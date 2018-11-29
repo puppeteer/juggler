@@ -152,3 +152,9 @@ browser/defaults/settings/main/example.json
 # Bug 1463748 - Fork and pref-off the new error pages
 browser/chrome/browser/content/browser/aboutNetError-new.xhtml
 browser/chrome/browser/content/browser/aboutNetError.xhtml
+
+# Juggler/marionette files
+chrome/juggler/content/content/floating-scrollbars.css
+browser/chrome/devtools/skin/floating-scrollbars-responsive-design.css
+chrome/juggler/content/server/stream-utils.js
+chrome/marionette/content/stream-utils.js

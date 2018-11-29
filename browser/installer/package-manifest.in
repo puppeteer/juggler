@@ -331,6 +331,11 @@
 @RESPATH@/defaults/pref/marionette.js
 #endif
 
+@RESPATH@/chrome/juggler@JAREXT@
+@RESPATH@/chrome/juggler.manifest
+@RESPATH@/components/juggler.manifest
+@RESPATH@/components/juggler.js
+
 @RESPATH@/components/nsAsyncShutdown.manifest
 @RESPATH@/components/nsAsyncShutdown.js
 
