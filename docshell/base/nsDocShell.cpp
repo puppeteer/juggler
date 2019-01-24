@@ -1198,6 +1198,7 @@ bool nsDocShell::SetCurrentURI(nsIURI* aURI, nsIRequest* aRequest,
     isSubFrame = mLSHE->GetIsSubFrame();
   }
 
+  FireOnFrameLocationChange(this, aRequest, aURI, aLocationFlags);
   if (!isSubFrame && !isRoot) {
     /*
      * We don't want to send OnLocationChange notifications when
