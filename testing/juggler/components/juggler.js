@@ -32,13 +32,15 @@ CommandLineHandler.prototype = {
     Services.obs.addObserver(this, 'sessionstore-windows-restored');
   },
 
-  observe: function(subject, topic) {
+  observe: async function(subject, topic) {
     Services.obs.removeObserver(this, 'sessionstore-windows-restored');
+
+    const win = await waitForBrowserWindow();
 
     this._server = new TCPListener();
     this._sessions = new Map();
     this._server.onconnectioncreated = connection => {
-      this._sessions.set(connection, new ChromeSession(connection));
+      this._sessions.set(connection, new ChromeSession(connection, win));
     }
     this._server.onconnectionclosed = connection => {
       this._sessions.delete(connection);
@@ -61,3 +63,41 @@ CommandLineHandler.prototype = {
 
 var NSGetFactory = XPCOMUtils.generateNSGetFactory([CommandLineHandler]);
 
+/**
+ * @return {!Promise<Ci.nsIDOMChromeWindow>}
+ */
+async function waitForBrowserWindow() {
+  const windowsIt = Services.wm.getEnumerator('navigator:browser');
+  if (windowsIt.hasMoreElements())
+    return waitForWindowLoaded(windowsIt.getNext().QueryInterface(Ci.nsIDOMChromeWindow));
+
+  let fulfill;
+  let promise = new Promise(x => fulfill = x);
+
+  const listener = {
+    onOpenWindow: window => {
+      if (window instanceof Ci.nsIDOMChromeWindow) {
+        Services.wm.removeListener(listener);
+        fulfill(waitForWindowLoaded(window));
+      }
+    },
+    onCloseWindow: () => {}
+  };
+  Services.wm.addListener(listener);
+  return promise;
+
+  /**
+   * @param {!Ci.nsIDOMChromeWindow} window
+   * @return {!Promise<Ci.nsIDOMChromeWindow>}
+   */
+  function waitForWindowLoaded(window) {
+    if (window.document.readyState === 'complete')
+      return window;
+    return new Promise(fulfill => {
+      window.addEventListener('load', function listener() {
+        window.removeEventListener('load', listener);
+        fulfill(window);
+      });
+    });
+  }
+}

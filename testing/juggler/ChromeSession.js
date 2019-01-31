@@ -2,11 +2,15 @@ const {BrowserHandler} = ChromeUtils.import("chrome://juggler/content/BrowserHan
 const {protocol, checkScheme} = ChromeUtils.import("chrome://juggler/content/Protocol.js");
 
 class ChromeSession {
-  constructor(connection) {
+  /**
+   * @param {Connection} connection
+   * @param {Ci.nsIDOMChromeWindow} mainWindow
+   */
+  constructor(connection, mainWindow) {
     this._connection = connection;
     this._connection.onmessage = this._dispatch.bind(this);
 
-    this._browserHandler = new BrowserHandler(this);
+    this._browserHandler = new BrowserHandler(this, mainWindow);
   }
 
   emitEvent(eventName, params) {

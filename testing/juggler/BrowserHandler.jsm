@@ -5,9 +5,13 @@ const {PageHandler} = ChromeUtils.import("chrome://juggler/content/PageHandler.j
 const {InsecureSweepingOverride} = ChromeUtils.import("chrome://juggler/content/InsecureSweepingOverride.js");
 
 class BrowserHandler {
-  constructor(session) {
+  /**
+   * @param {ChromeSession} session
+   * @param {Ci.nsIDOMChromeWindow} mainWindow
+   */
+  constructor(session, mainWindow) {
     this._session = session;
-    this._mainWindowPromise = waitForBrowserWindow();
+    this._mainWindow = mainWindow;
     this._pageHandlers = new Map();
     this._tabsToPageHandlers = new Map();
     this._initializePages();
@@ -27,7 +31,6 @@ class BrowserHandler {
   }
 
   async getInfo() {
-    const win = await this._mainWindowPromise;
     const version = Components.classes["@mozilla.org/xre/app-info;1"]
                               .getService(Components.interfaces.nsIXULAppInfo)
                               .version;
@@ -38,14 +41,13 @@ class BrowserHandler {
   }
 
   async _initializePages() {
-    const win = await this._mainWindowPromise;
-    const tabs = win.gBrowser.tabs;
-    for (const tab of win.gBrowser.tabs)
+    const tabs = this._mainWindow.gBrowser.tabs;
+    for (const tab of this._mainWindow.gBrowser.tabs)
       this._ensurePageHandler(tab);
-    win.gBrowser.tabContainer.addEventListener('TabOpen', event => {
+    this._mainWindow.gBrowser.tabContainer.addEventListener('TabOpen', event => {
       this._ensurePageHandler(event.target);
     });
-    win.gBrowser.tabContainer.addEventListener('TabClose', event => {
+    this._mainWindow.gBrowser.tabContainer.addEventListener('TabClose', event => {
       this._removePageHandlerForTab(event.target);
     });
   }
@@ -76,11 +78,10 @@ class BrowserHandler {
   }
 
   async newPage() {
-    const win = await this._mainWindowPromise;
-    const tab = win.gBrowser.addTab('about:blank', {
+    const tab = this._mainWindow.gBrowser.addTab('about:blank', {
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
     });
-    win.gBrowser.selectedTab = tab;
+    this._mainWindow.gBrowser.selectedTab = tab;
     // Await navigation to about:blank
     await new Promise(resolve => {
       const wpl = {
@@ -100,48 +101,8 @@ class BrowserHandler {
   }
 
   async closePage({pageId}) {
-    const win = await this._mainWindowPromise;
     const pageHandler = this._pageHandlers.get(pageId);
-    await win.gBrowser.removeTab(pageHandler.tab());
-  }
-}
-
-/**
- * @return {!Promise<Ci.nsIDOMChromeWindow>}
- */
-async function waitForBrowserWindow() {
-  const windowsIt = Services.wm.getEnumerator('navigator:browser');
-  if (windowsIt.hasMoreElements())
-    return waitForWindowLoaded(windowsIt.getNext().QueryInterface(Ci.nsIDOMChromeWindow));
-
-  let fulfill;
-  let promise = new Promise(x => fulfill = x);
-
-  const listener = {
-    onOpenWindow: window => {
-      if (window instanceof Ci.nsIDOMChromeWindow) {
-        Services.wm.removeListener(listener);
-        fulfill(waitForWindowLoaded(window));
-      }
-    },
-    onCloseWindow: () => {}
-  };
-  Services.wm.addListener(listener);
-  return promise;
-
-  /**
-   * @param {!Ci.nsIDOMChromeWindow} window
-   * @return {!Promise<Ci.nsIDOMChromeWindow>}
-   */
-  function waitForWindowLoaded(window) {
-    if (window.document.readyState === 'complete')
-      return window;
-    return new Promise(fulfill => {
-      window.addEventListener('load', function listener() {
-        window.removeEventListener('load', listener);
-        fulfill(window);
-      });
-    });
+    await this._mainWindow.gBrowser.removeTab(pageHandler.tab());
   }
 }
 
