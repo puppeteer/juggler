@@ -15,20 +15,6 @@ else
 fi
 
 SHA=$(git rev-parse HEAD)
-
-set +e
-gsutil ls gs://juggler-builds/$SHA/ >/dev/null 2>/dev/null
-retVal=$?
-set -e
-
-if [ $retVal -eq 0 ]; then
-  echo "gs://juggler-builds/$SHA already exists - FAIL"
-  echo "NOTE: If you want to re-upload, run 'gsutil rm $SHA' first."
-  exit 1
-else
-  echo "gs://juggler-builds/$SHA is vacant - OK"
-fi
-
 OBJ_FOLDER=""
 ARCH_NAME=""
 if [ "$(uname)" == "Darwin" ]; then
@@ -43,6 +29,20 @@ else
   echo "UNKNOWN ENVIRONMENT; CANNOT PROCEED!"
   exit 1
 fi
+
+set +e
+gsutil ls gs://juggler-builds/$SHA/$ARCH_NAME >/dev/null 2>/dev/null
+retVal=$?
+set -e
+
+if [ $retVal -eq 0 ]; then
+  echo "gs://juggler-builds/$SHA already exists - FAIL"
+  echo "NOTE: If you want to re-upload, run 'gsutil rm $SHA' first."
+  exit 1
+else
+  echo "gs://juggler-builds/$SHA is vacant - OK"
+fi
+
 
 # rm -rf $OBJ_FOLDER
 # ./mach bootstrap --application-choice=browser --no-interactive
