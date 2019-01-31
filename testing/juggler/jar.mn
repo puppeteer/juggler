@@ -10,6 +10,7 @@ juggler.jar:
   content/Helper.js (Helper.js)
   content/PageHandler.jsm (PageHandler.jsm)
   content/BrowserHandler.jsm (BrowserHandler.jsm)
+  content/BrowserContextManager.js (BrowserContextManager.js)
   content/content/main.js (content/main.js)
   content/content/ContentSession.js (content/ContentSession.js)
   content/content/FrameTree.js (content/FrameTree.js)

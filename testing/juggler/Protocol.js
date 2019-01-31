@@ -41,6 +41,8 @@ const DOMQuad = {
 
 const protocol = {
   methods: {
+    // Start emitting tagOpened/tabClosed events
+    'Browser.enable': {},
     'Browser.getInfo': {
       returns: {
         userAgent: t.String,
@@ -53,6 +55,9 @@ const protocol = {
       },
     },
     'Browser.newPage': {
+      params: {
+        browserContextId: t.Optional(t.String),
+      },
       returns: {
         pageId: t.String,
       }
@@ -60,6 +65,21 @@ const protocol = {
     'Browser.closePage': {
       params: {
         pageId: t.String,
+      },
+    },
+    'Browser.createBrowserContext': {
+      returns: {
+        browserContextId: t.String,
+      },
+    },
+    'Browser.removeBrowserContext': {
+      params: {
+        browserContextId: t.String,
+      },
+    },
+    'Browser.getBrowserContexts': {
+      returns: {
+        browserContextIds: t.Array(t.String),
       },
     },
     'Page.enable': {
@@ -265,6 +285,7 @@ const protocol = {
   events: {
     'Browser.tabOpened': {
       pageId: t.String,
+      browserContextId: t.Optional(t.String),
       url: t.String,
     },
     'Browser.tabClosed': { pageId: t.String, },

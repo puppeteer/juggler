@@ -8,13 +8,15 @@ class BrowserHandler {
   /**
    * @param {ChromeSession} session
    * @param {Ci.nsIDOMChromeWindow} mainWindow
+   * @param {BrowserContextManager} contextManager
    */
-  constructor(session, mainWindow) {
+  constructor(session, mainWindow, contextManager) {
     this._session = session;
     this._mainWindow = mainWindow;
+    this._contextManager = contextManager;
     this._pageHandlers = new Map();
     this._tabsToPageHandlers = new Map();
-    this._initializePages();
+    this._enabled = false;
     this._sweepingOverride = null;
   }
 
@@ -40,7 +42,22 @@ class BrowserHandler {
     return {version: 'Firefox/' + version, userAgent};
   }
 
-  async _initializePages() {
+  async createBrowserContext() {
+    return {browserContextId: this._contextManager.createBrowserContext()};
+  }
+
+  async removeBrowserContext({browserContextId}) {
+    this._contextManager.removeBrowserContext(browserContextId);
+  }
+
+  async getBrowserContexts() {
+    return {browserContextIds: this._contextManager.getBrowserContexts()};
+  }
+
+  async enable() {
+    if (this._enabled)
+      return;
+    this._enabled = true;
     const tabs = this._mainWindow.gBrowser.tabs;
     for (const tab of this._mainWindow.gBrowser.tabs)
       this._ensurePageHandler(tab);
@@ -64,7 +81,8 @@ class BrowserHandler {
     this._tabsToPageHandlers.set(tab, pageHandler);
     this._session.emitEvent('Browser.tabOpened', {
       url: pageHandler.url(),
-      pageId: pageHandler.id()
+      pageId: pageHandler.id(),
+      browserContextId: this._contextManager.browserContextId(tab.userContextId),
     });
     return pageHandler;
   }
@@ -77,8 +95,9 @@ class BrowserHandler {
     this._session.emitEvent('Browser.tabClosed', {pageId: pageHandler.id()});
   }
 
-  async newPage() {
+  async newPage({browserContextId}) {
     const tab = this._mainWindow.gBrowser.addTab('about:blank', {
+      userContextId: this._contextManager.userContextId(browserContextId),
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
     });
     this._mainWindow.gBrowser.selectedTab = tab;

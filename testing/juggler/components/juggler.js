@@ -2,6 +2,7 @@ const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm")
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {TCPListener} = ChromeUtils.import("chrome://juggler/content/server/server.js");
 const {ChromeSession} = ChromeUtils.import("chrome://juggler/content/ChromeSession.js");
+const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -36,11 +37,15 @@ CommandLineHandler.prototype = {
     Services.obs.removeObserver(this, 'sessionstore-windows-restored');
 
     const win = await waitForBrowserWindow();
+    const browserContextManager = new BrowserContextManager();
+    // Cleanup containers from previous runs (if any)
+    for (const contextId of browserContextManager.getBrowserContexts())
+      browserContextManager.removeBrowserContext(contextId);
 
     this._server = new TCPListener();
     this._sessions = new Map();
     this._server.onconnectioncreated = connection => {
-      this._sessions.set(connection, new ChromeSession(connection, win));
+      this._sessions.set(connection, new ChromeSession(connection, win, browserContextManager));
     }
     this._server.onconnectionclosed = connection => {
       this._sessions.delete(connection);
