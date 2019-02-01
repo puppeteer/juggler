@@ -36,11 +36,11 @@ retVal=$?
 set -e
 
 if [ $retVal -eq 0 ]; then
-  echo "gs://juggler-builds/$SHA already exists - FAIL"
+  echo "gs://juggler-builds/$SHA/$ARCH_NAME already exists - FAIL"
   echo "NOTE: If you want to re-upload, run 'gsutil rm $SHA' first."
   exit 1
 else
-  echo "gs://juggler-builds/$SHA is vacant - OK"
+  echo "gs://juggler-builds/$SHA/$ARCH_NAME is vacant - OK"
 fi
 
 
