@@ -38,9 +38,6 @@ CommandLineHandler.prototype = {
 
     const win = await waitForBrowserWindow();
     const browserContextManager = new BrowserContextManager();
-    // Cleanup containers from previous runs (if any)
-    for (const contextId of browserContextManager.getBrowserContexts())
-      browserContextManager.removeBrowserContext(contextId);
 
     this._server = new TCPListener();
     this._sessions = new Map();
