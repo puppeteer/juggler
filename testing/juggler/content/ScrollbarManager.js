@@ -16,13 +16,24 @@ class ScrollbarManager {
   constructor(mm, docShell) {
     this._docShell = docShell;
     this._customScrollbars = null;
+    this._docShellScrollBars = new Map();
 
     if (isHeadless)
       this._setCustomScrollbars(HIDDEN_SCROLLBARS);
 
+    const webProgress = this._docShell.QueryInterface(Ci.nsIInterfaceRequestor)
+                                .getInterface(Ci.nsIWebProgress);
+
+    this.QueryInterface = ChromeUtils.generateQI(['nsIWebProgressListener', 'nsISupportsWeakReference']);
     this._eventListeners = [
-      helper.addEventListener(mm, 'DOMWindowCreated', this._onDOMWindowCreated.bind(this)),
+      helper.addProgressListener(webProgress, this, Ci.nsIWebProgress.NOTIFY_ALL),
     ];
+  }
+
+  onLocationChange(webProgress, request, URI, flags) {
+    if (flags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)
+      return;
+    this._updateAllDocShells();
   }
 
   setFloatingScrollbars(enabled) {
@@ -34,27 +45,38 @@ class ScrollbarManager {
   _setCustomScrollbars(customScrollbars) {
     if (this._customScrollbars === customScrollbars)
       return;
-    const windowUtils = this._docShell.domWindow.windowUtils;
-    if (this._customScrollbars)
-      windowUtils.removeSheet(this._customScrollbars, windowUtils.AGENT_SHEET);
     this._customScrollbars = customScrollbars;
-    if (this._customScrollbars)
-      windowUtils.loadSheet(this._customScrollbars, windowUtils.AGENT_SHEET);
+    this._updateAllDocShells();
+  }
+
+  _updateAllDocShells() {
+    const allDocShells = [this._docShell];
+    for (let i = 0; i < this._docShell.childCount; i++)
+      allDocShells.push(this._docShell.getChildAt(i).QueryInterface(Ci.nsIDocShell));
+    // At this point, a content viewer might not be loaded for certain docShells.
+    // Scrollbars will be updated in onLocationChange.
+    const docShells = allDocShells.filter(docShell => docShell.contentViewer);
+
+    // Update scrollbar stylesheets.
+    for (const docShell of docShells) {
+      const oldScrollbars = this._docShellScrollBars.get(docShell);
+      if (oldScrollbars === this._customScrollbars)
+        continue;
+      const winUtils = docShell.contentViewer.DOMDocument.defaultView.windowUtils;
+      if (oldScrollbars)
+        winUtils.removeSheet(oldScrollbars, winUtils.AGENT_SHEET);
+      if (this._customScrollbars)
+        winUtils.loadSheet(this._customScrollbars, winUtils.AGENT_SHEET);
+    }
+    // Update state for all *existing* docShells.
+    this._docShellScrollBars.clear();
+    for (const docShell of docShells)
+      this._docShellScrollBars.set(docShell, this._customScrollbars);
   }
 
   dispose() {
     this._setCustomScrollbars(null);
     helper.removeListeners(this._eventListeners);
-  }
-
-  _onDOMWindowCreated(event) {
-    const docShell = event.target.ownerGlobal.docShell;
-    if (docShell === this._docShell)
-      return;
-    const windowUtils = docShell.domWindow.windowUtils;
-    if (this._customScrollbars) {
-      windowUtils.loadSheet(this._customScrollbars, windowUtils.AGENT_SHEET);
-    }
   }
 }
 
