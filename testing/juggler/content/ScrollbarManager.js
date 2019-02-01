@@ -16,7 +16,7 @@ class ScrollbarManager {
   constructor(mm, docShell) {
     this._docShell = docShell;
     this._customScrollbars = null;
-    this._docShellScrollBars = new Map();
+    this._contentViewerScrollBars = new Map();
 
     if (isHeadless)
       this._setCustomScrollbars(HIDDEN_SCROLLBARS);
@@ -55,23 +55,23 @@ class ScrollbarManager {
       allDocShells.push(this._docShell.getChildAt(i).QueryInterface(Ci.nsIDocShell));
     // At this point, a content viewer might not be loaded for certain docShells.
     // Scrollbars will be updated in onLocationChange.
-    const docShells = allDocShells.filter(docShell => docShell.contentViewer);
+    const contentViewers = allDocShells.map(docShell => docShell.contentViewer).filter(contentViewer => !!contentViewer);
 
     // Update scrollbar stylesheets.
-    for (const docShell of docShells) {
-      const oldScrollbars = this._docShellScrollBars.get(docShell);
+    for (const contentViewer of contentViewers) {
+      const oldScrollbars = this._contentViewerScrollBars.get(contentViewer);
       if (oldScrollbars === this._customScrollbars)
         continue;
-      const winUtils = docShell.contentViewer.DOMDocument.defaultView.windowUtils;
+      const winUtils = contentViewer.DOMDocument.defaultView.windowUtils;
       if (oldScrollbars)
         winUtils.removeSheet(oldScrollbars, winUtils.AGENT_SHEET);
       if (this._customScrollbars)
         winUtils.loadSheet(this._customScrollbars, winUtils.AGENT_SHEET);
     }
     // Update state for all *existing* docShells.
-    this._docShellScrollBars.clear();
-    for (const docShell of docShells)
-      this._docShellScrollBars.set(docShell, this._customScrollbars);
+    this._contentViewerScrollBars.clear();
+    for (const contentViewer of contentViewers)
+      this._contentViewerScrollBars.set(contentViewer, this._customScrollbars);
   }
 
   dispose() {
