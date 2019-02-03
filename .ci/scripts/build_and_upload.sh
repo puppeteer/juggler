@@ -50,6 +50,6 @@ fi
 ./mach package
 cd $OBJ_FOLDER/dist/
 zip -r $ARCH_NAME firefox
-gsutil mv firefox-linux.zip gs://juggler-builds/$SHA/
+gsutil mv $ARCH_NAME gs://juggler-builds/$SHA/
 cd -
-echo "UPLOADED TO: gs://juggler-builds/$SHA"
+echo "UPLOADED TO: gs://juggler-builds/$SHA/$ARCH_NAME"
