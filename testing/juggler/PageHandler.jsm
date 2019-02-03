@@ -174,6 +174,14 @@ class PageHandler {
     return await this._contentSession.send('evaluate', options);
   }
 
+  /**
+   * @param {{pageId: String, frameId: String, objectId: String}} options
+   * @return {!Promise<*>}
+   */
+  async contentFrame(options) {
+    return await this._contentSession.send('contentFrame', options);
+  }
+
   async getObjectProperties(options) {
     return await this._contentSession.send('getObjectProperties', options);
   }

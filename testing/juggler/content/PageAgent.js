@@ -308,6 +308,18 @@ class PageAgent {
     return {quads};
   }
 
+  contentFrame({objectId, frameId}) {
+    const frame = this._frameTree.frame(frameId);
+    if (!frame)
+      throw new Error('Failed to find frame with id = ' + frameId);
+    const executionContext = this._ensureExecutionContext(frame);
+    const unsafeObject = executionContext.unsafeObject(objectId);
+    if (!unsafeObject.contentWindow)
+      return null;
+    const contentFrame = this._frameTree.frameForDocShell(unsafeObject.contentWindow.docShell);
+    return {frameId: contentFrame.id()};
+  }
+
   async getBoundingBox({frameId, objectId}) {
     const frame = this._frameTree.frame(frameId);
     if (!frame)

@@ -100,6 +100,16 @@ const protocol = {
         }),
       },
     },
+    'Page.contentFrame': {
+      params: {
+        pageId: t.String,
+        frameId: t.String,
+        objectId: t.String,
+      },
+      returns: {
+        frameId: t.Nullable(t.String),
+      },
+    },
     'Page.evaluate': {
       params: t.Either({
         pageId: t.String,
