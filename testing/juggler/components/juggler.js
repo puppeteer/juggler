@@ -3,6 +3,7 @@ const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {TCPListener} = ChromeUtils.import("chrome://juggler/content/server/server.js");
 const {ChromeSession} = ChromeUtils.import("chrome://juggler/content/ChromeSession.js");
 const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
+const {NetworkObserver} = ChromeUtils.import("chrome://juggler/content/NetworkObserver.js");
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -38,6 +39,8 @@ CommandLineHandler.prototype = {
 
     const win = await waitForBrowserWindow();
     const browserContextManager = new BrowserContextManager();
+
+    this._networkObserver = new NetworkObserver();
 
     this._server = new TCPListener();
     this._sessions = new Map();
