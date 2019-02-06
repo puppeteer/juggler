@@ -9,6 +9,7 @@ juggler.jar:
   content/Protocol.js (Protocol.js)
   content/Helper.js (Helper.js)
   content/PageHandler.jsm (PageHandler.jsm)
+  content/NetworkObserver.jsm (NetworkObserver.jsm)
   content/BrowserHandler.jsm (BrowserHandler.jsm)
   content/BrowserContextManager.js (BrowserContextManager.js)
   content/content/main.js (content/main.js)
