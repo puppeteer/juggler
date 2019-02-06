@@ -17,6 +17,7 @@ fi
 SHA=$(git rev-parse HEAD)
 OBJ_FOLDER=""
 ARCH_NAME=""
+
 if [ "$(uname)" == "Darwin" ]; then
   # Setup for Mac OS X platform
   OBJ_FOLDER="obj-x86_64-apple-darwin17.7.0"
@@ -49,6 +50,12 @@ fi
 ./mach build
 ./mach package
 cd $OBJ_FOLDER/dist/
+
+# Copy the libstdc++ version we linked against.
+# TODO(aslushnikov): this won't be needed with official builds.
+if [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
+  cp /usr/lib/x86_64-linux-gnu/libstdc++.so.6 firefox/libstdc++.so.6
+fi
 zip -r $ARCH_NAME firefox
 gsutil mv $ARCH_NAME gs://juggler-builds/$SHA/
 cd -
