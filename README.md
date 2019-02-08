@@ -2,8 +2,8 @@
 
 > Juggler - Firefox Automation Protocol for implementing the Puppeteer API.
 
-This repository is a fork of Firefox browser with additional support for "Juggler" remote debugging protocol.
-Juggler could be found in [`//testing/juggler/`](https://github.com/Puppeteer/juggler/blob/master/testing/juggler).
+This repository is a fork of the Firefox browser with additional support for the "Juggler" remote debugging protocol.
+Juggler can be found in [`//testing/juggler/`](https://github.com/Puppeteer/juggler/blob/master/testing/juggler).
 
 ## Protocol
 
@@ -11,13 +11,13 @@ See [`//testing/juggler/Protocol.js`](https://github.com/Puppeteer/juggler/blob/
 
 ## Building FF with Juggler
 
-1. Clone Juggler repository (without history to make things faster)
+1. Clone the Juggler repository (without history to make things faster)
 ```bash
 git clone --depth 1 https://github.com/Puppeteer/juggler
 cd juggler
 ```
 
-2. Bootstrap host environment for Firefox build and compile firefox locally
+2. Bootstrap a host environment for the Firefox build and compile Firefox locally
 
 ```bash
 # OPTIONAL - bootstrap host environment.
@@ -28,7 +28,10 @@ cd juggler
 
 ### Troubleshooting when building FF on Mac
 #### Black screen after FF Build
-As of Jan. 2019 there is a known [bug](https://bugzilla.mozilla.org/show_bug.cgi?id=1493330) that will cause an entirely black screen when running the nightly build of firefox built with the **MacOSX SDK version 10.14.**
+As of Jan. 2019 there is a known
+[bug](https://bugzilla.mozilla.org/show_bug.cgi?id=1493330) that will cause an
+entirely black screen when running the nightly build of firefox built with the
+**MacOSX SDK version 10.14.**
 
 The easiest fix right now is downgrading your MacOSX SDK.
 
@@ -71,7 +74,7 @@ Pass `0` to pick a random port - Juggler will print its port to STDOUT.
 
 ## Uploading builds to Google Storage
 
-> **QUICK:** on Linux and OSX, use `//.ci/scripts/build_and_upload.sh`
+> **QUICK:** on Linux and OSX, just use `//.ci/scripts/build_and_upload.sh`
 
 Firefox builds with Juggler support are uploaded to gs://juggler-builds/ bucket.
 
@@ -92,7 +95,7 @@ gcloud config set project juggler-builds
 ./mach package
 ```
 
-4. Archive build and copy to the gbucket
+4. Archive the build and copy to the gbucket
 
 We want to ship `*.zip` archives so that it's easy to decompress them on the node-side.
 
