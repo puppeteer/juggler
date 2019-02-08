@@ -68,7 +68,7 @@ sudo installer -pkg /Library/Developer/CommandLineTools/Packages/macOS_SDK_heade
 Juggle adds a `-juggler` CLI flag that accepts a port to expose a remote protocol on.
 Pass `0` to pick a random port - Juggler will print its port to STDOUT.
 
-```
+```bash
 ./mach run -- -juggler 0
 ```
 
@@ -76,28 +76,28 @@ Pass `0` to pick a random port - Juggler will print its port to STDOUT.
 
 > **QUICK:** on Linux and OSX, just use `//.ci/scripts/build_and_upload.sh`
 
-Firefox builds with Juggler support are uploaded to gs://juggler-builds/ bucket.
+Firefox builds with Juggler support are uploaded to the gs://juggler-builds/ bucket.
 
 Project maintainers can upload builds.
 To upload a build, do the following:
 
 1. Install [gcloud](https://cloud.google.com/sdk/install) if you haven't yet.
-2. Authenticate in the cloud and select project
+2. Authenticate in the cloud and select the project
 
 ```bash
 gcloud auth login
 gcloud config set project juggler-builds
 ```
 
-3. Make sure **firefox is compiled**; after that, package a build for a redistribution:
+3. Make sure **firefox is compiled**. After that, package a build for redistribution:
 
 ```bash
 ./mach package
 ```
 
-4. Archive the build and copy to the gbucket
+4. Archive the build and copy it to the gbucket
 
-We want to ship `*.zip` archives so that it's easy to decompress them on the node-side.
+We want to ship `*.zip` archives so that it will be easy to decompress them on the node-side.
 
 - Linux: `.ci/scripts/upload_linux.sh`
 - Mac: `.ci/scripts/upload_mac.sh`
