@@ -2,15 +2,18 @@
 
 > Juggler - Firefox Automation Protocol for implementing the Puppeteer API.
 
+This repository is a fork of Firefox browser with additional support for "Juggler" remote debugging protocol.
+Juggler could be found in [`//testing/juggler/`](https://github.com/Puppeteer/juggler/blob/master/testing/juggler).
+
 ## Protocol
 
-See [`//src/Protocol.js`](https://github.com/GoogleChrome/puppeteer/blob/master/experimental/juggler/src/Protocol.js).
+See [`//testing/juggler/Protocol.js`](https://github.com/Puppeteer/juggler/blob/master/testing/juggler/Protocol.js).
 
 ## Building FF with Juggler
 
-1. Clone Juggler repository
+1. Clone Juggler repository (without history to make things faster)
 ```bash
-git clone https://github.com/aslushnikov/juggler
+git clone --depth 1 https://github.com/Puppeteer/juggler
 cd juggler
 ```
 
@@ -67,6 +70,8 @@ Pass `0` to pick a random port - Juggler will print its port to STDOUT.
 ```
 
 ## Uploading builds to Google Storage
+
+> **QUICK:** on Linux and OSX, use `//.ci/scripts/build_and_upload.sh`
 
 Firefox builds with Juggler support are uploaded to gs://juggler-builds/ bucket.
 
