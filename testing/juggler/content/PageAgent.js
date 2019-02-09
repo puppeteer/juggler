@@ -48,6 +48,11 @@ class PageAgent {
     this._scrollbarManager.setFloatingScrollbars(isMobile);
   }
 
+  async setUserAgent({userAgent}) {
+    const docShell = this._frameTree.mainFrame().docShell();
+    docShell.customUserAgent = userAgent;
+  }
+
   addScriptToEvaluateOnNewDocument({script}) {
     const scriptId = helper.generateId();
     this._scriptsToEvaluateOnNewDocument.set(scriptId, script);

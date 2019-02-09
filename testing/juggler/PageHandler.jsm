@@ -126,6 +126,10 @@ class PageHandler {
     await this._contentSession.send('enable');
   }
 
+  async setUserAgent(options) {
+    return await this._contentSession.send('setUserAgent', options);
+  }
+
   async screenshot(options) {
     return await this._contentSession.send('screenshot', options);
   }

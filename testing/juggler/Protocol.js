@@ -100,6 +100,12 @@ const protocol = {
         }),
       },
     },
+    'Page.setUserAgent': {
+      params: {
+        pageId: t.String,
+        userAgent: t.Nullable(t.String),
+      },
+    },
     'Page.contentFrame': {
       params: {
         pageId: t.String,
