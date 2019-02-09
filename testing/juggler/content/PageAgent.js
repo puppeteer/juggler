@@ -281,10 +281,10 @@ class PageAgent {
     return {navigationId: frame.pendingNavigationId(), navigationURL: frame.pendingNavigationURL()};
   }
 
-  async disposeObject({frameId, objectId}) {
-    const frame = this._frameTree.frame(frameId);
+  async disposeObject({executionContextId, objectId}) {
+    const frame = this._frameTree.frame(executionContextId);
     if (!frame)
-      throw new Error('Failed to find frame with id = ' + frameId);
+      throw new Error('Failed to find frame with id = ' + executionContextId);
     const executionContext = this._ensureExecutionContext(frame);
     return executionContext.disposeObject(objectId);
   }
@@ -345,10 +345,10 @@ class PageAgent {
     return {x: x1 + frame.domWindow().scrollX, y: y1 + frame.domWindow().scrollY, width: x2 - x1, height: y2 - y1};
   }
 
-  async evaluate({frameId, functionText, args, script, returnByValue}) {
-    const frame = this._frameTree.frame(frameId);
+  async evaluate({executionContextId, functionText, args, script, returnByValue}) {
+    const frame = this._frameTree.frame(executionContextId);
     if (!frame)
-      throw new Error('Failed to find frame with id = ' + frameId);
+      throw new Error('Failed to find frame with id = ' + executionContextId);
     const executionContext = this._ensureExecutionContext(frame);
     const exceptionDetails = {};
     let result = null;
@@ -364,10 +364,10 @@ class PageAgent {
     return {result};
   }
 
-  async getObjectProperties({frameId, objectId}) {
-    const frame = this._frameTree.frame(frameId);
+  async getObjectProperties({executionContextId, objectId}) {
+    const frame = this._frameTree.frame(executionContextId);
     if (!frame)
-      throw new Error('Failed to find frame with id = ' + frameId);
+      throw new Error('Failed to find frame with id = ' + executionContextId);
     const executionContext = this._ensureExecutionContext(frame);
     return {properties: executionContext.getObjectProperties(objectId)};
   }

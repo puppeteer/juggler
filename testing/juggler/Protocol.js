@@ -113,7 +113,8 @@ const protocol = {
     'Page.evaluate': {
       params: t.Either({
         pageId: t.String,
-        frameId: t.String,
+        // Pass frameId here.
+        executionContextId: t.String,
         functionText: t.String,
         returnByValue: t.Optional(t.Boolean),
         args: t.Array(t.Either(
@@ -123,7 +124,8 @@ const protocol = {
         )),
       }, {
         pageId: t.String,
-        frameId: t.String,
+        // Pass frameId here.
+        executionContextId: t.String,
         script: t.String,
         returnByValue: t.Optional(t.Boolean),
       }),
@@ -155,7 +157,7 @@ const protocol = {
     'Page.disposeObject': {
       params: {
         pageId: t.String,
-        frameId: t.String,
+        executionContextId: t.String,
         objectId: t.String,
       },
     },
@@ -163,7 +165,7 @@ const protocol = {
     'Page.getObjectProperties': {
       params: {
         pageId: t.String,
-        frameId: t.String,
+        executionContextId: t.String,
         objectId: t.String,
       },
 
