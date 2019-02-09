@@ -79,10 +79,13 @@ class BrowserHandler {
     const pageHandler = new PageHandler(this._session, tab);
     this._pageHandlers.set(pageHandler.id(), pageHandler);
     this._tabsToPageHandlers.set(tab, pageHandler);
+
+    const openerHandler = tab.openerTab ? this._ensurePageHandler(tab.openerTab) : null;
     this._session.emitEvent('Browser.tabOpened', {
       url: pageHandler.url(),
       pageId: pageHandler.id(),
       browserContextId: this._contextManager.browserContextId(tab.userContextId),
+      openerId: openerHandler ? openerHandler.id() : undefined,
     });
     return pageHandler;
   }

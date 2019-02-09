@@ -299,6 +299,8 @@ const protocol = {
       pageId: t.String,
       browserContextId: t.Optional(t.String),
       url: t.String,
+      // PageId of parent tab.
+      openerId: t.Optional(t.String),
     },
     'Browser.tabClosed': { pageId: t.String, },
     'Browser.tabNavigated': {
