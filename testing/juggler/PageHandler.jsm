@@ -130,6 +130,14 @@ class PageHandler {
     return await this._contentSession.send('setUserAgent', options);
   }
 
+  async setJavascriptEnabled(options) {
+    return await this._contentSession.send('setJavascriptEnabled', options);
+  }
+
+  async setCacheDisabled(options) {
+    return await this._contentSession.send('setCacheDisabled', options);
+  }
+
   async screenshot(options) {
     return await this._contentSession.send('screenshot', options);
   }

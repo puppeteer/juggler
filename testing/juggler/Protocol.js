@@ -106,6 +106,18 @@ const protocol = {
         userAgent: t.Nullable(t.String),
       },
     },
+    'Page.setCacheDisabled': {
+      params: {
+        pageId: t.String,
+        cacheDisabled: t.Boolean,
+      },
+    },
+    'Page.setJavascriptEnabled': {
+      params: {
+        pageId: t.String,
+        enabled: t.Boolean,
+      },
+    },
     'Page.contentFrame': {
       params: {
         pageId: t.String,

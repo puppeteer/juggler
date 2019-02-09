@@ -63,6 +63,20 @@ class PageAgent {
     this._scriptsToEvaluateOnNewDocument.delete(scriptId);
   }
 
+  setCacheDisabled({cacheDisabled}) {
+    const enable = Ci.nsIRequest.LOAD_NORMAL;
+    const disable = Ci.nsIRequest.LOAD_BYPASS_CACHE |
+                  Ci.nsIRequest.INHIBIT_CACHING;
+
+    const docShell = this._frameTree.mainFrame().docShell();
+    docShell.defaultLoadFlags = cacheDisabled ? disable : enable;
+  }
+
+  setJavascriptEnabled({enabled}) {
+    const docShell = this._frameTree.mainFrame().docShell();
+    docShell.allowJavascript = enabled;
+  }
+
   enable() {
     if (this._enabled)
       return;
