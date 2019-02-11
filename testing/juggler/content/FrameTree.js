@@ -23,6 +23,7 @@ class FrameTree {
     ]);
 
     const flags = Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT |
+                  //Ci.nsIWebProgress.NOTIFY_STATE_REQUEST |
                   Ci.nsIWebProgress.NOTIFY_FRAME_LOCATION;
     this._eventListeners = [
       helper.addObserver(subject => this._onDocShellCreated(subject.QueryInterface(Ci.nsIDocShell)), 'webnavigation-create'),
@@ -63,6 +64,29 @@ class FrameTree {
     if (!(request instanceof Ci.nsIChannel))
       return;
     const channel = request.QueryInterface(Ci.nsIChannel);
+    try {
+      const ee = channel.QueryInterface(Ci.nsIHttpChannel);
+      const isStart = flag & Ci.nsIWebProgressListener.STATE_START;
+      if (isStart && channel.URI.spec.includes('localhost')) {
+        const loadContext = request.notificationCallbacks.getInterface(Ci.nsILoadContext);
+        if (loadContext) {
+          const window = loadContext.associatedWindow;
+          if (window) {
+            dump('[content] channel.loadContext.associatedWindow.innerWindowID: ' + window.windowUtils.currentInnerWindowID + '\n');
+            if (window.docShell)
+              dump(`[content] frameId = ${this.frameForDocShell(window.docShell).id()}\n`);
+          } else
+            dump('-- no window\n');
+        } else {
+          dump('-- no load context\n');
+        }
+        dump('[content] ' + channel.requestMethod + ' ' + channel.URI.spec + '\n');
+        dump('[content] channel.channelId: ' + ee.channelId + '\n');
+        dump('[content] channel.topLevelContentWindowId: ' + ee.topLevelContentWindowId + '\n');
+        dump('[content] channel.topLevelOuterContentWindowId: ' + ee.topLevelOuterContentWindowId + '\n');
+      }
+    } catch (e) {
+    }
     const docShell = progress.DOMWindow.docShell;
     const frame = this._docShellToFrame.get(docShell);
     if (!frame) {
@@ -124,6 +148,8 @@ class FrameTree {
   _createFrame(docShell) {
     const parentFrame = this._docShellToFrame.get(docShell.parent) || null;
     const frame = new Frame(this, docShell, parentFrame);
+    dump('[content - created] outerWindowID: ' + docShell.domWindow.windowUtils.outerWindowID + '\n');
+    //dump('[content - created] innerWindowID: ' + docShell.contentViewer.defaultView.windowUtils.innerWindowID + '\n');
     this._docShellToFrame.set(docShell, frame);
     this._frameIdToFrame.set(frame.id(), frame);
     this.emit(FrameTree.Events.FrameAttached, frame);

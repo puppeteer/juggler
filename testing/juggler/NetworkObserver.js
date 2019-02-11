@@ -27,6 +27,19 @@ class NetworkObserver {
   }
 
   _onWillSendRequest(channel, timestamp, extraStringData) {
+    if (!channel.URI.spec.includes('localhost'))
+      return;
+    dump('>>>>>--------------------------\n');
+    for (let i in channel) {
+      // dump(' -- ' + i + '\n');
+    }
+    dump(channel.requestMethod + ' ' + channel.URI.spec + '\n');
+    dump('[chrome] channel.loadInfo.innerWindowID: ' + channel.loadInfo.innerWindowID + '\n');
+    dump('[chrome] channel.loadInfo.outerWindowID: ' + channel.loadInfo.outerWindowID + '\n');
+    dump('[chrome] channel.channelId: ' + channel.channelId+ '\n');
+    dump('[chrome] channel.topLevelContentWindowId: ' + channel.topLevelContentWindowId+ '\n');
+    dump('[chrome] channel.topLevelOuterContentWindowId: ' + channel.topLevelOuterContentWindowId+ '\n');
+    dump('<<<<<<--------------------------\n');
   }
 }
 
