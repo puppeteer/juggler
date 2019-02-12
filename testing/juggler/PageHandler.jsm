@@ -164,11 +164,16 @@ class PageHandler {
 
   async onRequestWillBeSent(httpChannel) {
     const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+
+    const causeType = httpChannel.loadInfo ? httpChannel.loadInfo.externalContentPolicyType : Ci.nsIContentPolicy.TYPE_OTHER;
     this._sendNetworkEvent(httpChannel.channelId, 'requestWillBeSent', {
       pageId: this._pageId,
       frameId: details ? details.frameId : undefined,
+      method: httpChannel.requestMethod,
+      isNavigationRequest: httpChannel.isMainDocumentChannel,
       requestId: httpChannel.channelId + '',
       url: httpChannel.URI.spec,
+      cause: causeTypeToString(causeType),
     });
   }
 
@@ -413,6 +418,14 @@ class Dialog {
       this._element.ui.loginTextbox.value = promptValue;
     this._element.ui.button0.click();
   }
+}
+
+function causeTypeToString(causeType) {
+  for (let key in Ci.nsIContentPolicy) {
+    if (Ci.nsIContentPolicy[key] === causeType)
+      return key;
+  }
+  return 'TYPE_OTHER';
 }
 
 var EXPORTED_SYMBOLS = ['PageHandler'];

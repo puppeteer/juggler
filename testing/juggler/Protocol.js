@@ -393,6 +393,9 @@ const protocol = {
       frameId: t.Optional(t.String),
       requestId: t.String,
       url: t.String,
+      method: t.String,
+      isNavigationRequest: t.Boolean,
+      cause: t.String,
     },
     'Page.responseReceived': {
       pageId: t.String,
