@@ -180,9 +180,11 @@ class PageHandler {
   }
 
   async onRequestFinished(httpChannel) {
+    const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
     this._sendNetworkEvent(httpChannel.channelId, 'requestFinished', {
       pageId: this._pageId,
       requestId: httpChannel.channelId + '',
+      errorCode: details ? details.errorCode : undefined,
     });
   }
 

@@ -401,6 +401,7 @@ const protocol = {
     'Page.requestFinished': {
       pageId: t.String,
       requestId: t.String,
+      errorCode: t.Optional(t.String),
     },
   },
 }

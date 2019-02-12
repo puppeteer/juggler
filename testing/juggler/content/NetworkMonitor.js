@@ -39,8 +39,23 @@ class NetworkMonitor {
     const frame = this._frameTree.frameForDocShell(window.docShell)
     if (!frame)
       return;
+    const isStart = flag & Ci.nsIWebProgressListener.STATE_START;
+    const isStop = flag & Ci.nsIWebProgressListener.STATE_STOP;
+    if (!isStop && !isStart)
+      return;
+
+    let errorCode = undefined;
+    if (isStop) {
+      for (const key of Object.keys(Cr)) {
+        if (Cr[key] === status) {
+          errorCode = key;
+          break;
+        }
+      }
+    }
     this._requestDetails.set(request.channelId, {
       frameId: frame.id(),
+      errorCode,
     });
   }
 
