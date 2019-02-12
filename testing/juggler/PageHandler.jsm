@@ -24,6 +24,8 @@ class PageHandler {
     this._browser.addProgressListener(this, Ci.nsIWebProgress.NOTIFY_LOCATION);
     this._dialogs = new Map();
 
+    this._networkEvents = new Map();
+
     // First navigation always happens to about:blank - do not report it.
     this._skipNextNavigation = true;
   }
@@ -128,9 +130,60 @@ class PageHandler {
     this._networkObserver.trackBrowserNetwork(this._browser, this);
   }
 
+  _sendNetworkEvent(channelId, eventName, eventData) {
+    let events = this._networkEvents.get(channelId);
+    if (!events) {
+      events = {
+        requestWillBeSent: null,
+        responseReceived: null,
+        requestFinished: null,
+        _lastSentEvent: null,
+      };
+      this._networkEvents.set(channelId, events);
+    }
+    events[eventName] = eventData;
+
+    // State machine - sending network events.
+    if (!events._lastSentEvent && events.requestWillBeSent) {
+      this._chromeSession.emitEvent('Page.requestWillBeSent', events.requestWillBeSent);
+      events._lastSentEvent = 'requestWillBeSent';
+    }
+    if (events._lastSentEvent === 'requestWillBeSent' && events.responseReceived) {
+      this._chromeSession.emitEvent('Page.responseReceived', events.responseReceived);
+      events._lastSentEvent = 'responseReceived';
+    }
+    if (events._lastSentEvent === 'responseReceived' && events.requestFinished) {
+      this._chromeSession.emitEvent('Page.requestFinished', events.requestFinished);
+      events._lastSentEvent = 'requestFinished';
+    }
+
+    // Clean up if request lifecycle is over.
+    if (events._lastSentEvent === 'requestFinished')
+      this._networkEvents.delete(channelId);
+  }
+
   async onRequestWillBeSent(httpChannel) {
     const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
-    dump(`requestWillBeSent: ${httpChannel.URI.spec} frameId: ${details ? details.frameId : '<NULL>'}\n`);
+    this._sendNetworkEvent(httpChannel.channelId, 'requestWillBeSent', {
+      pageId: this._pageId,
+      frameId: details ? details.frameId : undefined,
+      requestId: httpChannel.channelId + '',
+      url: httpChannel.URI.spec,
+    });
+  }
+
+  async onResponseReceived(httpChannel) {
+    this._sendNetworkEvent(httpChannel.channelId, 'responseReceived', {
+      pageId: this._pageId,
+      requestId: httpChannel.channelId + '',
+    });
+  }
+
+  async onRequestFinished(httpChannel) {
+    this._sendNetworkEvent(httpChannel.channelId, 'requestFinished', {
+      pageId: this._pageId,
+      requestId: httpChannel.channelId + '',
+    });
   }
 
   async setUserAgent(options) {

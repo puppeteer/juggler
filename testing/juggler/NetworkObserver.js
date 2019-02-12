@@ -34,6 +34,10 @@ class NetworkObserver {
       return;
     if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_REQUEST_HEADER)
       delegate.onRequestWillBeSent(httpChannel);
+    else if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_RESPONSE_HEADER)
+      delegate.onResponseReceived(httpChannel);
+    else if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE)
+      delegate.onRequestFinished(httpChannel);
   }
 
   trackBrowserNetwork(browser, delegate) {

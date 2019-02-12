@@ -387,6 +387,21 @@ const protocol = {
       pageId: t.String,
       dialogId: t.String,
     },
+    'Page.requestWillBeSent': {
+      pageId: t.String,
+      //TODO: return optional for favicon for now.
+      frameId: t.Optional(t.String),
+      requestId: t.String,
+      url: t.String,
+    },
+    'Page.responseReceived': {
+      pageId: t.String,
+      requestId: t.String,
+    },
+    'Page.requestFinished': {
+      pageId: t.String,
+      requestId: t.String,
+    },
   },
 }
 
