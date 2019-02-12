@@ -9,12 +9,14 @@ class ContentSession {
    * @param {string} sessionId
    * @param {!ContentFrameMessageManager} messageManager
    * @param {!FrameTree} frameTree
+   * @param {!ScrollbarManager} scrollbarManager
+   * @param {!NetworkMonitor} networkMonitor
    */
-  constructor(sessionId, messageManager, frameTree, scrollbarManager) {
+  constructor(sessionId, messageManager, frameTree, scrollbarManager, networkMonitor) {
     this._sessionId = sessionId;
     this._runtimeAgent = new RuntimeAgent();
     this._messageManager = messageManager;
-    this._pageAgent = new PageAgent(this, this._runtimeAgent, frameTree, scrollbarManager);
+    this._pageAgent = new PageAgent(this, this._runtimeAgent, frameTree, scrollbarManager, networkMonitor);
     this._eventListeners = [
       helper.addMessageListener(messageManager, this._sessionId, this._onMessage.bind(this)),
     ];

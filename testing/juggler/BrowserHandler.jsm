@@ -9,11 +9,13 @@ class BrowserHandler {
    * @param {ChromeSession} session
    * @param {Ci.nsIDOMChromeWindow} mainWindow
    * @param {BrowserContextManager} contextManager
+   * @param {NetworkObserver} networkObserver
    */
-  constructor(session, mainWindow, contextManager) {
+  constructor(session, mainWindow, contextManager, networkObserver) {
     this._session = session;
     this._mainWindow = mainWindow;
     this._contextManager = contextManager;
+    this._networkObserver = networkObserver;
     this._pageHandlers = new Map();
     this._tabsToPageHandlers = new Map();
     this._enabled = false;
@@ -76,7 +78,7 @@ class BrowserHandler {
   _ensurePageHandler(tab) {
     if (this._tabsToPageHandlers.has(tab))
       return this._tabsToPageHandlers.get(tab);
-    const pageHandler = new PageHandler(this._session, tab);
+    const pageHandler = new PageHandler(this._session, tab, this._networkObserver);
     this._pageHandlers.set(pageHandler.id(), pageHandler);
     this._tabsToPageHandlers.set(tab, pageHandler);
 

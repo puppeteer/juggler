@@ -10,9 +10,10 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class PageHandler {
-  constructor(chromeSession, tab) {
+  constructor(chromeSession, tab, networkObserver) {
     this._pageId = helper.generateId();
     this._chromeSession = chromeSession;
+    this._networkObserver = networkObserver;
     this._tab = tab;
     this._browser = tab.linkedBrowser;
     this._enabled = false;
@@ -124,6 +125,12 @@ class PageHandler {
     this._initializeDialogEvents();
     this._contentSession = new ContentSession(this._chromeSession, this._browser, this._pageId);
     await this._contentSession.send('enable');
+    this._networkObserver.trackBrowserNetwork(this._browser, this);
+  }
+
+  async onRequestWillBeSent(httpChannel) {
+    const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+    dump(`requestWillBeSent: ${httpChannel.URI.spec} frameId: ${details ? details.frameId : '<NULL>'}\n`);
   }
 
   async setUserAgent(options) {
