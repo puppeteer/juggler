@@ -10,9 +10,10 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class PageHandler {
-  constructor(chromeSession, tab) {
+  constructor(chromeSession, tab, networkObserver) {
     this._pageId = helper.generateId();
     this._chromeSession = chromeSession;
+    this._networkObserver = networkObserver;
     this._tab = tab;
     this._browser = tab.linkedBrowser;
     this._enabled = false;
@@ -22,6 +23,8 @@ class PageHandler {
     ]);
     this._browser.addProgressListener(this, Ci.nsIWebProgress.NOTIFY_LOCATION);
     this._dialogs = new Map();
+
+    this._httpActivity = new Map();
 
     // First navigation always happens to about:blank - do not report it.
     this._skipNextNavigation = true;
@@ -124,6 +127,77 @@ class PageHandler {
     this._initializeDialogEvents();
     this._contentSession = new ContentSession(this._chromeSession, this._browser, this._pageId);
     await this._contentSession.send('enable');
+    this._networkObserver.trackBrowserNetwork(this._browser, this);
+  }
+
+  _ensureHTTPActivity(requestId) {
+    let activity = this._httpActivity.get(requestId);
+    if (!activity) {
+      activity = {
+        _id: requestId,
+        _lastSentEvent: null,
+        request: null,
+        response: null,
+        complete: null,
+      };
+      this._httpActivity.set(requestId, activity);
+    }
+    return activity;
+  }
+
+  _reportHTTPAcitivityEvents(activity) {
+    // State machine - sending network events.
+    if (!activity._lastSentEvent && activity.request) {
+      this._chromeSession.emitEvent('Page.requestWillBeSent', activity.request);
+      activity._lastSentEvent = 'requestWillBeSent';
+    }
+    if (activity._lastSentEvent === 'requestWillBeSent' && activity.response) {
+      this._chromeSession.emitEvent('Page.responseReceived', activity.response);
+      activity._lastSentEvent = 'responseReceived';
+    }
+    if (activity._lastSentEvent === 'responseReceived' && activity.complete) {
+      this._chromeSession.emitEvent('Page.requestFinished', activity.complete);
+      activity._lastSentEvent = 'requestFinished';
+    }
+
+    // Clean up if request lifecycle is over.
+    if (activity._lastSentEvent === 'requestFinished')
+      this._httpActivity.delete(activity._id);
+  }
+
+  async onRequestWillBeSent(httpChannel, eventDetails, redirectedFromChannel) {
+    const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+    const activity = this._ensureHTTPActivity(httpChannel.channelId);
+    activity.request = {
+      requestId: httpChannel.channelId + '',
+      redirectedFrom: redirectedFromChannel ? redirectedFromChannel.channelId + '' : undefined,
+      pageId: this._pageId,
+      frameId: details ? details.frameId : undefined,
+      ...eventDetails,
+    };
+    this._reportHTTPAcitivityEvents(activity);
+  }
+
+  async onResponseReceived(httpChannel, eventDetails) {
+    const activity = this._ensureHTTPActivity(httpChannel.channelId);
+    activity.response = {
+      requestId: httpChannel.channelId + '',
+      pageId: this._pageId,
+      ...eventDetails,
+    };
+    this._reportHTTPAcitivityEvents(activity);
+  }
+
+  async onRequestFinished(httpChannel, eventDetails) {
+    const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+    const activity = this._ensureHTTPActivity(httpChannel.channelId);
+    activity.complete = {
+      ...eventDetails,
+      requestId: httpChannel.channelId + '',
+      pageId: this._pageId,
+      errorCode: details ? details.errorCode : undefined,
+    };
+    this._reportHTTPAcitivityEvents(activity);
   }
 
   async setUserAgent(options) {

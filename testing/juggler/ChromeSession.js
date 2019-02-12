@@ -6,12 +6,13 @@ class ChromeSession {
    * @param {Connection} connection
    * @param {Ci.nsIDOMChromeWindow} mainWindow
    * @param {BrowserContextManager} contextManager
+   * @param {NetworkObserver} networkObserver
    */
-  constructor(connection, mainWindow, contextManager) {
+  constructor(connection, mainWindow, contextManager, networkObserver) {
     this._connection = connection;
     this._connection.onmessage = this._dispatch.bind(this);
 
-    this._browserHandler = new BrowserHandler(this, mainWindow, contextManager);
+    this._browserHandler = new BrowserHandler(this, mainWindow, contextManager, networkObserver);
   }
 
   emitEvent(eventName, params) {

@@ -9,10 +9,11 @@ const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
 const helper = new Helper();
 
 class PageAgent {
-  constructor(session, runtimeAgent, frameTree, scrollbarManager) {
+  constructor(session, runtimeAgent, frameTree, scrollbarManager, networkMonitor) {
     this._session = session;
     this._runtime = runtimeAgent;
     this._frameTree = frameTree;
+    this._networkMonitor = networkMonitor;
     this._scrollbarManager = scrollbarManager;
 
     this._frameToExecutionContext = new Map();
@@ -38,6 +39,10 @@ class PageAgent {
         }
       });
     });
+  }
+
+  requestDetails({channelId}) {
+    return this._networkMonitor.requestDetails(channelId);
   }
 
   async setViewport({deviceScaleFactor, isMobile, hasTouch}) {

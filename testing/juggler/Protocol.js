@@ -387,6 +387,31 @@ const protocol = {
       pageId: t.String,
       dialogId: t.String,
     },
+    'Page.requestWillBeSent': {
+      pageId: t.String,
+      // There's no frame for certain requests, e.g. favicon.
+      frameId: t.Optional(t.String),
+      requestId: t.String,
+      // RequestID of redirected request.
+      redirectedFrom: t.Optional(t.String),
+      url: t.String,
+      method: t.String,
+      isNavigationRequest: t.Boolean,
+      cause: t.String,
+    },
+    'Page.responseReceived': {
+      pageId: t.String,
+      requestId: t.String,
+      remoteIPAddress: t.String,
+      remotePort: t.Number,
+      status: t.Number,
+      statusText: t.String,
+    },
+    'Page.requestFinished': {
+      pageId: t.String,
+      requestId: t.String,
+      errorCode: t.Optional(t.String),
+    },
   },
 }
 
