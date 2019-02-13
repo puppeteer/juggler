@@ -99,6 +99,7 @@ class NetworkObserver {
       visitHeader: (name, value) => headers.push({name, value}),
     });
     delegate.onResponseReceived(httpChannel, {
+      securityDetails: getSecurityDetails(httpChannel),
       fromCache,
       headers,
       remoteIPAddress: httpChannel.remoteAddress,
@@ -119,6 +120,30 @@ class NetworkObserver {
     Services.catMan.deleteCategoryEntry(SINK_CATEGORY_NAME, SINK_CONTRACT_ID, false);
     helper.removeListeners(this._eventListeners);
   }
+}
+
+const protocolVersionNames = {
+  [Ci.nsITransportSecurityInfo.TLS_VERSION_1]: 'TLS 1',
+  [Ci.nsITransportSecurityInfo.TLS_VERSION_1_1]: 'TLS 1.1',
+  [Ci.nsITransportSecurityInfo.TLS_VERSION_1_2]: 'TLS 1.2',
+  [Ci.nsITransportSecurityInfo.TLS_VERSION_1_3]: 'TLS 1.3',
+};
+
+function getSecurityDetails(httpChannel) {
+  const securityInfo = httpChannel.securityInfo;
+  if (!securityInfo)
+    return null;
+  securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+  if (!securityInfo.serverCert)
+    return null;
+  return {
+    protocol: protocolVersionNames[securityInfo.protocolVersion] || '<unknown>',
+    subjectName: securityInfo.serverCert.commonName,
+    issuer: securityInfo.serverCert.issuerCommonName,
+    // Convert to seconds.
+    validFrom: securityInfo.serverCert.validity.notBefore / 1000 / 1000,
+    validTo: securityInfo.serverCert.validity.notAfter / 1000 / 1000,
+  };
 }
 
 function getLoadContext(httpChannel) {

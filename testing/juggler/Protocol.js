@@ -404,6 +404,13 @@ const protocol = {
       cause: t.String,
     },
     'Page.responseReceived': {
+      securityDetails: t.Nullable({
+        protocol: t.String,
+        subjectName: t.String,
+        issuer: t.String,
+        validFrom: t.Number,
+        validTo: t.Number,
+      }),
       pageId: t.String,
       requestId: t.String,
       fromCache: t.Boolean,
