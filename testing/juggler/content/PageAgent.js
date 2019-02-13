@@ -275,14 +275,14 @@ class PageAgent {
       throw new Error(`Invalid url: "${url}"`);
     }
     const frame = this._frameTree.frame(frameId);
-    const docShell = frame.docShell();
+    const docShell = frame.docShell().QueryInterface(Ci.nsIWebNavigation);
     docShell.loadURI(url, Ci.nsIWebNavigation.LOAD_FLAGS_NONE, null /* referrer */, null /* postData */, null /* headers */);
     return {navigationId: frame.pendingNavigationId(), navigationURL: frame.pendingNavigationURL()};
   }
 
   async reload({frameId, url}) {
     const frame = this._frameTree.frame(frameId);
-    const docShell = frame.docShell();
+    const docShell = frame.docShell().QueryInterface(Ci.nsIWebNavigation);
     docShell.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE);
     return {navigationId: frame.pendingNavigationId(), navigationURL: frame.pendingNavigationURL()};
   }
