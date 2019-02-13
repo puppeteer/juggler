@@ -199,6 +199,7 @@ const protocol = {
         pageId: t.String,
         frameId: t.String,
         url: t.String,
+        referer: t.Optional(t.String),
       },
       returns: {
         navigationId: t.Nullable(t.String),

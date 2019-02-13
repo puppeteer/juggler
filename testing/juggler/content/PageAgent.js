@@ -268,15 +268,23 @@ class PageAgent {
     this._session.emitEvent('Page.consoleAPICalled', {args, type, frameId: messageFrame.id()});
   }
 
-  async navigate({frameId, url}) {
+  async navigate({frameId, url, referer}) {
     try {
       const uri = NetUtil.newURI(url);
     } catch (e) {
       throw new Error(`Invalid url: "${url}"`);
     }
+    let referrerURI = null;
+    if (referer) {
+      try {
+        referrerURI = NetUtil.newURI(referer);
+      } catch (e) {
+        throw new Error(`Invalid referer: "${referer}"`);
+      }
+    }
     const frame = this._frameTree.frame(frameId);
     const docShell = frame.docShell().QueryInterface(Ci.nsIWebNavigation);
-    docShell.loadURI(url, Ci.nsIWebNavigation.LOAD_FLAGS_NONE, null /* referrer */, null /* postData */, null /* headers */);
+    docShell.loadURI(url, Ci.nsIWebNavigation.LOAD_FLAGS_NONE, referrerURI, null /* postData */, null /* headers */);
     return {navigationId: frame.pendingNavigationId(), navigationURL: frame.pendingNavigationURL()};
   }
 
