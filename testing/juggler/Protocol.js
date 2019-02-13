@@ -394,6 +394,7 @@ const protocol = {
       requestId: t.String,
       // RequestID of redirected request.
       redirectedFrom: t.Optional(t.String),
+      postData: t.Optional(t.String),
       headers: t.Array({
         name: t.String,
         value: t.String,

@@ -2,6 +2,7 @@
 
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -78,6 +79,7 @@ class NetworkObserver {
       });
       delegate.onRequestWillBeSent(httpChannel, {
         url: httpChannel.URI.spec,
+        postData: readPostData(httpChannel),
         headers,
         method: httpChannel.requestMethod,
         isNavigationRequest: httpChannel.isMainDocumentChannel,
@@ -144,6 +146,40 @@ function getSecurityDetails(httpChannel) {
     validFrom: securityInfo.serverCert.validity.notBefore / 1000 / 1000,
     validTo: securityInfo.serverCert.validity.notAfter / 1000 / 1000,
   };
+}
+
+function readPostData(httpChannel) {
+  if (!(httpChannel instanceof Ci.nsIUploadChannel))
+    return undefined;
+  const iStream = httpChannel.uploadStream;
+  if (!iStream)
+    return undefined;
+  const isSeekableStream = iStream instanceof Ci.nsISeekableStream;
+
+  let prevOffset;
+  if (isSeekableStream) {
+    prevOffset = iStream.tell();
+    iStream.seek(Ci.nsISeekableStream.NS_SEEK_SET, 0);
+  }
+
+  // Read data from the stream.
+  let text = undefined;
+  try {
+    text = NetUtil.readInputStreamToString(iStream, iStream.available());
+    const converter = Cc['@mozilla.org/intl/scriptableunicodeconverter']
+        .createInstance(Ci.nsIScriptableUnicodeConverter);
+    converter.charset = 'UTF-8';
+    text = converter.ConvertToUnicode(text);
+  } catch (err) {
+    text = undefined;
+  }
+
+  // Seek locks the file, so seek to the beginning only if necko hasn't
+  // read it yet, since necko doesn't seek to 0 before reading (at lest
+  // not till 459384 is fixed).
+  if (isSeekableStream && prevOffset == 0)
+    iStream.seek(Ci.nsISeekableStream.NS_SEEK_SET, 0);
+  return text;
 }
 
 function getLoadContext(httpChannel) {
