@@ -10,52 +10,26 @@ const helper = new Helper();
 class NetworkMonitor {
   constructor(rootDocShell, frameTree) {
     this._frameTree = frameTree;
-    this.QueryInterface = ChromeUtils.generateQI([
-      Ci.nsIWebProgressListener,
-      Ci.nsIWebProgressListener2,
-      Ci.nsISupportsWeakReference,
-    ]);
     this._requestDetails = new Map();
 
-    const webProgress = rootDocShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                                .getInterface(Ci.nsIWebProgress);
-    const flags = Ci.nsIWebProgress.NOTIFY_STATE_REQUEST;
     this._eventListeners = [
-      helper.addProgressListener(webProgress, this, flags),
+      helper.addObserver(this._onRequest.bind(this), 'http-on-opening-request'),
     ];
   }
 
-  onStateChange(progress, request, flag, status) {
-    if (!(request instanceof Ci.nsIHttpChannel))
+  _onRequest(channel) {
+    if (!(channel instanceof Ci.nsIHttpChannel))
       return;
-    let loadContext = null;
-    if (request.notificationCallbacks)
-      loadContext = request.notificationCallbacks.getInterface(Ci.nsILoadContext);
-    else if (request.loadGroup)
-      loadContext = request.loadGroup.notificationCallbacks.getInterface(Ci.nsILoadContext);
+    const httpChannel = channel.QueryInterface(Ci.nsIHttpChannel);
+    const loadContext = getLoadContext(httpChannel);
     if (!loadContext)
       return;
     const window = loadContext.associatedWindow;
     const frame = this._frameTree.frameForDocShell(window.docShell)
     if (!frame)
       return;
-    const isStart = flag & Ci.nsIWebProgressListener.STATE_START;
-    const isStop = flag & Ci.nsIWebProgressListener.STATE_STOP;
-    if (!isStop && !isStart)
-      return;
-
-    let errorCode = undefined;
-    if (isStop) {
-      for (const key of Object.keys(Cr)) {
-        if (Cr[key] === status) {
-          errorCode = key;
-          break;
-        }
-      }
-    }
-    this._requestDetails.set(request.channelId, {
+    this._requestDetails.set(httpChannel.channelId, {
       frameId: frame.id(),
-      errorCode,
     });
   }
 
@@ -68,6 +42,20 @@ class NetworkMonitor {
     helper.removeListeners(this._eventListeners);
   }
 }
+
+function getLoadContext(httpChannel) {
+  let loadContext = null;
+  try {
+    if (httpChannel.notificationCallbacks)
+      loadContext = httpChannel.notificationCallbacks.getInterface(Ci.nsILoadContext);
+  } catch (e) {}
+  try {
+    if (!loadContext && httpChannel.loadGroup)
+      loadContext = httpChannel.loadGroup.notificationCallbacks.getInterface(Ci.nsILoadContext);
+  } catch (e) { }
+  return loadContext;
+}
+
 
 var EXPORTED_SYMBOLS = ['NetworkMonitor'];
 this.NetworkMonitor = NetworkMonitor;

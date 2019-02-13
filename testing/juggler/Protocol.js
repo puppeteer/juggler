@@ -389,7 +389,7 @@ const protocol = {
     },
     'Page.requestWillBeSent': {
       pageId: t.String,
-      // There's no frame for certain requests, e.g. favicon.
+      // frameId may be absent for redirected requests.
       frameId: t.Optional(t.String),
       requestId: t.String,
       // RequestID of redirected request.

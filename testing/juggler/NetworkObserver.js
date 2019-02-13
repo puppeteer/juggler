@@ -79,7 +79,6 @@ class NetworkObserver {
         cause: causeTypeToString(causeType),
       }, oldChannel);
     } else if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE) {
-      dump(httpChannel.loadInfo.redirectChain.length + '\n');
       delegate.onRequestFinished(httpChannel, {});
     }
   }
