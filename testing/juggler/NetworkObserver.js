@@ -72,8 +72,13 @@ class NetworkObserver {
       const causeType = httpChannel.loadInfo ? httpChannel.loadInfo.externalContentPolicyType : Ci.nsIContentPolicy.TYPE_OTHER;
       const oldChannel = this._redirectMap.get(httpChannel);
       this._redirectMap.delete(httpChannel);
+      const headers = [];
+      httpChannel.visitRequestHeaders({
+        visitHeader: (name, value) => headers.push({name, value}),
+      });
       delegate.onRequestWillBeSent(httpChannel, {
         url: httpChannel.URI.spec,
+        headers,
         method: httpChannel.requestMethod,
         isNavigationRequest: httpChannel.isMainDocumentChannel,
         cause: causeTypeToString(causeType),
@@ -89,8 +94,13 @@ class NetworkObserver {
     if (!delegate)
       return;
     httpChannel.QueryInterface(Ci.nsIHttpChannelInternal);
+    const headers = [];
+    httpChannel.visitResponseHeaders({
+      visitHeader: (name, value) => headers.push({name, value}),
+    });
     delegate.onResponseReceived(httpChannel, {
       fromCache,
+      headers,
       remoteIPAddress: httpChannel.remoteAddress,
       remotePort: httpChannel.remotePort,
       status: httpChannel.responseStatus,

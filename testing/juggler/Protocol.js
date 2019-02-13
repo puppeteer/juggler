@@ -394,6 +394,10 @@ const protocol = {
       requestId: t.String,
       // RequestID of redirected request.
       redirectedFrom: t.Optional(t.String),
+      headers: t.Array({
+        name: t.String,
+        value: t.String,
+      }),
       url: t.String,
       method: t.String,
       isNavigationRequest: t.Boolean,
@@ -407,6 +411,10 @@ const protocol = {
       remotePort: t.Number,
       status: t.Number,
       statusText: t.String,
+      headers: t.Array({
+        name: t.String,
+        value: t.String,
+      }),
     },
     'Page.requestFinished': {
       pageId: t.String,
