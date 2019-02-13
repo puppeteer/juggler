@@ -41,9 +41,9 @@ class NetworkObserver {
     Services.catMan.addCategoryEntry(SINK_CATEGORY_NAME, SINK_CONTRACT_ID, SINK_CONTRACT_ID, false, true);
 
     this._eventListeners = [
-      helper.addObserver(this._onResponse.bind(this), 'http-on-examine-response'),
-      helper.addObserver(this._onResponse.bind(this), 'http-on-examine-cached-response'),
-      helper.addObserver(this._onResponse.bind(this), 'http-on-examine-merged-response'),
+      helper.addObserver(this._onResponse.bind(this, false /* fromCache */), 'http-on-examine-response'),
+      helper.addObserver(this._onResponse.bind(this, true /* fromCache */), 'http-on-examine-cached-response'),
+      helper.addObserver(this._onResponse.bind(this, true /* fromCache */), 'http-on-examine-merged-response'),
     ];
   }
 
@@ -83,13 +83,14 @@ class NetworkObserver {
     }
   }
 
-  _onResponse(httpChannel, topic) {
+  _onResponse(fromCache, httpChannel, topic) {
     const loadContext = getLoadContext(httpChannel);
     const delegate = loadContext ? this._browsers.get(loadContext.topFrameElement) : null;
     if (!delegate)
       return;
     httpChannel.QueryInterface(Ci.nsIHttpChannelInternal);
     delegate.onResponseReceived(httpChannel, {
+      fromCache,
       remoteIPAddress: httpChannel.remoteAddress,
       remotePort: httpChannel.remotePort,
       status: httpChannel.responseStatus,

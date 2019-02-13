@@ -402,6 +402,7 @@ const protocol = {
     'Page.responseReceived': {
       pageId: t.String,
       requestId: t.String,
+      fromCache: t.Boolean,
       remoteIPAddress: t.String,
       remotePort: t.Number,
       status: t.Number,
