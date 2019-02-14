@@ -376,6 +376,11 @@ const protocol = {
       frameId: t.String,
       args: t.Array(RemoteObject),
       type: t.String,
+      location: {
+        columnNumber: t.Number,
+        lineNumber: t.Number,
+        url: t.String,
+      },
     },
     'Page.dialogOpened': {
       pageId: t.String,

@@ -265,7 +265,16 @@ class PageAgent {
       return;
     const executionContext = this._ensureExecutionContext(messageFrame);
     const args = wrappedJSObject.arguments.map(arg => executionContext.rawValueToRemoteObject(arg));
-    this._session.emitEvent('Page.consoleAPICalled', {args, type, frameId: messageFrame.id()});
+    this._session.emitEvent('Page.consoleAPICalled', {
+      args,
+      type,
+      frameId: messageFrame.id(),
+      location: {
+        lineNumber: wrappedJSObject.lineNumber - 1,
+        columnNumber: wrappedJSObject.columnNumber - 1,
+        url: wrappedJSObject.filename,
+      },
+    });
   }
 
   async navigate({frameId, url, referer}) {
