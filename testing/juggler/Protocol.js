@@ -1,17 +1,4 @@
-const t = {
-  String: x => typeof x === 'string' || typeof x === 'String',
-  Number: x => typeof x === 'number',
-  Boolean: x => typeof x === 'boolean',
-  Null: x => Object.is(x, null),
-  Enum: values => x => values.indexOf(x) !== -1,
-  Undefined: x => Object.is(x, undefined),
-  Or: (...schemes) => x => schemes.some(scheme => checkScheme(scheme, x)),
-  Either: (...schemes) => x => schemes.map(scheme => checkScheme(scheme, x)).reduce((acc, x) => acc + (x ? 1 : 0)) === 1,
-  Array: scheme => x => Array.isArray(x) && x.every(element => checkScheme(scheme, element)),
-  Nullable: scheme => x => Object.is(x, null) || checkScheme(scheme, x),
-  Optional: scheme => x => Object.is(x, undefined) || checkScheme(scheme, x),
-  Any: x => true,
-}
+const {t, checkScheme} = ChromeUtils.import('chrome://juggler/content/PrimitiveTypes.js');
 
 // Protocol-specific types.
 const types = {};
@@ -446,35 +433,6 @@ const Page = {
     },
   },
 };
-
-function checkScheme(scheme, x, details = {}, path = []) {
-  if (typeof scheme === 'object') {
-    for (const [propertyName, check] of Object.entries(scheme)) {
-      path.push(propertyName);
-      const result = checkScheme(check, x[propertyName], details, path);
-      path.pop();
-      if (!result)
-        return false;
-    }
-    for (const propertyName of Object.keys(x)) {
-      if (!scheme[propertyName]) {
-        path.push(propertyName);
-        details.propertyName = path.join('.');
-        details.propertyValue = x[propertyName];
-        details.errorType = 'extra';
-        return false;
-      }
-    }
-    return true;
-  }
-  const result = scheme(x);
-  if (!result) {
-    details.propertyName = path.join('.');
-    details.propertyValue = x;
-    details.errorType = 'unsupported';
-  }
-  return result;
-}
 
 this.protocol = {
   domains: {Browser, Page},

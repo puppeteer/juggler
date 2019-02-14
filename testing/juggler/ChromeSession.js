@@ -22,7 +22,7 @@ class ChromeSession {
       throw new Error(`ERROR: event '${eventName}' is not supported`);
     const details = {};
     if (!checkScheme(scheme, params || {}, details))
-      throw new Error(`ERROR: event '${eventName}' is called with ${details.errorType} parameter '${details.propertyName}': ${details.propertyValue}`);
+      throw new Error(`ERROR: failed to emit event '${eventName}' ${JSON.stringify(params, null, 2)}\n${details.error}`);
     this._connection.send({method: eventName, params});
   }
 
@@ -42,13 +42,13 @@ class ChromeSession {
         throw new Error(`ERROR: method '${method}' is not supported`);
       let details = {};
       if (!checkScheme(descriptor.params || {}, params, details))
-        throw new Error(`ERROR: method '${method}' is called with ${details.errorType} parameter '${details.propertyName}': ${details.propertyValue}`);
+        throw new Error(`ERROR: failed to call method '${method}' with parameters ${JSON.stringify(params, null, 2)}\n${details.error}`);
 
       const result = await this._innerDispatch(method, params);
 
       details = {};
       if ((descriptor.returns || result) && !checkScheme(descriptor.returns, result, details))
-        throw new Error(`ERROR: method '${method}' returned ${details.errorType} parameter '${details.propertyName}': ${details.propertyValue}`);
+        throw new Error(`ERROR: failed to dispatch method '${method}' result ${JSON.stringify(result, null, 2)}\n${details.error}`);
 
       this._connection.send({id, result});
     } catch (e) {

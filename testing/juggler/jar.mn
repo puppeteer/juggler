@@ -6,6 +6,7 @@ juggler.jar:
 % content juggler %content/
   content/ChromeSession.js (ChromeSession.js)
   content/InsecureSweepingOverride.js (InsecureSweepingOverride.js)
+  content/PrimitiveTypes.js (PrimitiveTypes.js)
   content/Protocol.js (Protocol.js)
   content/Helper.js (Helper.js)
   content/PageHandler.jsm (PageHandler.jsm)
