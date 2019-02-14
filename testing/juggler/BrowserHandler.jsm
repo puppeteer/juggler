@@ -124,9 +124,11 @@ class BrowserHandler {
     return {pageId: pageHandler.id()};
   }
 
-  async closePage({pageId}) {
+  async closePage({pageId, runBeforeUnload}) {
     const pageHandler = this._pageHandlers.get(pageId);
-    await this._mainWindow.gBrowser.removeTab(pageHandler.tab());
+    await this._mainWindow.gBrowser.removeTab(pageHandler.tab(), {
+      skipPermitUnload: !runBeforeUnload,
+    });
   }
 }
 

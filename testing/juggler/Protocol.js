@@ -65,6 +65,7 @@ const protocol = {
     'Browser.closePage': {
       params: {
         pageId: t.String,
+        runBeforeUnload: t.Optional(t.Boolean),
       },
     },
     'Browser.createBrowserContext': {
