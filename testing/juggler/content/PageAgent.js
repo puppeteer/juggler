@@ -18,6 +18,7 @@ class PageAgent {
 
     this._frameToExecutionContext = new Map();
     this._scriptsToEvaluateOnNewDocument = new Map();
+    this._bindingsToAdd = new Set();
 
     const disallowedMessageCategories = new Set([
       'XPConnect JavaScript',
@@ -227,13 +228,15 @@ class PageAgent {
   }
 
   _onDOMWindowCreated(event) {
-    if (!this._scriptsToEvaluateOnNewDocument.size)
+    if (!this._scriptsToEvaluateOnNewDocument.size && !this._bindingsToAdd.size)
       return;
     const docShell = event.target.ownerGlobal.docShell;
     const frame = this._frameTree.frameForDocShell(docShell);
     if (!frame)
       return;
     const executionContext = this._ensureExecutionContext(frame);
+    for (const bindingName of this._bindingsToAdd.values())
+      this._exposeFunction(frame, bindingName);
     for (const script of this._scriptsToEvaluateOnNewDocument.values()) {
       try {
         let result = executionContext.evaluateScript(script);
@@ -372,6 +375,26 @@ class PageAgent {
       throw new Error('Failed to find frame with id = ' + executionContextId);
     const executionContext = this._ensureExecutionContext(frame);
     return executionContext.disposeObject(objectId);
+  }
+
+  addBinding({name}) {
+    if (this._bindingsToAdd.has(name))
+      throw new Error(`Binding with name ${name} already exists`);
+    this._bindingsToAdd.add(name);
+    for (const frame of this._frameTree.frames())
+      this._exposeFunction(frame, name);
+  }
+
+  _exposeFunction(frame, name) {
+    Cu.exportFunction((...args) => {
+      this._session.emitEvent('Page.bindingCalled', {
+        frameId: frame.id(),
+        name,
+        payload: args[0]
+      });
+    }, frame.domWindow(), {
+      defineAs: name
+    });
   }
 
   getContentQuads({objectId, frameId}) {

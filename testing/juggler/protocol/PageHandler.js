@@ -111,6 +111,10 @@ class PageHandler {
     return await this._contentSession.send('setUserAgent', options);
   }
 
+  async addBinding(options) {
+    return await this._contentSession.send('addBinding', options);
+  }
+
   async setJavascriptEnabled(options) {
     return await this._contentSession.send('setJavascriptEnabled', options);
   }
