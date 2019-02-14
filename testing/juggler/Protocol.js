@@ -372,7 +372,7 @@ const protocol = {
       frameId: t.String,
       url: t.String,
     },
-    'Page.consoleAPICalled': {
+    'Page.console': {
       pageId: t.String,
       frameId: t.String,
       args: t.Array(RemoteObject),

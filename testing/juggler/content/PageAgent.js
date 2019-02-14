@@ -19,6 +19,51 @@ class PageAgent {
     this._frameToExecutionContext = new Map();
     this._scriptsToEvaluateOnNewDocument = new Map();
 
+    const disallowedMessageCategories = new Set([
+      'XPConnect JavaScript',
+      'component javascript',
+      'chrome javascript',
+      'chrome registration',
+      'XBL',
+      'XBL Prototype Handler',
+      'XBL Content Sink',
+      'xbl javascript',
+    ]);
+    this._consoleServiceListener = {
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIConsoleListener]),
+
+      observe: message => {
+        if (!(message instanceof Ci.nsIScriptError) || !message.outerWindowID ||
+            !message.category || disallowedMessageCategories.has(message.category)) {
+          return;
+        }
+        const errorWindow = Services.wm.getOuterWindowWithId(message.outerWindowID);
+        const frame = errorWindow ? this._frameTree.frameForDocShell(errorWindow.docShell) : null;
+        if (!frame)
+          return;
+        const typeNames = {
+          [Ci.nsIConsoleMessage.debug]: 'debug',
+          [Ci.nsIConsoleMessage.info]: 'info',
+          [Ci.nsIConsoleMessage.warn]: 'warn',
+          [Ci.nsIConsoleMessage.error]: 'error',
+        };
+        this._session.emitEvent('Page.console', {
+          args: [{
+            value: message.message,
+          }],
+          type: typeNames[message.logLevel],
+          frameId: frame.id(),
+          location: {
+            lineNumber: message.lineNumber,
+            columnNumber: message.columnNumber,
+            url: message.sourceName,
+          },
+        });
+      },
+    };
+
+    Services.console.registerListener(this._consoleServiceListener);
+
     this._eventListeners = [];
     this._enabled = false;
 
@@ -223,6 +268,7 @@ class PageAgent {
   }
 
   dispose() {
+    Services.console.unregisterListener(this._consoleServiceListener);
     helper.removeListeners(this._eventListeners);
   }
 
@@ -265,7 +311,7 @@ class PageAgent {
       return;
     const executionContext = this._ensureExecutionContext(messageFrame);
     const args = wrappedJSObject.arguments.map(arg => executionContext.rawValueToRemoteObject(arg));
-    this._session.emitEvent('Page.consoleAPICalled', {
+    this._session.emitEvent('Page.console', {
       args,
       type,
       frameId: messageFrame.id(),
