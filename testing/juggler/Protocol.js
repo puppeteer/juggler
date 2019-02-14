@@ -13,48 +13,40 @@ const t = {
   Any: x => true,
 }
 
-const RemoteObject = t.Either(
-  {
-    type: t.Enum(['object', 'function', 'undefined', 'string', 'number', 'boolean', 'symbol', 'bigint']),
-    subtype: t.Optional(t.Enum(['array', 'null', 'node', 'regexp', 'date', 'map', 'set', 'weakmap', 'weakset', 'error', 'proxy', 'promise', 'typedarray'])),
-    objectId: t.String,
-  },
-  {
-    unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']),
-  },
-  {
-    value: t.Any
-  },
-);
+// Protocol-specific types.
+const types = {};
 
-const DOMPoint = {
-  x: t.Number,
-  y: t.Number,
-};
+const Browser = {
+  events: {
+    'tabOpened': {
+      pageId: t.String,
+      browserContextId: t.Optional(t.String),
+      url: t.String,
+      // PageId of parent tab.
+      openerId: t.Optional(t.String),
+    },
+    'tabClosed': { pageId: t.String, },
+    'tabNavigated': {
+      pageId: t.String,
+      url: t.String
+    },
+  },
 
-const DOMQuad = {
-  p1: DOMPoint,
-  p2: DOMPoint,
-  p3: DOMPoint,
-  p4: DOMPoint
-};
-
-const protocol = {
   methods: {
     // Start emitting tagOpened/tabClosed events
-    'Browser.enable': {},
-    'Browser.getInfo': {
+    'enable': {},
+    'getInfo': {
       returns: {
         userAgent: t.String,
         version: t.String,
       },
     },
-    'Browser.setIgnoreHTTPSErrors': {
+    'setIgnoreHTTPSErrors': {
       params: {
         enabled: t.Boolean,
       },
     },
-    'Browser.newPage': {
+    'newPage': {
       params: {
         browserContextId: t.Optional(t.String),
       },
@@ -62,33 +54,172 @@ const protocol = {
         pageId: t.String,
       }
     },
-    'Browser.closePage': {
+    'closePage': {
       params: {
         pageId: t.String,
         runBeforeUnload: t.Optional(t.Boolean),
       },
     },
-    'Browser.createBrowserContext': {
+    'createBrowserContext': {
       returns: {
         browserContextId: t.String,
       },
     },
-    'Browser.removeBrowserContext': {
+    'removeBrowserContext': {
       params: {
         browserContextId: t.String,
       },
     },
-    'Browser.getBrowserContexts': {
+    'getBrowserContexts': {
       returns: {
         browserContextIds: t.Array(t.String),
       },
     },
-    'Page.enable': {
+  },
+};
+
+types.DOMPoint = {
+  x: t.Number,
+  y: t.Number,
+};
+
+types.DOMQuad = {
+  p1: types.DOMPoint,
+  p2: types.DOMPoint,
+  p3: types.DOMPoint,
+  p4: types.DOMPoint,
+};
+
+types.RemoteObject = t.Either({
+  type: t.Enum(['object', 'function', 'undefined', 'string', 'number', 'boolean', 'symbol', 'bigint']),
+  subtype: t.Optional(t.Enum(['array', 'null', 'node', 'regexp', 'date', 'map', 'set', 'weakmap', 'weakset', 'error', 'proxy', 'promise', 'typedarray'])),
+  objectId: t.String,
+}, {
+  unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']),
+}, {
+  value: t.Any
+});
+
+const Page = {
+  events: {
+    'eventFired': {
+      pageId: t.String,
+      frameId: t.String,
+      name: t.Enum(['load', 'DOMContentLoaded']),
+    },
+    'uncaughtError': {
+      pageId: t.String,
+      frameId: t.String,
+      message: t.String,
+      stack: t.String,
+    },
+    'frameAttached': {
+      pageId: t.String,
+      frameId: t.String,
+      parentFrameId: t.Optional(t.String),
+    },
+    'frameDetached': {
+      pageId: t.String,
+      frameId: t.String,
+    },
+    'navigationStarted': {
+      pageId: t.String,
+      frameId: t.String,
+      navigationId: t.String,
+      url: t.String,
+    },
+    'navigationCommitted': {
+      pageId: t.String,
+      frameId: t.String,
+      navigationId: t.String,
+      url: t.String,
+      // frame.id or frame.name
+      name: t.String,
+    },
+    'navigationAborted': {
+      pageId: t.String,
+      frameId: t.String,
+      navigationId: t.String,
+      errorText: t.String,
+    },
+    'sameDocumentNavigation': {
+      pageId: t.String,
+      frameId: t.String,
+      url: t.String,
+    },
+    'console': {
+      pageId: t.String,
+      frameId: t.String,
+      args: t.Array(types.RemoteObject),
+      type: t.String,
+      location: {
+        columnNumber: t.Number,
+        lineNumber: t.Number,
+        url: t.String,
+      },
+    },
+    'dialogOpened': {
+      pageId: t.String,
+      dialogId: t.String,
+      type: t.Enum(['prompt', 'alert', 'confirm', 'beforeunload']),
+      message: t.String,
+      defaultValue: t.Optional(t.String),
+    },
+    'dialogClosed': {
+      pageId: t.String,
+      dialogId: t.String,
+    },
+    'requestWillBeSent': {
+      pageId: t.String,
+      // frameId may be absent for redirected requests.
+      frameId: t.Optional(t.String),
+      requestId: t.String,
+      // RequestID of redirected request.
+      redirectedFrom: t.Optional(t.String),
+      postData: t.Optional(t.String),
+      headers: t.Array({
+        name: t.String,
+        value: t.String,
+      }),
+      url: t.String,
+      method: t.String,
+      isNavigationRequest: t.Boolean,
+      cause: t.String,
+    },
+    'responseReceived': {
+      securityDetails: t.Nullable({
+        protocol: t.String,
+        subjectName: t.String,
+        issuer: t.String,
+        validFrom: t.Number,
+        validTo: t.Number,
+      }),
+      pageId: t.String,
+      requestId: t.String,
+      fromCache: t.Boolean,
+      remoteIPAddress: t.String,
+      remotePort: t.Number,
+      status: t.Number,
+      statusText: t.String,
+      headers: t.Array({
+        name: t.String,
+        value: t.String,
+      }),
+    },
+    'requestFinished': {
+      pageId: t.String,
+      requestId: t.String,
+      errorCode: t.Optional(t.String),
+    },
+  },
+
+  methods: {
+    'enable': {
       params: {
         pageId: t.String,
       },
     },
-    'Page.setViewport': {
+    'setViewport': {
       params: {
         pageId: t.String,
         viewport: t.Nullable({
@@ -101,25 +232,25 @@ const protocol = {
         }),
       },
     },
-    'Page.setUserAgent': {
+    'setUserAgent': {
       params: {
         pageId: t.String,
         userAgent: t.Nullable(t.String),
       },
     },
-    'Page.setCacheDisabled': {
+    'setCacheDisabled': {
       params: {
         pageId: t.String,
         cacheDisabled: t.Boolean,
       },
     },
-    'Page.setJavascriptEnabled': {
+    'setJavascriptEnabled': {
       params: {
         pageId: t.String,
         enabled: t.Boolean,
       },
     },
-    'Page.contentFrame': {
+    'contentFrame': {
       params: {
         pageId: t.String,
         frameId: t.String,
@@ -129,7 +260,7 @@ const protocol = {
         frameId: t.Nullable(t.String),
       },
     },
-    'Page.evaluate': {
+    'evaluate': {
       params: t.Either({
         pageId: t.String,
         // Pass frameId here.
@@ -150,7 +281,7 @@ const protocol = {
       }),
 
       returns: {
-        result: t.Optional(RemoteObject),
+        result: t.Optional(types.RemoteObject),
         exceptionDetails: t.Optional({
           text: t.Optional(t.String),
           stack: t.Optional(t.String),
@@ -158,7 +289,7 @@ const protocol = {
         }),
       }
     },
-    'Page.addScriptToEvaluateOnNewDocument': {
+    'addScriptToEvaluateOnNewDocument': {
       params: {
         pageId: t.String,
         script: t.String,
@@ -167,13 +298,13 @@ const protocol = {
         scriptId: t.String,
       }
     },
-    'Page.removeScriptToEvaluateOnNewDocument': {
+    'removeScriptToEvaluateOnNewDocument': {
       params: {
         pageId: t.String,
         scriptId: t.String,
       },
     },
-    'Page.disposeObject': {
+    'disposeObject': {
       params: {
         pageId: t.String,
         executionContextId: t.String,
@@ -181,7 +312,7 @@ const protocol = {
       },
     },
 
-    'Page.getObjectProperties': {
+    'getObjectProperties': {
       params: {
         pageId: t.String,
         executionContextId: t.String,
@@ -191,11 +322,11 @@ const protocol = {
       returns: {
         properties: t.Array({
           name: t.String,
-          value: RemoteObject,
+          value: types.RemoteObject,
         }),
       }
     },
-    'Page.navigate': {
+    'navigate': {
       params: {
         pageId: t.String,
         frameId: t.String,
@@ -207,7 +338,7 @@ const protocol = {
         navigationURL: t.Nullable(t.String),
       }
     },
-    'Page.goBack': {
+    'goBack': {
       params: {
         pageId: t.String,
         frameId: t.String,
@@ -217,7 +348,7 @@ const protocol = {
         navigationURL: t.Nullable(t.String),
       }
     },
-    'Page.goForward': {
+    'goForward': {
       params: {
         pageId: t.String,
         frameId: t.String,
@@ -227,7 +358,7 @@ const protocol = {
         navigationURL: t.Nullable(t.String),
       }
     },
-    'Page.reload': {
+    'reload': {
       params: {
         pageId: t.String,
         frameId: t.String,
@@ -237,7 +368,7 @@ const protocol = {
         navigationURL: t.String,
       }
     },
-    'Page.getBoundingBox': {
+    'getBoundingBox': {
       params: {
         pageId: t.String,
         frameId: t.String,
@@ -250,7 +381,7 @@ const protocol = {
         height: t.Number,
       }),
     },
-    'Page.screenshot': {
+    'screenshot': {
       params: {
         pageId: t.String,
         mimeType: t.Enum(['image/png', 'image/jpeg']),
@@ -266,17 +397,17 @@ const protocol = {
         data: t.String,
       }
     },
-    'Page.getContentQuads': {
+    'getContentQuads': {
       params: {
         pageId: t.String,
         frameId: t.String,
         objectId: t.String,
       },
       returns: {
-        quads: t.Array(DOMQuad),
+        quads: t.Array(types.DOMQuad),
       },
     },
-    'Page.dispatchKeyEvent': {
+    'dispatchKeyEvent': {
       params: {
         pageId: t.String,
         type: t.String,
@@ -287,7 +418,7 @@ const protocol = {
         repeat: t.Boolean,
       }
     },
-    'Page.dispatchMouseEvent': {
+    'dispatchMouseEvent': {
       params: {
         pageId: t.String,
         type: t.String,
@@ -299,13 +430,13 @@ const protocol = {
         buttons: t.Number,
       }
     },
-    'Page.insertText': {
+    'insertText': {
       params: {
         pageId: t.String,
         text: t.String,
       }
     },
-    'Page.handleDialog': {
+    'handleDialog': {
       params: {
         pageId: t.String,
         dialogId: t.String,
@@ -314,130 +445,7 @@ const protocol = {
       },
     },
   },
-  events: {
-    'Browser.tabOpened': {
-      pageId: t.String,
-      browserContextId: t.Optional(t.String),
-      url: t.String,
-      // PageId of parent tab.
-      openerId: t.Optional(t.String),
-    },
-    'Browser.tabClosed': { pageId: t.String, },
-    'Browser.tabNavigated': {
-      pageId: t.String,
-      url: t.String
-    },
-    'Page.eventFired': {
-      pageId: t.String,
-      frameId: t.String,
-      name: t.Enum(['load', 'DOMContentLoaded']),
-    },
-    'Page.uncaughtError': {
-      pageId: t.String,
-      frameId: t.String,
-      message: t.String,
-      stack: t.String,
-    },
-    'Page.frameAttached': {
-      pageId: t.String,
-      frameId: t.String,
-      parentFrameId: t.Optional(t.String),
-    },
-    'Page.frameDetached': {
-      pageId: t.String,
-      frameId: t.String,
-    },
-    'Page.navigationStarted': {
-      pageId: t.String,
-      frameId: t.String,
-      navigationId: t.String,
-      url: t.String,
-    },
-    'Page.navigationCommitted': {
-      pageId: t.String,
-      frameId: t.String,
-      navigationId: t.String,
-      url: t.String,
-      // frame.id or frame.name
-      name: t.String,
-    },
-    'Page.navigationAborted': {
-      pageId: t.String,
-      frameId: t.String,
-      navigationId: t.String,
-      errorText: t.String,
-    },
-    'Page.sameDocumentNavigation': {
-      pageId: t.String,
-      frameId: t.String,
-      url: t.String,
-    },
-    'Page.console': {
-      pageId: t.String,
-      frameId: t.String,
-      args: t.Array(RemoteObject),
-      type: t.String,
-      location: {
-        columnNumber: t.Number,
-        lineNumber: t.Number,
-        url: t.String,
-      },
-    },
-    'Page.dialogOpened': {
-      pageId: t.String,
-      dialogId: t.String,
-      type: t.Enum(['prompt', 'alert', 'confirm', 'beforeunload']),
-      message: t.String,
-      defaultValue: t.Optional(t.String),
-    },
-    'Page.dialogClosed': {
-      pageId: t.String,
-      dialogId: t.String,
-    },
-    'Page.requestWillBeSent': {
-      pageId: t.String,
-      // frameId may be absent for redirected requests.
-      frameId: t.Optional(t.String),
-      requestId: t.String,
-      // RequestID of redirected request.
-      redirectedFrom: t.Optional(t.String),
-      postData: t.Optional(t.String),
-      headers: t.Array({
-        name: t.String,
-        value: t.String,
-      }),
-      url: t.String,
-      method: t.String,
-      isNavigationRequest: t.Boolean,
-      cause: t.String,
-    },
-    'Page.responseReceived': {
-      securityDetails: t.Nullable({
-        protocol: t.String,
-        subjectName: t.String,
-        issuer: t.String,
-        validFrom: t.Number,
-        validTo: t.Number,
-      }),
-      pageId: t.String,
-      requestId: t.String,
-      fromCache: t.Boolean,
-      remoteIPAddress: t.String,
-      remotePort: t.Number,
-      status: t.Number,
-      statusText: t.String,
-      headers: t.Array({
-        name: t.String,
-        value: t.String,
-      }),
-    },
-    'Page.requestFinished': {
-      pageId: t.String,
-      requestId: t.String,
-      errorCode: t.Optional(t.String),
-    },
-  },
-}
+};
 
 function checkScheme(scheme, x, details = {}, path = []) {
   if (typeof scheme === 'object') {
@@ -468,6 +476,8 @@ function checkScheme(scheme, x, details = {}, path = []) {
   return result;
 }
 
-this.protocol = protocol;
+this.protocol = {
+  domains: {Browser, Page},
+};
 this.checkScheme = checkScheme;
 this.EXPORTED_SYMBOLS = ['protocol', 'checkScheme'];

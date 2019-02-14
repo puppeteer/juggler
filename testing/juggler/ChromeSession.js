@@ -16,7 +16,8 @@ class ChromeSession {
   }
 
   emitEvent(eventName, params) {
-    const scheme = protocol.events[eventName];
+    const [domain, eName] = eventName.split('.');
+    const scheme = protocol.domains[domain] ? protocol.domains[domain].events[eName] : null;
     if (!scheme)
       throw new Error(`ERROR: event '${eventName}' is not supported`);
     const details = {};
@@ -35,7 +36,8 @@ class ChromeSession {
       if (!method)
         throw new Error(`ERROR: every message must have a 'method' parameter`);
 
-      const descriptor = protocol.methods[method];
+      const [domain, methodName] = method.split('.');
+      const descriptor = protocol.domains[domain] ? protocol.domains[domain].methods[methodName] : null;
       if (!descriptor)
         throw new Error(`ERROR: method '${method}' is not supported`);
       let details = {};
