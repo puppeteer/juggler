@@ -203,7 +203,7 @@ class Frame {
   }
 
   domWindow() {
-    return this._docShell.DOMWindow;
+    return this._docShell.domWindow;
   }
 
   name() {

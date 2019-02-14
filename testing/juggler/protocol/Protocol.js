@@ -242,6 +242,11 @@ const Page = {
     'dialogClosed': {
       dialogId: t.String,
     },
+    'bindingCalled': {
+      frameId: t.String,
+      name: t.String,
+      payload: t.Any,
+    },
   },
 
   methods: {
@@ -315,6 +320,11 @@ const Page = {
           value: t.Optional(t.Any),
         }),
       }
+    },
+    'addBinding': {
+      params: {
+        name: t.String,
+      },
     },
     'addScriptToEvaluateOnNewDocument': {
       params: {

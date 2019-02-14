@@ -18,6 +18,7 @@ class PageAgent {
 
     this._frameToExecutionContext = new Map();
     this._scriptsToEvaluateOnNewDocument = new Map();
+    this._bindingsToAdd = new Set();
 
     const disallowedMessageCategories = new Set([
       'XPConnect JavaScript',
@@ -141,7 +142,8 @@ class PageAgent {
     Services.console.registerListener(this._consoleServiceListener);
     this._eventListeners = [
       () => Services.console.unregisterListener(this._consoleServiceListener),
-      helper.addObserver(this._consoleAPICalled.bind(this),  "console-api-log-event"),
+      helper.addObserver(this._consoleAPICalled.bind(this), "console-api-log-event"),
+      helper.addObserver(this._onDOMWindowDestroyed.bind(this), "dom-window-destroyed"),
       helper.addEventListener(this._session.mm(), 'DOMContentLoaded', this._onDOMContentLoaded.bind(this)),
       helper.addEventListener(this._session.mm(), 'pageshow', this._onLoad.bind(this)),
       helper.addEventListener(this._session.mm(), 'DOMWindowCreated', this._onDOMWindowCreated.bind(this)),
@@ -213,11 +215,6 @@ class PageAgent {
   }
 
   _onNavigationCommitted(frame) {
-    const context = this._frameToExecutionContext.get(frame);
-    if (context) {
-      this._runtime.destroyExecutionContext(context);
-      this._frameToExecutionContext.delete(frame);
-    }
     this._session.emitEvent('Page.navigationCommitted', {
       frameId: frame.id(),
       navigationId: frame.lastCommittedNavigationId(),
@@ -227,13 +224,15 @@ class PageAgent {
   }
 
   _onDOMWindowCreated(event) {
-    if (!this._scriptsToEvaluateOnNewDocument.size)
+    if (!this._scriptsToEvaluateOnNewDocument.size && !this._bindingsToAdd.size)
       return;
     const docShell = event.target.ownerGlobal.docShell;
     const frame = this._frameTree.frameForDocShell(docShell);
     if (!frame)
       return;
     const executionContext = this._ensureExecutionContext(frame);
+    for (const bindingName of this._bindingsToAdd.values())
+      this._exposeFunction(frame, bindingName);
     for (const script of this._scriptsToEvaluateOnNewDocument.values()) {
       try {
         let result = executionContext.evaluateScript(script);
@@ -241,6 +240,18 @@ class PageAgent {
           executionContext.disposeObject(result.objectId);
       } catch (e) {
       }
+    }
+  }
+
+  _onDOMWindowDestroyed(window) {
+    const docShell = window.docShell;
+    const frame = this._frameTree.frameForDocShell(docShell);
+    if (!frame)
+      return;
+    const oldContext = this._frameToExecutionContext.get(frame);
+    if (oldContext) {
+      this._runtime.destroyExecutionContext(oldContext);
+      this._frameToExecutionContext.delete(frame);
     }
   }
 
@@ -372,6 +383,26 @@ class PageAgent {
       throw new Error('Failed to find frame with id = ' + executionContextId);
     const executionContext = this._ensureExecutionContext(frame);
     return executionContext.disposeObject(objectId);
+  }
+
+  addBinding({name}) {
+    if (this._bindingsToAdd.has(name))
+      throw new Error(`Binding with name ${name} already exists`);
+    this._bindingsToAdd.add(name);
+    for (const frame of this._frameTree.frames())
+      this._exposeFunction(frame, name);
+  }
+
+  _exposeFunction(frame, name) {
+    Cu.exportFunction((...args) => {
+      this._session.emitEvent('Page.bindingCalled', {
+        frameId: frame.id(),
+        name,
+        payload: args[0]
+      });
+    }, frame.domWindow(), {
+      defineAs: name
+    });
   }
 
   getContentQuads({objectId, frameId}) {
