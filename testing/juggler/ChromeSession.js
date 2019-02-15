@@ -1,5 +1,5 @@
-const {BrowserHandler} = ChromeUtils.import("chrome://juggler/content/BrowserHandler.jsm");
-const {PageHandler} = ChromeUtils.import("chrome://juggler/content/PageHandler.jsm");
+const {BrowserHandler} = ChromeUtils.import("chrome://juggler/content/BrowserHandler.js");
+const {PageHandler} = ChromeUtils.import("chrome://juggler/content/PageHandler.js");
 const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
 const {protocol, checkScheme} = ChromeUtils.import("chrome://juggler/content/Protocol.js");
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
