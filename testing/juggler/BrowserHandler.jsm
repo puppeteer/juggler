@@ -1,25 +1,22 @@
 "use strict";
 
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const {PageHandler} = ChromeUtils.import("chrome://juggler/content/PageHandler.jsm");
+const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
 const {InsecureSweepingOverride} = ChromeUtils.import("chrome://juggler/content/InsecureSweepingOverride.js");
+const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
+const helper = new Helper();
 
 class BrowserHandler {
   /**
    * @param {ChromeSession} session
-   * @param {Ci.nsIDOMChromeWindow} mainWindow
-   * @param {BrowserContextManager} contextManager
-   * @param {NetworkObserver} networkObserver
    */
-  constructor(session, mainWindow, contextManager, networkObserver) {
+  constructor(session) {
     this._session = session;
-    this._mainWindow = mainWindow;
-    this._contextManager = contextManager;
-    this._networkObserver = networkObserver;
-    this._pageHandlers = new Map();
-    this._tabsToPageHandlers = new Map();
+    this._contextManager = session.contextManager();
+    this._targetRegistry = session.targetRegistry();
     this._enabled = false;
     this._sweepingOverride = null;
+    this._eventListeners = [];
   }
 
   async setIgnoreHTTPSErrors({enabled}) {
@@ -60,75 +57,53 @@ class BrowserHandler {
     if (this._enabled)
       return;
     this._enabled = true;
-    const tabs = this._mainWindow.gBrowser.tabs;
-    for (const tab of this._mainWindow.gBrowser.tabs)
-      this._ensurePageHandler(tab);
-    this._mainWindow.gBrowser.tabContainer.addEventListener('TabOpen', event => {
-      this._ensurePageHandler(event.target);
-    });
-    this._mainWindow.gBrowser.tabContainer.addEventListener('TabClose', event => {
-      this._removePageHandlerForTab(event.target);
-    });
+    const targets = this._targetRegistry.targets();
+    for (const target of this._targetRegistry.targets())
+      this._onTargetCreated(target);
+
+    this._eventListeners = [
+      helper.on(this._targetRegistry, TargetRegistry.Events.TargetCreated, this._onTargetCreated.bind(this)),
+      helper.on(this._targetRegistry, TargetRegistry.Events.TargetChanged, this._onTargetChanged.bind(this)),
+      helper.on(this._targetRegistry, TargetRegistry.Events.TargetDestroyed, this._onTargetDestroyed.bind(this)),
+    ];
   }
 
-  pageForId(pageId) {
-    return this._pageHandlers.get(pageId) || null;
+  dispose() {
+    helper.removeListeners(this._eventListeners);
   }
 
-  _ensurePageHandler(tab) {
-    if (this._tabsToPageHandlers.has(tab))
-      return this._tabsToPageHandlers.get(tab);
-    const pageHandler = new PageHandler(this._session, tab, this._networkObserver);
-    this._pageHandlers.set(pageHandler.id(), pageHandler);
-    this._tabsToPageHandlers.set(tab, pageHandler);
-
-    const openerHandler = tab.openerTab ? this._ensurePageHandler(tab.openerTab) : null;
+  _onTargetCreated(target) {
     this._session.emitEvent('Browser.tabOpened', {
-      url: pageHandler.url(),
-      pageId: pageHandler.id(),
-      browserContextId: this._contextManager.browserContextId(tab.userContextId),
-      openerId: openerHandler ? openerHandler.id() : undefined,
+      url: target.url(),
+      pageId: target.id(),
+      browserContextId: target.browserContextId(),
+      openerId: target.openerId(),
     });
-    return pageHandler;
   }
 
-  _removePageHandlerForTab(tab) {
-    const pageHandler = this._tabsToPageHandlers.get(tab);
-    this._tabsToPageHandlers.delete(tab);
-    this._pageHandlers.delete(pageHandler.id());
-    pageHandler.dispose();
-    this._session.emitEvent('Browser.tabClosed', {pageId: pageHandler.id()});
+  _onTargetChanged(target) {
+    this._session.emitEvent('Browser.tabNavigated', {
+      pageId: target.id(),
+      url: target.url(),
+    });
+  }
+
+  _onTargetDestroyed(target) {
+    this._session.emitEvent('Browser.tabClosed', {
+      pageId: target.id(),
+    });
   }
 
   async newPage({browserContextId}) {
-    const tab = this._mainWindow.gBrowser.addTab('about:blank', {
-      userContextId: this._contextManager.userContextId(browserContextId),
-      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-    });
-    this._mainWindow.gBrowser.selectedTab = tab;
-    // Await navigation to about:blank
-    await new Promise(resolve => {
-      const wpl = {
-        onLocationChange: function(aWebProgress, aRequest, aLocation) {
-          tab.linkedBrowser.removeProgressListener(wpl);
-          resolve();
-        },
-        QueryInterface: ChromeUtils.generateQI([
-          Ci.nsIWebProgressListener,
-          Ci.nsISupportsWeakReference,
-        ]),
-      };
-      tab.linkedBrowser.addProgressListener(wpl);
-    });
-    const pageHandler = this._ensurePageHandler(tab);
-    return {pageId: pageHandler.id()};
+    const target = await this._targetRegistry.newPage({browserContextId});
+    return {pageId: target.id()};
   }
 
   async closePage({pageId, runBeforeUnload}) {
-    const pageHandler = this._pageHandlers.get(pageId);
-    await this._mainWindow.gBrowser.removeTab(pageHandler.tab(), {
-      skipPermitUnload: !runBeforeUnload,
-    });
+    const target = this._targetRegistry.target(pageId);
+    if (!target)
+      throw new Error(`No page with id = "${pageId}"`);
+    await target.close({runBeforeUnload});
   }
 }
 

@@ -1,18 +1,73 @@
 const {BrowserHandler} = ChromeUtils.import("chrome://juggler/content/BrowserHandler.jsm");
+const {PageHandler} = ChromeUtils.import("chrome://juggler/content/PageHandler.jsm");
+const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
 const {protocol, checkScheme} = ChromeUtils.import("chrome://juggler/content/Protocol.js");
+const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
+const helper = new Helper();
 
 class ChromeSession {
   /**
    * @param {Connection} connection
-   * @param {Ci.nsIDOMChromeWindow} mainWindow
    * @param {BrowserContextManager} contextManager
    * @param {NetworkObserver} networkObserver
+   * @param {TargetRegistry} targetRegistry
    */
-  constructor(connection, mainWindow, contextManager, networkObserver) {
+  constructor(connection, contextManager, networkObserver, targetRegistry) {
     this._connection = connection;
     this._connection.onmessage = this._dispatch.bind(this);
 
-    this._browserHandler = new BrowserHandler(this, mainWindow, contextManager, networkObserver);
+    this._contextManager = contextManager;
+    this._networkObserver = networkObserver;
+    this._targetRegistry = targetRegistry;
+
+    this._browserHandler = new BrowserHandler(this);
+    this._pageHandlers = new Map();
+
+    this._factories = {
+      'Page.enable': ({pageId}) => this._enableHandler(this._pageHandlers, PageHandler, pageId),
+    };
+
+    this._eventListeners = [
+      helper.on(this._targetRegistry, TargetRegistry.Events.TargetDestroyed, this._onTargetDestroyed.bind(this)),
+    ];
+  }
+
+  _onTargetDestroyed(target) {
+    const pageHandler = this._pageHandlers.get(target.id());
+    if (pageHandler) {
+      pageHandler.dispose();
+      this._pageHandlers.delete(target.id());
+    }
+  }
+
+  dispose() {
+    helper.removeListeners(this._eventListeners);
+    for (const pageHandler of this._pageHandlers.values())
+      pageHandler.dispose();
+    this._pageHandlers.clear();
+    this._browserHandler.dispose();
+  }
+
+  async _enableHandler(map, classType, targetId) {
+    if (map.has(targetId))
+      throw new Error('Already enabled!');
+    const target = this._targetRegistry.target(targetId);
+    if (!target)
+      throw new Error(`Cannot find target ${targetId}`);
+    const instance = await classType.create(this, target);
+    map.set(targetId, instance);
+  }
+
+  contextManager() {
+    return this._contextManager;
+  }
+
+  targetRegistry() {
+    return this._targetRegistry;
+  }
+
+  networkObserver() {
+    return this._networkObserver;
   }
 
   emitEvent(eventName, params) {
@@ -63,10 +118,12 @@ class ChromeSession {
     const [domainName, methodName] = method.split('.');
     if (domainName === 'Browser')
       return await this._browserHandler[methodName](params);
+    if (!params.pageId)
+      throw new Error(`Parameter "pageId" must be present for ${domainName}.* methods`);
+    if (this._factories[method])
+      return await this._factories[method](params);
     if (domainName === 'Page') {
-      if (!params.pageId)
-        throw new Error('Parameter "pageId" must be present for Page.* methods');
-      const pageHandler = this._browserHandler.pageForId(params.pageId);
+      const pageHandler = this._pageHandlers.get(params.pageId);
       if (!pageHandler)
         throw new Error('Failed to find page for id = ' + pageId);
       return await pageHandler[methodName](params);

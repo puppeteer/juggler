@@ -10,24 +10,27 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class PageHandler {
-  constructor(chromeSession, tab, networkObserver) {
-    this._pageId = helper.generateId();
+  static async create(chromeSession, target) {
+    if (target.type() !== 'page')
+      throw new Error('Cannot enable Page domain for non-page target');
+    const pageHandler = new PageHandler(chromeSession, target);
+    await pageHandler._contentSession.send('enable');
+    return pageHandler;
+  }
+
+  constructor(chromeSession, target) {
+    this._pageId = target.id();
     this._chromeSession = chromeSession;
-    this._networkObserver = networkObserver;
-    this._tab = tab;
-    this._browser = tab.linkedBrowser;
-    this._enabled = false;
-    this.QueryInterface = ChromeUtils.generateQI([
-      Ci.nsIWebProgressListener,
-      Ci.nsISupportsWeakReference,
-    ]);
-    this._browser.addProgressListener(this, Ci.nsIWebProgress.NOTIFY_LOCATION);
+    this._networkObserver = chromeSession.networkObserver();
+    this._tab = target.tab();
+    this._browser = this._tab.linkedBrowser;
     this._dialogs = new Map();
 
     this._httpActivity = new Map();
 
-    // First navigation always happens to about:blank - do not report it.
-    this._skipNextNavigation = true;
+    this._initializeDialogEvents();
+    this._contentSession = new ContentSession(this._chromeSession, this._browser, this._pageId);
+    this._networkObserver.trackBrowserNetwork(this._browser, this);
   }
 
   async setViewport({viewport}) {
@@ -97,17 +100,6 @@ class PageHandler {
     }
   }
 
-  onLocationChange(aWebProgress, aRequest, aLocation) {
-    if (this._skipNextNavigation) {
-      this._skipNextNavigation = false;
-      return;
-    }
-    this._chromeSession.emitEvent('Browser.tabNavigated', {
-      pageId: this._pageId,
-      url: aLocation.spec
-    });
-  }
-
   url() {
     return this._browser.currentURI.spec;
   }
@@ -121,9 +113,6 @@ class PageHandler {
   }
 
   async enable() {
-    if (this._enabled)
-      return;
-    this._enabled = true;
     this._initializeDialogEvents();
     this._contentSession = new ContentSession(this._chromeSession, this._browser, this._pageId);
     await this._contentSession.send('enable');
@@ -307,11 +296,8 @@ class PageHandler {
   }
 
   dispose() {
-    this._browser.removeProgressListener(this);
-    if (this._contentSession) {
-      this._contentSession.dispose();
-      this._contentSession = null;
-    }
+    this._contentSession.dispose();
+    this._contentSession = null;
   }
 }
 
