@@ -1,5 +1,6 @@
 const {BrowserHandler} = ChromeUtils.import("chrome://juggler/content/BrowserHandler.js");
 const {PageHandler} = ChromeUtils.import("chrome://juggler/content/PageHandler.js");
+const {NetworkHandler} = ChromeUtils.import("chrome://juggler/content/NetworkHandler.js");
 const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
 const {protocol, checkScheme} = ChromeUtils.import("chrome://juggler/content/Protocol.js");
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
@@ -21,55 +22,41 @@ class ChromeSession {
     this._targetRegistry = targetRegistry;
 
     this._browserHandler = new BrowserHandler(this);
-
-    this._domainConstructors = {
-      Page: PageHandler,
-    };
-    this._targetDomainHandlers = new Map();
+    this._targetToDomainHandlers = new Map();
 
     this._eventListeners = [
       helper.on(this._targetRegistry, TargetRegistry.Events.TargetDestroyed, this._onTargetDestroyed.bind(this)),
     ];
   }
 
-  async _createDomainHandler(targetId, domainName) {
-    if (!this._domainConstructors[domainName])
-      throw new Error('Cannot enable domain ' + domainName + ' for page target ' + targetId);
+  async _createDomainHandlers(targetId) {
     const target = this._targetRegistry.target(targetId);
     if (!target)
       throw new Error(`Cannot find target ${targetId}`);
     if (target.type() !== 'page')
       throw new Error('Cannot enable domain for non-page target');
 
-    let handlers = this._targetDomainHandlers.get(targetId);
-    if (!handlers) {
-      handlers = {
-        contentSession: null,
-      };
-      this._targetDomainHandlers.set(targetId, handlers);
-    }
-    if (handlers[domainName])
-      throw new Error('Domain ' + domainName + ' is already enabled');
-    if (!handlers.contentSession) {
-      handlers.contentSession = new ContentSession(this, target.tab().linkedBrowser, targetId);
-      await handlers.contentSession.send('enable');
-    }
-    handlers[domainName] = new this._domainConstructors[domainName](this, handlers.contentSession, target);
+    if (this._targetToDomainHandlers.has(targetId))
+      throw new Error('Domain handlers for target ' + targetId + ' are already enabled');
+
+    const contentSession = new ContentSession(this, target.tab().linkedBrowser, targetId);
+    await contentSession.send('enable');
+
+    const Page = new PageHandler(this, contentSession, target);
+    const Network = new NetworkHandler(this, contentSession, target);
+    this._targetToDomainHandlers.set(targetId, {
+      contentSession, Page, Network
+    });
   }
 
   _disposeTargetDomainHandlers(targetId) {
-    const handlers = this._targetDomainHandlers.get(targetId);
+    const handlers = this._targetToDomainHandlers.get(targetId);
     if (!handlers)
       return;
-    for (let [key, handler] of Object.entries(handlers)) {
-      // Destroy content session in the very end.
-      if (key === 'contentSession')
-        continue;
-      handler.dispose();
-    }
-    if (handlers.contentSession)
-      handlers.contentSession.dispose();
-    this._targetDomainHandlers.delete(targetId);
+    handlers.Page.dispose();
+    handlers.Network.dispose();
+    handlers.contentSession.dispose();
+    this._targetToDomainHandlers.delete(targetId);
   }
 
   _onTargetDestroyed(target) {
@@ -78,9 +65,9 @@ class ChromeSession {
 
   dispose() {
     helper.removeListeners(this._eventListeners);
-    for (const targetId of Object.keys(this._targetDomainHandlers))
+    for (const targetId of Object.keys(this._targetToDomainHandlers))
       this._disposeTargetDomainHandlers(targetId);
-    this._targetDomainHandlers.clear();
+    this._targetToDomainHandlers.clear();
     this._browserHandler.dispose();
   }
 
@@ -141,14 +128,14 @@ class ChromeSession {
   }
 
   async _innerDispatch(method, params) {
+    if (method === 'Page.enable') {
+      await this._createDomainHandlers(params.pageId);
+      return;
+    }
     const [domainName, methodName] = method.split('.');
     if (domainName === 'Browser')
       return await this._browserHandler[methodName](params);
-    if (methodName === 'enable') {
-      await this._createDomainHandler(params.pageId, domainName);
-      return;
-    }
-    const handlers = this._targetDomainHandlers.get(params.pageId);
+    const handlers = this._targetToDomainHandlers.get(params.pageId);
     if (!handlers || !handlers[domainName])
       throw new Error(`Domain ${domainName} is not enabled`);
     return await handlers[domainName][methodName](params);

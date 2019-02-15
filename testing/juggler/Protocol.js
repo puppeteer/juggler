@@ -87,6 +87,55 @@ types.RemoteObject = t.Either({
   value: t.Any
 });
 
+const Network = {
+  events: {
+    'requestWillBeSent': {
+      pageId: t.String,
+      // frameId may be absent for redirected requests.
+      frameId: t.Optional(t.String),
+      requestId: t.String,
+      // RequestID of redirected request.
+      redirectedFrom: t.Optional(t.String),
+      postData: t.Optional(t.String),
+      headers: t.Array({
+        name: t.String,
+        value: t.String,
+      }),
+      url: t.String,
+      method: t.String,
+      isNavigationRequest: t.Boolean,
+      cause: t.String,
+    },
+    'responseReceived': {
+      securityDetails: t.Nullable({
+        protocol: t.String,
+        subjectName: t.String,
+        issuer: t.String,
+        validFrom: t.Number,
+        validTo: t.Number,
+      }),
+      pageId: t.String,
+      requestId: t.String,
+      fromCache: t.Boolean,
+      remoteIPAddress: t.String,
+      remotePort: t.Number,
+      status: t.Number,
+      statusText: t.String,
+      headers: t.Array({
+        name: t.String,
+        value: t.String,
+      }),
+    },
+    'requestFinished': {
+      pageId: t.String,
+      requestId: t.String,
+      errorCode: t.Optional(t.String),
+    },
+  },
+  methods: {
+  },
+};
+
 const Page = {
   events: {
     'eventFired': {
@@ -155,48 +204,6 @@ const Page = {
     'dialogClosed': {
       pageId: t.String,
       dialogId: t.String,
-    },
-    'requestWillBeSent': {
-      pageId: t.String,
-      // frameId may be absent for redirected requests.
-      frameId: t.Optional(t.String),
-      requestId: t.String,
-      // RequestID of redirected request.
-      redirectedFrom: t.Optional(t.String),
-      postData: t.Optional(t.String),
-      headers: t.Array({
-        name: t.String,
-        value: t.String,
-      }),
-      url: t.String,
-      method: t.String,
-      isNavigationRequest: t.Boolean,
-      cause: t.String,
-    },
-    'responseReceived': {
-      securityDetails: t.Nullable({
-        protocol: t.String,
-        subjectName: t.String,
-        issuer: t.String,
-        validFrom: t.Number,
-        validTo: t.Number,
-      }),
-      pageId: t.String,
-      requestId: t.String,
-      fromCache: t.Boolean,
-      remoteIPAddress: t.String,
-      remotePort: t.Number,
-      status: t.Number,
-      statusText: t.String,
-      headers: t.Array({
-        name: t.String,
-        value: t.String,
-      }),
-    },
-    'requestFinished': {
-      pageId: t.String,
-      requestId: t.String,
-      errorCode: t.Optional(t.String),
     },
   },
 
@@ -435,7 +442,7 @@ const Page = {
 };
 
 this.protocol = {
-  domains: {Browser, Page},
+  domains: {Browser, Page, Network},
 };
 this.checkScheme = checkScheme;
 this.EXPORTED_SYMBOLS = ['protocol', 'checkScheme'];

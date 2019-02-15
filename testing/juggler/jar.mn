@@ -11,6 +11,7 @@ juggler.jar:
   content/Helper.js (Helper.js)
   content/PageHandler.js (PageHandler.js)
   content/NetworkObserver.js (NetworkObserver.js)
+  content/NetworkHandler.js (NetworkHandler.js)
   content/BrowserHandler.js (BrowserHandler.js)
   content/BrowserContextManager.js (BrowserContextManager.js)
   content/TargetRegistry.js (TargetRegistry.js)
