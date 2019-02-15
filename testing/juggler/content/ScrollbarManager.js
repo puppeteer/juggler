@@ -13,7 +13,7 @@ const isHeadless = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo).isHea
 const helper = new Helper();
 
 class ScrollbarManager {
-  constructor(mm, docShell) {
+  constructor(docShell) {
     this._docShell = docShell;
     this._customScrollbars = null;
     this._contentViewerScrollBars = new Map();

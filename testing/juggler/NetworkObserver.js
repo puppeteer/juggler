@@ -1,5 +1,6 @@
 "use strict";
 
+const {EventEmitter} = ChromeUtils.import('resource://gre/modules/EventEmitter.jsm');
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
@@ -20,6 +21,7 @@ const SINK_CATEGORY_NAME = "net-channel-event-sinks";
 
 class NetworkObserver {
   constructor() {
+    EventEmitter.decorate(this);
     this._browsers = new Map();
     this._activityDistributor = Cc["@mozilla.org/network/http-activity-distributor;1"].getService(Ci.nsIHttpActivityDistributor);
     this._activityDistributor.addObserver(this);
@@ -53,8 +55,7 @@ class NetworkObserver {
       return;
     const httpChannel = oldChannel.QueryInterface(Ci.nsIHttpChannel);
     const loadContext = getLoadContext(httpChannel);
-    const delegate = loadContext ? this._browsers.get(loadContext.topFrameElement) : null;
-    if (!delegate)
+    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
       return;
     this._redirectMap.set(newChannel, oldChannel);
   }
@@ -66,8 +67,7 @@ class NetworkObserver {
       return;
     const httpChannel = channel.QueryInterface(Ci.nsIHttpChannel);
     const loadContext = getLoadContext(httpChannel);
-    const delegate = loadContext ? this._browsers.get(loadContext.topFrameElement) : null;
-    if (!delegate)
+    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
       return;
     if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_REQUEST_HEADER) {
       const causeType = httpChannel.loadInfo ? httpChannel.loadInfo.externalContentPolicyType : Ci.nsIContentPolicy.TYPE_OTHER;
@@ -77,7 +77,7 @@ class NetworkObserver {
       httpChannel.visitRequestHeaders({
         visitHeader: (name, value) => headers.push({name, value}),
       });
-      delegate.onRequestWillBeSent(httpChannel, {
+      this.emit('request', httpChannel, {
         url: httpChannel.URI.spec,
         postData: readPostData(httpChannel),
         headers,
@@ -86,21 +86,20 @@ class NetworkObserver {
         cause: causeTypeToString(causeType),
       }, oldChannel);
     } else if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE) {
-      delegate.onRequestFinished(httpChannel, {});
+      this.emit('requestfinished', httpChannel, {});
     }
   }
 
   _onResponse(fromCache, httpChannel, topic) {
     const loadContext = getLoadContext(httpChannel);
-    const delegate = loadContext ? this._browsers.get(loadContext.topFrameElement) : null;
-    if (!delegate)
+    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
       return;
     httpChannel.QueryInterface(Ci.nsIHttpChannelInternal);
     const headers = [];
     httpChannel.visitResponseHeaders({
       visitHeader: (name, value) => headers.push({name, value}),
     });
-    delegate.onResponseReceived(httpChannel, {
+    this.emit('response', httpChannel, {
       securityDetails: getSecurityDetails(httpChannel),
       fromCache,
       headers,
@@ -111,8 +110,18 @@ class NetworkObserver {
     });
   }
 
-  trackBrowserNetwork(browser, delegate) {
-    this._browsers.set(browser, delegate);
+  startTrackingBrowserNetwork(browser) {
+    const value = this._browsers.get(browser) || 0;
+    this._browsers.set(browser, value + 1);
+    return () => this.stopTrackingBrowserNetwork(browser);
+  }
+
+  stopTrackingBrowserNetwork(browser) {
+    const value = this._browsers.get(browser);
+    if (value)
+      this._browsers.set(browser, value - 1);
+    else
+      this._browsers.delete(browser);
   }
 
   dispose() {

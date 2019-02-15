@@ -21,8 +21,24 @@ class PageHandler {
 
     this._httpActivity = new Map();
 
-    this._initializeDialogEvents();
-    this._networkObserver.trackBrowserNetwork(this._browser, this);
+    this._updateModalDialogs();
+
+    this._eventListeners = [
+      helper.addEventListener(this._browser, 'DOMWillOpenModalDialog', async (event) => {
+        // wait for the dialog to be actually added to DOM.
+        await Promise.resolve();
+        this._updateModalDialogs();
+      }),
+      helper.addEventListener(this._browser, 'DOMModalDialogClosed', event => this._updateModalDialogs()),
+      helper.on(this._networkObserver, 'request', this._onRequest.bind(this)),
+      helper.on(this._networkObserver, 'response', this._onResponse.bind(this)),
+      helper.on(this._networkObserver, 'requestfinished', this._onRequestFinished.bind(this)),
+      this._networkObserver.startTrackingBrowserNetwork(this._browser),
+    ];
+  }
+
+  dispose() {
+    helper.removeListeners(this._eventListeners);
   }
 
   async setViewport({viewport}) {
@@ -50,18 +66,6 @@ class PageHandler {
         height: dimensions.height
       }),
     ]);
-  }
-
-  _initializeDialogEvents() {
-    this._browser.addEventListener('DOMWillOpenModalDialog', async (event) => {
-      // wait for the dialog to be actually added to DOM.
-      await Promise.resolve();
-      this._updateModalDialogs();
-    });
-    this._browser.addEventListener('DOMModalDialogClosed', (event) => {
-      this._updateModalDialogs();
-    });
-    this._updateModalDialogs();
   }
 
   _updateModalDialogs() {
@@ -139,7 +143,7 @@ class PageHandler {
       this._httpActivity.delete(activity._id);
   }
 
-  async onRequestWillBeSent(httpChannel, eventDetails, redirectedFromChannel) {
+  async _onRequest(httpChannel, eventDetails, redirectedFromChannel) {
     const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
     const activity = this._ensureHTTPActivity(httpChannel.channelId);
     activity.request = {
@@ -152,7 +156,7 @@ class PageHandler {
     this._reportHTTPAcitivityEvents(activity);
   }
 
-  async onResponseReceived(httpChannel, eventDetails) {
+  async _onResponse(httpChannel, eventDetails) {
     const activity = this._ensureHTTPActivity(httpChannel.channelId);
     activity.response = {
       requestId: httpChannel.channelId + '',
@@ -162,7 +166,7 @@ class PageHandler {
     this._reportHTTPAcitivityEvents(activity);
   }
 
-  async onRequestFinished(httpChannel, eventDetails) {
+  async _onRequestFinished(httpChannel, eventDetails) {
     const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
     const activity = this._ensureHTTPActivity(httpChannel.channelId);
     activity.complete = {
@@ -278,9 +282,6 @@ class PageHandler {
       dialog.accept(promptText);
     else
       dialog.dismiss();
-  }
-
-  dispose() {
   }
 }
 

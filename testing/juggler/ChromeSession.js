@@ -176,6 +176,8 @@ class ContentSession {
     for (const {resolve, reject} of this._pendingMessages.values())
       reject(new Error('Page closed.'));
     this._pendingMessages.clear();
+    if (this._browser.messageManager)
+      this._browser.messageManager.sendAsyncMessage('juggler:dispose-content-session', this._sessionId);
   }
 
   /**
