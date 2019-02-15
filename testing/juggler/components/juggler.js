@@ -4,6 +4,7 @@ const {TCPListener} = ChromeUtils.import("chrome://juggler/content/server/server
 const {ChromeSession} = ChromeUtils.import("chrome://juggler/content/ChromeSession.js");
 const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
 const {NetworkObserver} = ChromeUtils.import("chrome://juggler/content/NetworkObserver.js");
+const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -40,14 +41,17 @@ CommandLineHandler.prototype = {
     const win = await waitForBrowserWindow();
     const browserContextManager = new BrowserContextManager();
     const networkObserver = new NetworkObserver();
+    const targetRegistry = new TargetRegistry(win, browserContextManager);
 
     this._server = new TCPListener();
     this._sessions = new Map();
     this._server.onconnectioncreated = connection => {
-      this._sessions.set(connection, new ChromeSession(connection, win, browserContextManager, networkObserver));
+      this._sessions.set(connection, new ChromeSession(connection, browserContextManager, networkObserver, targetRegistry));
     }
     this._server.onconnectionclosed = connection => {
+      const session = this._sessions.get(connection);
       this._sessions.delete(connection);
+      session.dispose();
     }
     const runningPort = this._server.start(this._port);
     Services.mm.loadFrameScript(FRAME_SCRIPT, true /* aAllowDelayedLoad */);
