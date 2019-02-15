@@ -21,41 +21,67 @@ class ChromeSession {
     this._targetRegistry = targetRegistry;
 
     this._browserHandler = new BrowserHandler(this);
-    this._pageHandlers = new Map();
 
-    this._factories = {
-      'Page.enable': ({pageId}) => this._enableHandler(this._pageHandlers, PageHandler, pageId),
+    this._domainConstructors = {
+      Page: PageHandler,
     };
+    this._targetDomainHandlers = new Map();
 
     this._eventListeners = [
       helper.on(this._targetRegistry, TargetRegistry.Events.TargetDestroyed, this._onTargetDestroyed.bind(this)),
     ];
   }
 
-  _onTargetDestroyed(target) {
-    const pageHandler = this._pageHandlers.get(target.id());
-    if (pageHandler) {
-      pageHandler.dispose();
-      this._pageHandlers.delete(target.id());
+  async _createDomainHandler(targetId, domainName) {
+    if (!this._domainConstructors[domainName])
+      throw new Error('Cannot enable domain ' + domainName + ' for page target ' + targetId);
+    const target = this._targetRegistry.target(targetId);
+    if (!target)
+      throw new Error(`Cannot find target ${targetId}`);
+    if (target.type() !== 'page')
+      throw new Error('Cannot enable domain for non-page target');
+
+    let handlers = this._targetDomainHandlers.get(targetId);
+    if (!handlers) {
+      handlers = {
+        contentSession: null,
+      };
+      this._targetDomainHandlers.set(targetId, handlers);
     }
+    if (handlers[domainName])
+      throw new Error('Domain ' + domainName + ' is already enabled');
+    if (!handlers.contentSession) {
+      handlers.contentSession = new ContentSession(this, target.tab().linkedBrowser, targetId);
+      await handlers.contentSession.send('enable');
+    }
+    handlers[domainName] = new this._domainConstructors[domainName](this, handlers.contentSession, target);
+  }
+
+  _disposeTargetDomainHandlers(targetId) {
+    const handlers = this._targetDomainHandlers.get(targetId);
+    if (!handlers)
+      return;
+    for (let [key, handler] of Object.entries(handlers)) {
+      // Destroy content session in the very end.
+      if (key === 'contentSession')
+        continue;
+      handler.dispose();
+    }
+    if (handlers.contentSession)
+      handlers.contentSession.dispose();
+    this._targetDomainHandlers.delete(targetId);
+  }
+
+  _onTargetDestroyed(target) {
+    this._disposeTargetDomainHandlers(target.id());
   }
 
   dispose() {
     helper.removeListeners(this._eventListeners);
-    for (const pageHandler of this._pageHandlers.values())
-      pageHandler.dispose();
-    this._pageHandlers.clear();
+    for (const targetId of Object.keys(this._targetDomainHandlers))
+      this._disposeTargetDomainHandlers(targetId);
+    this._targetDomainHandlers.clear();
     this._browserHandler.dispose();
-  }
-
-  async _enableHandler(map, classType, targetId) {
-    if (map.has(targetId))
-      throw new Error('Already enabled!');
-    const target = this._targetRegistry.target(targetId);
-    if (!target)
-      throw new Error(`Cannot find target ${targetId}`);
-    const instance = await classType.create(this, target);
-    map.set(targetId, instance);
   }
 
   contextManager() {
@@ -118,19 +144,74 @@ class ChromeSession {
     const [domainName, methodName] = method.split('.');
     if (domainName === 'Browser')
       return await this._browserHandler[methodName](params);
-    if (!params.pageId)
-      throw new Error(`Parameter "pageId" must be present for ${domainName}.* methods`);
-    if (this._factories[method])
-      return await this._factories[method](params);
-    if (domainName === 'Page') {
-      const pageHandler = this._pageHandlers.get(params.pageId);
-      if (!pageHandler)
-        throw new Error('Failed to find page for id = ' + pageId);
-      return await pageHandler[methodName](params);
+    if (methodName === 'enable') {
+      await this._createDomainHandler(params.pageId, domainName);
+      return;
     }
-    throw new Error(`INTERNAL ERROR: failed to dispatch '${method}'`);
+    const handlers = this._targetDomainHandlers.get(params.pageId);
+    if (!handlers || !handlers[domainName])
+      throw new Error(`Domain ${domainName} is not enabled`);
+    return await handlers[domainName][methodName](params);
   }
 }
+
+class ContentSession {
+  constructor(chromeSession, browser, pageId) {
+    this._chromeSession = chromeSession;
+    this._browser = browser;
+    this._pageId = pageId;
+    this._messageId = 0;
+    this._pendingMessages = new Map();
+    this._sessionId = helper.generateId();
+    this._browser.messageManager.sendAsyncMessage('juggler:create-content-session', this._sessionId);
+    this._eventListeners = [
+      helper.addMessageListener(this._browser.messageManager, this._sessionId, {
+        receiveMessage: message => this._onMessage(message)
+      }),
+    ];
+  }
+
+  dispose() {
+    helper.removeListeners(this._eventListeners);
+    for (const {resolve, reject} of this._pendingMessages.values())
+      reject(new Error('Page closed.'));
+    this._pendingMessages.clear();
+  }
+
+  /**
+   * @param {string} methodName
+   * @param {*} params
+   * @return {!Promise<*>}
+   */
+  send(methodName, params) {
+    const id = ++this._messageId;
+    const promise = new Promise((resolve, reject) => {
+      this._pendingMessages.set(id, {resolve, reject});
+    });
+    this._browser.messageManager.sendAsyncMessage(this._sessionId, {id, methodName, params});
+    return promise;
+  }
+
+  _onMessage({data}) {
+    if (data.id) {
+      let id = data.id;
+      const {resolve, reject} = this._pendingMessages.get(data.id);
+      this._pendingMessages.delete(data.id);
+      if (data.error)
+        reject(new Error(data.error));
+      else
+        resolve(data.result);
+    } else {
+      const {
+        eventName,
+        params = {}
+      } = data;
+      params.pageId = this._pageId;
+      this._chromeSession.emitEvent(eventName, params);
+    }
+  }
+}
+
 
 this.EXPORTED_SYMBOLS = ['ChromeSession'];
 this.ChromeSession = ChromeSession;

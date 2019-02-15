@@ -10,17 +10,10 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class PageHandler {
-  static async create(chromeSession, target) {
-    if (target.type() !== 'page')
-      throw new Error('Cannot enable Page domain for non-page target');
-    const pageHandler = new PageHandler(chromeSession, target);
-    await pageHandler._contentSession.send('enable');
-    return pageHandler;
-  }
-
-  constructor(chromeSession, target) {
+  constructor(chromeSession, contentSession, target) {
     this._pageId = target.id();
     this._chromeSession = chromeSession;
+    this._contentSession = contentSession;
     this._networkObserver = chromeSession.networkObserver();
     this._tab = target.tab();
     this._browser = this._tab.linkedBrowser;
@@ -29,7 +22,6 @@ class PageHandler {
     this._httpActivity = new Map();
 
     this._initializeDialogEvents();
-    this._contentSession = new ContentSession(this._chromeSession, this._browser, this._pageId);
     this._networkObserver.trackBrowserNetwork(this._browser, this);
   }
 
@@ -110,13 +102,6 @@ class PageHandler {
 
   id() {
     return this._pageId;
-  }
-
-  async enable() {
-    this._initializeDialogEvents();
-    this._contentSession = new ContentSession(this._chromeSession, this._browser, this._pageId);
-    await this._contentSession.send('enable');
-    this._networkObserver.trackBrowserNetwork(this._browser, this);
   }
 
   _ensureHTTPActivity(requestId) {
@@ -296,65 +281,6 @@ class PageHandler {
   }
 
   dispose() {
-    this._contentSession.dispose();
-    this._contentSession = null;
-  }
-}
-
-class ContentSession {
-  constructor(chromeSession, browser, pageId) {
-    this._chromeSession = chromeSession;
-    this._browser = browser;
-    this._pageId = pageId;
-    this._messageId = 0;
-    this._pendingMessages = new Map();
-    this._sessionId = helper.generateId();
-    this._browser.messageManager.sendAsyncMessage('juggler:create-content-session', this._sessionId);
-    this._eventListeners = [
-      helper.addMessageListener(this._browser.messageManager, this._sessionId, {
-        receiveMessage: message => this._onMessage(message)
-      }),
-    ];
-  }
-
-  dispose() {
-    helper.removeListeners(this._eventListeners);
-    for (const {resolve, reject} of this._pendingMessages.values())
-      reject(new Error('Page closed.'));
-    this._pendingMessages.clear();
-  }
-
-  /**
-   * @param {string} methodName
-   * @param {*} params
-   * @return {!Promise<*>}
-   */
-  send(methodName, params) {
-    const id = ++this._messageId;
-    const promise = new Promise((resolve, reject) => {
-      this._pendingMessages.set(id, {resolve, reject});
-    });
-    this._browser.messageManager.sendAsyncMessage(this._sessionId, {id, methodName, params});
-    return promise;
-  }
-
-  _onMessage({data}) {
-    if (data.id) {
-      let id = data.id;
-      const {resolve, reject} = this._pendingMessages.get(data.id);
-      this._pendingMessages.delete(data.id);
-      if (data.error)
-        reject(new Error(data.error));
-      else
-        resolve(data.result);
-    } else {
-      const {
-        eventName,
-        params = {}
-      } = data;
-      params.pageId = this._pageId;
-      this._chromeSession.emitEvent(eventName, params);
-    }
   }
 }
 
