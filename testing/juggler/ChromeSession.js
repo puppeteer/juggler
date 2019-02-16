@@ -16,6 +16,7 @@ class ChromeSession {
   constructor(connection, contextManager, networkObserver, targetRegistry) {
     this._connection = connection;
     this._connection.onmessage = this._dispatch.bind(this);
+    this._connection.onclose = this.dispose.bind(this);
 
     this._contextManager = contextManager;
     this._networkObserver = networkObserver;
@@ -91,10 +92,11 @@ class ChromeSession {
     const details = {};
     if (!checkScheme(scheme, params || {}, details))
       throw new Error(`ERROR: failed to emit event '${eventName}' ${JSON.stringify(params, null, 2)}\n${details.error}`);
-    this._connection.send({method: eventName, params});
+    this._connection.send(JSON.stringify({method: eventName, params}));
   }
 
-  async _dispatch(data) {
+  async _dispatch(event) {
+    const data = JSON.parse(event.data);
     const id = data.id;
     try {
       const method = data.method;
@@ -118,12 +120,12 @@ class ChromeSession {
       if ((descriptor.returns || result) && !checkScheme(descriptor.returns, result, details))
         throw new Error(`ERROR: failed to dispatch method '${method}' result ${JSON.stringify(result, null, 2)}\n${details.error}`);
 
-      this._connection.send({id, result});
+      this._connection.send(JSON.stringify({id, result}));
     } catch (e) {
-      this._connection.send({id, error: {
+      this._connection.send(JSON.stringify({id, error: {
         message: e.message,
         data: e.stack
-      }});
+      }}));
     }
   }
 

@@ -24,8 +24,4 @@ juggler.jar:
   content/content/ScrollbarManager.js (content/ScrollbarManager.js)
   content/content/floating-scrollbars.css (content/floating-scrollbars.css)
   content/content/hidden-scrollbars.css (content/hidden-scrollbars.css)
-  content/server/server.js (server/server.js)
-  content/server/transport.js (server/transport.js)
-  content/server/stream-utils.js (server/stream-utils.js)
-  content/server/packets.js (server/packets.js)
 

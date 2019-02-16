@@ -1,6 +1,5 @@
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const {TCPListener} = ChromeUtils.import("chrome://juggler/content/server/server.js");
 const {ChromeSession} = ChromeUtils.import("chrome://juggler/content/ChromeSession.js");
 const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
 const {NetworkObserver} = ChromeUtils.import("chrome://juggler/content/NetworkObserver.js");
@@ -14,7 +13,7 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/main.js";
 
 // Command Line Handler
 function CommandLineHandler() {
-  this._port = 0;
+  this._port = -1;
 };
 
 CommandLineHandler.prototype = {
@@ -43,19 +42,21 @@ CommandLineHandler.prototype = {
     const networkObserver = new NetworkObserver();
     const targetRegistry = new TargetRegistry(win, browserContextManager);
 
-    this._server = new TCPListener();
-    this._sessions = new Map();
-    this._server.onconnectioncreated = connection => {
-      this._sessions.set(connection, new ChromeSession(connection, browserContextManager, networkObserver, targetRegistry));
-    }
-    this._server.onconnectionclosed = connection => {
-      const session = this._sessions.get(connection);
-      this._sessions.delete(connection);
-      session.dispose();
-    }
-    const runningPort = this._server.start(this._port);
+    const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
+    const WebSocketServer = require('devtools/server/socket/websocket-server');
+    this._server = Cc["@mozilla.org/network/server-socket;1"].createInstance(Ci.nsIServerSocket);
+    this._server.initSpecialConnection(this._port, Ci.nsIServerSocket.KeepWhenOffline | Ci.nsIServerSocket.LoopbackOnly, 4);
+    this._server.asyncListen({
+      onSocketAccepted: async(socket, transport) => {
+        const input = transport.openInputStream(0, 0, 0);
+        const output = transport.openOutputStream(0, 0, 0);
+        const webSocket = await WebSocketServer.accept(transport, input, output);
+        new ChromeSession(webSocket, browserContextManager, networkObserver, targetRegistry);
+      }
+    });
+
     Services.mm.loadFrameScript(FRAME_SCRIPT, true /* aAllowDelayedLoad */);
-    dump(`Juggler listening on juggler://127.0.0.1:${runningPort}\n`);
+    dump(`Juggler listening on ws://127.0.0.1:${this._server.port}\n`);
   },
 
   QueryInterface: ChromeUtils.generateQI([ Ci.nsICommandLineHandler ]),
