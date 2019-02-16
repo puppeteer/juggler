@@ -11,7 +11,7 @@ const helper = new Helper();
 
 class PageHandler {
   constructor(chromeSession, contentSession, target) {
-    this._pageId = target.id();
+    this._targetId = target.id();
     this._chromeSession = chromeSession;
     this._contentSession = contentSession;
     this._tab = target.tab();
@@ -67,7 +67,7 @@ class PageHandler {
       if (!elements.has(dialog.element())) {
         this._dialogs.delete(dialog.id());
         this._chromeSession.emitEvent('Page.dialogClosed', {
-          pageId: this._pageId,
+          targetId: this._targetId,
           dialogId: dialog.id(),
         });
       } else {
@@ -80,7 +80,7 @@ class PageHandler {
         continue;
       this._dialogs.set(dialog.id(), dialog);
       this._chromeSession.emitEvent('Page.dialogOpened', {
-        pageId: this._pageId,
+        targetId: this._targetId,
         dialogId: dialog.id(),
         type: dialog.type(),
         message: dialog.message(),
@@ -95,10 +95,6 @@ class PageHandler {
 
   tab() {
     return this._tab;
-  }
-
-  id() {
-    return this._pageId;
   }
 
   async setUserAgent(options) {
@@ -162,7 +158,7 @@ class PageHandler {
   }
 
   /**
-   * @param {{pageId: String, frameId: String, objectId: String}} options
+   * @param {{targetId: String, frameId: String, objectId: String}} options
    * @return {!Promise<*>}
    */
   async contentFrame(options) {

@@ -61,7 +61,6 @@ class BrowserHandler {
     if (this._enabled)
       return;
     this._enabled = true;
-    const targets = this._targetRegistry.targets();
     for (const target of this._targetRegistry.targets())
       this._onTargetCreated(target);
 
@@ -77,36 +76,36 @@ class BrowserHandler {
   }
 
   _onTargetCreated(target) {
-    this._session.emitEvent('Browser.tabOpened', {
+    this._session.emitEvent('Browser.targetCreated', {
       url: target.url(),
-      pageId: target.id(),
+      targetId: target.id(),
       browserContextId: target.browserContextId(),
       openerId: target.openerId(),
     });
   }
 
   _onTargetChanged(target) {
-    this._session.emitEvent('Browser.tabNavigated', {
-      pageId: target.id(),
+    this._session.emitEvent('Browser.targetChanged', {
+      targetId: target.id(),
       url: target.url(),
     });
   }
 
   _onTargetDestroyed(target) {
-    this._session.emitEvent('Browser.tabClosed', {
-      pageId: target.id(),
+    this._session.emitEvent('Browser.targetDestroyed', {
+      targetId: target.id(),
     });
   }
 
   async newPage({browserContextId}) {
     const target = await this._targetRegistry.newPage({browserContextId});
-    return {pageId: target.id()};
+    return {targetId: target.id()};
   }
 
-  async closePage({pageId, runBeforeUnload}) {
-    const target = this._targetRegistry.target(pageId);
+  async closePage({targetId, runBeforeUnload}) {
+    const target = this._targetRegistry.target(targetId);
     if (!target)
-      throw new Error(`No page with id = "${pageId}"`);
+      throw new Error(`No page with id = "${targetId}"`);
     await target.close({runBeforeUnload});
   }
 }

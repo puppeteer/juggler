@@ -131,13 +131,13 @@ class ChromeSession {
 
   async _innerDispatch(method, params) {
     if (method === 'Page.enable') {
-      await this._createDomainHandlers(params.pageId);
+      await this._createDomainHandlers(params.targetId);
       return;
     }
     const [domainName, methodName] = method.split('.');
     if (domainName === 'Browser')
       return await this._browserHandler[methodName](params);
-    const handlers = this._targetToDomainHandlers.get(params.pageId);
+    const handlers = this._targetToDomainHandlers.get(params.targetId);
     if (!handlers || !handlers[domainName])
       throw new Error(`Domain ${domainName} is not enabled`);
     return await handlers[domainName][methodName](params);
@@ -145,10 +145,10 @@ class ChromeSession {
 }
 
 class ContentSession {
-  constructor(chromeSession, browser, pageId) {
+  constructor(chromeSession, browser, targetId) {
     this._chromeSession = chromeSession;
     this._browser = browser;
-    this._pageId = pageId;
+    this._targetId = targetId;
     this._messageId = 0;
     this._pendingMessages = new Map();
     this._sessionId = helper.generateId();
@@ -197,7 +197,7 @@ class ContentSession {
         eventName,
         params = {}
       } = data;
-      params.pageId = this._pageId;
+      params.targetId = this._targetId;
       this._chromeSession.emitEvent(eventName, params);
     }
   }

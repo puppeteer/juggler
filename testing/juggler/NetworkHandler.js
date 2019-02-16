@@ -11,7 +11,7 @@ const helper = new Helper();
 
 class NetworkHandler {
   constructor(chromeSession, contentSession, target) {
-    this._pageId = target.id();
+    this._targetId = target.id();
     this._chromeSession = chromeSession;
     this._contentSession = contentSession;
     this._networkObserver = chromeSession.networkObserver();
@@ -69,7 +69,7 @@ class NetworkHandler {
     activity.request = {
       requestId: httpChannel.channelId + '',
       redirectedFrom: redirectedFromChannel ? redirectedFromChannel.channelId + '' : undefined,
-      pageId: this._pageId,
+      targetId: this._targetId,
       frameId: details ? details.frameId : undefined,
       ...eventDetails,
     };
@@ -80,7 +80,7 @@ class NetworkHandler {
     const activity = this._ensureHTTPActivity(httpChannel.channelId);
     activity.response = {
       requestId: httpChannel.channelId + '',
-      pageId: this._pageId,
+      targetId: this._targetId,
       ...eventDetails,
     };
     this._reportHTTPAcitivityEvents(activity);
@@ -92,7 +92,7 @@ class NetworkHandler {
     activity.complete = {
       ...eventDetails,
       requestId: httpChannel.channelId + '',
-      pageId: this._pageId,
+      targetId: this._targetId,
       errorCode: details ? details.errorCode : undefined,
     };
     this._reportHTTPAcitivityEvents(activity);
