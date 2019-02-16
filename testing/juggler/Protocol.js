@@ -22,6 +22,7 @@ const Browser = {
   methods: {
     // Start emitting tagOpened/tabClosed events
     'enable': {},
+    'close': {},
     'getInfo': {
       returns: {
         userAgent: t.String,

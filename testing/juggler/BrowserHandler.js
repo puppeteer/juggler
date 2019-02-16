@@ -19,6 +19,10 @@ class BrowserHandler {
     this._eventListeners = [];
   }
 
+  async close() {
+    Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+  }
+
   async setIgnoreHTTPSErrors({enabled}) {
     if (!enabled && this._sweepingOverride) {
       this._sweepingOverride.unregister();
