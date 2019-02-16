@@ -15,6 +15,9 @@ class TargetRegistry {
     this._mainWindow = mainWindow;
     this._contextManager = contextManager;
     this._targets = new Map();
+
+    const browserTarget = new BrowserTarget();
+    this._targets.set(browserTarget.id(), browserTarget);
     this._tabToTarget = new Map();
 
     for (const tab of this._mainWindow.gBrowser.tabs)
@@ -138,6 +141,20 @@ class PageTarget {
 
   dispose() {
     helper.removeListeners(this._eventListeners);
+  }
+}
+
+class BrowserTarget {
+  id() {
+    return 'target-browser';
+  }
+
+  info() {
+    return {
+      targetId: this.id(),
+      type: 'browser',
+      url: '',
+    }
   }
 }
 
