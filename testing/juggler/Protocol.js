@@ -3,20 +3,20 @@ const {t, checkScheme} = ChromeUtils.import('chrome://juggler/content/PrimitiveT
 // Protocol-specific types.
 const types = {};
 
+types.TargetInfo = {
+  type: t.Enum(['page', 'browser']),
+  targetId: t.String,
+  browserContextId: t.Optional(t.String),
+  url: t.String,
+  // PageId of parent tab, if any.
+  openerId: t.Optional(t.String),
+};
+
 const Browser = {
   events: {
-    'targetCreated': {
-      targetId: t.String,
-      browserContextId: t.Optional(t.String),
-      url: t.String,
-      // PageId of parent tab.
-      openerId: t.Optional(t.String),
-    },
-    'targetDestroyed': { targetId: t.String, },
-    'targetChanged': {
-      targetId: t.String,
-      url: t.String
-    },
+    'targetCreated': types.TargetInfo,
+    'targetDestroyed': types.TargetInfo,
+    'targetInfoChanged': types.TargetInfo,
   },
 
   methods: {

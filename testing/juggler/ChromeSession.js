@@ -31,20 +31,14 @@ class ChromeSession {
   }
 
   async _createDomainHandlers(targetId) {
-    const target = this._targetRegistry.target(targetId);
-    if (!target)
-      throw new Error(`Cannot find target ${targetId}`);
-    if (target.type() !== 'page')
-      throw new Error('Cannot enable domain for non-page target');
-
     if (this._targetToDomainHandlers.has(targetId))
       throw new Error('Domain handlers for target ' + targetId + ' are already enabled');
-
-    const contentSession = new ContentSession(this, target.tab().linkedBrowser, targetId);
+    const tab = this._targetRegistry.tabForTarget(targetId);
+    const contentSession = new ContentSession(this, tab.linkedBrowser, targetId);
     await contentSession.send('enable');
 
-    const Page = new PageHandler(this, contentSession, target);
-    const Network = new NetworkHandler(this, contentSession, target);
+    const Page = new PageHandler(this, contentSession, targetId, tab);
+    const Network = new NetworkHandler(this, contentSession, targetId, tab);
     this._targetToDomainHandlers.set(targetId, {
       contentSession, Page, Network
     });
@@ -60,8 +54,8 @@ class ChromeSession {
     this._targetToDomainHandlers.delete(targetId);
   }
 
-  _onTargetDestroyed(target) {
-    this._disposeTargetDomainHandlers(target.id());
+  _onTargetDestroyed({targetId}) {
+    this._disposeTargetDomainHandlers(targetId);
   }
 
   dispose() {

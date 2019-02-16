@@ -10,8 +10,8 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class NetworkHandler {
-  constructor(chromeSession, contentSession, target) {
-    this._targetId = target.id();
+  constructor(chromeSession, contentSession, targetId, tab) {
+    this._targetId = targetId;
     this._chromeSession = chromeSession;
     this._contentSession = contentSession;
     this._networkObserver = chromeSession.networkObserver();
@@ -20,7 +20,7 @@ class NetworkHandler {
       helper.on(this._networkObserver, 'request', this._onRequest.bind(this)),
       helper.on(this._networkObserver, 'response', this._onResponse.bind(this)),
       helper.on(this._networkObserver, 'requestfinished', this._onRequestFinished.bind(this)),
-      this._networkObserver.startTrackingBrowserNetwork(target.tab().linkedBrowser),
+      this._networkObserver.startTrackingBrowserNetwork(tab.linkedBrowser),
     ];
   }
 

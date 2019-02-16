@@ -29,8 +29,8 @@ class TargetRegistry {
         return;
       this._targets.delete(target.id());
       this._tabToTarget.delete(tab);
-      target._onClosed();
-      this.emit(TargetRegistry.Events.TargetDestroyed, target);
+      target.dispose();
+      this.emit(TargetRegistry.Events.TargetDestroyed, target.info());
     });
   }
 
@@ -55,15 +55,27 @@ class TargetRegistry {
       tab.linkedBrowser.addProgressListener(wpl);
     });
     const target = this._ensureTargetForTab(tab);
-    return target;
+    return target.id();
   }
 
-  target(targetId) {
-    return this._targets.get(targetId) || null;
+  async closePage(targetId, runBeforeUnload = false) {
+    const tab = this.tabForTarget(targetId);
+    await this._mainWindow.gBrowser.removeTab(tab, {
+      skipPermitUnload: !runBeforeUnload,
+    });
   }
 
-  targets() {
-    return Array.from(this._targets.values());
+  targetInfos() {
+    return Array.from(this._targets.values()).map(target => target.info());
+  }
+
+  tabForTarget(targetId) {
+    const target = this._targets.get(targetId);
+    if (!target)
+      throw new Error(`Target "${targetId}" does not exist!`);
+    if (!(target instanceof PageTarget))
+      throw new Error(`Target "${targetId}" is not a page!`);
+    return target._tab;
   }
 
   _ensureTargetForTab(tab) {
@@ -74,7 +86,7 @@ class TargetRegistry {
 
     this._targets.set(target.id(), target);
     this._tabToTarget.set(tab, target);
-    this.emit(TargetRegistry.Events.TargetCreated, target);
+    this.emit(TargetRegistry.Events.TargetCreated, target.info());
   }
 }
 
@@ -88,7 +100,6 @@ class PageTarget {
     this._browserContextId = browserContextId;
     this._openerId = opener ? opener.id() : undefined;
     this._url = tab.linkedBrowser.currentURI.spec;
-    this._closed = false;
 
     // First navigation always happens to about:blank - do not report it.
     this._skipNextNavigation = true;
@@ -102,28 +113,18 @@ class PageTarget {
     ];
   }
 
-  url() {
-    return this._url;
-  }
-
-  type() {
-    return 'page';
-  }
-
-  tab() {
-    return this._tab;
-  }
-
   id() {
     return this._targetId;
   }
 
-  openerId() {
-    return this._openerId;
-  }
-
-  browserContextId() {
-    return this._browserContextId;
+  info() {
+    return {
+      targetId: this.id(),
+      type: 'page',
+      url: this._url,
+      browserContextId: this._browserContextId,
+      openerId: this._openerId,
+    };
   }
 
   _onNavigated(aLocation) {
@@ -132,20 +133,10 @@ class PageTarget {
       return;
     }
     this._url = aLocation.spec;
-    this._registry.emit(TargetRegistry.Events.TargetChanged, this);
+    this._registry.emit(TargetRegistry.Events.TargetChanged, this.info());
   }
 
-  async close({runBeforeUnload}) {
-    if (this._closed)
-      return;
-    this._closed = true;
-    await this._registry._mainWindow.gBrowser.removeTab(this._tab, {
-      skipPermitUnload: !runBeforeUnload,
-    });
-  }
-
-  _onClosed() {
-    this._closed = true;
+  dispose() {
     helper.removeListeners(this._eventListeners);
   }
 }

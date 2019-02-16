@@ -10,11 +10,11 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class PageHandler {
-  constructor(chromeSession, contentSession, target) {
-    this._targetId = target.id();
+  constructor(chromeSession, contentSession, targetId, tab) {
     this._chromeSession = chromeSession;
     this._contentSession = contentSession;
-    this._tab = target.tab();
+    this._targetId = targetId;
+    this._tab = tab;
     this._browser = this._tab.linkedBrowser;
     this._dialogs = new Map();
 
