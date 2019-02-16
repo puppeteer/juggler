@@ -55,7 +55,7 @@ CommandLineHandler.prototype = {
     }
     const runningPort = this._server.start(this._port);
     Services.mm.loadFrameScript(FRAME_SCRIPT, true /* aAllowDelayedLoad */);
-    dump(`Juggler listening on tcp://127.0.0.1:${runningPort}\n`);
+    dump(`Juggler listening on juggler://127.0.0.1:${runningPort}\n`);
   },
 
   QueryInterface: ChromeUtils.generateQI([ Ci.nsICommandLineHandler ]),
