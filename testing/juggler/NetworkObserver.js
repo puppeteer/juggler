@@ -8,6 +8,7 @@ const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
+const Cr = Components.results;
 const Cm = Components.manager;
 const helper = new Helper();
 
@@ -29,7 +30,7 @@ class NetworkObserver {
       return;
     NetworkObserver._instance = new NetworkObserver();
   }
-  
+
   constructor() {
     EventEmitter.decorate(this);
     this._browsers = new Map();
@@ -53,11 +54,52 @@ class NetworkObserver {
     registrar.registerFactory(SINK_CLASS_ID, SINK_CLASS_DESCRIPTION, SINK_CONTRACT_ID, this._channelSinkFactory);
     Services.catMan.addCategoryEntry(SINK_CATEGORY_NAME, SINK_CONTRACT_ID, SINK_CONTRACT_ID, false, true);
 
+    // Request interception state.
+    this._browserSuspendedChannels = new Map();
+
     this._eventListeners = [
+      helper.addObserver(this._onRequest.bind(this), 'http-on-modify-request'),
       helper.addObserver(this._onResponse.bind(this, false /* fromCache */), 'http-on-examine-response'),
       helper.addObserver(this._onResponse.bind(this, true /* fromCache */), 'http-on-examine-cached-response'),
       helper.addObserver(this._onResponse.bind(this, true /* fromCache */), 'http-on-examine-merged-response'),
     ];
+  }
+
+  enableRequestInterception(browser) {
+    if (!this._browserSuspendedChannels.has(browser))
+      this._browserSuspendedChannels.set(browser, new Map());
+  }
+
+  disableRequestInterception(browser) {
+    const suspendedChannels = this._browserSuspendedChannels.get(browser);
+    if (!suspendedChannels)
+      return;
+    this._browserSuspendedChannels.delete(browser);
+    for (const channel of suspendedChannels.values())
+      channel.resume();
+  }
+
+  resumeSuspendedRequest(browser, requestId) {
+    const suspendedChannels = this._browserSuspendedChannels.get(browser);
+    if (!suspendedChannels)
+      throw new Error(`Request interception is not enabled`);
+    const httpChannel = suspendedChannels.get(requestId);
+    if (!httpChannel)
+      throw new Error(`Cannot find request "${requestId}"`);
+    suspendedChannels.delete(requestId);
+    httpChannel.resume();
+  }
+
+  abortSuspendedRequest(browser, requestId) {
+    const suspendedChannels = this._browserSuspendedChannels.get(browser);
+    if (!suspendedChannels)
+      throw new Error(`Request interception is not enabled`);
+    const httpChannel = suspendedChannels.get(requestId);
+    if (!httpChannel)
+      throw new Error(`Cannot find request "${requestId}"`);
+    suspendedChannels.delete(requestId);
+    httpChannel.cancel(Cr.NS_BINDING_ABORTED);
+    httpChannel.resume();
   }
 
   _onRedirect(oldChannel, newChannel) {
@@ -79,29 +121,43 @@ class NetworkObserver {
     const loadContext = getLoadContext(httpChannel);
     if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
       return;
-    if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_REQUEST_HEADER) {
-      const causeType = httpChannel.loadInfo ? httpChannel.loadInfo.externalContentPolicyType : Ci.nsIContentPolicy.TYPE_OTHER;
-      const oldChannel = this._redirectMap.get(httpChannel);
-      this._redirectMap.delete(httpChannel);
-      const headers = [];
-      httpChannel.visitRequestHeaders({
-        visitHeader: (name, value) => headers.push({name, value}),
-      });
-      this.emit('request', httpChannel, {
-        url: httpChannel.URI.spec,
-        requestId: httpChannel.channelId + '',
-        redirectedFrom: oldChannel ? oldChannel.channelId + '' : undefined,
-        postData: readPostData(httpChannel),
-        headers,
-        method: httpChannel.requestMethod,
-        isNavigationRequest: httpChannel.isMainDocumentChannel,
-        cause: causeTypeToString(causeType),
-      });
-    } else if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE) {
+    if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE) {
       this.emit('requestfinished', httpChannel, {
-        requestId: httpChannel.channelId + '',
+        requestId: requestId(httpChannel),
       });
     }
+  }
+
+  _onRequest(channel, topic) {
+    if (!(channel instanceof Ci.nsIHttpChannel))
+      return;
+    const httpChannel = channel.QueryInterface(Ci.nsIHttpChannel);
+    const loadContext = getLoadContext(httpChannel);
+    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
+      return;
+    const causeType = httpChannel.loadInfo ? httpChannel.loadInfo.externalContentPolicyType : Ci.nsIContentPolicy.TYPE_OTHER;
+    const headers = [];
+    httpChannel.visitRequestHeaders({
+      visitHeader: (name, value) => headers.push({name, value}),
+    });
+    const suspendedChannels = this._browserSuspendedChannels.get(loadContext.topFrameElement);
+    if (suspendedChannels) {
+      httpChannel.suspend();
+      suspendedChannels.set(requestId(httpChannel), httpChannel);
+    }
+    const oldChannel = this._redirectMap.get(httpChannel);
+    this._redirectMap.delete(httpChannel);
+    this.emit('request', httpChannel, {
+      url: httpChannel.URI.spec,
+      suspended: suspendedChannels ? true : undefined,
+      requestId: requestId(httpChannel),
+      redirectedFrom: oldChannel ? requestId(oldChannel) : undefined,
+      postData: readPostData(httpChannel),
+      headers,
+      method: httpChannel.requestMethod,
+      isNavigationRequest: httpChannel.isMainDocumentChannel,
+      cause: causeTypeToString(causeType),
+    });
   }
 
   _onResponse(fromCache, httpChannel, topic) {
@@ -113,13 +169,22 @@ class NetworkObserver {
     httpChannel.visitResponseHeaders({
       visitHeader: (name, value) => headers.push({name, value}),
     });
+
+    let remoteIPAddress = undefined;
+    let remotePort = undefined;
+    try {
+      remoteIPAddress = httpChannel.remoteAddress;
+      remotePort = httpChannel.remotePort;
+    } catch (e) {
+      // remoteAddress is not defined for cached requests.
+    }
     this.emit('response', httpChannel, {
-      requestId: httpChannel.channelId + '',
+      requestId: requestId(httpChannel),
       securityDetails: getSecurityDetails(httpChannel),
       fromCache,
       headers,
-      remoteIPAddress: httpChannel.remoteAddress,
-      remotePort: httpChannel.remotePort,
+      remoteIPAddress,
+      remotePort,
       status: httpChannel.responseStatus,
       statusText: httpChannel.responseStatusText,
     });
@@ -217,6 +282,10 @@ function getLoadContext(httpChannel) {
       loadContext = httpChannel.loadGroup.notificationCallbacks.getInterface(Ci.nsILoadContext);
   } catch (e) { }
   return loadContext;
+}
+
+function requestId(httpChannel) {
+  return httpChannel.channelId + '';
 }
 
 function causeTypeToString(causeType) {

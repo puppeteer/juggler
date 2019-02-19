@@ -123,6 +123,7 @@ const Network = {
         name: t.String,
         value: t.String,
       }),
+      suspended: t.Optional(t.Boolean),
       url: t.String,
       method: t.String,
       isNavigationRequest: t.Boolean,
@@ -138,8 +139,8 @@ const Network = {
       }),
       requestId: t.String,
       fromCache: t.Boolean,
-      remoteIPAddress: t.String,
-      remotePort: t.Number,
+      remoteIPAddress: t.Optional(t.String),
+      remotePort: t.Optional(t.Number),
       status: t.Number,
       statusText: t.String,
       headers: t.Array({
@@ -153,7 +154,22 @@ const Network = {
     },
   },
   methods: {
-    enable: {},
+    'enable': {},
+    'setRequestInterception': {
+      params: {
+        enabled: t.Boolean,
+      },
+    },
+    'abortSuspendedRequest': {
+      params: {
+        requestId: t.String,
+      },
+    },
+    'resumeSuspendedRequest': {
+      params: {
+        requestId: t.String,
+      },
+    },
   },
 };
 

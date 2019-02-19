@@ -18,6 +18,8 @@ class NetworkHandler {
     this._networkObserver = NetworkObserver.instance();
     this._httpActivity = new Map();
     this._enabled = false;
+    this._browser = TargetRegistry.instance().tabForTarget(this._chromeSession.targetId()).linkedBrowser;
+    this._requestInterception = false;
     this._eventListeners = [];
   }
 
@@ -25,13 +27,27 @@ class NetworkHandler {
     if (this._enabled)
       return;
     this._enabled = true;
-    const browser = TargetRegistry.instance().tabForTarget(this._chromeSession.targetId()).linkedBrowser;
     this._eventListeners = [
       helper.on(this._networkObserver, 'request', this._onRequest.bind(this)),
       helper.on(this._networkObserver, 'response', this._onResponse.bind(this)),
       helper.on(this._networkObserver, 'requestfinished', this._onRequestFinished.bind(this)),
-      this._networkObserver.startTrackingBrowserNetwork(browser),
+      this._networkObserver.startTrackingBrowserNetwork(this._browser),
     ];
+  }
+
+  async setRequestInterception({enabled}) {
+    if (enabled)
+      this._networkObserver.enableRequestInterception(this._browser);
+    else
+      this._networkObserver.disableRequestInterception(this._browser);
+  }
+
+  async resumeSuspendedRequest({requestId}) {
+    this._networkObserver.resumeSuspendedRequest(this._browser, requestId);
+  }
+
+  async abortSuspendedRequest({requestId}) {
+    this._networkObserver.abortSuspendedRequest(this._browser, requestId);
   }
 
   dispose() {
