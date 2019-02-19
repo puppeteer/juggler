@@ -73,7 +73,7 @@ class NetworkHandler {
       this._httpActivity.delete(activity._id);
   }
 
-  async _onRequest(httpChannel, eventDetails, redirectedFromChannel) {
+  async _onRequest(httpChannel, eventDetails) {
     let details = null;
     try {
       details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
@@ -81,10 +81,8 @@ class NetworkHandler {
       if (this._contentSession.isDisposed())
         return;
     }
-    const activity = this._ensureHTTPActivity(httpChannel.channelId);
+    const activity = this._ensureHTTPActivity(eventDetails.requestId);
     activity.request = {
-      requestId: httpChannel.channelId + '',
-      redirectedFrom: redirectedFromChannel ? redirectedFromChannel.channelId + '' : undefined,
       frameId: details ? details.frameId : undefined,
       ...eventDetails,
     };
@@ -92,11 +90,8 @@ class NetworkHandler {
   }
 
   async _onResponse(httpChannel, eventDetails) {
-    const activity = this._ensureHTTPActivity(httpChannel.channelId);
-    activity.response = {
-      requestId: httpChannel.channelId + '',
-      ...eventDetails,
-    };
+    const activity = this._ensureHTTPActivity(eventDetails.requestId);
+    activity.response = eventDetails;
     this._reportHTTPAcitivityEvents(activity);
   }
 
@@ -108,10 +103,9 @@ class NetworkHandler {
       if (this._contentSession.isDisposed())
         return;
     }
-    const activity = this._ensureHTTPActivity(httpChannel.channelId);
+    const activity = this._ensureHTTPActivity(eventDetails.requestId);
     activity.complete = {
       ...eventDetails,
-      requestId: httpChannel.channelId + '',
       errorCode: details ? details.errorCode : undefined,
     };
     this._reportHTTPAcitivityEvents(activity);

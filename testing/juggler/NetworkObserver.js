@@ -89,14 +89,18 @@ class NetworkObserver {
       });
       this.emit('request', httpChannel, {
         url: httpChannel.URI.spec,
+        requestId: httpChannel.channelId + '',
+        redirectedFrom: oldChannel ? oldChannel.channelId + '' : undefined,
         postData: readPostData(httpChannel),
         headers,
         method: httpChannel.requestMethod,
         isNavigationRequest: httpChannel.isMainDocumentChannel,
         cause: causeTypeToString(causeType),
-      }, oldChannel);
+      });
     } else if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE) {
-      this.emit('requestfinished', httpChannel, {});
+      this.emit('requestfinished', httpChannel, {
+        requestId: httpChannel.channelId + '',
+      });
     }
   }
 
@@ -110,6 +114,7 @@ class NetworkObserver {
       visitHeader: (name, value) => headers.push({name, value}),
     });
     this.emit('response', httpChannel, {
+      requestId: httpChannel.channelId + '',
       securityDetails: getSecurityDetails(httpChannel),
       fromCache,
       headers,
