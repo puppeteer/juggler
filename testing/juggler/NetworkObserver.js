@@ -56,6 +56,7 @@ class NetworkObserver {
 
     // Request interception state.
     this._browserSuspendedChannels = new Map();
+    this._extraHTTPHeaders = new Map();
 
     this._eventListeners = [
       helper.addObserver(this._onRequest.bind(this), 'http-on-modify-request'),
@@ -63,6 +64,13 @@ class NetworkObserver {
       helper.addObserver(this._onResponse.bind(this, true /* fromCache */), 'http-on-examine-cached-response'),
       helper.addObserver(this._onResponse.bind(this, true /* fromCache */), 'http-on-examine-merged-response'),
     ];
+  }
+
+  setExtraHTTPHeaders(browser, headers) {
+    if (!headers)
+      this._extraHTTPHeaders.delete(browser);
+    else
+      this._extraHTTPHeaders.set(browser, headers);
   }
 
   enableRequestInterception(browser) {
@@ -139,6 +147,11 @@ class NetworkObserver {
     const loadContext = getLoadContext(httpChannel);
     if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
       return;
+    const extraHeaders = this._extraHTTPHeaders.get(loadContext.topFrameElement);
+    if (extraHeaders) {
+      for (const header of extraHeaders)
+        httpChannel.setRequestHeader(header.name, header.value, false /* merge */);
+    }
     const causeType = httpChannel.loadInfo ? httpChannel.loadInfo.externalContentPolicyType : Ci.nsIContentPolicy.TYPE_OTHER;
     const headers = [];
     httpChannel.visitRequestHeaders({

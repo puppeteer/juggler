@@ -36,6 +36,10 @@ class NetworkHandler {
     ];
   }
 
+  async setExtraHTTPHeaders({headers}) {
+    this._networkObserver.setExtraHTTPHeaders(this._browser, headers);
+  }
+
   async setRequestInterception({enabled}) {
     if (enabled)
       this._networkObserver.enableRequestInterception(this._browser);

@@ -162,6 +162,14 @@ const Network = {
         enabled: t.Boolean,
       },
     },
+    'setExtraHTTPHeaders': {
+      params: {
+        headers: t.Array({
+          name: t.String,
+          value: t.String,
+        }),
+      },
+    },
     'abortSuspendedRequest': {
       params: {
         requestId: t.String,
