@@ -1,4 +1,4 @@
-const {t, checkScheme} = ChromeUtils.import('chrome://juggler/content/PrimitiveTypes.js');
+const {t, checkScheme} = ChromeUtils.import('chrome://juggler/content/protocol/PrimitiveTypes.js');
 
 // Protocol-specific types.
 const types = {};

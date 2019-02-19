@@ -4,17 +4,17 @@
 
 juggler.jar:
 % content juggler %content/
-  content/ChromeSession.js (ChromeSession.js)
   content/InsecureSweepingOverride.js (InsecureSweepingOverride.js)
-  content/PrimitiveTypes.js (PrimitiveTypes.js)
-  content/Protocol.js (Protocol.js)
   content/Helper.js (Helper.js)
-  content/PageHandler.js (PageHandler.js)
   content/NetworkObserver.js (NetworkObserver.js)
-  content/NetworkHandler.js (NetworkHandler.js)
-  content/BrowserHandler.js (BrowserHandler.js)
   content/BrowserContextManager.js (BrowserContextManager.js)
   content/TargetRegistry.js (TargetRegistry.js)
+  content/protocol/PrimitiveTypes.js (protocol/PrimitiveTypes.js)
+  content/protocol/Protocol.js (protocol/Protocol.js)
+  content/protocol/Dispatcher.js (protocol/Dispatcher.js)
+  content/protocol/PageHandler.js (protocol/PageHandler.js)
+  content/protocol/NetworkHandler.js (protocol/NetworkHandler.js)
+  content/protocol/BrowserHandler.js (protocol/BrowserHandler.js)
   content/content/main.js (content/main.js)
   content/content/ContentSession.js (content/ContentSession.js)
   content/content/FrameTree.js (content/FrameTree.js)

@@ -1,6 +1,6 @@
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const {Dispatcher} = ChromeUtils.import("chrome://juggler/content/ChromeSession.js");
+const {Dispatcher} = ChromeUtils.import("chrome://juggler/content/protocol/Dispatcher.js");
 const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
 const {NetworkObserver} = ChromeUtils.import("chrome://juggler/content/NetworkObserver.js");
 const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");

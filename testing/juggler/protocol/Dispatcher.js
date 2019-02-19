@@ -1,15 +1,12 @@
-const {BrowserHandler} = ChromeUtils.import("chrome://juggler/content/BrowserHandler.js");
-const {PageHandler} = ChromeUtils.import("chrome://juggler/content/PageHandler.js");
-const {NetworkHandler} = ChromeUtils.import("chrome://juggler/content/NetworkHandler.js");
 const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
-const {protocol, checkScheme} = ChromeUtils.import("chrome://juggler/content/Protocol.js");
+const {protocol, checkScheme} = ChromeUtils.import("chrome://juggler/content/protocol/Protocol.js");
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const helper = new Helper();
 
 const PROTOCOL_HANDLERS = {
-  Page: PageHandler,
-  Network: NetworkHandler,
-  Browser: BrowserHandler,
+  Page: ChromeUtils.import("chrome://juggler/content/protocol/PageHandler.js").PageHandler,
+  Network: ChromeUtils.import("chrome://juggler/content/protocol/NetworkHandler.js").NetworkHandler,
+  Browser: ChromeUtils.import("chrome://juggler/content/protocol/BrowserHandler.js").BrowserHandler,
 };
 
 class Dispatcher {
