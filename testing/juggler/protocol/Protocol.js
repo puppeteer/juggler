@@ -15,8 +15,7 @@ types.TargetInfo = {
 const Browser = {
   targets: ['browser'],
 
-  events: {
-  },
+  events: {},
 
   methods: {
     'close': {},
@@ -150,7 +149,10 @@ const Network = {
     },
     'requestFinished': {
       requestId: t.String,
-      errorCode: t.Optional(t.String),
+    },
+    'requestFailed': {
+      requestId: t.String,
+      errorCode: t.String,
     },
   },
   methods: {

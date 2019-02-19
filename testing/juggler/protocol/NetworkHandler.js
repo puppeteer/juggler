@@ -31,6 +31,7 @@ class NetworkHandler {
       helper.on(this._networkObserver, 'request', this._onRequest.bind(this)),
       helper.on(this._networkObserver, 'response', this._onResponse.bind(this)),
       helper.on(this._networkObserver, 'requestfinished', this._onRequestFinished.bind(this)),
+      helper.on(this._networkObserver, 'requestfailed', this._onRequestFailed.bind(this)),
       this._networkObserver.startTrackingBrowserNetwork(this._browser),
     ];
   }
@@ -63,6 +64,7 @@ class NetworkHandler {
         request: null,
         response: null,
         complete: null,
+        failed: null,
       };
       this._httpActivity.set(requestId, activity);
     }
@@ -83,9 +85,13 @@ class NetworkHandler {
       this._chromeSession.emitEvent('Network.requestFinished', activity.complete);
       activity._lastSentEvent = 'requestFinished';
     }
+    if (activity._lastSentEvent && activity.failed) {
+      this._chromeSession.emitEvent('Network.requestFailed', activity.failed);
+      activity._lastSentEvent = 'requestFailed';
+    }
 
     // Clean up if request lifecycle is over.
-    if (activity._lastSentEvent === 'requestFinished')
+    if (activity._lastSentEvent === 'requestFinished' || activity._lastSentEvent === 'requestFailed')
       this._httpActivity.delete(activity._id);
   }
 
@@ -112,21 +118,16 @@ class NetworkHandler {
   }
 
   async _onRequestFinished(httpChannel, eventDetails) {
-    let details = null;
-    try {
-      details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
-    } catch (e) {
-      if (this._contentSession.isDisposed())
-        return;
-    }
     const activity = this._ensureHTTPActivity(eventDetails.requestId);
-    activity.complete = {
-      ...eventDetails,
-      errorCode: details ? details.errorCode : undefined,
-    };
+    activity.complete = eventDetails;
     this._reportHTTPAcitivityEvents(activity);
   }
 
+  async _onRequestFailed(httpChannel, eventDetails) {
+    const activity = this._ensureHTTPActivity(eventDetails.requestId);
+    activity.failed = eventDetails;
+    this._reportHTTPAcitivityEvents(activity);
+  }
 }
 
 var EXPORTED_SYMBOLS = ['NetworkHandler'];

@@ -90,16 +90,20 @@ class NetworkObserver {
     httpChannel.resume();
   }
 
-  abortSuspendedRequest(browser, requestId) {
+  abortSuspendedRequest(browser, aRequestId) {
     const suspendedChannels = this._browserSuspendedChannels.get(browser);
     if (!suspendedChannels)
       throw new Error(`Request interception is not enabled`);
-    const httpChannel = suspendedChannels.get(requestId);
+    const httpChannel = suspendedChannels.get(aRequestId);
     if (!httpChannel)
-      throw new Error(`Cannot find request "${requestId}"`);
-    suspendedChannels.delete(requestId);
-    httpChannel.cancel(Cr.NS_BINDING_ABORTED);
+      throw new Error(`Cannot find request "${aRequestId}"`);
+    suspendedChannels.delete(aRequestId);
+    httpChannel.cancel(Cr.NS_ERROR_FAILURE);
     httpChannel.resume();
+    this.emit('requestfailed', httpChannel, {
+      requestId: requestId(httpChannel),
+      errorCode: helper.getNetworkErrorStatusText(httpChannel.status),
+    });
   }
 
   _onRedirect(oldChannel, newChannel) {
@@ -121,11 +125,11 @@ class NetworkObserver {
     const loadContext = getLoadContext(httpChannel);
     if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
       return;
-    if (activitySubtype === Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE) {
-      this.emit('requestfinished', httpChannel, {
-        requestId: requestId(httpChannel),
-      });
-    }
+    if (activitySubtype !== Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE)
+      return;
+    this.emit('requestfinished', httpChannel, {
+      requestId: requestId(httpChannel),
+    });
   }
 
   _onRequest(channel, topic) {
