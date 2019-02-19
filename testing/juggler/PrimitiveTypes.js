@@ -119,7 +119,13 @@ function beauty(path, obj) {
 }
 
 function checkScheme(scheme, x, details = {}, path = ['<root>']) {
+  if (!scheme)
+    throw new Error(`ILLDEFINED SCHEME: ${path.join('.')}`);
   if (typeof scheme === 'object') {
+    if (!x) {
+      details.error = `Object "${path.join('.')}" is undefined, but has some scheme`;
+      return false;
+    }
     for (const [propertyName, aScheme] of Object.entries(scheme)) {
       path.push(propertyName);
       const result = checkScheme(aScheme, x[propertyName], details, path);

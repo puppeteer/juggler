@@ -13,7 +13,16 @@ types.TargetInfo = {
 };
 
 const Browser = {
+  targets: ['browser'],
+
   events: {
+    'attachedToTarget': {
+      sessionId: t.String,
+      targetInfo: types.TargetInfo,
+    },
+    'detachedFromTarget': {
+      sessionId: t.String,
+    },
     'targetCreated': types.TargetInfo,
     'targetDestroyed': types.TargetInfo,
     'targetInfoChanged': types.TargetInfo,
@@ -29,6 +38,14 @@ const Browser = {
         version: t.String,
       },
     },
+    'attachToTarget': {
+      params: {
+        targetId: t.String,
+      },
+      returns: {
+        sessionId: t.String,
+      },
+    },
     'setIgnoreHTTPSErrors': {
       params: {
         enabled: t.Boolean,
@@ -41,12 +58,6 @@ const Browser = {
       returns: {
         targetId: t.String,
       }
-    },
-    'closePage': {
-      params: {
-        targetId: t.String,
-        runBeforeUnload: t.Optional(t.Boolean),
-      },
     },
     'createBrowserContext': {
       returns: {
@@ -89,9 +100,9 @@ types.RemoteObject = t.Either({
 });
 
 const Network = {
+  targets: ['page'],
   events: {
     'requestWillBeSent': {
-      targetId: t.String,
       // frameId may be absent for redirected requests.
       frameId: t.Optional(t.String),
       requestId: t.String,
@@ -115,7 +126,6 @@ const Network = {
         validFrom: t.Number,
         validTo: t.Number,
       }),
-      targetId: t.String,
       requestId: t.String,
       fromCache: t.Boolean,
       remoteIPAddress: t.String,
@@ -128,45 +138,40 @@ const Network = {
       }),
     },
     'requestFinished': {
-      targetId: t.String,
       requestId: t.String,
       errorCode: t.Optional(t.String),
     },
   },
   methods: {
+    enable: {},
   },
 };
 
 const Page = {
+  targets: ['page'],
   events: {
     'eventFired': {
-      targetId: t.String,
       frameId: t.String,
       name: t.Enum(['load', 'DOMContentLoaded']),
     },
     'uncaughtError': {
-      targetId: t.String,
       frameId: t.String,
       message: t.String,
       stack: t.String,
     },
     'frameAttached': {
-      targetId: t.String,
       frameId: t.String,
       parentFrameId: t.Optional(t.String),
     },
     'frameDetached': {
-      targetId: t.String,
       frameId: t.String,
     },
     'navigationStarted': {
-      targetId: t.String,
       frameId: t.String,
       navigationId: t.String,
       url: t.String,
     },
     'navigationCommitted': {
-      targetId: t.String,
       frameId: t.String,
       navigationId: t.String,
       url: t.String,
@@ -174,18 +179,15 @@ const Page = {
       name: t.String,
     },
     'navigationAborted': {
-      targetId: t.String,
       frameId: t.String,
       navigationId: t.String,
       errorText: t.String,
     },
     'sameDocumentNavigation': {
-      targetId: t.String,
       frameId: t.String,
       url: t.String,
     },
     'console': {
-      targetId: t.String,
       frameId: t.String,
       args: t.Array(types.RemoteObject),
       type: t.String,
@@ -196,27 +198,27 @@ const Page = {
       },
     },
     'dialogOpened': {
-      targetId: t.String,
       dialogId: t.String,
       type: t.Enum(['prompt', 'alert', 'confirm', 'beforeunload']),
       message: t.String,
       defaultValue: t.Optional(t.String),
     },
     'dialogClosed': {
-      targetId: t.String,
       dialogId: t.String,
     },
   },
 
   methods: {
     'enable': {
+      params: {},
+    },
+    'close': {
       params: {
-        targetId: t.String,
+        runBeforeUnload: t.Optional(t.Boolean),
       },
     },
     'setViewport': {
       params: {
-        targetId: t.String,
         viewport: t.Nullable({
           width: t.Number,
           height: t.Number,
@@ -229,25 +231,21 @@ const Page = {
     },
     'setUserAgent': {
       params: {
-        targetId: t.String,
         userAgent: t.Nullable(t.String),
       },
     },
     'setCacheDisabled': {
       params: {
-        targetId: t.String,
         cacheDisabled: t.Boolean,
       },
     },
     'setJavascriptEnabled': {
       params: {
-        targetId: t.String,
         enabled: t.Boolean,
       },
     },
     'contentFrame': {
       params: {
-        targetId: t.String,
         frameId: t.String,
         objectId: t.String,
       },
@@ -257,7 +255,6 @@ const Page = {
     },
     'evaluate': {
       params: t.Either({
-        targetId: t.String,
         // Pass frameId here.
         executionContextId: t.String,
         functionText: t.String,
@@ -268,7 +265,6 @@ const Page = {
           { value: t.Any },
         )),
       }, {
-        targetId: t.String,
         // Pass frameId here.
         executionContextId: t.String,
         script: t.String,
@@ -286,7 +282,6 @@ const Page = {
     },
     'addScriptToEvaluateOnNewDocument': {
       params: {
-        targetId: t.String,
         script: t.String,
       },
       returns: {
@@ -295,13 +290,11 @@ const Page = {
     },
     'removeScriptToEvaluateOnNewDocument': {
       params: {
-        targetId: t.String,
         scriptId: t.String,
       },
     },
     'disposeObject': {
       params: {
-        targetId: t.String,
         executionContextId: t.String,
         objectId: t.String,
       },
@@ -309,7 +302,6 @@ const Page = {
 
     'getObjectProperties': {
       params: {
-        targetId: t.String,
         executionContextId: t.String,
         objectId: t.String,
       },
@@ -323,7 +315,6 @@ const Page = {
     },
     'navigate': {
       params: {
-        targetId: t.String,
         frameId: t.String,
         url: t.String,
         referer: t.Optional(t.String),
@@ -335,7 +326,6 @@ const Page = {
     },
     'goBack': {
       params: {
-        targetId: t.String,
         frameId: t.String,
       },
       returns: {
@@ -345,7 +335,6 @@ const Page = {
     },
     'goForward': {
       params: {
-        targetId: t.String,
         frameId: t.String,
       },
       returns: {
@@ -355,7 +344,6 @@ const Page = {
     },
     'reload': {
       params: {
-        targetId: t.String,
         frameId: t.String,
       },
       returns: {
@@ -365,7 +353,6 @@ const Page = {
     },
     'getBoundingBox': {
       params: {
-        targetId: t.String,
         frameId: t.String,
         objectId: t.String,
       },
@@ -378,7 +365,6 @@ const Page = {
     },
     'screenshot': {
       params: {
-        targetId: t.String,
         mimeType: t.Enum(['image/png', 'image/jpeg']),
         fullPage: t.Optional(t.Boolean),
         clip: t.Optional({
@@ -394,7 +380,6 @@ const Page = {
     },
     'getContentQuads': {
       params: {
-        targetId: t.String,
         frameId: t.String,
         objectId: t.String,
       },
@@ -404,7 +389,6 @@ const Page = {
     },
     'dispatchKeyEvent': {
       params: {
-        targetId: t.String,
         type: t.String,
         key: t.String,
         keyCode: t.Number,
@@ -415,7 +399,6 @@ const Page = {
     },
     'dispatchMouseEvent': {
       params: {
-        targetId: t.String,
         type: t.String,
         button: t.Number,
         x: t.Number,
@@ -427,13 +410,11 @@ const Page = {
     },
     'insertText': {
       params: {
-        targetId: t.String,
         text: t.String,
       }
     },
     'handleDialog': {
       params: {
-        targetId: t.String,
         dialogId: t.String,
         accept: t.Boolean,
         promptText: t.Optional(t.String),

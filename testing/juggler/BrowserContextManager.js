@@ -5,6 +5,16 @@ const {ContextualIdentityService} = ChromeUtils.import("resource://gre/modules/C
 const IDENTITY_NAME = 'JUGGLER ';
 
 class BrowserContextManager {
+  static instance() {
+    return BrowserContextManager._instance || null;
+  }
+
+  static initialize() {
+    if (BrowserContextManager._instance)
+      return;
+    BrowserContextManager._instance = new BrowserContextManager();
+  }
+
   constructor() {
     this._id = 0;
     this._browserContextIdToUserContextId = new Map();

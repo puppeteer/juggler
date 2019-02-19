@@ -20,6 +20,16 @@ const SINK_CONTRACT_ID = "@mozilla.org/network/monitor/channeleventsink;1";
 const SINK_CATEGORY_NAME = "net-channel-event-sinks";
 
 class NetworkObserver {
+  static instance() {
+    return NetworkObserver._instance || null;
+  }
+
+  static initialize() {
+    if (NetworkObserver._instance)
+      return;
+    NetworkObserver._instance = new NetworkObserver();
+  }
+  
   constructor() {
     EventEmitter.decorate(this);
     this._browsers = new Map();

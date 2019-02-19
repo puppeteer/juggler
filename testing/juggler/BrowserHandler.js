@@ -2,6 +2,7 @@
 
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
+const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
 const {InsecureSweepingOverride} = ChromeUtils.import("chrome://juggler/content/InsecureSweepingOverride.js");
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const helper = new Helper();
@@ -12,8 +13,8 @@ class BrowserHandler {
    */
   constructor(session) {
     this._session = session;
-    this._contextManager = session.contextManager();
-    this._targetRegistry = session.targetRegistry();
+    this._contextManager = BrowserContextManager.instance();
+    this._targetRegistry = TargetRegistry.instance();
     this._enabled = false;
     this._sweepingOverride = null;
     this._eventListeners = [];
@@ -21,6 +22,11 @@ class BrowserHandler {
 
   async close() {
     Services.startup.quit(Ci.nsIAppStartup.eForceQuit);
+  }
+
+  async attachToTarget({targetId}) {
+    const sessionId = await this._session.dispatcher().createSession(targetId);
+    return {sessionId};
   }
 
   async setIgnoreHTTPSErrors({enabled}) {
@@ -90,10 +96,6 @@ class BrowserHandler {
   async newPage({browserContextId}) {
     const targetId = await this._targetRegistry.newPage({browserContextId});
     return {targetId};
-  }
-
-  async closePage({targetId, runBeforeUnload}) {
-    await this._targetRegistry.closePage(targetId, runBeforeUnload);
   }
 }
 

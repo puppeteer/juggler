@@ -6,93 +6,84 @@ const {protocol, checkScheme} = ChromeUtils.import("chrome://juggler/content/Pro
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const helper = new Helper();
 
-class ChromeSession {
+const PROTOCOL_HANDLERS = {
+  Page: PageHandler,
+  Network: NetworkHandler,
+  Browser: BrowserHandler,
+};
+
+class Dispatcher {
   /**
    * @param {Connection} connection
-   * @param {BrowserContextManager} contextManager
-   * @param {NetworkObserver} networkObserver
-   * @param {TargetRegistry} targetRegistry
    */
-  constructor(connection, contextManager, networkObserver, targetRegistry) {
+  constructor(connection) {
     this._connection = connection;
     this._connection.onmessage = this._dispatch.bind(this);
-    this._connection.onclose = this.dispose.bind(this);
+    this._connection.onclose = this._dispose.bind(this);
 
-    this._contextManager = contextManager;
-    this._networkObserver = networkObserver;
-    this._targetRegistry = targetRegistry;
-
-    this._browserHandler = new BrowserHandler(this);
-    this._targetToDomainHandlers = new Map();
+    this._targetSessions = new Map();
+    this._sessions = new Map();
+    this._rootSession = new ChromeSession(this, undefined, null /* contentSession */, TargetRegistry.instance().browserTargetInfo());
 
     this._eventListeners = [
-      helper.on(this._targetRegistry, TargetRegistry.Events.TargetDestroyed, this._onTargetDestroyed.bind(this)),
+      helper.on(TargetRegistry.instance(), TargetRegistry.Events.TargetDestroyed, this._onTargetDestroyed.bind(this)),
     ];
   }
 
-  async _createDomainHandlers(targetId) {
-    if (this._targetToDomainHandlers.has(targetId))
-      throw new Error('Domain handlers for target ' + targetId + ' are already enabled');
-    const tab = this._targetRegistry.tabForTarget(targetId);
-    const contentSession = new ContentSession(this, tab.linkedBrowser, targetId);
-    await contentSession.send('enable');
+  async createSession(targetId) {
+    const targetInfo = TargetRegistry.instance().targetInfo(targetId);
+    if (!targetInfo)
+      throw new Error(`Target "${targetId}" is not found`);
+    let targetSessions = this._targetSessions.get(targetId);
+    if (!targetSessions) {
+      targetSessions = new Map();
+      this._targetSessions.set(targetId, targetSessions);
+    }
 
-    const Page = new PageHandler(this, contentSession, targetId, tab);
-    const Network = new NetworkHandler(this, contentSession, targetId, tab);
-    this._targetToDomainHandlers.set(targetId, {
-      contentSession, Page, Network
+    const sessionId = helper.generateId();
+    const contentSession = targetInfo.type === 'page' ? new ContentSession(this, sessionId, targetInfo) : null;
+    const chromeSession = new ChromeSession(this, sessionId, contentSession, targetInfo);
+    targetSessions.set(sessionId, chromeSession);
+    this._sessions.set(sessionId, chromeSession);
+    this._emitEvent(this._rootSession._sessionId, 'Browser.attachedToTarget', {
+      sessionId: sessionId,
+      targetInfo
     });
+    return sessionId;
   }
 
-  _disposeTargetDomainHandlers(targetId) {
-    const handlers = this._targetToDomainHandlers.get(targetId);
-    if (!handlers)
-      return;
-    handlers.Page.dispose();
-    handlers.Network.dispose();
-    handlers.contentSession.dispose();
-    this._targetToDomainHandlers.delete(targetId);
+  _dispose() {
+    helper.removeListeners(this._eventListeners);
+    this._connection.onmessage = null;
+    this._connection.onclose = null;
+    this._rootSession.dispose();
+    this._rootSession = null;
+    for (const session of this._sessions.values())
+      session.dispose();
+    this._sessions.clear();
+    this._targetSessions.clear();
   }
 
   _onTargetDestroyed({targetId}) {
-    this._disposeTargetDomainHandlers(targetId);
-  }
-
-  dispose() {
-    helper.removeListeners(this._eventListeners);
-    for (const targetId of Object.keys(this._targetToDomainHandlers))
-      this._disposeTargetDomainHandlers(targetId);
-    this._targetToDomainHandlers.clear();
-    this._browserHandler.dispose();
-  }
-
-  contextManager() {
-    return this._contextManager;
-  }
-
-  targetRegistry() {
-    return this._targetRegistry;
-  }
-
-  networkObserver() {
-    return this._networkObserver;
-  }
-
-  emitEvent(eventName, params) {
-    const [domain, eName] = eventName.split('.');
-    const scheme = protocol.domains[domain] ? protocol.domains[domain].events[eName] : null;
-    if (!scheme)
-      throw new Error(`ERROR: event '${eventName}' is not supported`);
-    const details = {};
-    if (!checkScheme(scheme, params || {}, details))
-      throw new Error(`ERROR: failed to emit event '${eventName}' ${JSON.stringify(params, null, 2)}\n${details.error}`);
-    this._connection.send(JSON.stringify({method: eventName, params}));
+    const sessions = this._targetSessions.get(targetId);
+    if (!sessions)
+      return;
+    this._targetSessions.delete(targetId);
+    for (const [sessionId, session] of sessions) {
+      session.dispose();
+      this._sessions.delete(sessionId);
+    }
   }
 
   async _dispatch(event) {
     const data = JSON.parse(event.data);
     const id = data.id;
+    const sessionId = data.sessionId;
+    delete data.sessionId;
     try {
+      const session = sessionId ? this._sessions.get(sessionId) : this._rootSession;
+      if (!session)
+        throw new Error(`ERROR: cannot find session with id "${sessionId}"`);
       const method = data.method;
       const params = data.params || {};
       if (!id)
@@ -108,45 +99,98 @@ class ChromeSession {
       if (!checkScheme(descriptor.params || {}, params, details))
         throw new Error(`ERROR: failed to call method '${method}' with parameters ${JSON.stringify(params, null, 2)}\n${details.error}`);
 
-      const result = await this._innerDispatch(method, params);
+      const result = await session.dispatch(method, params);
 
       details = {};
       if ((descriptor.returns || result) && !checkScheme(descriptor.returns, result, details))
         throw new Error(`ERROR: failed to dispatch method '${method}' result ${JSON.stringify(result, null, 2)}\n${details.error}`);
 
-      this._connection.send(JSON.stringify({id, result}));
+      this._connection.send(JSON.stringify({id, sessionId, result}));
     } catch (e) {
-      this._connection.send(JSON.stringify({id, error: {
+      this._connection.send(JSON.stringify({id, sessionId, error: {
         message: e.message,
         data: e.stack
       }}));
     }
   }
 
-  async _innerDispatch(method, params) {
-    if (method === 'Page.enable') {
-      await this._createDomainHandlers(params.targetId);
-      return;
+  _emitEvent(sessionId, eventName, params) {
+    const [domain, eName] = eventName.split('.');
+    const scheme = protocol.domains[domain] ? protocol.domains[domain].events[eName] : null;
+    if (!scheme)
+      throw new Error(`ERROR: event '${eventName}' is not supported`);
+    const details = {};
+    if (!checkScheme(scheme, params || {}, details))
+      throw new Error(`ERROR: failed to emit event '${eventName}' ${JSON.stringify(params, null, 2)}\n${details.error}`);
+    this._connection.send(JSON.stringify({method: eventName, params, sessionId}));
+  }
+}
+
+class ChromeSession {
+  /**
+   * @param {Connection} connection
+   */
+  constructor(dispatcher, sessionId, contentSession, targetInfo) {
+    this._dispatcher = dispatcher;
+    this._sessionId = sessionId;
+    this._contentSession = contentSession;
+    this._targetInfo = targetInfo;
+
+    this._handlers = {};
+    for (const [domainName, handlerFactory] of Object.entries(PROTOCOL_HANDLERS)) {
+      if (protocol.domains[domainName].targets.includes(targetInfo.type))
+        this._handlers[domainName] = new handlerFactory(this, contentSession);
     }
+  }
+
+  dispatcher() {
+    return this._dispatcher;
+  }
+
+  targetId() {
+    return this._targetInfo.targetId;
+  }
+
+  dispose() {
+    if (this._contentSession)
+      this._contentSession.dispose();
+    this._contentSession = null;
+    for (const [domainName, handler] of Object.entries(this._handlers)) {
+      handler.dispose();
+      delete this._handlers[domainName];
+    }
+    // Root session don't have sessionId and don't emit detachedFromTarget.
+    if (this._sessionId) {
+      this._dispatcher._emitEvent(this._sessionId, 'Browser.detachedFromTarget', {
+        sessionId: this._sessionId,
+      });
+    }
+  }
+
+  emitEvent(eventName, params) {
+    this._dispatcher._emitEvent(this._sessionId, eventName, params);
+  }
+
+  async dispatch(method, params) {
     const [domainName, methodName] = method.split('.');
-    if (domainName === 'Browser')
-      return await this._browserHandler[methodName](params);
-    const handlers = this._targetToDomainHandlers.get(params.targetId);
-    if (!handlers || !handlers[domainName])
-      throw new Error(`Domain ${domainName} is not enabled`);
-    return await handlers[domainName][methodName](params);
+    if (!this._handlers[domainName])
+      throw new Error(`Domain "${domainName}" does not exist`);
+    if (!this._handlers[domainName][methodName])
+      throw new Error(`Handler for domain "${domainName}" does not implement method "${methodName}"`);
+    return await this._handlers[domainName][methodName](params);
   }
 }
 
 class ContentSession {
-  constructor(chromeSession, browser, targetId) {
-    this._chromeSession = chromeSession;
-    this._browser = browser;
-    this._targetId = targetId;
+  constructor(dispatcher, sessionId, targetInfo) {
+    this._dispatcher = dispatcher;
+    const tab = TargetRegistry.instance().tabForTarget(targetInfo.targetId);
+    this._browser = tab.linkedBrowser;
     this._messageId = 0;
     this._pendingMessages = new Map();
-    this._sessionId = helper.generateId();
+    this._sessionId = sessionId;
     this._browser.messageManager.sendAsyncMessage('juggler:create-content-session', this._sessionId);
+    this._disposed = false;
     this._eventListeners = [
       helper.addMessageListener(this._browser.messageManager, this._sessionId, {
         receiveMessage: message => this._onMessage(message)
@@ -154,10 +198,17 @@ class ContentSession {
     ];
   }
 
+  isDisposed() {
+    return this._disposed;
+  }
+
   dispose() {
+    if (this._disposed)
+      return;
+    this._disposed = true;
     helper.removeListeners(this._eventListeners);
-    for (const {resolve, reject} of this._pendingMessages.values())
-      reject(new Error('Page closed.'));
+    for (const {resolve, reject, methodName} of this._pendingMessages.values())
+      reject(new Error(`Failed "${methodName}": Page closed.`));
     this._pendingMessages.clear();
     if (this._browser.messageManager)
       this._browser.messageManager.sendAsyncMessage('juggler:dispose-content-session', this._sessionId);
@@ -171,7 +222,7 @@ class ContentSession {
   send(methodName, params) {
     const id = ++this._messageId;
     const promise = new Promise((resolve, reject) => {
-      this._pendingMessages.set(id, {resolve, reject});
+      this._pendingMessages.set(id, {resolve, reject, methodName});
     });
     this._browser.messageManager.sendAsyncMessage(this._sessionId, {id, methodName, params});
     return promise;
@@ -191,13 +242,12 @@ class ContentSession {
         eventName,
         params = {}
       } = data;
-      params.targetId = this._targetId;
-      this._chromeSession.emitEvent(eventName, params);
+      this._dispatcher._emitEvent(this._sessionId, eventName, params);
     }
   }
 }
 
 
-this.EXPORTED_SYMBOLS = ['ChromeSession'];
-this.ChromeSession = ChromeSession;
+this.EXPORTED_SYMBOLS = ['Dispatcher'];
+this.Dispatcher = Dispatcher;
 

@@ -1,6 +1,8 @@
 "use strict";
 
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
+const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -10,14 +12,27 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class PageHandler {
-  constructor(chromeSession, contentSession, targetId, tab) {
+  constructor(chromeSession, contentSession) {
     this._chromeSession = chromeSession;
     this._contentSession = contentSession;
-    this._targetId = targetId;
-    this._tab = tab;
-    this._browser = this._tab.linkedBrowser;
+    this._browser = TargetRegistry.instance().tabForTarget(chromeSession.targetId()).linkedBrowser;
     this._dialogs = new Map();
 
+    this._eventListeners = [];
+    this._enabled = false;
+  }
+
+  async close({runBeforeUnload}) {
+    // Postpone target close to deliver response in session.
+    Services.tm.dispatchToMainThread(() => {
+      TargetRegistry.instance().closePage(this._chromeSession.targetId(), runBeforeUnload);
+    });
+  }
+
+  async enable() {
+    if (this._enabled)
+      return;
+    this._enabled = true;
     this._updateModalDialogs();
 
     this._eventListeners = [
@@ -28,6 +43,7 @@ class PageHandler {
       }),
       helper.addEventListener(this._browser, 'DOMModalDialogClosed', event => this._updateModalDialogs()),
     ];
+    await this._contentSession.send('enable');
   }
 
   dispose() {
@@ -67,7 +83,6 @@ class PageHandler {
       if (!elements.has(dialog.element())) {
         this._dialogs.delete(dialog.id());
         this._chromeSession.emitEvent('Page.dialogClosed', {
-          targetId: this._targetId,
           dialogId: dialog.id(),
         });
       } else {
@@ -80,7 +95,6 @@ class PageHandler {
         continue;
       this._dialogs.set(dialog.id(), dialog);
       this._chromeSession.emitEvent('Page.dialogOpened', {
-        targetId: this._targetId,
         dialogId: dialog.id(),
         type: dialog.type(),
         message: dialog.message(),
@@ -91,10 +105,6 @@ class PageHandler {
 
   url() {
     return this._browser.currentURI.spec;
-  }
-
-  tab() {
-    return this._tab;
   }
 
   async setUserAgent(options) {
@@ -158,7 +168,7 @@ class PageHandler {
   }
 
   /**
-   * @param {{targetId: String, frameId: String, objectId: String}} options
+   * @param {{frameId: String, objectId: String}} options
    * @return {!Promise<*>}
    */
   async contentFrame(options) {

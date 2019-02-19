@@ -1,6 +1,6 @@
 const {XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
-const {ChromeSession} = ChromeUtils.import("chrome://juggler/content/ChromeSession.js");
+const {Dispatcher} = ChromeUtils.import("chrome://juggler/content/ChromeSession.js");
 const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
 const {NetworkObserver} = ChromeUtils.import("chrome://juggler/content/NetworkObserver.js");
 const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
@@ -38,9 +38,9 @@ CommandLineHandler.prototype = {
     Services.obs.removeObserver(this, 'sessionstore-windows-restored');
 
     const win = await waitForBrowserWindow();
-    const browserContextManager = new BrowserContextManager();
-    const networkObserver = new NetworkObserver();
-    const targetRegistry = new TargetRegistry(win, browserContextManager);
+    BrowserContextManager.initialize();
+    NetworkObserver.initialize();
+    TargetRegistry.initialize(win, BrowserContextManager.instance());
 
     const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
     const WebSocketServer = require('devtools/server/socket/websocket-server');
@@ -51,7 +51,7 @@ CommandLineHandler.prototype = {
         const input = transport.openInputStream(0, 0, 0);
         const output = transport.openOutputStream(0, 0, 0);
         const webSocket = await WebSocketServer.accept(transport, input, output);
-        new ChromeSession(webSocket, browserContextManager, networkObserver, targetRegistry);
+        new Dispatcher(webSocket);
       }
     });
 

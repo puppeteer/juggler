@@ -1,6 +1,8 @@
 "use strict";
 
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
+const {NetworkObserver} = ChromeUtils.import('chrome://juggler/content/NetworkObserver.js');
+const {TargetRegistry} = ChromeUtils.import("chrome://juggler/content/TargetRegistry.js");
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -10,17 +12,25 @@ const FRAME_SCRIPT = "chrome://juggler/content/content/ContentSession.js";
 const helper = new Helper();
 
 class NetworkHandler {
-  constructor(chromeSession, contentSession, targetId, tab) {
-    this._targetId = targetId;
+  constructor(chromeSession, contentSession) {
     this._chromeSession = chromeSession;
     this._contentSession = contentSession;
-    this._networkObserver = chromeSession.networkObserver();
+    this._networkObserver = NetworkObserver.instance();
     this._httpActivity = new Map();
+    this._enabled = false;
+    this._eventListeners = [];
+  }
+
+  async enable() {
+    if (this._enabled)
+      return;
+    this._enabled = true;
+    const browser = TargetRegistry.instance().tabForTarget(this._chromeSession.targetId()).linkedBrowser;
     this._eventListeners = [
       helper.on(this._networkObserver, 'request', this._onRequest.bind(this)),
       helper.on(this._networkObserver, 'response', this._onResponse.bind(this)),
       helper.on(this._networkObserver, 'requestfinished', this._onRequestFinished.bind(this)),
-      this._networkObserver.startTrackingBrowserNetwork(tab.linkedBrowser),
+      this._networkObserver.startTrackingBrowserNetwork(browser),
     ];
   }
 
@@ -64,12 +74,17 @@ class NetworkHandler {
   }
 
   async _onRequest(httpChannel, eventDetails, redirectedFromChannel) {
-    const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+    let details = null;
+    try {
+      details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+    } catch (e) {
+      if (this._contentSession.isDisposed())
+        return;
+    }
     const activity = this._ensureHTTPActivity(httpChannel.channelId);
     activity.request = {
       requestId: httpChannel.channelId + '',
       redirectedFrom: redirectedFromChannel ? redirectedFromChannel.channelId + '' : undefined,
-      targetId: this._targetId,
       frameId: details ? details.frameId : undefined,
       ...eventDetails,
     };
@@ -80,19 +95,23 @@ class NetworkHandler {
     const activity = this._ensureHTTPActivity(httpChannel.channelId);
     activity.response = {
       requestId: httpChannel.channelId + '',
-      targetId: this._targetId,
       ...eventDetails,
     };
     this._reportHTTPAcitivityEvents(activity);
   }
 
   async _onRequestFinished(httpChannel, eventDetails) {
-    const details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+    let details = null;
+    try {
+      details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+    } catch (e) {
+      if (this._contentSession.isDisposed())
+        return;
+    }
     const activity = this._ensureHTTPActivity(httpChannel.channelId);
     activity.complete = {
       ...eventDetails,
       requestId: httpChannel.channelId + '',
-      targetId: this._targetId,
       errorCode: details ? details.errorCode : undefined,
     };
     this._reportHTTPAcitivityEvents(activity);

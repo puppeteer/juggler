@@ -62,8 +62,6 @@ class PageAgent {
       },
     };
 
-    Services.console.registerListener(this._consoleServiceListener);
-
     this._eventListeners = [];
     this._enabled = false;
 
@@ -132,7 +130,17 @@ class PageAgent {
       return;
 
     this._enabled = true;
+    // Dispatch frameAttached events for all initial frames
+    for (const frame of this._frameTree.frames()) {
+      this._onFrameAttached(frame);
+      if (frame.url())
+        this._onNavigationCommitted(frame);
+      if (frame.pendingNavigationId())
+        this._onNavigationStarted(frame);
+    }
+    Services.console.registerListener(this._consoleServiceListener);
     this._eventListeners = [
+      () => Services.console.unregisterListener(this._consoleServiceListener),
       helper.addObserver(this._consoleAPICalled.bind(this),  "console-api-log-event"),
       helper.addEventListener(this._session.mm(), 'DOMContentLoaded', this._onDOMContentLoaded.bind(this)),
       helper.addEventListener(this._session.mm(), 'pageshow', this._onLoad.bind(this)),
@@ -145,15 +153,6 @@ class PageAgent {
       helper.on(this._frameTree, 'navigationaborted', this._onNavigationAborted.bind(this)),
       helper.on(this._frameTree, 'samedocumentnavigation', this._onSameDocumentNavigation.bind(this)),
     ];
-
-    // Dispatch frameAttached events for all initial frames
-    for (const frame of this._frameTree.frames()) {
-      this._onFrameAttached(frame);
-      if (frame.url())
-        this._onNavigationCommitted(frame);
-      if (frame.pendingNavigationId())
-        this._onNavigationStarted(frame);
-    }
   }
 
   _onDOMContentLoaded(event) {
@@ -268,7 +267,6 @@ class PageAgent {
   }
 
   dispose() {
-    Services.console.unregisterListener(this._consoleServiceListener);
     helper.removeListeners(this._eventListeners);
   }
 

@@ -9,6 +9,16 @@ const Cu = Components.utils;
 const helper = new Helper();
 
 class TargetRegistry {
+  static instance() {
+    return TargetRegistry._instance || null;
+  }
+
+  static initialize(mainWindow, contextManager) {
+    if (TargetRegistry._instance)
+      return;
+    TargetRegistry._instance = new TargetRegistry(mainWindow, contextManager);
+  }
+
   constructor(mainWindow, contextManager) {
     EventEmitter.decorate(this);
 
@@ -16,8 +26,8 @@ class TargetRegistry {
     this._contextManager = contextManager;
     this._targets = new Map();
 
-    const browserTarget = new BrowserTarget();
-    this._targets.set(browserTarget.id(), browserTarget);
+    this._browserTarget = new BrowserTarget();
+    this._targets.set(this._browserTarget.id(), this._browserTarget);
     this._tabToTarget = new Map();
 
     for (const tab of this._mainWindow.gBrowser.tabs)
@@ -70,6 +80,15 @@ class TargetRegistry {
 
   targetInfos() {
     return Array.from(this._targets.values()).map(target => target.info());
+  }
+
+  targetInfo(targetId) {
+    const target = this._targets.get(targetId);
+    return target ? target.info() : null;
+  }
+
+  browserTargetInfo() {
+    return this._browserTarget.info();
   }
 
   tabForTarget(targetId) {
