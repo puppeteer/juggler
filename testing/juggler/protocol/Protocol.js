@@ -16,6 +16,28 @@ const Browser = {
   targets: ['browser'],
 
   events: {
+  },
+
+  methods: {
+    'close': {},
+    'getInfo': {
+      returns: {
+        userAgent: t.String,
+        version: t.String,
+      },
+    },
+    'setIgnoreHTTPSErrors': {
+      params: {
+        enabled: t.Boolean,
+      },
+    },
+  },
+};
+
+const Target = {
+  targets: ['browser'],
+
+  events: {
     'attachedToTarget': {
       sessionId: t.String,
       targetInfo: types.TargetInfo,
@@ -31,24 +53,12 @@ const Browser = {
   methods: {
     // Start emitting tagOpened/tabClosed events
     'enable': {},
-    'close': {},
-    'getInfo': {
-      returns: {
-        userAgent: t.String,
-        version: t.String,
-      },
-    },
     'attachToTarget': {
       params: {
         targetId: t.String,
       },
       returns: {
         sessionId: t.String,
-      },
-    },
-    'setIgnoreHTTPSErrors': {
-      params: {
-        enabled: t.Boolean,
       },
     },
     'newPage': {
@@ -424,7 +434,7 @@ const Page = {
 };
 
 this.protocol = {
-  domains: {Browser, Page, Network},
+  domains: {Browser, Target, Page, Network},
 };
 this.checkScheme = checkScheme;
 this.EXPORTED_SYMBOLS = ['protocol', 'checkScheme'];

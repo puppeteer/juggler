@@ -7,6 +7,7 @@ const PROTOCOL_HANDLERS = {
   Page: ChromeUtils.import("chrome://juggler/content/protocol/PageHandler.js").PageHandler,
   Network: ChromeUtils.import("chrome://juggler/content/protocol/NetworkHandler.js").NetworkHandler,
   Browser: ChromeUtils.import("chrome://juggler/content/protocol/BrowserHandler.js").BrowserHandler,
+  Target: ChromeUtils.import("chrome://juggler/content/protocol/TargetHandler.js").TargetHandler,
 };
 
 class Dispatcher {
@@ -42,7 +43,7 @@ class Dispatcher {
     const chromeSession = new ChromeSession(this, sessionId, contentSession, targetInfo);
     targetSessions.set(sessionId, chromeSession);
     this._sessions.set(sessionId, chromeSession);
-    this._emitEvent(this._rootSession._sessionId, 'Browser.attachedToTarget', {
+    this._emitEvent(this._rootSession._sessionId, 'Target.attachedToTarget', {
       sessionId: sessionId,
       targetInfo
     });
@@ -158,7 +159,7 @@ class ChromeSession {
     }
     // Root session don't have sessionId and don't emit detachedFromTarget.
     if (this._sessionId) {
-      this._dispatcher._emitEvent(this._sessionId, 'Browser.detachedFromTarget', {
+      this._dispatcher._emitEvent(this._sessionId, 'Target.detachedFromTarget', {
         sessionId: this._sessionId,
       });
     }
