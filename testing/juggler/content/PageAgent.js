@@ -97,6 +97,14 @@ class PageAgent {
     this._scrollbarManager.setFloatingScrollbars(isMobile);
   }
 
+  async setEmulatedMedia({media}) {
+    const docShell = this._frameTree.mainFrame().docShell();
+    if (media)
+      docShell.contentViewer.emulateMedium(media);
+    else
+      docShell.contentViewer.stopEmulatingMedium();
+  }
+
   async setUserAgent({userAgent}) {
     const docShell = this._frameTree.mainFrame().docShell();
     docShell.customUserAgent = userAgent;
@@ -481,7 +489,7 @@ class PageAgent {
     return {properties: executionContext.getObjectProperties(objectId)};
   }
 
-  async screenshot({mimeType, fullPage, frameId, objectId, clip}) {
+  async screenshot({mimeType, fullPage, clip}) {
     const content = this._session.mm().content;
     if (clip) {
       const data = takeScreenshot(content, clip.x, clip.y, clip.width, clip.height, mimeType);

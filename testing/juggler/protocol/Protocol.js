@@ -275,6 +275,11 @@ const Page = {
         userAgent: t.Nullable(t.String),
       },
     },
+    'setEmulatedMedia': {
+      params: {
+        media: t.Enum(['screen', 'print', '']),
+      },
+    },
     'setCacheDisabled': {
       params: {
         cacheDisabled: t.Boolean,

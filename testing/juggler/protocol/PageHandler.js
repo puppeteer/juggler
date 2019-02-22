@@ -111,6 +111,10 @@ class PageHandler {
     return await this._contentSession.send('setUserAgent', options);
   }
 
+  async setEmulatedMedia(options) {
+    return await this._contentSession.send('setEmulatedMedia', options);
+  }
+
   async addBinding(options) {
     return await this._contentSession.send('addBinding', options);
   }
