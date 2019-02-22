@@ -143,10 +143,9 @@ class PageAgent {
     this._eventListeners = [
       () => Services.console.unregisterListener(this._consoleServiceListener),
       helper.addObserver(this._consoleAPICalled.bind(this), "console-api-log-event"),
-      helper.addObserver(this._onDOMWindowDestroyed.bind(this), "dom-window-destroyed"),
+      helper.addObserver(this._onDOMWindowCreated.bind(this), 'content-document-global-created'),
       helper.addEventListener(this._session.mm(), 'DOMContentLoaded', this._onDOMContentLoaded.bind(this)),
       helper.addEventListener(this._session.mm(), 'pageshow', this._onLoad.bind(this)),
-      helper.addEventListener(this._session.mm(), 'DOMWindowCreated', this._onDOMWindowCreated.bind(this)),
       helper.addEventListener(this._session.mm(), 'error', this._onError.bind(this)),
       helper.on(this._frameTree, 'frameattached', this._onFrameAttached.bind(this)),
       helper.on(this._frameTree, 'framedetached', this._onFrameDetached.bind(this)),
@@ -223,12 +222,18 @@ class PageAgent {
     });
   }
 
-  _onDOMWindowCreated(event) {
-    if (!this._scriptsToEvaluateOnNewDocument.size && !this._bindingsToAdd.size)
-      return;
-    const docShell = event.target.ownerGlobal.docShell;
+  _onDOMWindowCreated(window) {
+    const docShell = window.docShell;
     const frame = this._frameTree.frameForDocShell(docShell);
     if (!frame)
+      return;
+
+    if (this._frameToExecutionContext.has(frame)) {
+      this._runtime.destroyExecutionContext(this._frameToExecutionContext.get(frame));
+      this._frameToExecutionContext.delete(frame);
+    }
+
+    if (!this._scriptsToEvaluateOnNewDocument.size && !this._bindingsToAdd.size)
       return;
     const executionContext = this._ensureExecutionContext(frame);
     for (const bindingName of this._bindingsToAdd.values())
@@ -240,18 +245,6 @@ class PageAgent {
           executionContext.disposeObject(result.objectId);
       } catch (e) {
       }
-    }
-  }
-
-  _onDOMWindowDestroyed(window) {
-    const docShell = window.docShell;
-    const frame = this._frameTree.frameForDocShell(docShell);
-    if (!frame)
-      return;
-    const oldContext = this._frameToExecutionContext.get(frame);
-    if (oldContext) {
-      this._runtime.destroyExecutionContext(oldContext);
-      this._frameToExecutionContext.delete(frame);
     }
   }
 
@@ -401,7 +394,7 @@ class PageAgent {
         payload: args[0]
       });
     }, frame.domWindow(), {
-      defineAs: name
+      defineAs: name,
     });
   }
 
