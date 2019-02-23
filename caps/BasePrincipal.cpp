@@ -440,7 +440,7 @@ already_AddRefed<BasePrincipal> BasePrincipal::CreateCodebasePrincipal(
 already_AddRefed<BasePrincipal>
 BasePrincipal::CloneStrippingUserContextIdAndFirstPartyDomain() {
   OriginAttributes attrs = OriginAttributesRef();
-  attrs.StripAttributes(OriginAttributes::STRIP_USER_CONTEXT_ID |
+  attrs.StripAttributes(// OriginAttributes::STRIP_USER_CONTEXT_ID |
                         OriginAttributes::STRIP_FIRST_PARTY_DOMAIN);
 
   nsAutoCString originNoSuffix;

@@ -170,7 +170,7 @@ nsresult GetOriginFromPrincipal(nsIPrincipal* aPrincipal, nsACString& aOrigin) {
   attrs.mPrivateBrowsingId = 0;
 
   // Disable userContext and firstParty isolation for permissions.
-  attrs.StripAttributes(mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID |
+  attrs.StripAttributes(//mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID |
                         mozilla::OriginAttributes::STRIP_FIRST_PARTY_DOMAIN);
 
   attrs.CreateSuffix(suffix);
@@ -192,7 +192,7 @@ nsresult GetPrincipalFromOrigin(const nsACString& aOrigin,
   attrs.mPrivateBrowsingId = 0;
 
   // Disable userContext and firstParty isolation for permissions.
-  attrs.StripAttributes(mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID |
+  attrs.StripAttributes(//mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID |
                         mozilla::OriginAttributes::STRIP_FIRST_PARTY_DOMAIN);
 
   nsCOMPtr<nsIURI> uri;
@@ -292,7 +292,7 @@ already_AddRefed<nsIPrincipal> GetNextSubDomainPrincipal(
   mozilla::OriginAttributes attrs = aPrincipal->OriginAttributesRef();
 
   // Disable userContext and firstParty isolation for permissions.
-  attrs.StripAttributes(mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID |
+  attrs.StripAttributes(//mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID |
                         mozilla::OriginAttributes::STRIP_FIRST_PARTY_DOMAIN);
 
   nsCOMPtr<nsIPrincipal> principal =
@@ -3210,7 +3210,7 @@ nsPermissionManager::SetPermissionsWithKey(const nsACString& aPermissionKey,
   attrs.mPrivateBrowsingId = 0;
 
   // Disable userContext and firstParty isolation for permissions.
-  attrs.StripAttributes(OriginAttributes::STRIP_USER_CONTEXT_ID |
+  attrs.StripAttributes(//OriginAttributes::STRIP_USER_CONTEXT_ID |
                         OriginAttributes::STRIP_FIRST_PARTY_DOMAIN);
 
 #ifdef DEBUG

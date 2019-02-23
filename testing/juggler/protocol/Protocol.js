@@ -30,6 +30,20 @@ const Browser = {
         enabled: t.Boolean,
       },
     },
+    'grantPermissions': {
+      params: {
+        origin: t.String,
+        browserContextId: t.Optional(t.String),
+        permissions: t.Array(t.Enum([
+          'geo', 'microphone', 'camera', 'desktop-notifications'
+        ])),
+      },
+    },
+    'resetPermissions': {
+      params: {
+        browserContextId: t.Optional(t.String),
+      }
+    },
   },
 };
 

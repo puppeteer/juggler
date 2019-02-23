@@ -1,8 +1,17 @@
 "use strict";
 
 const {ContextualIdentityService} = ChromeUtils.import("resource://gre/modules/ContextualIdentityService.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
 
 const IDENTITY_NAME = 'JUGGLER ';
+
+const ALL_PERMISSIONS = [
+  'geo',
+  'microphone',
+  'camera',
+  'desktop-notifications',
+];
 
 class BrowserContextManager {
   static instance() {
@@ -19,6 +28,7 @@ class BrowserContextManager {
     this._id = 0;
     this._browserContextIdToUserContextId = new Map();
     this._userContextIdToBrowserContextId = new Map();
+
     // Cleanup containers from previous runs (if any)
     for (const identity of ContextualIdentityService.getPublicIdentities()) {
       if (identity.name && identity.name.startsWith(IDENTITY_NAME)) {
@@ -26,6 +36,20 @@ class BrowserContextManager {
         ContextualIdentityService.closeContainerTabs(identity.userContextId);
       }
     }
+  }
+
+  grantPermissions(browserContextId, origin, permissions) {
+    const attrs = browserContextId ? {userContextId: this.userContextId(browserContextId)} : {};
+    const principal = Services.scriptSecurityManager.createCodebasePrincipal(NetUtil.newURI(origin), attrs);
+    for (const permission of ALL_PERMISSIONS) {
+      const action = permissions.includes(permission) ? Ci.nsIPermissionManager.ALLOW_ACTION : Ci.nsIPermissionManager.DENY_ACTION;
+      Services.perms.addFromPrincipal(principal, permission, action);
+    }
+  }
+
+  resetPermissions(browserContextId) {
+    const attrs = browserContextId ? {userContextId: this.userContextId(browserContextId)} : {};
+    Services.perms.removePermissionsWithAttributes(JSON.stringify(attrs));
   }
 
   createBrowserContext() {
