@@ -2,6 +2,7 @@
 
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {InsecureSweepingOverride} = ChromeUtils.import("chrome://juggler/content/InsecureSweepingOverride.js");
+const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/BrowserContextManager.js");
 
 class BrowserHandler {
   /**
@@ -9,6 +10,7 @@ class BrowserHandler {
    */
   constructor() {
     this._sweepingOverride = null;
+    this._contextManager = BrowserContextManager.instance();
   }
 
   async close() {
@@ -25,6 +27,14 @@ class BrowserHandler {
       this._sweepingOverride.register();
       Services.prefs.setBoolPref('security.mixed_content.block_active_content', false);
     }
+  }
+
+  grantPermissions({browserContextId, origin, permissions}) {
+    this._contextManager.grantPermissions(browserContextId, origin, permissions);
+  }
+
+  resetPermissions({browserContextId}) {
+    this._contextManager.resetPermissions(browserContextId);
   }
 
   async getInfo() {

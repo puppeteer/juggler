@@ -6,6 +6,8 @@ const {BrowserContextManager} = ChromeUtils.import("chrome://juggler/content/Bro
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const helper = new Helper();
 
+const Ci = Components.interfaces;
+
 class TargetHandler {
   /**
    * @param {ChromeSession} session
