@@ -406,6 +406,18 @@ class PageAgent {
     });
   }
 
+  async setFileInputFiles({objectId, frameId, files}) {
+    const frame = this._frameTree.frame(frameId);
+    if (!frame)
+      throw new Error('Failed to find frame with id = ' + frameId);
+    const executionContext = this._ensureExecutionContext(frame);
+    const unsafeObject = executionContext.unsafeObject(objectId);
+    if (!unsafeObject)
+      throw new Error('Object is not input!');
+    const nsFiles = await Promise.all(files.map(filePath => File.createFromFileName(filePath)));
+    unsafeObject.mozSetFileArray(nsFiles);
+  }
+
   getContentQuads({objectId, frameId}) {
     const frame = this._frameTree.frame(frameId);
     if (!frame)

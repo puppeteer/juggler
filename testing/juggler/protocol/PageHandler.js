@@ -111,6 +111,10 @@ class PageHandler {
     return await this._contentSession.send('setUserAgent', options);
   }
 
+  async setFileInputFiles(options) {
+    return await this._contentSession.send('setFileInputFiles', options);
+  }
+
   async setEmulatedMedia(options) {
     return await this._contentSession.send('setEmulatedMedia', options);
   }

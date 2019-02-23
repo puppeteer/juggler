@@ -258,6 +258,13 @@ const Page = {
         runBeforeUnload: t.Optional(t.Boolean),
       },
     },
+    'setFileInputFiles': {
+      params: {
+        frameId: t.String,
+        objectId: t.String,
+        files: t.Array(t.String),
+      },
+    },
     'setViewport': {
       params: {
         viewport: t.Nullable({
