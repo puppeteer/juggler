@@ -2,11 +2,14 @@
 const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
+const Cc = Components.classes;
 
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
 
 const helper = new Helper();
+
+const wdb = Cc["@mozilla.org/dom/workers/workerdebuggermanager;1"].getService(Ci.nsIWorkerDebuggerManager);
 
 class PageAgent {
   constructor(session, runtimeAgent, frameTree, scrollbarManager, networkMonitor) {
@@ -17,6 +20,10 @@ class PageAgent {
     this._scrollbarManager = scrollbarManager;
 
     this._frameToExecutionContext = new Map();
+    this._workerToExecutionContext = new Map();
+
+    this._executionContexts = new Map();
+
     this._scriptsToEvaluateOnNewDocument = new Map();
     this._bindingsToAdd = new Set();
 
@@ -147,8 +154,30 @@ class PageAgent {
       if (frame.pendingNavigationId())
         this._onNavigationStarted(frame);
     }
+
+    for (const workerDebugger of wdb.getWorkerDebuggerEnumerator())
+      this._ensureWorkerExecutionContext(workerDebugger);
+
+    const workerListener = {
+      onRegister: workerDebugger => this._ensureWorkerExecutionContext(workerDebugger),
+
+      onUnregister: workerDebugger => {
+        const context = this._workerToExecutionContext.get(workerDebugger);
+        if (context) {
+          this._runtime.destroyExecutionContext(context);
+          this._workerToExecutionContext.delete(workerDebugger);
+          this._executionContexts.delete(context.id());
+          this._session.emitEvent('Page.workerDestroyed', {
+            workerId: context.id(),
+          });
+        }
+      },
+    };
+    wdb.addListener(workerListener);
+
     Services.console.registerListener(this._consoleServiceListener);
     this._eventListeners = [
+      () => wdb.removeListener(workerListener),
       () => Services.console.unregisterListener(this._consoleServiceListener),
       helper.addObserver(this._consoleAPICalled.bind(this), "console-api-log-event"),
       helper.addObserver(this._onDOMWindowCreated.bind(this), 'content-document-global-created'),
@@ -237,13 +266,15 @@ class PageAgent {
       return;
 
     if (this._frameToExecutionContext.has(frame)) {
-      this._runtime.destroyExecutionContext(this._frameToExecutionContext.get(frame));
+      const oldContext = this._frameToExecutionContext.get(frame);
+      this._runtime.destroyExecutionContext(oldContext);
       this._frameToExecutionContext.delete(frame);
+      this._executionContexts.delete(oldContext.id());
     }
 
     if (!this._scriptsToEvaluateOnNewDocument.size && !this._bindingsToAdd.size)
       return;
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._ensureFrameExecutionContext(frame);
     for (const bindingName of this._bindingsToAdd.values())
       this._exposeFunction(frame, bindingName);
     for (const script of this._scriptsToEvaluateOnNewDocument.values()) {
@@ -269,11 +300,26 @@ class PageAgent {
     });
   }
 
-  _ensureExecutionContext(frame) {
+  _ensureFrameExecutionContext(frame) {
     let executionContext = this._frameToExecutionContext.get(frame);
     if (!executionContext) {
       executionContext = this._runtime.createExecutionContext(frame.domWindow());
       this._frameToExecutionContext.set(frame, executionContext);
+      this._executionContexts.set(executionContext.id(), executionContext);
+    }
+    return executionContext;
+  }
+
+  _ensureWorkerExecutionContext(workerDebugger) {
+    let executionContext = this._workerToExecutionContext.get(workerDebugger);
+    if (!executionContext) {
+      executionContext = this._runtime.createExecutionContext(workerDebugger.window);
+      this._workerToExecutionContext.set(workerDebugger, executionContext);
+      this._executionContexts.set(executionContext.id(), executionContext);
+      this._session.emitEvent('Page.workerCreated', {
+        workerId: executionContext.id(),
+        url: workerDebugger.url,
+      });
     }
     return executionContext;
   }
@@ -319,7 +365,7 @@ class PageAgent {
     }
     if (!messageFrame)
       return;
-    const executionContext = this._ensureExecutionContext(messageFrame);
+    const executionContext = this._ensureFrameExecutionContext(messageFrame);
     const args = wrappedJSObject.arguments.map(arg => executionContext.rawValueToRemoteObject(arg));
     this._session.emitEvent('Page.console', {
       args,
@@ -382,7 +428,7 @@ class PageAgent {
     const frame = this._frameTree.frame(executionContextId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + executionContextId);
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._ensureFrameExecutionContext(frame);
     return executionContext.disposeObject(objectId);
   }
 
@@ -410,7 +456,7 @@ class PageAgent {
     const frame = this._frameTree.frame(frameId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + frameId);
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._ensureFrameExecutionContext(frame);
     const unsafeObject = executionContext.unsafeObject(objectId);
     if (!unsafeObject)
       throw new Error('Object is not input!');
@@ -422,7 +468,7 @@ class PageAgent {
     const frame = this._frameTree.frame(frameId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + frameId);
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._ensureFrameExecutionContext(frame);
     const unsafeObject = executionContext.unsafeObject(objectId);
     if (!unsafeObject.getBoxQuads)
       throw new Error('RemoteObject is not a node');
@@ -441,7 +487,7 @@ class PageAgent {
     const frame = this._frameTree.frame(frameId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + frameId);
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._ensureFrameExecutionContext(frame);
     const unsafeObject = executionContext.unsafeObject(objectId);
     if (!unsafeObject.contentWindow)
       return null;
@@ -453,7 +499,7 @@ class PageAgent {
     const frame = this._frameTree.frame(frameId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + frameId);
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._ensureFrameExecutionContext(frame);
     const unsafeObject = executionContext.unsafeObject(objectId);
     if (!unsafeObject.getBoxQuads)
       throw new Error('RemoteObject is not a node');
@@ -475,11 +521,11 @@ class PageAgent {
   }
 
   async evaluate({executionContextId, functionText, args, script, returnByValue}) {
-    const frame = this._frameTree.frame(executionContextId);
-    if (!frame)
-      throw new Error('Failed to find frame with id = ' + executionContextId);
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._executionContexts.get(executionContextId);
+    if (!executionContext)
+      throw new Error('Failed to find execution context with id = ' + executionContextId);
     const exceptionDetails = {};
+
     let result = null;
     if (script)
       result = await executionContext.evaluateScript(script, exceptionDetails);
@@ -497,7 +543,7 @@ class PageAgent {
     const frame = this._frameTree.frame(executionContextId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + executionContextId);
-    const executionContext = this._ensureExecutionContext(frame);
+    const executionContext = this._ensureFrameExecutionContext(frame);
     return {properties: executionContext.getObjectProperties(objectId)};
   }
 

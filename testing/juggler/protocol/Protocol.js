@@ -261,6 +261,13 @@ const Page = {
       name: t.String,
       payload: t.Any,
     },
+    'workerCreated': {
+      workerId: t.String,
+      url: t.String,
+    },
+    'workerDestroyed': {
+      workerId: t.String,
+    },
   },
 
   methods: {

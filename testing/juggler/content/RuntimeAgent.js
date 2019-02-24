@@ -12,6 +12,7 @@ class RuntimeAgent {
   constructor() {
     this._debugger = new Debugger();
     this._pendingPromises = new Map();
+    this._lastExecutionContextId = 0;
   }
 
   dispose() {}
@@ -55,7 +56,7 @@ class RuntimeAgent {
   }
 
   createExecutionContext(domWindow) {
-    return new ExecutionContext(this, domWindow, this._debugger.addDebuggee(domWindow));
+    return new ExecutionContext(this, domWindow, this._debugger.addDebuggee(domWindow), 'execution-' + (++this._lastExecutionContextId));
   }
 
   destroyExecutionContext(destroyedContext) {
@@ -72,11 +73,16 @@ class RuntimeAgent {
 }
 
 class ExecutionContext {
-  constructor(runtime, DOMWindow, global) {
+  constructor(runtime, DOMWindow, global, id) {
     this._runtime = runtime;
     this._domWindow = DOMWindow;
     this._global = global;
     this._remoteObjects = new Map();
+    this._id = id;
+  }
+
+  id() {
+    return this._id;
   }
 
   async evaluateScript(script, exceptionDetails = {}) {
