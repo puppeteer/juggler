@@ -24,6 +24,15 @@ types.DOMQuad = {
   p4: types.DOMPoint,
 };
 
+types.TouchPoint = {
+  x: t.Number,
+  y: t.Number,
+  radiusX: t.Optional(t.Number),
+  radiusY: t.Optional(t.Number),
+  rotationAngle: t.Optional(t.Number),
+  force: t.Optional(t.Number),
+};
+
 types.RemoteObject = t.Either({
   type: t.Enum(['object', 'function', 'undefined', 'string', 'number', 'boolean', 'symbol', 'bigint']),
   subtype: t.Optional(t.Enum(['array', 'null', 'node', 'regexp', 'date', 'map', 'set', 'weakmap', 'weakset', 'error', 'proxy', 'promise', 'typedarray'])),
@@ -506,6 +515,16 @@ const Page = {
         location: t.Number,
         code: t.String,
         repeat: t.Boolean,
+      }
+    },
+    'dispatchTouchEvent': {
+      params: {
+        type: t.Enum(['touchStart', 'touchEnd', 'touchMove', 'touchCancel']),
+        touchPoints: t.Array(types.TouchPoint),
+        modifiers: t.Number,
+      },
+      returns: {
+        defaultPrevented: t.Boolean,
       }
     },
     'dispatchMouseEvent': {
