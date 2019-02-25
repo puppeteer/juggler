@@ -4,13 +4,23 @@ const {EventEmitter} = ChromeUtils.import('resource://gre/modules/EventEmitter.j
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
+const {CommonUtils} = ChromeUtils.import("resource://services-common/utils.js");
+
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cu = Components.utils;
 const Cr = Components.results;
 const Cm = Components.manager;
+const CC = Components.Constructor;
 const helper = new Helper();
+
+const BinaryInputStream = CC('@mozilla.org/binaryinputstream;1', 'nsIBinaryInputStream', 'setInputStream');
+const BinaryOutputStream = CC('@mozilla.org/binaryoutputstream;1', 'nsIBinaryOutputStream', 'setOutputStream');
+const StorageStream = CC('@mozilla.org/storagestream;1', 'nsIStorageStream', 'init');
+
+// Cap response storage with 100Mb per tracked tab.
+const MAX_RESPONSE_STORAGE_SIZE = 100 * 1024 * 1024;
 
 /**
  * This is a nsIChannelEventSink implementation that monitors channel redirects.
@@ -33,7 +43,7 @@ class NetworkObserver {
 
   constructor() {
     EventEmitter.decorate(this);
-    this._browsers = new Map();
+    this._browserSessionCount = new Map();
     this._activityDistributor = Cc["@mozilla.org/network/http-activity-distributor;1"].getService(Ci.nsIHttpActivityDistributor);
     this._activityDistributor.addObserver(this);
 
@@ -57,6 +67,7 @@ class NetworkObserver {
     // Request interception state.
     this._browserSuspendedChannels = new Map();
     this._extraHTTPHeaders = new Map();
+    this._browserResponseStorages = new Map();
 
     this._eventListeners = [
       helper.addObserver(this._onRequest.bind(this), 'http-on-modify-request'),
@@ -98,6 +109,13 @@ class NetworkObserver {
     httpChannel.resume();
   }
 
+  getResponseBody(browser, requestId) {
+    const responseStorage = this._browserResponseStorages.get(browser);
+    if (!responseStorage)
+      throw new Error('Responses are not tracked for the given browser');
+    return responseStorage.getBase64EncodedResponse(requestId);
+  }
+
   abortSuspendedRequest(browser, aRequestId) {
     const suspendedChannels = this._browserSuspendedChannels.get(browser);
     if (!suspendedChannels)
@@ -119,7 +137,7 @@ class NetworkObserver {
       return;
     const httpChannel = oldChannel.QueryInterface(Ci.nsIHttpChannel);
     const loadContext = getLoadContext(httpChannel);
-    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
+    if (!loadContext || !this._browserSessionCount.has(loadContext.topFrameElement))
       return;
     this._redirectMap.set(newChannel, oldChannel);
   }
@@ -131,7 +149,7 @@ class NetworkObserver {
       return;
     const httpChannel = channel.QueryInterface(Ci.nsIHttpChannel);
     const loadContext = getLoadContext(httpChannel);
-    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
+    if (!loadContext || !this._browserSessionCount.has(loadContext.topFrameElement))
       return;
     if (activitySubtype !== Ci.nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE)
       return;
@@ -145,7 +163,7 @@ class NetworkObserver {
       return;
     const httpChannel = channel.QueryInterface(Ci.nsIHttpChannel);
     const loadContext = getLoadContext(httpChannel);
-    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
+    if (!loadContext || !this._browserSessionCount.has(loadContext.topFrameElement))
       return;
     const extraHeaders = this._extraHTTPHeaders.get(loadContext.topFrameElement);
     if (extraHeaders) {
@@ -164,12 +182,16 @@ class NetworkObserver {
     }
     const oldChannel = this._redirectMap.get(httpChannel);
     this._redirectMap.delete(httpChannel);
+
+    // Install response body hooks.
+    new ResponseBodyListener(this, loadContext.topFrameElement, httpChannel);
+
     this.emit('request', httpChannel, {
       url: httpChannel.URI.spec,
       suspended: suspendedChannels ? true : undefined,
       requestId: requestId(httpChannel),
       redirectedFrom: oldChannel ? requestId(oldChannel) : undefined,
-      postData: readPostData(httpChannel),
+      postData: readRequestPostData(httpChannel),
       headers,
       method: httpChannel.requestMethod,
       isNavigationRequest: httpChannel.isMainDocumentChannel,
@@ -179,7 +201,7 @@ class NetworkObserver {
 
   _onResponse(fromCache, httpChannel, topic) {
     const loadContext = getLoadContext(httpChannel);
-    if (!loadContext || !this._browsers.has(loadContext.topFrameElement))
+    if (!loadContext || !this._browserSessionCount.has(loadContext.topFrameElement))
       return;
     httpChannel.QueryInterface(Ci.nsIHttpChannelInternal);
     const headers = [];
@@ -207,18 +229,32 @@ class NetworkObserver {
     });
   }
 
+  _onResponseFinished(browser, httpChannel, body) {
+    const responseStorage = this._browserResponseStorages.get(browser);
+    if (!responseStorage)
+      return;
+    responseStorage.addResponseBody(httpChannel, body);
+    this.emit('requestfinished', httpChannel, {
+      requestId: requestId(httpChannel),
+    });
+  }
+
   startTrackingBrowserNetwork(browser) {
-    const value = this._browsers.get(browser) || 0;
-    this._browsers.set(browser, value + 1);
+    const value = this._browserSessionCount.get(browser) || 0;
+    this._browserSessionCount.set(browser, value + 1);
+    if (value === 0)
+      this._browserResponseStorages.set(browser, new ResponseStorage(MAX_RESPONSE_STORAGE_SIZE, MAX_RESPONSE_STORAGE_SIZE / 10));
     return () => this.stopTrackingBrowserNetwork(browser);
   }
 
   stopTrackingBrowserNetwork(browser) {
-    const value = this._browsers.get(browser);
-    if (value)
-      this._browsers.set(browser, value - 1);
-    else
-      this._browsers.delete(browser);
+    const value = this._browserSessionCount.get(browser);
+    if (value) {
+      this._browserSessionCount.set(browser, value - 1);
+    } else {
+      this._browserSessionCount.delete(browser);
+      this._browserResponseStorages.delete(browser);
+    }
   }
 
   dispose() {
@@ -254,7 +290,7 @@ function getSecurityDetails(httpChannel) {
   };
 }
 
-function readPostData(httpChannel) {
+function readRequestPostData(httpChannel) {
   if (!(httpChannel instanceof Ci.nsIUploadChannel))
     return undefined;
   const iStream = httpChannel.uploadStream;
@@ -311,6 +347,91 @@ function causeTypeToString(causeType) {
       return key;
   }
   return 'TYPE_OTHER';
+}
+
+class ResponseStorage {
+  constructor(maxTotalSize, maxResponseSize) {
+    this._totalSize = 0;
+    this._maxResponseSize = maxResponseSize;
+    this._maxTotalSize = maxTotalSize;
+    this._responses = new Map();
+  }
+
+  addResponseBody(httpChannel, body) {
+    if (body.length > this._maxResponseSize) {
+      this._responses.set(requestId, {
+        evicted: true,
+        body: '',
+      });
+      return;
+    }
+    let encodings = [];
+    if ((httpChannel instanceof Ci.nsIEncodedChannel) && httpChannel.contentEncodings && !httpChannel.applyConversion) {
+      const encodingHeader = httpChannel.getResponseHeader("Content-Encoding");
+      encodings = encodingHeader.split(/\s*\t*,\s*\t*/);
+    }
+    this._responses.set(requestId(httpChannel), {body, encodings});
+    this._totalSize += body.length;
+    if (this._totalSize > this._maxTotalSize) {
+      for (let [requestId, response] of this._responses) {
+        this._totalSize -= response.body.length;
+        response.body = '';
+        response.evicted = true;
+        if (this._totalSize < this._maxTotalSize)
+          break;
+      }
+    }
+  }
+
+  getBase64EncodedResponse(requestId) {
+    const response = this._responses.get(requestId);
+    if (!response)
+      throw new Error(`Request "${requestId}" is not found`);
+    if (response.evicted)
+      return {base64body: '', evicted: true};
+    let result = response.body;
+    if (response.encodings && response.encodings.length) {
+      for (const encoding of response.encodings)
+        result = CommonUtils.convertString(result, encoding, 'uncompressed');
+    }
+    return {base64body: btoa(result)};
+  }
+}
+
+class ResponseBodyListener {
+  constructor(networkObserver, browser, httpChannel) {
+    this._networkObserver = networkObserver;
+    this._browser = browser;
+    this._httpChannel = httpChannel;
+    this._chunks = [];
+    this.QueryInterface = ChromeUtils.generateQI([Ci.nsIStreamListener]);
+    httpChannel.QueryInterface(Ci.nsITraceableChannel);
+    this.originalListener = httpChannel.setNewListener(this);
+  }
+
+  onDataAvailable(aRequest, aContext, aInputStream, aOffset, aCount) {
+    const iStream = new BinaryInputStream(aInputStream);
+    const sStream = new StorageStream(8192, aCount, null);
+    const oStream = new BinaryOutputStream(sStream.getOutputStream(0));
+
+    // Copy received data as they come.
+    const data = iStream.readBytes(aCount);
+    this._chunks.push(data);
+
+    oStream.writeBytes(data, aCount);
+    this.originalListener.onDataAvailable(aRequest, aContext, sStream.newInputStream(0), aOffset, aCount);
+  }
+
+  onStartRequest(aRequest, aContext) {
+    this.originalListener.onStartRequest(aRequest, aContext);
+  }
+
+  onStopRequest(aRequest, aContext, aStatusCode) {
+    this.originalListener.onStopRequest(aRequest, aContext, aStatusCode);
+    const body = this._chunks.join('');
+    delete this._chunks;
+    this._networkObserver._onResponseFinished(this._browser, this._httpChannel, body);
+  }
 }
 
 var EXPORTED_SYMBOLS = ['NetworkObserver'];

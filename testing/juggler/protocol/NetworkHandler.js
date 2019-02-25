@@ -36,6 +36,10 @@ class NetworkHandler {
     ];
   }
 
+  async getResponseBody({requestId}) {
+    return this._networkObserver.getResponseBody(this._browser, requestId);
+  }
+
   async setExtraHTTPHeaders({headers}) {
     this._networkObserver.setExtraHTTPHeaders(this._browser, headers);
   }

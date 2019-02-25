@@ -194,6 +194,15 @@ const Network = {
         requestId: t.String,
       },
     },
+    'getResponseBody': {
+      params: {
+        requestId: t.String,
+      },
+      returns: {
+        base64body: t.String,
+        evicted: t.Optional(t.Boolean),
+      },
+    },
   },
 };
 
