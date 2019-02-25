@@ -212,22 +212,34 @@ const Runtime = {
   },
   methods: {
     'evaluate': {
-      params: t.Either({
+      params: {
         // Pass frameId here.
         executionContextId: t.String,
-        functionText: t.String,
+        expression: t.String,
+        returnByValue: t.Optional(t.Boolean),
+      },
+
+      returns: {
+        result: t.Optional(types.RemoteObject),
+        exceptionDetails: t.Optional({
+          text: t.Optional(t.String),
+          stack: t.Optional(t.String),
+          value: t.Optional(t.Any),
+        }),
+      }
+    },
+    'callFunction': {
+      params: {
+        // Pass frameId here.
+        executionContextId: t.String,
+        functionDeclaration: t.String,
         returnByValue: t.Optional(t.Boolean),
         args: t.Array(t.Either(
           { objectId: t.String },
           { unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']) },
           { value: t.Any },
         )),
-      }, {
-        // Pass frameId here.
-        executionContextId: t.String,
-        script: t.String,
-        returnByValue: t.Optional(t.Boolean),
-      }),
+      },
 
       returns: {
         result: t.Optional(types.RemoteObject),

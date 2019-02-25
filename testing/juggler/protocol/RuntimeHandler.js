@@ -22,6 +22,14 @@ class RuntimeHandler {
     return await this._contentSession.send('evaluate', options);
   }
 
+  /**
+   * @param {{functionText: String, frameId: String}} options
+   * @return {!Promise<*>}
+   */
+  async callFunction(options) {
+    return await this._contentSession.send('callFunction', options);
+  }
+
   async getObjectProperties(options) {
     return await this._contentSession.send('getObjectProperties', options);
   }

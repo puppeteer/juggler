@@ -474,17 +474,28 @@ class PageAgent {
     return {x: x1 + frame.domWindow().scrollX, y: y1 + frame.domWindow().scrollY, width: x2 - x1, height: y2 - y1};
   }
 
-  async evaluate({executionContextId, functionText, args, script, returnByValue}) {
+  async evaluate({executionContextId, expression, returnByValue}) {
     const frame = this._frameTree.frame(executionContextId);
     if (!frame)
       throw new Error('Failed to find frame with id = ' + executionContextId);
     const executionContext = this._ensureExecutionContext(frame);
     const exceptionDetails = {};
-    let result = null;
-    if (script)
-      result = await executionContext.evaluateScript(script, exceptionDetails);
-    else
-      result = await executionContext.evaluateFunction(functionText, args, exceptionDetails);
+    let result = await executionContext.evaluateScript(expression, exceptionDetails);
+    if (!result)
+      return {exceptionDetails};
+    let isNode = undefined;
+    if (returnByValue)
+      result = executionContext.ensureSerializedToValue(result);
+    return {result};
+  }
+
+  async callFunction({executionContextId, functionDeclaration, args, returnByValue}) {
+    const frame = this._frameTree.frame(executionContextId);
+    if (!frame)
+      throw new Error('Failed to find frame with id = ' + executionContextId);
+    const executionContext = this._ensureExecutionContext(frame);
+    const exceptionDetails = {};
+    let result = await executionContext.evaluateFunction(functionDeclaration, args, exceptionDetails);
     if (!result)
       return {exceptionDetails};
     let isNode = undefined;
