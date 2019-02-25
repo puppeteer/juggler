@@ -507,6 +507,21 @@ class PageAgent {
       throw new Error(`Unknown type ${type}`);
   }
 
+  async dispatchTouchEvent({type, touchPoints, modifiers}) {
+    const frame = this._frameTree.mainFrame();
+    frame.domWindow().windowUtils.sendTouchEvent(
+      type.toLowerCase(),
+      touchPoints.map((point, id) => id),
+      touchPoints.map(point => point.x),
+      touchPoints.map(point => point.y),
+      touchPoints.map(point => point.radiusX === undefined ? 1.0 : point.radiusX),
+      touchPoints.map(point => point.radiusY === undefined ? 1.0 : point.radiusY),
+      touchPoints.map(point => point.rotationAngle === undefined ? 0.0 : point.rotationAngle),
+      touchPoints.map(point => point.force === undefined ? 1.0 : point.force),
+      touchPoints.length,
+      modifiers);
+  }
+
   async dispatchMouseEvent({type, x, y, button, clickCount, modifiers, buttons}) {
     const frame = this._frameTree.mainFrame();
     frame.domWindow().windowUtils.sendMouseEvent(

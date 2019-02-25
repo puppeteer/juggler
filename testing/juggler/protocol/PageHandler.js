@@ -187,6 +187,10 @@ class PageHandler {
     return await this._contentSession.send('Page.dispatchKeyEvent', options);
   }
 
+  async dispatchTouchEvent(options) {
+    return await this._contentSession.send('Page.dispatchTouchEvent', options);
+  }
+
   async dispatchMouseEvent(options) {
     return await this._contentSession.send('Page.dispatchMouseEvent', options);
   }
