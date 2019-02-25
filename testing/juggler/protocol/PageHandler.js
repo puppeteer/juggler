@@ -43,7 +43,7 @@ class PageHandler {
       }),
       helper.addEventListener(this._browser, 'DOMModalDialogClosed', event => this._updateModalDialogs()),
     ];
-    await this._contentSession.send('enable');
+    await this._contentSession.send('Page.enable');
   }
 
   dispose() {
@@ -65,12 +65,12 @@ class PageHandler {
     }
     const dimensions = this._browser.getBoundingClientRect();
     await Promise.all([
-      this._contentSession.send('setViewport', {
+      this._contentSession.send('Page.setViewport', {
         deviceScaleFactor: viewport ? viewport.deviceScaleFactor : 0,
         isMobile: viewport && viewport.isMobile,
         hasTouch: viewport && viewport.hasTouch,
       }),
-      this._contentSession.send('awaitViewportDimensions', {
+      this._contentSession.send('Page.awaitViewportDimensions', {
         width: dimensions.width,
         height: dimensions.height
       }),
@@ -104,67 +104,67 @@ class PageHandler {
   }
 
   async setUserAgent(options) {
-    return await this._contentSession.send('setUserAgent', options);
+    return await this._contentSession.send('Page.setUserAgent', options);
   }
 
   async setFileInputFiles(options) {
-    return await this._contentSession.send('setFileInputFiles', options);
+    return await this._contentSession.send('Page.setFileInputFiles', options);
   }
 
   async setEmulatedMedia(options) {
-    return await this._contentSession.send('setEmulatedMedia', options);
+    return await this._contentSession.send('Page.setEmulatedMedia', options);
   }
 
   async setJavascriptEnabled(options) {
-    return await this._contentSession.send('setJavascriptEnabled', options);
+    return await this._contentSession.send('Page.setJavascriptEnabled', options);
   }
 
   async setCacheDisabled(options) {
-    return await this._contentSession.send('setCacheDisabled', options);
+    return await this._contentSession.send('Page.setCacheDisabled', options);
   }
 
   async addBinding(options) {
-    return await this._contentSession.send('addBinding', options);
+    return await this._contentSession.send('Page.addBinding', options);
   }
 
   async screenshot(options) {
-    return await this._contentSession.send('screenshot', options);
+    return await this._contentSession.send('Page.screenshot', options);
   }
 
   async getBoundingBox(options) {
-    return await this._contentSession.send('getBoundingBox', options);
+    return await this._contentSession.send('Page.getBoundingBox', options);
   }
 
   async getContentQuads(options) {
-    return await this._contentSession.send('getContentQuads', options);
+    return await this._contentSession.send('Page.getContentQuads', options);
   }
 
   /**
    * @param {{frameId: string, url: string}} options
    */
   async navigate(options) {
-    return await this._contentSession.send('navigate', options);
+    return await this._contentSession.send('Page.navigate', options);
   }
 
   /**
    * @param {{frameId: string, url: string}} options
    */
   async goBack(options) {
-    return await this._contentSession.send('goBack', options);
+    return await this._contentSession.send('Page.goBack', options);
   }
 
   /**
    * @param {{frameId: string, url: string}} options
    */
   async goForward(options) {
-    return await this._contentSession.send('goForward', options);
+    return await this._contentSession.send('Page.goForward', options);
   }
 
   /**
    * @param {{frameId: string, url: string}} options
    */
   async reload(options) {
-    return await this._contentSession.send('reload', options);
+    return await this._contentSession.send('Page.reload', options);
   }
 
   /**
@@ -172,27 +172,27 @@ class PageHandler {
    * @return {!Promise<*>}
    */
   async contentFrame(options) {
-    return await this._contentSession.send('contentFrame', options);
+    return await this._contentSession.send('Page.contentFrame', options);
   }
 
   async addScriptToEvaluateOnNewDocument(options) {
-    return await this._contentSession.send('addScriptToEvaluateOnNewDocument', options);
+    return await this._contentSession.send('Page.addScriptToEvaluateOnNewDocument', options);
   }
 
   async removeScriptToEvaluateOnNewDocument(options) {
-    return await this._contentSession.send('removeScriptToEvaluateOnNewDocument', options);
+    return await this._contentSession.send('Page.removeScriptToEvaluateOnNewDocument', options);
   }
 
   async dispatchKeyEvent(options) {
-    return await this._contentSession.send('dispatchKeyEvent', options);
+    return await this._contentSession.send('Page.dispatchKeyEvent', options);
   }
 
   async dispatchMouseEvent(options) {
-    return await this._contentSession.send('dispatchMouseEvent', options);
+    return await this._contentSession.send('Page.dispatchMouseEvent', options);
   }
 
   async insertText(options) {
-    return await this._contentSession.send('insertText', options);
+    return await this._contentSession.send('Page.insertText', options);
   }
 
   async handleDialog({dialogId, accept, promptText}) {

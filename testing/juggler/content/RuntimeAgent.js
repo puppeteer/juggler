@@ -9,9 +9,38 @@ addDebuggerToGlobal(Cu.getGlobalForObject(this));
 const helper = new Helper();
 
 class RuntimeAgent {
-  constructor() {
+  constructor(session) {
     this._debugger = new Debugger();
     this._pendingPromises = new Map();
+    this._session = session;
+    this._executionContexts = new Map();
+
+    this._enabled = false;
+  }
+
+  enable() {
+    if (this._enabled)
+      return;
+    this._enabled = true;
+    for (const executionContext of this._executionContexts.values())
+      this._notifyExecutionContextCreated(executionContext);
+  }
+
+  _notifyExecutionContextCreated(executionContext) {
+    if (!this._enabled)
+      return;
+    this._session.emitEvent('Runtime.executionContextCreated', {
+      executionContextId: executionContext._id,
+      auxData: executionContext._auxData,
+    });
+  }
+
+  _notifyExecutionContextDestroyed(executionContext) {
+    if (!this._enabled)
+      return;
+    this._session.emitEvent('Runtime.executionContextDestroyed', {
+      executionContextId: executionContext._id,
+    });
   }
 
   dispose() {}
@@ -54,8 +83,11 @@ class RuntimeAgent {
     pendingPromise.resolve({success: false, obj: null});
   }
 
-  createExecutionContext(domWindow) {
-    return new ExecutionContext(this, domWindow, this._debugger.addDebuggee(domWindow));
+  createExecutionContext(domWindow, auxData) {
+    const context = new ExecutionContext(this, domWindow, this._debugger.addDebuggee(domWindow), auxData);
+    this._executionContexts.set(context._id, context);
+    this._notifyExecutionContextCreated(context);
+    return context;
   }
 
   destroyExecutionContext(destroyedContext) {
@@ -68,15 +100,65 @@ class RuntimeAgent {
     if (!this._pendingPromises.size)
       this._debugger.onPromiseSettled = undefined;
     this._debugger.removeDebuggee(destroyedContext._domWindow);
+    this._executionContexts.delete(destroyedContext._id);
+    this._notifyExecutionContextDestroyed(destroyedContext);
+  }
+
+  async evaluate({executionContextId, expression, returnByValue}) {
+    const executionContext = this._executionContexts.get(executionContextId);
+    if (!executionContext)
+      throw new Error('Failed to find execution context with id = ' + executionContextId);
+    const exceptionDetails = {};
+    let result = await executionContext.evaluateScript(expression, exceptionDetails);
+    if (!result)
+      return {exceptionDetails};
+    let isNode = undefined;
+    if (returnByValue)
+      result = executionContext.ensureSerializedToValue(result);
+    return {result};
+  }
+
+  async callFunction({executionContextId, functionDeclaration, args, returnByValue}) {
+    const executionContext = this._executionContexts.get(executionContextId);
+    if (!executionContext)
+      throw new Error('Failed to find execution context with id = ' + executionContextId);
+    const exceptionDetails = {};
+    let result = await executionContext.evaluateFunction(functionDeclaration, args, exceptionDetails);
+    if (!result)
+      return {exceptionDetails};
+    let isNode = undefined;
+    if (returnByValue)
+      result = executionContext.ensureSerializedToValue(result);
+    return {result};
+  }
+
+  async getObjectProperties({executionContextId, objectId}) {
+    const executionContext = this._executionContexts.get(executionContextId);
+    if (!executionContext)
+      throw new Error('Failed to find execution context with id = ' + executionContextId);
+    return {properties: executionContext.getObjectProperties(objectId)};
+  }
+
+  async disposeObject({executionContextId, objectId}) {
+    const executionContext = this._executionContexts.get(executionContextId);
+    if (!executionContext)
+      throw new Error('Failed to find execution context with id = ' + executionContextId);
+    return executionContext.disposeObject(objectId);
   }
 }
 
 class ExecutionContext {
-  constructor(runtime, DOMWindow, global) {
+  constructor(runtime, domWindow, global, auxData) {
     this._runtime = runtime;
-    this._domWindow = DOMWindow;
+    this._domWindow = domWindow;
     this._global = global;
     this._remoteObjects = new Map();
+    this._id = helper.generateId();
+    this._auxData = auxData;
+  }
+
+  id() {
+    return this._id;
   }
 
   async evaluateScript(script, exceptionDetails = {}) {

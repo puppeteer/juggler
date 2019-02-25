@@ -14,9 +14,13 @@ class ContentSession {
    */
   constructor(sessionId, messageManager, frameTree, scrollbarManager, networkMonitor) {
     this._sessionId = sessionId;
-    this._runtimeAgent = new RuntimeAgent();
     this._messageManager = messageManager;
-    this._pageAgent = new PageAgent(this, this._runtimeAgent, frameTree, scrollbarManager, networkMonitor);
+    const runtimeAgent = new RuntimeAgent(this);
+    const pageAgent = new PageAgent(this, runtimeAgent, frameTree, scrollbarManager, networkMonitor);
+    this._agents = {
+      Page: pageAgent,
+      Runtime: runtimeAgent,
+    };
     this._eventListeners = [
       helper.addMessageListener(messageManager, this._sessionId, this._onMessage.bind(this)),
     ];
@@ -33,10 +37,14 @@ class ContentSession {
   async _onMessage(msg) {
     const id = msg.data.id;
     try {
-      const handler = this._pageAgent[msg.data.methodName];
+      const [domainName, methodName] = msg.data.methodName.split('.');
+      const agent = this._agents[domainName];
+      if (!agent)
+        throw new Error(`unknown domain: ${domainName}`);
+      const handler = agent[methodName];
       if (!handler)
-        throw new Error('unknown method: "' + msg.data.methodName + '"');
-      const result = await handler.call(this._pageAgent, msg.data.params);
+        throw new Error(`unknown method: ${domainName}.${methodName}`);
+      const result = await handler.call(agent, msg.data.params);
       this._messageManager.sendAsyncMessage(this._sessionId, {id, result});
     } catch (e) {
       this._messageManager.sendAsyncMessage(this._sessionId, {id, error: e.message + '\n' + e.stack});
@@ -45,8 +53,8 @@ class ContentSession {
 
   dispose() {
     helper.removeListeners(this._eventListeners);
-    this._pageAgent.dispose();
-    this._runtimeAgent.dispose();
+    for (const agent of Object.values(this._agents))
+      agent.dispose();
   }
 }
 

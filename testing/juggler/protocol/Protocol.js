@@ -209,8 +209,18 @@ const Network = {
 const Runtime = {
   targets: ['page'],
   events: {
+    'executionContextCreated': {
+      executionContextId: t.String,
+      auxData: t.Any,
+    },
+    'executionContextDestroyed': {
+      executionContextId: t.String,
+    },
   },
   methods: {
+    'enable': {
+      params: {},
+    },
     'evaluate': {
       params: {
         // Pass frameId here.
@@ -314,7 +324,7 @@ const Page = {
       url: t.String,
     },
     'console': {
-      frameId: t.String,
+      executionContextId: t.String,
       args: t.Array(types.RemoteObject),
       type: t.String,
       location: {
@@ -333,7 +343,7 @@ const Page = {
       dialogId: t.String,
     },
     'bindingCalled': {
-      frameId: t.String,
+      executionContextId: t.String,
       name: t.String,
       payload: t.Any,
     },

@@ -40,7 +40,8 @@ class PageAgent {
         }
         const errorWindow = Services.wm.getOuterWindowWithId(message.outerWindowID);
         const frame = errorWindow ? this._frameTree.frameForDocShell(errorWindow.docShell) : null;
-        if (!frame)
+        const executionContext = this._frameToExecutionContext.get(frame);
+        if (!executionContext)
           return;
         const typeNames = {
           [Ci.nsIConsoleMessage.debug]: 'debug',
@@ -53,7 +54,7 @@ class PageAgent {
             value: message.message,
           }],
           type: typeNames[message.logLevel],
-          frameId: frame.id(),
+          executionContextId: executionContext.id(),
           location: {
             lineNumber: message.lineNumber,
             columnNumber: message.columnNumber,
@@ -240,10 +241,10 @@ class PageAgent {
       this._runtime.destroyExecutionContext(this._frameToExecutionContext.get(frame));
       this._frameToExecutionContext.delete(frame);
     }
+    const executionContext = this._ensureExecutionContext(frame);
 
     if (!this._scriptsToEvaluateOnNewDocument.size && !this._bindingsToAdd.size)
       return;
-    const executionContext = this._ensureExecutionContext(frame);
     for (const bindingName of this._bindingsToAdd.values())
       this._exposeFunction(frame, bindingName);
     for (const script of this._scriptsToEvaluateOnNewDocument.values()) {
@@ -261,6 +262,7 @@ class PageAgent {
       frameId: frame.id(),
       parentFrameId: frame.parentFrame() ? frame.parentFrame().id() : undefined,
     });
+    this._ensureExecutionContext(frame);
   }
 
   _onFrameDetached(frame) {
@@ -272,7 +274,9 @@ class PageAgent {
   _ensureExecutionContext(frame) {
     let executionContext = this._frameToExecutionContext.get(frame);
     if (!executionContext) {
-      executionContext = this._runtime.createExecutionContext(frame.domWindow());
+      executionContext = this._runtime.createExecutionContext(frame.domWindow(), {
+        frameId: frame.id(),
+      });
       this._frameToExecutionContext.set(frame, executionContext);
     }
     return executionContext;
@@ -317,14 +321,14 @@ class PageAgent {
         break;
       }
     }
-    if (!messageFrame)
+    const executionContext = this._frameToExecutionContext.get(messageFrame);
+    if (!executionContext)
       return;
-    const executionContext = this._ensureExecutionContext(messageFrame);
     const args = wrappedJSObject.arguments.map(arg => executionContext.rawValueToRemoteObject(arg));
     this._session.emitEvent('Page.console', {
       args,
       type,
-      frameId: messageFrame.id(),
+      executionContextId: executionContext.id(),
       location: {
         lineNumber: wrappedJSObject.lineNumber - 1,
         columnNumber: wrappedJSObject.columnNumber - 1,
@@ -378,14 +382,6 @@ class PageAgent {
     return {navigationId: frame.pendingNavigationId(), navigationURL: frame.pendingNavigationURL()};
   }
 
-  async disposeObject({executionContextId, objectId}) {
-    const frame = this._frameTree.frame(executionContextId);
-    if (!frame)
-      throw new Error('Failed to find frame with id = ' + executionContextId);
-    const executionContext = this._ensureExecutionContext(frame);
-    return executionContext.disposeObject(objectId);
-  }
-
   addBinding({name}) {
     if (this._bindingsToAdd.has(name))
       throw new Error(`Binding with name ${name} already exists`);
@@ -396,8 +392,9 @@ class PageAgent {
 
   _exposeFunction(frame, name) {
     Cu.exportFunction((...args) => {
+      const executionContext = this._ensureExecutionContext(frame);
       this._session.emitEvent('Page.bindingCalled', {
-        frameId: frame.id(),
+        executionContextId: executionContext.id(),
         name,
         payload: args[0]
       });
@@ -472,44 +469,6 @@ class PageAgent {
       y2 = Math.max(boundingBox.y + boundingBox.height, y2);
     }
     return {x: x1 + frame.domWindow().scrollX, y: y1 + frame.domWindow().scrollY, width: x2 - x1, height: y2 - y1};
-  }
-
-  async evaluate({executionContextId, expression, returnByValue}) {
-    const frame = this._frameTree.frame(executionContextId);
-    if (!frame)
-      throw new Error('Failed to find frame with id = ' + executionContextId);
-    const executionContext = this._ensureExecutionContext(frame);
-    const exceptionDetails = {};
-    let result = await executionContext.evaluateScript(expression, exceptionDetails);
-    if (!result)
-      return {exceptionDetails};
-    let isNode = undefined;
-    if (returnByValue)
-      result = executionContext.ensureSerializedToValue(result);
-    return {result};
-  }
-
-  async callFunction({executionContextId, functionDeclaration, args, returnByValue}) {
-    const frame = this._frameTree.frame(executionContextId);
-    if (!frame)
-      throw new Error('Failed to find frame with id = ' + executionContextId);
-    const executionContext = this._ensureExecutionContext(frame);
-    const exceptionDetails = {};
-    let result = await executionContext.evaluateFunction(functionDeclaration, args, exceptionDetails);
-    if (!result)
-      return {exceptionDetails};
-    let isNode = undefined;
-    if (returnByValue)
-      result = executionContext.ensureSerializedToValue(result);
-    return {result};
-  }
-
-  async getObjectProperties({executionContextId, objectId}) {
-    const frame = this._frameTree.frame(executionContextId);
-    if (!frame)
-      throw new Error('Failed to find frame with id = ' + executionContextId);
-    const executionContext = this._ensureExecutionContext(frame);
-    return {properties: executionContext.getObjectProperties(objectId)};
   }
 
   async screenshot({mimeType, fullPage, clip}) {

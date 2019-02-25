@@ -106,7 +106,7 @@ class NetworkHandler {
   async _onRequest(httpChannel, eventDetails) {
     let details = null;
     try {
-      details = await this._contentSession.send('requestDetails', {channelId: httpChannel.channelId});
+      details = await this._contentSession.send('Page.requestDetails', {channelId: httpChannel.channelId});
     } catch (e) {
       if (this._contentSession.isDisposed())
         return;

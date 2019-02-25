@@ -14,28 +14,24 @@ class RuntimeHandler {
     this._contentSession = contentSession;
   }
 
-  /**
-   * @param {{functionText: String, frameId: String}} options
-   * @return {!Promise<*>}
-   */
-  async evaluate(options) {
-    return await this._contentSession.send('evaluate', options);
+  async enable(options) {
+    return await this._contentSession.send('Runtime.enable', options);
   }
 
-  /**
-   * @param {{functionText: String, frameId: String}} options
-   * @return {!Promise<*>}
-   */
+  async evaluate(options) {
+    return await this._contentSession.send('Runtime.evaluate', options);
+  }
+
   async callFunction(options) {
-    return await this._contentSession.send('callFunction', options);
+    return await this._contentSession.send('Runtime.callFunction', options);
   }
 
   async getObjectProperties(options) {
-    return await this._contentSession.send('getObjectProperties', options);
+    return await this._contentSession.send('Runtime.getObjectProperties', options);
   }
 
   async disposeObject(options) {
-    return await this._contentSession.send('disposeObject', options);
+    return await this._contentSession.send('Runtime.disposeObject', options);
   }
 
   dispose() {}
