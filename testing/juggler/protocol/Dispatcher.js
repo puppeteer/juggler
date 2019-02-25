@@ -8,6 +8,7 @@ const PROTOCOL_HANDLERS = {
   Network: ChromeUtils.import("chrome://juggler/content/protocol/NetworkHandler.js").NetworkHandler,
   Browser: ChromeUtils.import("chrome://juggler/content/protocol/BrowserHandler.js").BrowserHandler,
   Target: ChromeUtils.import("chrome://juggler/content/protocol/TargetHandler.js").TargetHandler,
+  Runtime: ChromeUtils.import("chrome://juggler/content/protocol/RuntimeHandler.js").RuntimeHandler,
 };
 
 class Dispatcher {

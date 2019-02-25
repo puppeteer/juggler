@@ -103,10 +103,6 @@ class PageHandler {
     }
   }
 
-  url() {
-    return this._browser.currentURI.spec;
-  }
-
   async setUserAgent(options) {
     return await this._contentSession.send('setUserAgent', options);
   }
@@ -119,16 +115,16 @@ class PageHandler {
     return await this._contentSession.send('setEmulatedMedia', options);
   }
 
-  async addBinding(options) {
-    return await this._contentSession.send('addBinding', options);
-  }
-
   async setJavascriptEnabled(options) {
     return await this._contentSession.send('setJavascriptEnabled', options);
   }
 
   async setCacheDisabled(options) {
     return await this._contentSession.send('setCacheDisabled', options);
+  }
+
+  async addBinding(options) {
+    return await this._contentSession.send('addBinding', options);
   }
 
   async screenshot(options) {
@@ -172,23 +168,11 @@ class PageHandler {
   }
 
   /**
-   * @param {{functionText: String, frameId: String}} options
-   * @return {!Promise<*>}
-   */
-  async evaluate(options) {
-    return await this._contentSession.send('evaluate', options);
-  }
-
-  /**
    * @param {{frameId: String, objectId: String}} options
    * @return {!Promise<*>}
    */
   async contentFrame(options) {
     return await this._contentSession.send('contentFrame', options);
-  }
-
-  async getObjectProperties(options) {
-    return await this._contentSession.send('getObjectProperties', options);
   }
 
   async addScriptToEvaluateOnNewDocument(options) {
@@ -197,10 +181,6 @@ class PageHandler {
 
   async removeScriptToEvaluateOnNewDocument(options) {
     return await this._contentSession.send('removeScriptToEvaluateOnNewDocument', options);
-  }
-
-  async disposeObject(options) {
-    return await this._contentSession.send('disposeObject', options);
   }
 
   async dispatchKeyEvent(options) {

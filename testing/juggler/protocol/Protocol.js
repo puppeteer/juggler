@@ -12,6 +12,28 @@ types.TargetInfo = {
   openerId: t.Optional(t.String),
 };
 
+types.DOMPoint = {
+  x: t.Number,
+  y: t.Number,
+};
+
+types.DOMQuad = {
+  p1: types.DOMPoint,
+  p2: types.DOMPoint,
+  p3: types.DOMPoint,
+  p4: types.DOMPoint,
+};
+
+types.RemoteObject = t.Either({
+  type: t.Enum(['object', 'function', 'undefined', 'string', 'number', 'boolean', 'symbol', 'bigint']),
+  subtype: t.Optional(t.Enum(['array', 'null', 'node', 'regexp', 'date', 'map', 'set', 'weakmap', 'weakset', 'error', 'proxy', 'promise', 'typedarray'])),
+  objectId: t.String,
+}, {
+  unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']),
+}, {
+  value: t.Any
+});
+
 const Browser = {
   targets: ['browser'],
 
@@ -100,28 +122,6 @@ const Target = {
   },
 };
 
-types.DOMPoint = {
-  x: t.Number,
-  y: t.Number,
-};
-
-types.DOMQuad = {
-  p1: types.DOMPoint,
-  p2: types.DOMPoint,
-  p3: types.DOMPoint,
-  p4: types.DOMPoint,
-};
-
-types.RemoteObject = t.Either({
-  type: t.Enum(['object', 'function', 'undefined', 'string', 'number', 'boolean', 'symbol', 'bigint']),
-  subtype: t.Optional(t.Enum(['array', 'null', 'node', 'regexp', 'date', 'map', 'set', 'weakmap', 'weakset', 'error', 'proxy', 'promise', 'typedarray'])),
-  objectId: t.String,
-}, {
-  unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']),
-}, {
-  value: t.Any
-});
-
 const Network = {
   targets: ['page'],
   events: {
@@ -202,6 +202,61 @@ const Network = {
         base64body: t.String,
         evicted: t.Optional(t.Boolean),
       },
+    },
+  },
+};
+
+const Runtime = {
+  targets: ['page'],
+  events: {
+  },
+  methods: {
+    'evaluate': {
+      params: t.Either({
+        // Pass frameId here.
+        executionContextId: t.String,
+        functionText: t.String,
+        returnByValue: t.Optional(t.Boolean),
+        args: t.Array(t.Either(
+          { objectId: t.String },
+          { unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']) },
+          { value: t.Any },
+        )),
+      }, {
+        // Pass frameId here.
+        executionContextId: t.String,
+        script: t.String,
+        returnByValue: t.Optional(t.Boolean),
+      }),
+
+      returns: {
+        result: t.Optional(types.RemoteObject),
+        exceptionDetails: t.Optional({
+          text: t.Optional(t.String),
+          stack: t.Optional(t.String),
+          value: t.Optional(t.Any),
+        }),
+      }
+    },
+    'disposeObject': {
+      params: {
+        executionContextId: t.String,
+        objectId: t.String,
+      },
+    },
+
+    'getObjectProperties': {
+      params: {
+        executionContextId: t.String,
+        objectId: t.String,
+      },
+
+      returns: {
+        properties: t.Array({
+          name: t.String,
+          value: types.RemoteObject,
+        }),
+      }
     },
   },
 };
@@ -288,6 +343,11 @@ const Page = {
         files: t.Array(t.String),
       },
     },
+    'addBinding': {
+      params: {
+        name: t.String,
+      },
+    },
     'setViewport': {
       params: {
         viewport: t.Nullable({
@@ -329,38 +389,6 @@ const Page = {
         frameId: t.Nullable(t.String),
       },
     },
-    'evaluate': {
-      params: t.Either({
-        // Pass frameId here.
-        executionContextId: t.String,
-        functionText: t.String,
-        returnByValue: t.Optional(t.Boolean),
-        args: t.Array(t.Either(
-          { objectId: t.String },
-          { unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']) },
-          { value: t.Any },
-        )),
-      }, {
-        // Pass frameId here.
-        executionContextId: t.String,
-        script: t.String,
-        returnByValue: t.Optional(t.Boolean),
-      }),
-
-      returns: {
-        result: t.Optional(types.RemoteObject),
-        exceptionDetails: t.Optional({
-          text: t.Optional(t.String),
-          stack: t.Optional(t.String),
-          value: t.Optional(t.Any),
-        }),
-      }
-    },
-    'addBinding': {
-      params: {
-        name: t.String,
-      },
-    },
     'addScriptToEvaluateOnNewDocument': {
       params: {
         script: t.String,
@@ -373,26 +401,6 @@ const Page = {
       params: {
         scriptId: t.String,
       },
-    },
-    'disposeObject': {
-      params: {
-        executionContextId: t.String,
-        objectId: t.String,
-      },
-    },
-
-    'getObjectProperties': {
-      params: {
-        executionContextId: t.String,
-        objectId: t.String,
-      },
-
-      returns: {
-        properties: t.Array({
-          name: t.String,
-          value: types.RemoteObject,
-        }),
-      }
     },
     'navigate': {
       params: {
@@ -505,7 +513,7 @@ const Page = {
 };
 
 this.protocol = {
-  domains: {Browser, Target, Page, Network},
+  domains: {Browser, Target, Page, Runtime, Network},
 };
 this.checkScheme = checkScheme;
 this.EXPORTED_SYMBOLS = ['protocol', 'checkScheme'];
