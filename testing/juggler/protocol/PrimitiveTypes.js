@@ -79,6 +79,13 @@ t.Array = function(scheme) {
   }
 }
 
+t.Recursive = function(types, schemeName) {
+  return function(x, details = {}, path = ['<root>']) {
+    const scheme = types[schemeName];
+    return checkScheme(scheme, x, details, path);
+  }
+}
+
 t.Either = function(...schemes) {
   return function(x, details = {}, path = ['<root>']) {
     const nestedDetails = [];

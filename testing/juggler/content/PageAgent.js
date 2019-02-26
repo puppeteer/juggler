@@ -559,6 +559,121 @@ class PageAgent {
     const frame = this._frameTree.mainFrame();
     frame.textInputProcessor().commitCompositionWith(text);
   }
+
+  async getFullAXTree() {
+    const service = Cc["@mozilla.org/accessibilityService;1"]
+      .getService(Ci.nsIAccessibilityService);
+    const document = this._frameTree.mainFrame().domWindow().document;
+    const docAcc = service.getAccessibleFor(document);
+
+    async function waitForQuiet() {
+      let state = {};
+      docAcc.getState(state, {});
+      if ((state.value & Ci.nsIAccessibleStates.STATE_BUSY) == 0)
+        return;
+      let resolve, reject;
+      const promise = new Promise((x, y) => {resolve = x, reject = y});
+      let eventObserver = {
+        observe(subject, topic) {
+          if (topic !== "accessible-event") {
+            return;
+          }
+
+          // If event type does not match expected type, skip the event.
+          let event = subject.QueryInterface(Ci.nsIAccessibleEvent);
+          if (event.eventType !== Ci.nsIAccessibleEvent.EVENT_STATE_CHANGE) {
+            return;
+          }
+
+          // If event's accessible does not match expected accessible,
+          // skip the event.
+          if (event.accessible !== docAcc) {
+            return;
+          }
+
+          Services.obs.removeObserver(this, "accessible-event");
+          resolve();
+        },
+      };
+      Services.obs.addObserver(eventObserver, "accessible-event");
+      return promise;
+    }
+    function buildNode(accElement) {
+      let a = {}, b = {};
+      accElement.getState(a, b);
+      const tree = {
+        role: service.getStringRole(accElement.role),
+        name: accElement.name || '',
+      };
+      for (const userStringProperty of [
+        'value',
+        'description'
+      ]) {
+        tree[userStringProperty] = accElement[userStringProperty] || undefined;
+      }
+
+      const states = {};
+      for (const name of service.getStringStates(a.value, b.value))
+        states[name] = true;
+      for (const name of ['selected',
+        'focused',
+        'pressed',
+        'focusable',
+        'haspopup',
+        'required',
+        'invalid',
+        'modal',
+        'editable',
+        'busy',
+        'checked',
+        'multiselectable']) {
+        if (states[name])
+          tree[name] = true;
+      }
+
+      if (states['multi line'])
+        tree['multiline'] = true;
+      if (states['editable'] && states['readonly'])
+        tree['readonly'] = true;
+      if (states['checked'])
+        tree['checked'] = true;
+      if (states['mixed'])
+        tree['checked'] = 'mixed';
+      if (states['expanded'])
+        tree['expanded'] = true;
+      else if (states['collapsed'])
+        tree['expanded'] = false
+      if (!states['enabled'])
+        tree['disabled'] = true;
+
+      const attributes = {};
+      if (accElement.attributes) {
+        for (const { key, value } of accElement.attributes.enumerate()) {
+          attributes[key] = value;
+        }
+      }
+      for (const numericalProperty of ['level']) {
+        if (numericalProperty in attributes)
+          tree[numericalProperty] = parseFloat(attributes[numericalProperty]);
+      }
+      for (const stringProperty of ['tag', 'roledescription', 'valuetext', 'orientation', 'autocomplete', 'keyshortcuts']) {
+        if (stringProperty in attributes)
+          tree[stringProperty] = attributes[stringProperty];
+      }
+      const children = [];
+
+      for (let child = accElement.firstChild; child; child = child.nextSibling) {
+        children.push(buildNode(child));
+      }
+      if (children.length)
+        tree.children = children;
+      return tree;
+    }
+    await waitForQuiet();
+    return {
+      tree: buildNode(docAcc)
+    };
+  }
 }
 
 function takeScreenshot(win, left, top, width, height, mimeType) {

@@ -9,6 +9,7 @@ const PROTOCOL_HANDLERS = {
   Browser: ChromeUtils.import("chrome://juggler/content/protocol/BrowserHandler.js").BrowserHandler,
   Target: ChromeUtils.import("chrome://juggler/content/protocol/TargetHandler.js").TargetHandler,
   Runtime: ChromeUtils.import("chrome://juggler/content/protocol/RuntimeHandler.js").RuntimeHandler,
+  Accessibility: ChromeUtils.import("chrome://juggler/content/protocol/AccessibilityHandler.js").AccessibilityHandler,
 };
 
 class Dispatcher {
