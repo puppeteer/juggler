@@ -43,6 +43,43 @@ types.RemoteObject = t.Either({
   value: t.Any
 });
 
+types.AXTree = {
+  role: t.String,
+  name: t.String,
+  children: t.Optional(t.Array(t.Recursive(types, 'AXTree'))),
+
+  selected: t.Optional(t.Boolean),
+  focused: t.Optional(t.Boolean),
+  pressed: t.Optional(t.Boolean),
+  focusable: t.Optional(t.Boolean),
+  haspopup: t.Optional(t.Boolean),
+  required: t.Optional(t.Boolean),
+  invalid: t.Optional(t.Boolean),
+  modal: t.Optional(t.Boolean),
+  editable: t.Optional(t.Boolean),
+  busy: t.Optional(t.Boolean),
+  multiline: t.Optional(t.Boolean),
+  readonly: t.Optional(t.Boolean),
+  checked: t.Optional(t.Enum(['mixed', true])),
+  expanded: t.Optional(t.Boolean),
+  disabled: t.Optional(t.Boolean),
+  multiselectable: t.Optional(t.Boolean),
+
+  value: t.Optional(t.String),
+  description: t.Optional(t.String),
+
+  value: t.Optional(t.String),
+  roledescription: t.Optional(t.String),
+  valuetext: t.Optional(t.String),
+  orientation: t.Optional(t.String),
+  autocomplete: t.Optional(t.String),
+  keyshortcuts: t.Optional(t.String),
+
+  level: t.Optional(t.Number),
+
+  tag: t.Optional(t.String),
+}
+
 const Browser = {
   targets: ['browser'],
 
@@ -553,8 +590,22 @@ const Page = {
   },
 };
 
+
+const Accessibility = {
+  targets: ['page'],
+  events: {},
+  methods: {
+    'getFullAXTree': {
+      params: {},
+      returns: {
+        tree:types.AXTree
+      },
+    }
+  }
+}
+
 this.protocol = {
-  domains: {Browser, Target, Page, Runtime, Network},
+  domains: {Browser, Target, Page, Runtime, Network, Accessibility},
 };
 this.checkScheme = checkScheme;
 this.EXPORTED_SYMBOLS = ['protocol', 'checkScheme'];
