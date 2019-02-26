@@ -7,9 +7,9 @@ class AccessibilityHandler {
   async getFullAXTree() {
     return await this._contentSession.send('Page.getFullAXTree');
   }
+
+  dispose() { }
 }
-
-
 
 var EXPORTED_SYMBOLS = ['AccessibilityHandler'];
 this.AccessibilityHandler = AccessibilityHandler;

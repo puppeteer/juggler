@@ -37,6 +37,18 @@ class BrowserHandler {
     this._contextManager.resetPermissions(browserContextId);
   }
 
+  setCookies({browserContextId, cookies}) {
+    this._contextManager.setCookies(browserContextId, cookies);
+  }
+
+  deleteCookies({browserContextId, cookies}) {
+    this._contextManager.deleteCookies(browserContextId, cookies);
+  }
+
+  getCookies({browserContextId, urls}) {
+    return {cookies: this._contextManager.getCookies(browserContextId, urls)};
+  }
+
   async getInfo() {
     const version = Components.classes["@mozilla.org/xre/app-info;1"]
                               .getService(Components.interfaces.nsIXULAppInfo)

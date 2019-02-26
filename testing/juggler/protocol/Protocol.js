@@ -112,6 +112,53 @@ const Browser = {
         browserContextId: t.Optional(t.String),
       }
     },
+    'setCookies': {
+      params: {
+        browserContextId: t.Optional(t.String),
+        cookies: t.Array({
+          name: t.String,
+          value: t.String,
+          url: t.Optional(t.String),
+          domain: t.Optional(t.String),
+          path: t.Optional(t.String),
+          secure: t.Optional(t.Boolean),
+          httpOnly: t.Optional(t.Boolean),
+          sameSite: t.Optional(t.Enum(['strict', 'lax'])),
+          expires: t.Optional(t.Number),
+        }),
+      }
+    },
+    'deleteCookies': {
+      params: {
+        browserContextId: t.Optional(t.String),
+        cookies: t.Array({
+          name: t.String,
+          domain: t.Optional(t.String),
+          path: t.Optional(t.String),
+          url: t.Optional(t.String),
+        }),
+      }
+    },
+    'getCookies': {
+      params: {
+        browserContextId: t.Optional(t.String),
+        urls: t.Array(t.String),
+      },
+      returns: {
+        cookies: t.Array({
+          name: t.String,
+          domain: t.String,
+          path: t.String,
+          value: t.String,
+          expires: t.Number,
+          size: t.Number,
+          httpOnly: t.Boolean,
+          secure: t.Boolean,
+          session: t.Boolean,
+          sameSite: t.Optional(t.Enum(['strict', 'lax'])),
+        }),
+      },
+    },
   },
 };
 

@@ -156,6 +156,8 @@ class ChromeSession {
       this._contentSession.dispose();
     this._contentSession = null;
     for (const [domainName, handler] of Object.entries(this._handlers)) {
+      if (!handler.dispose)
+        throw new Error(`Handler for "${domainName}" domain does not define |dispose| method!`);
       handler.dispose();
       delete this._handlers[domainName];
     }
