@@ -33,15 +33,13 @@ types.TouchPoint = {
   force: t.Optional(t.Number),
 };
 
-types.RemoteObject = t.Either({
-  type: t.Enum(['object', 'function', 'undefined', 'string', 'number', 'boolean', 'symbol', 'bigint']),
+types.RemoteObject = {
+  type: t.Optional(t.Enum(['object', 'function', 'undefined', 'string', 'number', 'boolean', 'symbol', 'bigint'])),
   subtype: t.Optional(t.Enum(['array', 'null', 'node', 'regexp', 'date', 'map', 'set', 'weakmap', 'weakset', 'error', 'proxy', 'promise', 'typedarray'])),
-  objectId: t.String,
-}, {
-  unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']),
-}, {
+  objectId: t.Optional(t.String),
+  unserializableValue: t.Optional(t.Enum(['Infinity', '-Infinity', '-0', 'NaN'])),
   value: t.Any
-});
+};
 
 types.AXTree = {
   role: t.String,
@@ -337,11 +335,11 @@ const Runtime = {
         executionContextId: t.String,
         functionDeclaration: t.String,
         returnByValue: t.Optional(t.Boolean),
-        args: t.Array(t.Either(
-          { objectId: t.String },
-          { unserializableValue: t.Enum(['Infinity', '-Infinity', '-0', 'NaN']) },
-          { value: t.Any },
-        )),
+        args: t.Array({
+          objectId: t.Optional(t.String),
+          unserializableValue: t.Optional(t.Enum(['Infinity', '-Infinity', '-0', 'NaN'])),
+          value: t.Any,
+        }),
       },
 
       returns: {

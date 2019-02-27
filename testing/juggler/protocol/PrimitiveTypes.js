@@ -86,39 +86,6 @@ t.Recursive = function(types, schemeName) {
   }
 }
 
-t.Either = function(...schemes) {
-  return function(x, details = {}, path = ['<root>']) {
-    const nestedDetails = [];
-    const results = [];
-    let successes = 0;
-    for (const scheme of schemes) {
-      const d = {};
-      nestedDetails.push(d);
-      const result = checkScheme(scheme, x, d, path.slice());
-      results.push(result);
-      if (result)
-        ++successes;
-    }
-    if (!successes) {
-      details.error = `Neither scheme matched ${beauty(path, x)}.\n`;
-      for (let i = 0; i < nestedDetails.length; ++i) {
-        details.error += `\n== SCHEME #${i + 1} ERRORS ==\n` + nestedDetails[i].error.split('\n').map(line => '    ' + line).join('\n');
-      }
-      return false;
-    }
-    if (successes > 1) {
-      const successfulSchemeNumbers = [];
-      for (let i = 0; i < results.length; ++i) {
-        if (results[i])
-          successfulSchemeNumbers.push(i + 1);
-      }
-      details.error = `Multiple schemes (${successfulSchemeNumbers.join(', ')}) matched ${beauty(path, x)}`;
-      return false;
-    }
-    return true;
-  }
-}
-
 function beauty(path, obj) {
   if (path.length === 1)
     return `object ${JSON.stringify(obj, null, 2)}`;
