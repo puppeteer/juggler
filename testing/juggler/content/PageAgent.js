@@ -491,6 +491,10 @@ class PageAgent {
   async dispatchKeyEvent({type, keyCode, code, key, repeat, location}) {
     const frame = this._frameTree.mainFrame();
     const tip = frame.textInputProcessor();
+    if (key === 'Meta' && Services.appinfo.OS !== 'Darwin')
+      key = 'OS';
+    else if (key === 'OS' && Services.appinfo.OS === 'Darwin')
+      key = 'Meta';
     let keyEvent = new (frame.domWindow().KeyboardEvent)("", {
       key,
       code,
