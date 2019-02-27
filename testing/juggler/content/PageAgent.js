@@ -2,11 +2,14 @@
 const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
+const Cc = Components.classes;
 
 const {Helper} = ChromeUtils.import('chrome://juggler/content/Helper.js');
 const {NetUtil} = ChromeUtils.import('resource://gre/modules/NetUtil.jsm');
 
 const helper = new Helper();
+
+const wdb = Cc["@mozilla.org/dom/workers/workerdebuggermanager;1"].getService(Ci.nsIWorkerDebuggerManager);
 
 class PageAgent {
   constructor(session, runtimeAgent, frameTree, scrollbarManager, networkMonitor) {
@@ -19,6 +22,8 @@ class PageAgent {
     this._frameToExecutionContext = new Map();
     this._scriptsToEvaluateOnNewDocument = new Map();
     this._bindingsToAdd = new Set();
+
+    this._workerSessions = new Map();
 
     const disallowedMessageCategories = new Set([
       'XPConnect JavaScript',
@@ -148,8 +153,19 @@ class PageAgent {
       if (frame.pendingNavigationId())
         this._onNavigationStarted(frame);
     }
+
+    for (const workerDebugger of wdb.getWorkerDebuggerEnumerator())
+      this._ensureWorkerSession(workerDebugger);
+
+    const workerListener = {
+      onRegister: workerDebugger => this._ensureWorkerSession(workerDebugger),
+      onUnregister: workerDebugger => this._destroyWorkerSession(workerDebugger),
+    };
+    wdb.addListener(workerListener);
+
     Services.console.registerListener(this._consoleServiceListener);
     this._eventListeners = [
+      () => wdb.removeListener(workerListener),
       () => Services.console.unregisterListener(this._consoleServiceListener),
       helper.addObserver(this._consoleAPICalled.bind(this), "console-api-log-event"),
       helper.addObserver(this._onDOMWindowCreated.bind(this), 'content-document-global-created'),
@@ -174,6 +190,14 @@ class PageAgent {
       frameId: frame.id(),
       name: 'DOMContentLoaded',
     });
+  }
+
+  _ensureWorkerSession(workerDebugger) {
+    if (this._workerSessions.has(workerDebugger))
+      return;
+  }
+
+  _destroyWorkerSession(workerDebugger) {
   }
 
   _onError(errorEvent) {

@@ -8,6 +8,8 @@ const Cu = Components.utils;
 addDebuggerToGlobal(Cu.getGlobalForObject(this));
 const helper = new Helper();
 
+const wdb = Cc["@mozilla.org/dom/workers/workerdebuggermanager;1"].getService(Ci.nsIWorkerDebuggerManager);
+
 class RuntimeAgent {
   constructor(session) {
     this._debugger = new Debugger();
@@ -15,6 +17,8 @@ class RuntimeAgent {
     this._session = session;
     this._executionContexts = new Map();
 
+    this._workerSessions = new Map();
+    this._eventListeners = [];
     this._enabled = false;
   }
 
@@ -22,8 +26,30 @@ class RuntimeAgent {
     if (this._enabled)
       return;
     this._enabled = true;
+
+    for (const workerDebugger of wdb.getWorkerDebuggerEnumerator())
+      this._ensureWorkerSession(workerDebugger);
+
+    const workerListener = {
+      onRegister: workerDebugger => this._ensureWorkerSession(workerDebugger),
+      onUnregister: workerDebugger => this._destroyWorkerSession(workerDebugger),
+    };
+    wdb.addListener(workerListener);
+
     for (const executionContext of this._executionContexts.values())
       this._notifyExecutionContextCreated(executionContext);
+
+    this._eventListeners = [
+      () => wdb.removeListener(workerListener),
+    ];
+  }
+
+  _ensureWorkerSession(workerDebugger) {
+    if (this._workerSessions.has(workerDebugger))
+      return;
+  }
+
+  _destroyWorkerSession(workerDebugger) {
   }
 
   _notifyExecutionContextCreated(executionContext) {
@@ -43,7 +69,9 @@ class RuntimeAgent {
     });
   }
 
-  dispose() {}
+  dispose() {
+    helper.removeListener(this._eventListeners);
+  }
 
   async _awaitPromise(executionContext, obj, exceptionDetails = {}) {
     if (obj.promiseState === 'fulfilled')
@@ -88,6 +116,9 @@ class RuntimeAgent {
     this._executionContexts.set(context._id, context);
     this._notifyExecutionContextCreated(context);
     return context;
+  }
+
+  createWorkerExecutionContext(workerDebugger) {
   }
 
   destroyExecutionContext(destroyedContext) {
