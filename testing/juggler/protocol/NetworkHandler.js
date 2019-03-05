@@ -21,6 +21,7 @@ class NetworkHandler {
     this._browser = TargetRegistry.instance().tabForTarget(this._chromeSession.targetId()).linkedBrowser;
     this._requestInterception = false;
     this._eventListeners = [];
+    this._pendingRequstWillBeSentEvents = new Set();
   }
 
   async enable() {
@@ -49,6 +50,9 @@ class NetworkHandler {
       this._networkObserver.enableRequestInterception(this._browser);
     else
       this._networkObserver.disableRequestInterception(this._browser);
+    // Right after we enable/disable request interception we need to await all pending
+    // requestWillBeSent events before successfully returning from the method.
+    await Promise.all(Array.from(this._pendingRequstWillBeSentEvents));
   }
 
   async resumeSuspendedRequest({requestId}) {
@@ -104,12 +108,18 @@ class NetworkHandler {
   }
 
   async _onRequest(httpChannel, eventDetails) {
+    let pendingRequestCallback;
+    let pendingRequestPromise = new Promise(x => pendingRequestCallback = x);
+    this._pendingRequstWillBeSentEvents.add(pendingRequestPromise);
     let details = null;
     try {
       details = await this._contentSession.send('Page.requestDetails', {channelId: httpChannel.channelId});
     } catch (e) {
-      if (this._contentSession.isDisposed())
+      if (this._contentSession.isDisposed()) {
+        pendingRequestCallback();
+        this._pendingRequstWillBeSentEvents.delete(pendingRequestPromise);
         return;
+      }
     }
     const activity = this._ensureHTTPActivity(eventDetails.requestId);
     activity.request = {
@@ -117,6 +127,8 @@ class NetworkHandler {
       ...eventDetails,
     };
     this._reportHTTPAcitivityEvents(activity);
+    pendingRequestCallback();
+    this._pendingRequstWillBeSentEvents.delete(pendingRequestPromise);
   }
 
   async _onResponse(httpChannel, eventDetails) {
