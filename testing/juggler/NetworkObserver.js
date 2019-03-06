@@ -98,13 +98,21 @@ class NetworkObserver {
       channel.resume();
   }
 
-  resumeSuspendedRequest(browser, requestId) {
+  resumeSuspendedRequest(browser, requestId, headers) {
     const suspendedChannels = this._browserSuspendedChannels.get(browser);
     if (!suspendedChannels)
       throw new Error(`Request interception is not enabled`);
     const httpChannel = suspendedChannels.get(requestId);
     if (!httpChannel)
       throw new Error(`Cannot find request "${requestId}"`);
+    if (headers) {
+      // 1. Clear all previous headers.
+      for (const header of requestHeaders(httpChannel))
+        httpChannel.setRequestHeader(header.name, '', false /* merge */);
+      // 2. Set new headers.
+      for (const header of headers)
+        httpChannel.setRequestHeader(header.name, header.value, false /* merge */);
+    }
     suspendedChannels.delete(requestId);
     httpChannel.resume();
   }
@@ -171,10 +179,6 @@ class NetworkObserver {
         httpChannel.setRequestHeader(header.name, header.value, false /* merge */);
     }
     const causeType = httpChannel.loadInfo ? httpChannel.loadInfo.externalContentPolicyType : Ci.nsIContentPolicy.TYPE_OTHER;
-    const headers = [];
-    httpChannel.visitRequestHeaders({
-      visitHeader: (name, value) => headers.push({name, value}),
-    });
     const suspendedChannels = this._browserSuspendedChannels.get(loadContext.topFrameElement);
     if (suspendedChannels) {
       httpChannel.suspend();
@@ -192,7 +196,7 @@ class NetworkObserver {
       requestId: requestId(httpChannel),
       redirectedFrom: oldChannel ? requestId(oldChannel) : undefined,
       postData: readRequestPostData(httpChannel),
-      headers,
+      headers: requestHeaders(httpChannel),
       method: httpChannel.requestMethod,
       isNavigationRequest: httpChannel.isMainDocumentChannel,
       cause: causeTypeToString(causeType),
@@ -339,6 +343,14 @@ function getLoadContext(httpChannel) {
 
 function requestId(httpChannel) {
   return httpChannel.channelId + '';
+}
+
+function requestHeaders(httpChannel) {
+  const headers = [];
+  httpChannel.visitRequestHeaders({
+    visitHeader: (name, value) => headers.push({name, value}),
+  });
+  return headers;
 }
 
 function causeTypeToString(causeType) {

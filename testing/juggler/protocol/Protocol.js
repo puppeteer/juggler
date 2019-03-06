@@ -283,6 +283,10 @@ const Network = {
     'resumeSuspendedRequest': {
       params: {
         requestId: t.String,
+        headers: t.Optional(t.Array({
+          name: t.String,
+          value: t.String,
+        })),
       },
     },
     'getResponseBody': {
