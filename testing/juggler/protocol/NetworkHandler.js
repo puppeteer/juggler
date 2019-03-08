@@ -55,8 +55,8 @@ class NetworkHandler {
     await Promise.all(Array.from(this._pendingRequstWillBeSentEvents));
   }
 
-  async resumeSuspendedRequest({requestId, url, headers, method, postData}) {
-    this._networkObserver.resumeSuspendedRequest(this._browser, requestId, url, headers, method, postData);
+  async resumeSuspendedRequest({requestId, headers}) {
+    this._networkObserver.resumeSuspendedRequest(this._browser, requestId, headers);
   }
 
   async abortSuspendedRequest({requestId}) {
