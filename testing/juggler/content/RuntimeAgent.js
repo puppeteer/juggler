@@ -8,14 +8,107 @@ const Cu = Components.utils;
 addDebuggerToGlobal(Cu.getGlobalForObject(this));
 const helper = new Helper();
 
+const consoleLevelToProtocolType = {
+  'dir': 'dir',
+  'log': 'log',
+  'debug': 'debug',
+  'info': 'info',
+  'error': 'error',
+  'warn': 'warning',
+  'dirxml': 'dirxml',
+  'table': 'table',
+  'trace': 'trace',
+  'clear': 'clear',
+  'group': 'startGroup',
+  'groupCollapsed': 'startGroupCollapsed',
+  'groupEnd': 'endGroup',
+  'assert': 'assert',
+  'profile': 'profile',
+  'profileEnd': 'profileEnd',
+  'count': 'count',
+  'countReset': 'countReset',
+  'time': null,
+  'timeLog': 'timeLog',
+  'timeEnd': 'timeEnd',
+  'timeStamp': 'timeStamp',
+};
+
+const disallowedMessageCategories = new Set([
+  'XPConnect JavaScript',
+  'component javascript',
+  'chrome javascript',
+  'chrome registration',
+  'XBL',
+  'XBL Prototype Handler',
+  'XBL Content Sink',
+  'xbl javascript',
+]);
+
 class RuntimeAgent {
   constructor(session) {
     this._debugger = new Debugger();
     this._pendingPromises = new Map();
     this._session = session;
     this._executionContexts = new Map();
+    this._windowToExecutionContext = new Map();
+    this._consoleServiceListener = {
+      QueryInterface: ChromeUtils.generateQI([Ci.nsIConsoleListener]),
 
+      observe: message => {
+        if (!(message instanceof Ci.nsIScriptError) || !message.outerWindowID ||
+            !message.category || disallowedMessageCategories.has(message.category)) {
+          return;
+        }
+        const errorWindow = Services.wm.getOuterWindowWithId(message.outerWindowID);
+        const executionContext = this._windowToExecutionContext.get(errorWindow);
+        if (!executionContext)
+          return;
+        const typeNames = {
+          [Ci.nsIConsoleMessage.debug]: 'debug',
+          [Ci.nsIConsoleMessage.info]: 'info',
+          [Ci.nsIConsoleMessage.warn]: 'warn',
+          [Ci.nsIConsoleMessage.error]: 'error',
+        };
+        this._session.emitEvent('Runtime.console', {
+          args: [{
+            value: message.message,
+          }],
+          type: typeNames[message.logLevel],
+          executionContextId: executionContext.id(),
+          location: {
+            lineNumber: message.lineNumber,
+            columnNumber: message.columnNumber,
+            url: message.sourceName,
+          },
+        });
+      },
+    };
+
+    this._eventListeners = [];
     this._enabled = false;
+  }
+
+  _consoleAPICalled({wrappedJSObject}, topic, data) {
+    const type = consoleLevelToProtocolType[wrappedJSObject.level];
+    if (!type)
+      return;
+    const executionContext = Array.from(this._executionContexts.values()).find(context => {
+      const domWindow = context._domWindow;
+      return domWindow && domWindow.windowUtils.currentInnerWindowID === wrappedJSObject.innerID;
+    });
+    if (!executionContext)
+      return;
+    const args = wrappedJSObject.arguments.map(arg => executionContext.rawValueToRemoteObject(arg));
+    this._session.emitEvent('Runtime.console', {
+      args,
+      type,
+      executionContextId: executionContext.id(),
+      location: {
+        lineNumber: wrappedJSObject.lineNumber - 1,
+        columnNumber: wrappedJSObject.columnNumber - 1,
+        url: wrappedJSObject.filename,
+      },
+    });
   }
 
   enable() {
@@ -24,6 +117,11 @@ class RuntimeAgent {
     this._enabled = true;
     for (const executionContext of this._executionContexts.values())
       this._notifyExecutionContextCreated(executionContext);
+    Services.console.registerListener(this._consoleServiceListener);
+    this._eventListeners = [
+      () => Services.console.unregisterListener(this._consoleServiceListener),
+      helper.addObserver(this._consoleAPICalled.bind(this), "console-api-log-event"),
+    ];
   }
 
   _notifyExecutionContextCreated(executionContext) {
@@ -43,7 +141,9 @@ class RuntimeAgent {
     });
   }
 
-  dispose() {}
+  dispose() {
+    helper.removeListeners(this._eventListeners);
+  }
 
   async _awaitPromise(executionContext, obj, exceptionDetails = {}) {
     if (obj.promiseState === 'fulfilled')
@@ -86,6 +186,7 @@ class RuntimeAgent {
   createExecutionContext(domWindow, auxData) {
     const context = new ExecutionContext(this, domWindow, this._debugger.addDebuggee(domWindow), auxData);
     this._executionContexts.set(context._id, context);
+    this._windowToExecutionContext.set(domWindow, context);
     this._notifyExecutionContextCreated(context);
     return context;
   }
@@ -101,6 +202,7 @@ class RuntimeAgent {
       this._debugger.onPromiseSettled = undefined;
     this._debugger.removeDebuggee(destroyedContext._domWindow);
     this._executionContexts.delete(destroyedContext._id);
+    this._windowToExecutionContext.delete(destroyedContext._domWindow);
     this._notifyExecutionContextDestroyed(destroyedContext);
   }
 

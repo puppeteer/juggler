@@ -311,6 +311,16 @@ const Runtime = {
     'executionContextDestroyed': {
       executionContextId: t.String,
     },
+    'console': {
+      executionContextId: t.String,
+      args: t.Array(types.RemoteObject),
+      type: t.String,
+      location: {
+        columnNumber: t.Number,
+        lineNumber: t.Number,
+        url: t.String,
+      },
+    },
   },
   methods: {
     'enable': {
@@ -417,16 +427,6 @@ const Page = {
     'sameDocumentNavigation': {
       frameId: t.String,
       url: t.String,
-    },
-    'console': {
-      executionContextId: t.String,
-      args: t.Array(types.RemoteObject),
-      type: t.String,
-      location: {
-        columnNumber: t.Number,
-        lineNumber: t.Number,
-        url: t.String,
-      },
     },
     'dialogOpened': {
       dialogId: t.String,

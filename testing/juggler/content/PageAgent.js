@@ -20,50 +20,6 @@ class PageAgent {
     this._scriptsToEvaluateOnNewDocument = new Map();
     this._bindingsToAdd = new Set();
 
-    const disallowedMessageCategories = new Set([
-      'XPConnect JavaScript',
-      'component javascript',
-      'chrome javascript',
-      'chrome registration',
-      'XBL',
-      'XBL Prototype Handler',
-      'XBL Content Sink',
-      'xbl javascript',
-    ]);
-    this._consoleServiceListener = {
-      QueryInterface: ChromeUtils.generateQI([Ci.nsIConsoleListener]),
-
-      observe: message => {
-        if (!(message instanceof Ci.nsIScriptError) || !message.outerWindowID ||
-            !message.category || disallowedMessageCategories.has(message.category)) {
-          return;
-        }
-        const errorWindow = Services.wm.getOuterWindowWithId(message.outerWindowID);
-        const frame = errorWindow ? this._frameTree.frameForDocShell(errorWindow.docShell) : null;
-        const executionContext = this._frameToExecutionContext.get(frame);
-        if (!executionContext)
-          return;
-        const typeNames = {
-          [Ci.nsIConsoleMessage.debug]: 'debug',
-          [Ci.nsIConsoleMessage.info]: 'info',
-          [Ci.nsIConsoleMessage.warn]: 'warn',
-          [Ci.nsIConsoleMessage.error]: 'error',
-        };
-        this._session.emitEvent('Page.console', {
-          args: [{
-            value: message.message,
-          }],
-          type: typeNames[message.logLevel],
-          executionContextId: executionContext.id(),
-          location: {
-            lineNumber: message.lineNumber,
-            columnNumber: message.columnNumber,
-            url: message.sourceName,
-          },
-        });
-      },
-    };
-
     this._eventListeners = [];
     this._enabled = false;
 
@@ -148,10 +104,7 @@ class PageAgent {
       if (frame.pendingNavigationId())
         this._onNavigationStarted(frame);
     }
-    Services.console.registerListener(this._consoleServiceListener);
     this._eventListeners = [
-      () => Services.console.unregisterListener(this._consoleServiceListener),
-      helper.addObserver(this._consoleAPICalled.bind(this), "console-api-log-event"),
       helper.addObserver(this._onDOMWindowCreated.bind(this), 'content-document-global-created'),
       helper.addEventListener(this._session.mm(), 'DOMContentLoaded', this._onDOMContentLoaded.bind(this)),
       helper.addEventListener(this._session.mm(), 'pageshow', this._onLoad.bind(this)),
@@ -284,57 +237,6 @@ class PageAgent {
 
   dispose() {
     helper.removeListeners(this._eventListeners);
-  }
-
-  _consoleAPICalled({wrappedJSObject}, topic, data) {
-    const levelToType = {
-      'dir': 'dir',
-      'log': 'log',
-      'debug': 'debug',
-      'info': 'info',
-      'error': 'error',
-      'warn': 'warning',
-      'dirxml': 'dirxml',
-      'table': 'table',
-      'trace': 'trace',
-      'clear': 'clear',
-      'group': 'startGroup',
-      'groupCollapsed': 'startGroupCollapsed',
-      'groupEnd': 'endGroup',
-      'assert': 'assert',
-      'profile': 'profile',
-      'profileEnd': 'profileEnd',
-      'count': 'count',
-      'countReset': 'countReset',
-      'time': null,
-      'timeLog': 'timeLog',
-      'timeEnd': 'timeEnd',
-      'timeStamp': 'timeStamp',
-    };
-    const type = levelToType[wrappedJSObject.level];
-    if (!type) return;
-    let messageFrame = null;
-    for (const frame of this._frameTree.frames()) {
-      const domWindow = frame.domWindow();
-      if (domWindow && domWindow.windowUtils.currentInnerWindowID === wrappedJSObject.innerID) {
-        messageFrame = frame;
-        break;
-      }
-    }
-    const executionContext = this._frameToExecutionContext.get(messageFrame);
-    if (!executionContext)
-      return;
-    const args = wrappedJSObject.arguments.map(arg => executionContext.rawValueToRemoteObject(arg));
-    this._session.emitEvent('Page.console', {
-      args,
-      type,
-      executionContextId: executionContext.id(),
-      location: {
-        lineNumber: wrappedJSObject.lineNumber - 1,
-        columnNumber: wrappedJSObject.columnNumber - 1,
-        url: wrappedJSObject.filename,
-      },
-    });
   }
 
   async navigate({frameId, url, referer}) {
