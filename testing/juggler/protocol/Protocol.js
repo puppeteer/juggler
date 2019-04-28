@@ -121,7 +121,7 @@ const Browser = {
           path: t.Optional(t.String),
           secure: t.Optional(t.Boolean),
           httpOnly: t.Optional(t.Boolean),
-          sameSite: t.Optional(t.Enum(['strict', 'lax'])),
+          sameSite: t.Optional(t.Enum(['Strict', 'Lax'])),
           expires: t.Optional(t.Number),
         }),
       }
@@ -153,7 +153,7 @@ const Browser = {
           httpOnly: t.Boolean,
           secure: t.Boolean,
           session: t.Boolean,
-          sameSite: t.Optional(t.Enum(['strict', 'lax'])),
+          sameSite: t.Optional(t.Enum(['Strict', 'Lax'])),
         }),
       },
     },
