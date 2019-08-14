@@ -421,7 +421,7 @@ class ResponseBodyListener {
     this.originalListener = httpChannel.setNewListener(this);
   }
 
-  onDataAvailable(aRequest, aContext, aInputStream, aOffset, aCount) {
+  onDataAvailable(aRequest, aInputStream, aOffset, aCount) {
     const iStream = new BinaryInputStream(aInputStream);
     const sStream = new StorageStream(8192, aCount, null);
     const oStream = new BinaryOutputStream(sStream.getOutputStream(0));
@@ -431,15 +431,15 @@ class ResponseBodyListener {
     this._chunks.push(data);
 
     oStream.writeBytes(data, aCount);
-    this.originalListener.onDataAvailable(aRequest, aContext, sStream.newInputStream(0), aOffset, aCount);
+    this.originalListener.onDataAvailable(aRequest, sStream.newInputStream(0), aOffset, aCount);
   }
 
-  onStartRequest(aRequest, aContext) {
-    this.originalListener.onStartRequest(aRequest, aContext);
+  onStartRequest(aRequest) {
+    this.originalListener.onStartRequest(aRequest);
   }
 
-  onStopRequest(aRequest, aContext, aStatusCode) {
-    this.originalListener.onStopRequest(aRequest, aContext, aStatusCode);
+  onStopRequest(aRequest, aStatusCode) {
+    this.originalListener.onStopRequest(aRequest, aStatusCode);
     const body = this._chunks.join('');
     delete this._chunks;
     this._networkObserver._onResponseFinished(this._browser, this._httpChannel, body);

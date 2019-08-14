@@ -83,9 +83,9 @@ class BrowserContextManager {
 
   setCookies(browserContextId, cookies) {
     const protocolToSameSite = {
-      [undefined]: Ci.nsICookie2.SAMESITE_UNSET,
-      'Lax': Ci.nsICookie2.SAMESITE_LAX,
-      'Strict': Ci.nsICookie2.SAMESITE_STRICT,
+      [undefined]: Ci.nsICookie.SAMESITE_NONE,
+      'Lax': Ci.nsICookie.SAMESITE_LAX,
+      'Strict': Ci.nsICookie.SAMESITE_STRICT,
     };
     const userContextId = browserContextId ? this._browserContextIdToUserContextId.get(browserContextId) : undefined;
     for (const cookie of cookies) {
@@ -143,9 +143,9 @@ class BrowserContextManager {
     const userContextId = browserContextId ? this._browserContextIdToUserContextId.get(browserContextId) : undefined;
     const result = [];
     const sameSiteToProtocol = {
-      [Ci.nsICookie2.SAMESITE_UNSET]: undefined,
-      [Ci.nsICookie2.SAMESITE_LAX]: 'Lax',
-      [Ci.nsICookie2.SAMESITE_STRICT]: 'Strict',
+      [Ci.nsICookie.SAMESITE_NONE]: undefined,
+      [Ci.nsICookie.SAMESITE_LAX]: 'Lax',
+      [Ci.nsICookie.SAMESITE_STRICT]: 'Strict',
     };
     const uris = urls.map(url => NetUtil.newURI(url));
     for (let cookie of Services.cookies.enumerator) {

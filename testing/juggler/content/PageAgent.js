@@ -1,4 +1,5 @@
 "use strict";
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
@@ -246,16 +247,28 @@ class PageAgent {
       throw new Error(`Invalid url: "${url}"`);
     }
     let referrerURI = null;
+    let referrerInfo = null;
     if (referer) {
       try {
         referrerURI = NetUtil.newURI(referer);
+        const ReferrerInfo = Components.Constructor(
+          '@mozilla.org/referrer-info;1',
+          'nsIReferrerInfo',
+          'init'
+        );
+        referrerInfo = new ReferrerInfo(Ci.nsIHttpChannel.REFERRER_POLICY_UNSET, true, referrerURI);
       } catch (e) {
         throw new Error(`Invalid referer: "${referer}"`);
       }
     }
     const frame = this._frameTree.frame(frameId);
     const docShell = frame.docShell().QueryInterface(Ci.nsIWebNavigation);
-    docShell.loadURI(url, Ci.nsIWebNavigation.LOAD_FLAGS_NONE, referrerURI, null /* postData */, null /* headers */);
+    docShell.loadURI(url, {
+      flags: Ci.nsIWebNavigation.LOAD_FLAGS_NONE,
+      referrerInfo,
+      postData: null,
+      headers: null,
+    });
     return {navigationId: frame.pendingNavigationId(), navigationURL: frame.pendingNavigationURL()};
   }
 

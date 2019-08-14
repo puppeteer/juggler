@@ -78,19 +78,19 @@ class PageHandler {
   }
 
   _updateModalDialogs() {
-    const elements = new Set(this._browser.parentNode.getElementsByTagNameNS(XUL_NS, "tabmodalprompt"));
+    const prompts = new Set(this._browser.tabModalPromptBox ? this._browser.tabModalPromptBox.listPrompts() : []);
     for (const dialog of this._dialogs.values()) {
-      if (!elements.has(dialog.element())) {
+      if (!prompts.has(dialog.prompt())) {
         this._dialogs.delete(dialog.id());
         this._chromeSession.emitEvent('Page.dialogClosed', {
           dialogId: dialog.id(),
         });
       } else {
-        elements.delete(dialog.element());
+        prompts.delete(dialog.prompt());
       }
     }
-    for (const element of elements) {
-      const dialog = Dialog.createIfSupported(element);
+    for (const prompt of prompts) {
+      const dialog = Dialog.createIfSupported(prompt);
       if (!dialog)
         continue;
       this._dialogs.set(dialog.id(), dialog);
@@ -211,24 +211,24 @@ class PageHandler {
 }
 
 class Dialog {
-  static createIfSupported(element) {
-    const type = element.Dialog.args.promptType;
+  static createIfSupported(prompt) {
+    const type = prompt.args.promptType;
     switch (type) {
       case 'alert':
       case 'prompt':
       case 'confirm':
-        return new Dialog(element, type);
+        return new Dialog(prompt, type);
       case 'confirmEx':
-        return new Dialog(element, 'beforeunload');
+        return new Dialog(prompt, 'beforeunload');
       default:
         return null;
     };
   }
 
-  constructor(element, type) {
+  constructor(prompt, type) {
     this._id = helper.generateId();
     this._type = type;
-    this._element = element;
+    this._prompt = prompt;
   }
 
   id() {
@@ -236,32 +236,32 @@ class Dialog {
   }
 
   message() {
-    return this._element.ui.infoBody.textContent;
+    return this._prompt.ui.infoBody.textContent;
   }
 
   type() {
     return this._type;
   }
 
-  element() {
-    return this._element;
+  prompt() {
+    return this._prompt;
   }
 
   dismiss() {
-    if (this._element.ui.button1)
-      this._element.ui.button1.click();
+    if (this._prompt.ui.button1)
+      this._prompt.ui.button1.click();
     else
-      this._element.ui.button0.click();
+      this._prompt.ui.button0.click();
   }
 
   defaultValue() {
-    return this._element.ui.loginTextbox.value;
+    return this._prompt.ui.loginTextbox.value;
   }
 
   accept(promptValue) {
     if (typeof promptValue === 'string' && this._type === 'prompt')
-      this._element.ui.loginTextbox.value = promptValue;
-    this._element.ui.button0.click();
+      this._prompt.ui.loginTextbox.value = promptValue;
+    this._prompt.ui.button0.click();
   }
 }
 
