@@ -8,15 +8,17 @@
 
 #include "shell/OSObject.h"
 
+#include "mozilla/TextUtils.h"
+
 #include <errno.h>
 #include <stdlib.h>
 #ifdef XP_WIN
-#include <direct.h>
-#include <process.h>
-#include <string.h>
+#  include <direct.h>
+#  include <process.h>
+#  include <string.h>
 #else
-#include <sys/wait.h>
-#include <unistd.h>
+#  include <sys/wait.h>
+#  include <unistd.h>
 #endif
 
 #include "jsapi.h"
@@ -27,6 +29,7 @@
 #include "gc/FreeOp.h"
 #include "js/CharacterEncoding.h"
 #include "js/Conversions.h"
+#include "js/PropertySpec.h"
 #include "js/Wrapper.h"
 #include "shell/jsshell.h"
 #include "util/StringBuffer.h"
@@ -38,12 +41,12 @@
 #include "vm/JSObject-inl.h"
 
 #ifdef XP_WIN
-#ifndef PATH_MAX
-#define PATH_MAX (MAX_PATH > _MAX_DIR ? MAX_PATH : _MAX_DIR)
-#endif
-#define getcwd _getcwd
+#  ifndef PATH_MAX
+#    define PATH_MAX (MAX_PATH > _MAX_DIR ? MAX_PATH : _MAX_DIR)
+#  endif
+#  define getcwd _getcwd
 #else
-#include <libgen.h>
+#  include <libgen.h>
 #endif
 
 using js::shell::RCFile;
@@ -76,8 +79,8 @@ static bool IsAbsolutePath(const UniqueChars& filename) {
   // The first two cases are handled by the test above so we only need a test
   // for the last one here.
 
-  if ((strlen(pathname) > 3 && isalpha(pathname[0]) && pathname[1] == ':' &&
-       pathname[2] == '\\')) {
+  if ((strlen(pathname) > 3 && mozilla::IsAsciiAlpha(pathname[0]) &&
+       pathname[1] == ':' && pathname[2] == '\\')) {
     return true;
   }
 #endif
@@ -379,8 +382,8 @@ static bool osfile_writeTypedArrayToFile(JSContext* cx, unsigned argc,
   return true;
 }
 
-/* static */ RCFile* RCFile::create(JSContext* cx, const char* filename,
-                                    const char* mode) {
+/* static */
+RCFile* RCFile::create(JSContext* cx, const char* filename, const char* mode) {
   FILE* fp = fopen(filename, mode);
   if (!fp) {
     return nullptr;
@@ -422,7 +425,7 @@ class FileObject : public NativeObject {
       return nullptr;
     }
 
-    obj->setRCFile(file);
+    InitReservedSlot(obj, FILE_SLOT, file, MemoryUse::FileObjectFile);
     file->acquire();
     return obj;
   }
@@ -430,8 +433,8 @@ class FileObject : public NativeObject {
   static void finalize(FreeOp* fop, JSObject* obj) {
     FileObject* fileObj = &obj->as<FileObject>();
     RCFile* file = fileObj->rcFile();
+    RemoveCellMemory(obj, sizeof(*file), MemoryUse::FileObjectFile);
     if (file->release()) {
-      fileObj->setRCFile(nullptr);
       fop->delete_(file);
     }
   }
@@ -451,11 +454,6 @@ class FileObject : public NativeObject {
   RCFile* rcFile() {
     return reinterpret_cast<RCFile*>(
         js::GetReservedSlot(this, FILE_SLOT).toPrivate());
-  }
-
- private:
-  void setRCFile(RCFile* file) {
-    js::SetReservedSlot(this, FILE_SLOT, PrivateValue(file));
   }
 };
 
@@ -536,21 +534,22 @@ static bool Redirect(JSContext* cx, const CallArgs& args, RCFile** outFile) {
   }
 
   if (args[0].isObject()) {
-    RootedObject fileObj(cx, js::CheckedUnwrap(&args[0].toObject()));
+    Rooted<FileObject*> fileObj(cx,
+                                args[0].toObject().maybeUnwrapIf<FileObject>());
     if (!fileObj) {
+      JS_ReportErrorNumberASCII(cx, js::shell::my_GetErrorMessage, nullptr,
+                                JSSMSG_INVALID_ARGS, "redirect");
       return false;
     }
 
-    if (fileObj->is<FileObject>()) {
-      // Passed in a FileObject. Create a FileObject for the previous
-      // global file, and set the global file to the passed-in one.
-      *outFile = fileObj->as<FileObject>().rcFile();
-      (*outFile)->acquire();
-      oldFile->release();
+    // Passed in a FileObject. Create a FileObject for the previous
+    // global file, and set the global file to the passed-in one.
+    *outFile = fileObj->rcFile();
+    (*outFile)->acquire();
+    oldFile->release();
 
-      args.rval().setObject(*oldFileObj);
-      return true;
-    }
+    args.rval().setObject(*oldFileObj);
+    return true;
   }
 
   RootedString filename(cx);
@@ -586,10 +585,7 @@ static bool osfile_close(JSContext* cx, unsigned argc, Value* vp) {
 
   Rooted<FileObject*> fileObj(cx);
   if (args.get(0).isObject()) {
-    JSObject* obj = js::CheckedUnwrap(&args[0].toObject());
-    if (obj->is<FileObject>()) {
-      fileObj = &obj->as<FileObject>();
-    }
+    fileObj = args[0].toObject().maybeUnwrapIf<FileObject>();
   }
 
   if (!fileObj) {
@@ -675,7 +671,7 @@ static bool ospath_join(JSContext* cx, unsigned argc, Value* vp) {
   // This function doesn't take into account some aspects of Windows paths,
   // e.g. the drive letter is always reset when an absolute path is appended.
 
-  StringBuffer buffer(cx);
+  JSStringBuilder buffer(cx);
 
   for (unsigned i = 0; i < args.length(); i++) {
     if (!args[i].isString()) {

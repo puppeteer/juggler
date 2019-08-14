@@ -18,6 +18,7 @@
 #include "builtin/intl/SharedIntlData.h"
 #include "gc/FreeOp.h"
 #include "js/CharacterEncoding.h"
+#include "js/PropertySpec.h"
 #include "js/StableStringChars.h"
 #include "js/TypeDecls.h"
 #include "vm/GlobalObject.h"
@@ -67,7 +68,7 @@ static const JSFunctionSpec collator_methods[] = {
     JS_FN(js_toSource_str, collator_toSource, 0, 0), JS_FS_END};
 
 static const JSPropertySpec collator_properties[] = {
-    JS_SELF_HOSTED_GET("compare", "Intl_Collator_compare_get", 0),
+    JS_SELF_HOSTED_GET("compare", "$Intl_Collator_compare_get", 0),
     JS_STRING_SYM_PS(toStringTag, "Object", JSPROP_READONLY), JS_PS_END};
 
 /**
@@ -80,7 +81,7 @@ static bool Collator(JSContext* cx, const CallArgs& args) {
 
   // Steps 2-5 (Inlined 9.1.14, OrdinaryCreateFromConstructor).
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Null, &proto)) {
     return false;
   }
 

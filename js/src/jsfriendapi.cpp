@@ -13,9 +13,8 @@
 
 #include <stdint.h>
 
-#ifdef ENABLE_BIGINT
 #include "builtin/BigInt.h"
-#endif
+#include "builtin/MapObject.h"
 #include "builtin/Promise.h"
 #include "builtin/TestingFunctions.h"
 #include "gc/GCInternals.h"
@@ -27,6 +26,7 @@
 #include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/DateObject.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
 #include "vm/Realm.h"
@@ -55,16 +55,6 @@ JS::RootingContext::RootingContext()
     nativeStackLimit[i] = UINTPTR_MAX;
   }
 #endif
-}
-
-JS_FRIEND_API void js::SetSourceHook(JSContext* cx,
-                                     mozilla::UniquePtr<SourceHook> hook) {
-  cx->runtime()->sourceHook.ref() = std::move(hook);
-}
-
-JS_FRIEND_API mozilla::UniquePtr<SourceHook> js::ForgetSourceHook(
-    JSContext* cx) {
-  return std::move(cx->runtime()->sourceHook.ref());
 }
 
 JS_FRIEND_API void JS_SetGrayGCRootsTracer(JSContext* cx, JSTraceDataOp traceOp,
@@ -119,7 +109,7 @@ JS_FRIEND_API bool JS_SplicePrototype(JSContext* cx, HandleObject obj,
   }
 
   Rooted<TaggedProto> tagged(cx, TaggedProto(proto));
-  return JSObject::splicePrototype(cx, obj, obj->getClass(), tagged);
+  return JSObject::splicePrototype(cx, obj, tagged);
 }
 
 JS_FRIEND_API JSObject* JS_NewObjectWithUniqueType(JSContext* cx,
@@ -153,13 +143,8 @@ JS_FRIEND_API bool JS::GetIsSecureContext(JS::Realm* realm) {
   return realm->creationOptions().secureContext();
 }
 
-JS_FRIEND_API JSPrincipals* JS_GetCompartmentPrincipals(
-    JS::Compartment* compartment) {
-  // Note: for now we assume a single realm per compartment. This API will go
-  // away after we remove the remaining callers. See bug 1465700.
-  MOZ_RELEASE_ASSERT(compartment->realms().length() == 1);
-
-  return compartment->realms()[0]->principals();
+JS_FRIEND_API void js::AssertCompartmentHasSingleRealm(JS::Compartment* comp) {
+  MOZ_RELEASE_ASSERT(comp->realms().length() == 1);
 }
 
 JS_FRIEND_API JSPrincipals* JS::GetRealmPrincipals(JS::Realm* realm) {
@@ -279,7 +264,7 @@ JS_FRIEND_API bool js::GetBuiltinClass(JSContext* cx, HandleObject obj,
     return Proxy::getBuiltinClass(cx, obj, cls);
   }
 
-  if (obj->is<PlainObject>() || obj->is<UnboxedPlainObject>()) {
+  if (obj->is<PlainObject>()) {
     *cls = ESClass::Object;
   } else if (obj->is<ArrayObject>()) {
     *cls = ESClass::Array;
@@ -311,10 +296,8 @@ JS_FRIEND_API bool js::GetBuiltinClass(JSContext* cx, HandleObject obj,
     *cls = ESClass::Arguments;
   } else if (obj->is<ErrorObject>()) {
     *cls = ESClass::Error;
-#ifdef ENABLE_BIGINT
   } else if (obj->is<BigIntObject>()) {
     *cls = ESClass::BigInt;
-#endif
   } else {
     *cls = ESClass::Other;
   }
@@ -525,10 +508,6 @@ JS_FRIEND_API JSObject* JS_NewDeadWrapper(JSContext* cx, JSObject* origObj) {
   return NewDeadProxyObject(cx, origObj);
 }
 
-JS_FRIEND_API bool JS_IsScriptSourceObject(JSObject* obj) {
-  return obj->is<ScriptSourceObject>();
-}
-
 void js::TraceWeakMaps(WeakMapTracer* trc) {
   WeakMapBase::traceAllMappings(trc);
 }
@@ -547,43 +526,24 @@ JS_FRIEND_API bool js::ZoneGlobalsAreAllGray(JS::Zone* zone) {
   return true;
 }
 
-JS_FRIEND_API bool js::IsObjectZoneSweepingOrCompacting(JSObject* obj) {
-  MOZ_ASSERT(obj);
-  return MaybeForwarded(obj)->zone()->isGCSweepingOrCompacting();
+JS_FRIEND_API bool js::IsCompartmentZoneSweepingOrCompacting(
+    JS::Compartment* comp) {
+  MOZ_ASSERT(comp);
+  return comp->zone()->isGCSweepingOrCompacting();
 }
-
-namespace {
-struct VisitGrayCallbackFunctor {
-  GCThingCallback callback_;
-  void* closure_;
-  VisitGrayCallbackFunctor(GCThingCallback callback, void* closure)
-      : callback_(callback), closure_(closure) {}
-
-  template <class T>
-  void operator()(T tp) const {
-    if ((*tp)->isMarkedGray()) {
-      callback_(closure_, JS::GCCellPtr(*tp));
-    }
-  }
-};
-}  // namespace
 
 JS_FRIEND_API void js::VisitGrayWrapperTargets(Zone* zone,
                                                GCThingCallback callback,
                                                void* closure) {
   for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
     for (Compartment::WrapperEnum e(comp); !e.empty(); e.popFront()) {
-      e.front().mutableKey().applyToWrapped(
-          VisitGrayCallbackFunctor(callback, closure));
+      e.front().mutableKey().applyToWrapped([callback, closure](auto tp) {
+        if ((*tp)->isMarkedGray()) {
+          callback(closure, JS::GCCellPtr(*tp));
+        }
+      });
     }
   }
-}
-
-JS_FRIEND_API JSObject* js::GetWeakmapKeyDelegate(JSObject* key) {
-  if (JSWeakmapKeyDelegateOp op = key->getClass()->extWeakmapKeyDelegateOp()) {
-    return op(key);
-  }
-  return nullptr;
 }
 
 JS_FRIEND_API JSLinearString* js::StringToLinearStringSlow(JSContext* cx,
@@ -893,7 +853,7 @@ static bool FormatFrame(JSContext* cx, const FrameIter& iter, Sprinter& sp,
   if (showThisProps && thisVal.isObject()) {
     RootedObject obj(cx, &thisVal.toObject());
 
-    AutoIdVector keys(cx);
+    RootedIdVector keys(cx);
     if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY, &keys)) {
       if (cx->isThrowingOutOfMemory()) {
         return false;
@@ -1036,21 +996,23 @@ extern JS_FRIEND_API int JS::IsGCPoisoning() {
 #endif
 }
 
-struct DumpHeapTracer : public JS::CallbackTracer, public WeakMapTracer {
+struct DumpHeapTracer final : public JS::CallbackTracer, public WeakMapTracer {
   const char* prefix;
   FILE* output;
+  mozilla::MallocSizeOf mallocSizeOf;
 
-  DumpHeapTracer(FILE* fp, JSContext* cx)
+  DumpHeapTracer(FILE* fp, JSContext* cx, mozilla::MallocSizeOf mallocSizeOf)
       : JS::CallbackTracer(cx, DoNotTraceWeakMaps),
         js::WeakMapTracer(cx->runtime()),
         prefix(""),
-        output(fp) {}
+        output(fp),
+        mallocSizeOf(mallocSizeOf) {}
 
  private:
   void trace(JSObject* map, JS::GCCellPtr key, JS::GCCellPtr value) override {
     JSObject* kdelegate = nullptr;
     if (key.is<JSObject>()) {
-      kdelegate = js::GetWeakmapKeyDelegate(&key.as<JSObject>());
+      kdelegate = UncheckedUnwrapWithoutExpose(&key.as<JSObject>());
     }
 
     fprintf(output, "WeakMapEntry map=%p key=%p keyDelegate=%p value=%p\n", map,
@@ -1106,7 +1068,16 @@ static void DumpHeapVisitCell(JSRuntime* rt, void* data, void* thing,
   char cellDesc[1024 * 32];
   JS_GetTraceThingInfo(cellDesc, sizeof(cellDesc), dtrc, thing, traceKind,
                        true);
-  fprintf(dtrc->output, "%p %c %s\n", thing, MarkDescriptor(thing), cellDesc);
+
+  fprintf(dtrc->output, "%p %c %s", thing, MarkDescriptor(thing), cellDesc);
+  if (dtrc->mallocSizeOf) {
+    auto size =
+        JS::ubi::Node(JS::GCCellPtr(thing, traceKind)).size(dtrc->mallocSizeOf);
+    fprintf(dtrc->output, " SIZE:: %" PRIu64 "\n", size);
+  } else {
+    fprintf(dtrc->output, "\n");
+  }
+
   js::TraceChildren(dtrc, thing, traceKind);
 }
 
@@ -1122,12 +1093,13 @@ void DumpHeapTracer::onChild(const JS::GCCellPtr& thing) {
 }
 
 void js::DumpHeap(JSContext* cx, FILE* fp,
-                  js::DumpHeapNurseryBehaviour nurseryBehaviour) {
+                  js::DumpHeapNurseryBehaviour nurseryBehaviour,
+                  mozilla::MallocSizeOf mallocSizeOf) {
   if (nurseryBehaviour == js::CollectNurseryBeforeDump) {
-    cx->runtime()->gc.evictNursery(JS::gcreason::API);
+    cx->runtime()->gc.evictNursery(JS::GCReason::API);
   }
 
-  DumpHeapTracer dtrc(fp, cx);
+  DumpHeapTracer dtrc(fp, cx, mallocSizeOf);
 
   fprintf(dtrc.output, "# Roots.\n");
   {
@@ -1163,29 +1135,24 @@ JS_FRIEND_API JS::Realm* js::GetAnyRealmInZone(JS::Zone* zone) {
   return realm.get();
 }
 
-JS_FRIEND_API JSObject* js::GetFirstGlobalInCompartment(JS::Compartment* comp) {
-  JSObject* global = comp->firstRealm()->maybeGlobal();
-  MOZ_ASSERT(global);
-  return global;
-}
-
-void JS::ObjectPtr::finalize(JSRuntime* rt) {
-  if (IsIncrementalBarrierNeeded(rt->mainContextFromOwnThread())) {
-    IncrementalPreWriteBarrier(value);
+JS_FRIEND_API bool js::IsSharableCompartment(JS::Compartment* comp) {
+  // If this compartment has nuked outgoing wrappers (because all its globals
+  // got nuked), we won't be able to create any useful CCWs out of it in the
+  // future, and so we shouldn't use it for any new globals.
+  if (comp->nukedOutgoingWrappers) {
+    return false;
   }
-  value = nullptr;
-}
 
-void JS::ObjectPtr::finalize(JSContext* cx) { finalize(cx->runtime()); }
-
-void JS::ObjectPtr::updateWeakPointerAfterGC() {
-  if (js::gc::IsAboutToBeFinalizedUnbarriered(value.unsafeGet())) {
-    value = nullptr;
+  // If this compartment has no live globals, it might be in the middle of being
+  // GCed.  Don't create any new Realms inside.  There's no point to doing that
+  // anyway, since the idea would be to avoid CCWs from existing Realms in the
+  // compartment to the new Realm, and there are no existing Realms.
+  if (!CompartmentHasLiveGlobal(comp)) {
+    return false;
   }
-}
 
-void JS::ObjectPtr::trace(JSTracer* trc, const char* name) {
-  JS::TraceEdge(trc, &value, name);
+  // Good to go.
+  return true;
 }
 
 JS_FRIEND_API JSObject* js::GetTestingFunctions(JSContext* cx) {
@@ -1334,9 +1301,11 @@ JS_FRIEND_API void js::SetWindowProxy(JSContext* cx, HandleObject global,
   CHECK_THREAD(cx);
 
   cx->check(global, windowProxy);
-
   MOZ_ASSERT(IsWindowProxy(windowProxy));
-  global->as<GlobalObject>().setWindowProxy(windowProxy);
+
+  GlobalObject& globalObj = global->as<GlobalObject>();
+  globalObj.setWindowProxy(windowProxy);
+  globalObj.lexicalEnvironment().setWindowProxyThisValue(windowProxy);
 }
 
 JS_FRIEND_API JSObject* js::ToWindowIfWindowProxy(JSObject* obj) {
@@ -1410,6 +1379,14 @@ JS_FRIEND_API void js::LogDtor(void* self, const char* type, uint32_t sz) {
   }
 }
 
+JS_FRIEND_API JS::Value js::MaybeGetScriptPrivate(JSObject* object) {
+  if (!object->is<ScriptSourceObject>()) {
+    return UndefinedValue();
+  }
+
+  return object->as<ScriptSourceObject>().canonicalPrivate();
+}
+
 JS_FRIEND_API uint64_t js::GetGCHeapUsageForObjectZone(JSObject* obj) {
-  return obj->zone()->usage.gcBytes();
+  return obj->zone()->zoneSize.gcBytes();
 }

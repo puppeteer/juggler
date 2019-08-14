@@ -5,11 +5,12 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 XPIDL_SOURCES += [
     'domstubs.idl',
     'nsIBrowser.idl',
+    'nsIBrowserChild.idl',
     'nsIBrowserDOMWindow.idl',
     'nsIContentPermissionPrompt.idl',
     'nsIContentPrefService2.idl',
@@ -20,10 +21,9 @@ XPIDL_SOURCES += [
     'nsIDOMWindowUtils.idl',
     'nsIFocusManager.idl',
     'nsIQueryContentEventResult.idl',
+    'nsIRemoteTab.idl',
     'nsIServiceWorkerManager.idl',
     'nsIStructuredCloneContainer.idl',
-    'nsITabChild.idl',
-    'nsITabParent.idl',
     'nsITextInputProcessor.idl',
     'nsITextInputProcessorCallback.idl',
 ]

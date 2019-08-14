@@ -18,8 +18,8 @@
 
 // Printing Progress Includes
 #if !defined(XP_MACOSX)
-#include "nsPrintProgress.h"
-#include "nsPrintProgressParams.h"
+#  include "nsPrintProgress.h"
+#  include "nsPrintProgressParams.h"
 
 static const char* kPrintProgressDialogURL =
     "chrome://global/content/printProgress.xul";
@@ -34,7 +34,8 @@ NS_IMPL_ISUPPORTS(nsPrintingPromptService, nsIPrintingPromptService,
 
 StaticRefPtr<nsPrintingPromptService> sSingleton;
 
-/* static */ already_AddRefed<nsPrintingPromptService>
+/* static */
+already_AddRefed<nsPrintingPromptService>
 nsPrintingPromptService::GetSingleton() {
   MOZ_ASSERT(XRE_IsParentProcess(),
              "The content process must use nsPrintingProxy");
@@ -79,7 +80,7 @@ nsPrintingPromptService::ShowPrintDialog(mozIDOMWindowProxy* parent,
 }
 
 NS_IMETHODIMP
-nsPrintingPromptService::ShowProgress(
+nsPrintingPromptService::ShowPrintProgressDialog(
     mozIDOMWindowProxy* parent,
     nsIWebBrowserPrint* webBrowserPrint,  // ok to be null
     nsIPrintSettings* printSettings,      // ok to be null
@@ -128,8 +129,8 @@ nsPrintingPromptService::ShowProgress(
 }
 
 NS_IMETHODIMP
-nsPrintingPromptService::ShowPageSetup(mozIDOMWindowProxy* parent,
-                                       nsIPrintSettings* printSettings) {
+nsPrintingPromptService::ShowPageSetupDialog(mozIDOMWindowProxy* parent,
+                                             nsIPrintSettings* printSettings) {
   NS_ENSURE_ARG(printSettings);
 
   nsCOMPtr<nsIPrintDialogService> dlgPrint(
@@ -205,11 +206,24 @@ nsPrintingPromptService::OnStatusChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP
 nsPrintingPromptService::OnSecurityChange(nsIWebProgress* aWebProgress,
                                           nsIRequest* aRequest,
-                                          uint32_t state) {
+                                          uint32_t aState) {
 #if !defined(XP_MACOSX)
   if (mWebProgressListener) {
     return mWebProgressListener->OnSecurityChange(aWebProgress, aRequest,
-                                                  state);
+                                                  aState);
+  }
+#endif
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsPrintingPromptService::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
+                                                nsIRequest* aRequest,
+                                                uint32_t aEvent) {
+#if !defined(XP_MACOSX)
+  if (mWebProgressListener) {
+    return mWebProgressListener->OnContentBlockingEvent(aWebProgress, aRequest,
+                                                        aEvent);
   }
 #endif
   return NS_OK;

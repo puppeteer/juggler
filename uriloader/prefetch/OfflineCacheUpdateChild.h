@@ -11,7 +11,7 @@
 
 #include "nsCOMArray.h"
 #include "nsCOMPtr.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIURI.h"
@@ -29,23 +29,23 @@ class OfflineCacheUpdateChild : public nsIOfflineCacheUpdate,
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOFFLINECACHEUPDATE
 
-  virtual mozilla::ipc::IPCResult RecvNotifyStateEvent(
-      const uint32_t& stateEvent, const uint64_t& byteProgress) override;
+  mozilla::ipc::IPCResult RecvNotifyStateEvent(const uint32_t& stateEvent,
+                                               const uint64_t& byteProgress);
 
-  virtual mozilla::ipc::IPCResult RecvAssociateDocuments(
-      const nsCString& cacheGroupId, const nsCString& cacheClientId) override;
+  mozilla::ipc::IPCResult RecvAssociateDocuments(
+      const nsCString& cacheGroupId, const nsCString& cacheClientId);
 
-  virtual mozilla::ipc::IPCResult RecvFinish(const bool& succeeded,
-                                             const bool& isUpgrade) override;
+  mozilla::ipc::IPCResult RecvFinish(const bool& succeeded,
+                                     const bool& isUpgrade);
 
   explicit OfflineCacheUpdateChild(nsPIDOMWindowInner* aWindow);
 
-  void SetDocument(nsIDocument* aDocument);
+  void SetDocument(dom::Document* aDocument);
 
  private:
   ~OfflineCacheUpdateChild();
 
-  nsresult AssociateDocument(nsIDocument* aDocument,
+  nsresult AssociateDocument(dom::Document* aDocument,
                              nsIApplicationCache* aApplicationCache);
   void GatherObservers(nsCOMArray<nsIOfflineCacheUpdateObserver>& aObservers);
   nsresult Finish();
@@ -74,7 +74,7 @@ class OfflineCacheUpdateChild : public nsIOfflineCacheUpdate,
   nsCOMArray<nsIOfflineCacheUpdateObserver> mObservers;
 
   /* Document that requested this update */
-  nsCOMPtr<nsIDocument> mDocument;
+  nsCOMPtr<dom::Document> mDocument;
 
   /* Keep reference to the window that owns this update to call the
      parent offline cache update construcor */

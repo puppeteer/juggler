@@ -5,7 +5,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=799315
 -->
 <head>
   <title>Test for MP4 and MP3 support</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
   <script type="text/javascript" src="manifest.js"></script>
 </head>
@@ -96,13 +96,7 @@ function check_mp4(v, enabled) {
     check(codec, "probably");
     ok(MediaSource.isTypeSupported(codec), "VP9 in MP4 should be supported in MSE");
   });
-  // AV1 is temporarily disabled on Win32 due to linker issues
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=1475564
-  if (!isWindows32()) {
-    check("video/mp4; codecs=\"av1\"", "probably");
-  } else {
-    check("video/mp4; codecs=\"av1\"", "");
-  }
+  check("video/mp4; codecs=\"av1\"", "probably");
 }
 
 function check_mp3(v, enabled) {

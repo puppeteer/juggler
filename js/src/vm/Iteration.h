@@ -87,7 +87,13 @@ struct NativeIterator {
   };
 
  private:
-  uint32_t flags_ = 0;  // consists of Flags bits
+  static constexpr uint32_t FlagsBits = 3;
+  static constexpr uint32_t FlagsMask = (1 << FlagsBits) - 1;
+  static constexpr uint32_t PropCountLimit = 1 << (32 - FlagsBits);
+
+  // Stores Flags bits in the lower bits and the initial property count above
+  // them.
+  uint32_t flagsAndCount_ = 0;
 
   /* While in compartment->enumerators, these form a doubly linked list. */
   NativeIterator* next_ = nullptr;
@@ -110,7 +116,7 @@ struct NativeIterator {
    * to mean this function failed.
    */
   NativeIterator(JSContext* cx, Handle<PropertyIteratorObject*> propIter,
-                 Handle<JSObject*> objBeingIterated, const AutoIdVector& props,
+                 Handle<JSObject*> objBeingIterated, HandleIdVector props,
                  uint32_t numGuards, uint32_t guardKey, bool* hadError);
 
   /** Initialize an |ObjectRealm::enumerators| sentinel. */
@@ -223,31 +229,50 @@ struct NativeIterator {
 
   uint32_t guardKey() const { return guardKey_; }
 
-  bool isInitialized() const { return flags_ & Flags::Initialized; }
+  bool isInitialized() const { return flags() & Flags::Initialized; }
+
+  size_t allocationSize() const;
 
  private:
+  uint32_t flags() const { return flagsAndCount_ & FlagsMask; }
+
+  uint32_t initialPropertyCount() const { return flagsAndCount_ >> FlagsBits; }
+
+  void setFlags(uint32_t flags) {
+    MOZ_ASSERT((flags & ~FlagsMask) == 0);
+    flagsAndCount_ = (initialPropertyCount() << FlagsBits) | flags;
+  }
+
+  MOZ_MUST_USE bool setInitialPropertyCount(uint32_t count) {
+    if (count >= PropCountLimit) {
+      return false;
+    }
+    flagsAndCount_ = (count << FlagsBits) | flags();
+    return true;
+  }
+
   void markInitialized() {
-    MOZ_ASSERT(flags_ == 0);
-    flags_ = Flags::Initialized;
+    MOZ_ASSERT(flags() == 0);
+    setFlags(Flags::Initialized);
   }
 
  public:
   bool isActive() const {
     MOZ_ASSERT(isInitialized());
 
-    return flags_ & Flags::Active;
+    return flags() & Flags::Active;
   }
 
   void markActive() {
     MOZ_ASSERT(isInitialized());
 
-    flags_ |= Flags::Active;
+    flagsAndCount_ |= Flags::Active;
   }
 
   void markInactive() {
     MOZ_ASSERT(isInitialized());
 
-    flags_ &= ~Flags::Active;
+    flagsAndCount_ &= ~Flags::Active;
   }
 
   bool isReusable() const {
@@ -258,13 +283,13 @@ struct NativeIterator {
     // |Flags::Initialized| is set.  Using |Flags::NotReusable| to test
     // would also work, but this formulation is safer against memory
     // corruption.
-    return flags_ == Flags::Initialized;
+    return flags() == Flags::Initialized;
   }
 
   void markHasUnvisitedPropertyDeletion() {
     MOZ_ASSERT(isInitialized());
 
-    flags_ |= Flags::HasUnvisitedPropertyDeletion;
+    flagsAndCount_ |= Flags::HasUnvisitedPropertyDeletion;
   }
 
   void link(NativeIterator* other) {
@@ -310,8 +335,8 @@ struct NativeIterator {
     return offsetof(NativeIterator, propertiesEnd_);
   }
 
-  static constexpr size_t offsetOfFlags() {
-    return offsetof(NativeIterator, flags_);
+  static constexpr size_t offsetOfFlagsAndCount() {
+    return offsetof(NativeIterator, flagsAndCount_);
   }
 
   static constexpr size_t offsetOfNext() {
@@ -328,6 +353,10 @@ class PropertyIteratorObject : public NativeObject {
 
  public:
   static const Class class_;
+
+  // We don't use the fixed slot but the JITs use this constant to load the
+  // private value (the NativeIterator*).
+  static const uint32_t NUM_FIXED_SLOTS = 1;
 
   NativeIterator* getNativeIterator() const {
     return static_cast<js::NativeIterator*>(getPrivate());
@@ -357,14 +386,18 @@ class StringIteratorObject : public NativeObject {
 StringIteratorObject* NewStringIteratorObject(
     JSContext* cx, NewObjectKind newKind = GenericObject);
 
-JSObject* GetIterator(JSContext* cx, HandleObject obj);
+class RegExpStringIteratorObject : public NativeObject {
+ public:
+  static const Class class_;
+};
+
+RegExpStringIteratorObject* NewRegExpStringIteratorObject(
+    JSContext* cx, NewObjectKind newKind = GenericObject);
+
+MOZ_MUST_USE bool EnumerateProperties(JSContext* cx, HandleObject obj,
+                                      MutableHandleIdVector props);
 
 PropertyIteratorObject* LookupInIteratorCache(JSContext* cx, HandleObject obj);
-
-JSObject* EnumeratedIdVectorToIterator(JSContext* cx, HandleObject obj,
-                                       AutoIdVector& props);
-
-JSObject* NewEmptyPropertyIterator(JSContext* cx);
 
 JSObject* ValueToIterator(JSContext* cx, HandleValue vp);
 
@@ -383,8 +416,11 @@ extern bool SuppressDeletedElement(JSContext* cx, HandleObject obj,
  * IteratorMore() returns the next iteration value. If no value is available,
  * MagicValue(JS_NO_ITER_VALUE) is returned.
  */
-extern bool IteratorMore(JSContext* cx, HandleObject iterobj,
-                         MutableHandleValue rval);
+inline Value IteratorMore(JSObject* iterobj) {
+  NativeIterator* ni =
+      iterobj->as<PropertyIteratorObject>().getNativeIterator();
+  return ni->nextIteratedValueAndAdvance();
+}
 
 /*
  * Create an object of the form { value: VALUE, done: DONE }.

@@ -11,8 +11,10 @@
 #include "nsIApplicationCacheChannel.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIChannel.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/Logging.h"
+
+using mozilla::dom::Document;
 
 //
 // To enable logging (see mozilla/Logging.h for full details):
@@ -55,7 +57,7 @@ OfflineCacheUpdateGlue::~OfflineCacheUpdateGlue() {
   LOG(("OfflineCacheUpdateGlue::~OfflineCacheUpdateGlue [%p]", this));
 }
 
-nsIOfflineCacheUpdate *OfflineCacheUpdateGlue::EnsureUpdate() {
+nsIOfflineCacheUpdate* OfflineCacheUpdateGlue::EnsureUpdate() {
   if (!mUpdate) {
     mUpdate = new nsOfflineCacheUpdate();
     LOG(("OfflineCacheUpdateGlue [%p] is using update [%p]", this,
@@ -71,7 +73,7 @@ OfflineCacheUpdateGlue::Schedule() {
       mozilla::services::GetObserverService();
   if (observerService) {
     LOG(("Calling offline-cache-update-added"));
-    observerService->NotifyObservers(static_cast<nsIOfflineCacheUpdate *>(this),
+    observerService->NotifyObservers(static_cast<nsIOfflineCacheUpdate*>(this),
                                      "offline-cache-update-added", nullptr);
     LOG(("Done offline-cache-update-added"));
   }
@@ -88,17 +90,16 @@ OfflineCacheUpdateGlue::Schedule() {
 }
 
 NS_IMETHODIMP
-OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI, nsIURI *aDocumentURI,
-                             nsIPrincipal *aLoadingPrincipal,
-                             nsIDocument *aDocument,
-                             nsIFile *aCustomProfileDir) {
+OfflineCacheUpdateGlue::Init(nsIURI* aManifestURI, nsIURI* aDocumentURI,
+                             nsIPrincipal* aLoadingPrincipal,
+                             Document* aDocument, nsIFile* aCustomProfileDir) {
   nsresult rv;
 
   nsAutoCString originSuffix;
   rv = aLoadingPrincipal->GetOriginSuffix(originSuffix);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsOfflineCacheUpdateService *service =
+  nsOfflineCacheUpdateService* service =
       nsOfflineCacheUpdateService::EnsureService();
   if (service) {
     service->FindUpdate(aManifestURI, originSuffix, aCustomProfileDir,
@@ -123,7 +124,7 @@ OfflineCacheUpdateGlue::Init(nsIURI *aManifestURI, nsIURI *aDocumentURI,
                        aCustomProfileDir);
 }
 
-void OfflineCacheUpdateGlue::SetDocument(nsIDocument *aDocument) {
+void OfflineCacheUpdateGlue::SetDocument(Document* aDocument) {
   // The design is one document for one cache update on the content process.
   NS_ASSERTION(!mDocument,
                "Setting more then a single document on an instance of "
@@ -137,7 +138,7 @@ void OfflineCacheUpdateGlue::SetDocument(nsIDocument *aDocument) {
   // implicit (which are the reasons we collect documents here).
   if (!aDocument) return;
 
-  nsIChannel *channel = aDocument->GetChannel();
+  nsIChannel* channel = aDocument->GetChannel();
   nsCOMPtr<nsIApplicationCacheChannel> appCacheChannel =
       do_QueryInterface(channel);
   if (!appCacheChannel) return;
@@ -154,7 +155,7 @@ void OfflineCacheUpdateGlue::SetDocument(nsIDocument *aDocument) {
 }
 
 NS_IMETHODIMP
-OfflineCacheUpdateGlue::UpdateStateChanged(nsIOfflineCacheUpdate *aUpdate,
+OfflineCacheUpdateGlue::UpdateStateChanged(nsIOfflineCacheUpdate* aUpdate,
                                            uint32_t state) {
   if (state == nsIOfflineCacheUpdateObserver::STATE_FINISHED) {
     LOG(("OfflineCacheUpdateGlue got STATE_FINISHED [%p]", this));
@@ -164,7 +165,7 @@ OfflineCacheUpdateGlue::UpdateStateChanged(nsIOfflineCacheUpdate *aUpdate,
     if (observerService) {
       LOG(("Calling offline-cache-update-completed"));
       observerService->NotifyObservers(
-          static_cast<nsIOfflineCacheUpdate *>(this),
+          static_cast<nsIOfflineCacheUpdate*>(this),
           "offline-cache-update-completed", nullptr);
       LOG(("Done offline-cache-update-completed"));
     }
@@ -177,18 +178,18 @@ OfflineCacheUpdateGlue::UpdateStateChanged(nsIOfflineCacheUpdate *aUpdate,
 
 NS_IMETHODIMP
 OfflineCacheUpdateGlue::ApplicationCacheAvailable(
-    nsIApplicationCache *aApplicationCache) {
+    nsIApplicationCache* aApplicationCache) {
   NS_ENSURE_ARG(aApplicationCache);
 
   // Check that the document that requested this update was
   // previously associated with an application cache.  If not, it
   // should be associated with the new one.
-  nsCOMPtr<nsIApplicationCacheContainer> container =
-      do_QueryInterface(mDocument);
-  if (!container) return NS_OK;
+  if (!mDocument) {
+    return NS_OK;
+  }
 
   nsCOMPtr<nsIApplicationCache> existingCache;
-  nsresult rv = container->GetApplicationCache(getter_AddRefs(existingCache));
+  nsresult rv = mDocument->GetApplicationCache(getter_AddRefs(existingCache));
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (!existingCache) {
@@ -201,7 +202,7 @@ OfflineCacheUpdateGlue::ApplicationCacheAvailable(
            clientID.get(), mDocument.get()));
     }
 
-    rv = container->SetApplicationCache(aApplicationCache);
+    rv = mDocument->SetApplicationCache(aApplicationCache);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 

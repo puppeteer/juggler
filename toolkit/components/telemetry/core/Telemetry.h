@@ -7,8 +7,9 @@
 #define Telemetry_h__
 
 #include "mozilla/GuardObjects.h"
-#include "mozilla/StartupTimeline.h"
+#include "mozilla/TelemetryEventEnums.h"
 #include "mozilla/TelemetryHistogramEnums.h"
+#include "mozilla/TelemetryOriginEnums.h"
 #include "mozilla/TelemetryScalarEnums.h"
 #include "mozilla/TimeStamp.h"
 #include "nsString.h"
@@ -35,11 +36,17 @@ struct KeyedHistogramAccumulation;
 struct ScalarAction;
 struct KeyedScalarAction;
 struct ChildEventData;
+struct EventExtraEntry;
 
 /**
  * Initialize the Telemetry service on the main thread at startup.
  */
 void Init();
+
+/**
+ * Shutdown the Telemetry service.
+ */
+void ShutdownTelemetry();
 
 /**
  * Adds sample to a histogram defined in TelemetryHistogramEnums.h
@@ -567,6 +574,40 @@ void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aKey,
  */
 void ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, const nsAString& aKey,
                       uint32_t aValue);
+
+/**
+ * Records an event. See the Event documentation for more information:
+ * https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/telemetry/collection/events.html
+ *
+ * @param aId The event enum id.
+ * @param aValue Optional. The event value.
+ * @param aExtra Optional. The event's extra key/value pairs.
+ */
+void RecordEvent(mozilla::Telemetry::EventID aId,
+                 const mozilla::Maybe<nsCString>& aValue,
+                 const mozilla::Maybe<nsTArray<EventExtraEntry>>& aExtra);
+
+/**
+ * Enables recording of events in a category.
+ * Events default to recording disabled.
+ * This toggles recording for all events in the specified category.
+ *
+ * @param aCategory The category name.
+ * @param aEnabled Whether recording should be enabled or disabled.
+ */
+void SetEventRecordingEnabled(const nsACString& aCategory, bool aEnabled);
+
+/**
+ * YOU PROBABLY SHOULDN'T USE THIS.
+ * THIS IS AN EXPERIMENTAL API NOT YET READY FOR GENERAL USE.
+ *
+ * Records that the metric is true for the stated origin.
+ *
+ * @param aId the metric.
+ * @param aOrigin the origin on which to record the metric as true.
+ */
+void RecordOrigin(mozilla::Telemetry::OriginMetricID aId,
+                  const nsACString& aOrigin);
 
 }  // namespace Telemetry
 }  // namespace mozilla

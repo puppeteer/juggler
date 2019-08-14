@@ -81,16 +81,19 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HeapSnapshot)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-/* virtual */ JSObject* HeapSnapshot::WrapObject(JSContext* aCx,
-                                                 HandleObject aGivenProto) {
+/* virtual */
+JSObject* HeapSnapshot::WrapObject(JSContext* aCx, HandleObject aGivenProto) {
   return HeapSnapshot_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 /*** Reading Heap Snapshots ***************************************************/
 
-/* static */ already_AddRefed<HeapSnapshot> HeapSnapshot::Create(
-    JSContext* cx, GlobalObject& global, const uint8_t* buffer, uint32_t size,
-    ErrorResult& rv) {
+/* static */
+already_AddRefed<HeapSnapshot> HeapSnapshot::Create(JSContext* cx,
+                                                    GlobalObject& global,
+                                                    const uint8_t* buffer,
+                                                    uint32_t size,
+                                                    ErrorResult& rv) {
   RefPtr<HeapSnapshot> snapshot = new HeapSnapshot(cx, global.GetAsSupports());
   if (!snapshot->init(cx, buffer, size)) {
     rv.Throw(NS_ERROR_UNEXPECTED);
@@ -133,7 +136,7 @@ struct GetOrInternStringMatcher {
   explicit GetOrInternStringMatcher(InternedStringSet& strings)
       : internedStrings(strings) {}
 
-  const CharT* match(const std::string* str) {
+  const CharT* operator()(const std::string* str) {
     MOZ_ASSERT(str);
     size_t length = str->length() / sizeof(CharT);
     auto tempString = reinterpret_cast<const CharT*>(str->data());
@@ -144,7 +147,7 @@ struct GetOrInternStringMatcher {
     return internedStrings.back().get();
   }
 
-  const CharT* match(uint64_t ref) {
+  const CharT* operator()(uint64_t ref) {
     if (MOZ_LIKELY(ref < internedStrings.length())) {
       auto& string = internedStrings[ref];
       MOZ_ASSERT(string);
@@ -591,10 +594,10 @@ void HeapSnapshot::ComputeShortestPaths(JSContext* cx, uint64_t start,
 
   for (auto iter = shortestPaths.targetIter(); !iter.done(); iter.next()) {
     JS::RootedValue key(cx, JS::NumberValue(iter.get().identifier()));
-    JS::AutoValueVector paths(cx);
+    JS::RootedValueVector paths(cx);
 
     bool ok = shortestPaths.forEachPath(iter.get(), [&](JS::ubi::Path& path) {
-      JS::AutoValueVector pathValues(cx);
+      JS::RootedValueVector pathValues(cx);
 
       for (JS::ubi::BackEdge* edge : path) {
         JS::RootedObject pathPart(cx, JS_NewPlainObject(cx));
@@ -659,7 +662,7 @@ void HeapSnapshot::ComputeShortestPaths(JSContext* cx, uint64_t start,
 // globals, find the set of compartments the globals are allocated
 // within. Returns false on OOM failure.
 static bool PopulateCompartmentsWithGlobals(CompartmentSet& compartments,
-                                            AutoObjectVector& globals) {
+                                            HandleObjectVector globals) {
   unsigned length = globals.length();
   for (unsigned i = 0; i < length; i++) {
     if (!compartments.put(GetObjectCompartment(globals[i]))) return false;
@@ -670,7 +673,8 @@ static bool PopulateCompartmentsWithGlobals(CompartmentSet& compartments,
 
 // Add the given set of globals as explicit roots in the given roots
 // list. Returns false on OOM failure.
-static bool AddGlobalsAsRoots(AutoObjectVector& globals, ubi::RootList& roots) {
+static bool AddGlobalsAsRoots(HandleObjectVector globals,
+                              ubi::RootList& roots) {
   unsigned length = globals.length();
   for (unsigned i = 0; i < length; i++) {
     if (!roots.addRoot(ubi::Node(globals[i].get()), u"heap snapshot global")) {
@@ -726,8 +730,8 @@ static bool EstablishBoundaries(JSContext* cx, ErrorResult& rv,
       return false;
     }
 
-    AutoObjectVector globals(cx);
-    if (!dbg::GetDebuggeeGlobals(cx, *dbgObj, globals) ||
+    RootedObjectVector globals(cx);
+    if (!dbg::GetDebuggeeGlobals(cx, *dbgObj, &globals) ||
         !PopulateCompartmentsWithGlobals(compartments, globals) ||
         !roots.init(compartments) || !AddGlobalsAsRoots(globals, roots)) {
       rv.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -748,7 +752,7 @@ static bool EstablishBoundaries(JSContext* cx, ErrorResult& rv,
       return false;
     }
 
-    AutoObjectVector globals(cx);
+    RootedObjectVector globals(cx);
     for (uint32_t i = 0; i < length; i++) {
       JSObject* global = boundaries.mGlobals.Value().ElementAt(i);
       if (!JS_IsGlobalObject(global)) {
@@ -783,37 +787,6 @@ class TwoByteString
     : public Variant<JSAtom*, const char16_t*, JS::ubi::EdgeName> {
   using Base = Variant<JSAtom*, const char16_t*, JS::ubi::EdgeName>;
 
-  struct AsTwoByteStringMatcher {
-    TwoByteString match(JSAtom* atom) { return TwoByteString(atom); }
-
-    TwoByteString match(const char16_t* chars) { return TwoByteString(chars); }
-  };
-
-  struct IsNonNullMatcher {
-    template <typename T>
-    bool match(const T& t) {
-      return t != nullptr;
-    }
-  };
-
-  struct LengthMatcher {
-    size_t match(JSAtom* atom) {
-      MOZ_ASSERT(atom);
-      JS::ubi::AtomOrTwoByteChars s(atom);
-      return s.length();
-    }
-
-    size_t match(const char16_t* chars) {
-      MOZ_ASSERT(chars);
-      return NS_strlen(chars);
-    }
-
-    size_t match(const JS::ubi::EdgeName& ptr) {
-      MOZ_ASSERT(ptr);
-      return NS_strlen(ptr.get());
-    }
-  };
-
   struct CopyToBufferMatcher {
     RangedPtr<char16_t> destination;
     size_t maxLength;
@@ -821,15 +794,17 @@ class TwoByteString
     CopyToBufferMatcher(RangedPtr<char16_t> destination, size_t maxLength)
         : destination(destination), maxLength(maxLength) {}
 
-    size_t match(JS::ubi::EdgeName& ptr) { return ptr ? match(ptr.get()) : 0; }
+    size_t operator()(JS::ubi::EdgeName& ptr) {
+      return ptr ? operator()(ptr.get()) : 0;
+    }
 
-    size_t match(JSAtom* atom) {
+    size_t operator()(JSAtom* atom) {
       MOZ_ASSERT(atom);
       JS::ubi::AtomOrTwoByteChars s(atom);
       return s.copyToBuffer(destination, maxLength);
     }
 
-    size_t match(const char16_t* chars) {
+    size_t operator()(const char16_t* chars) {
       MOZ_ASSERT(chars);
       JS::ubi::AtomOrTwoByteChars s(chars);
       return s.copyToBuffer(destination, maxLength);
@@ -853,20 +828,30 @@ class TwoByteString
 
   // Rewrap the inner value of a JS::ubi::AtomOrTwoByteChars as a TwoByteString.
   static TwoByteString from(JS::ubi::AtomOrTwoByteChars&& s) {
-    AsTwoByteStringMatcher m;
-    return s.match(m);
+    return s.match([](auto* a) { return TwoByteString(a); });
   }
 
   // Returns true if the given TwoByteString is non-null, false otherwise.
   bool isNonNull() const {
-    IsNonNullMatcher m;
-    return match(m);
+    return match([](auto& t) { return t != nullptr; });
   }
 
   // Return the length of the string, 0 if it is null.
   size_t length() const {
-    LengthMatcher m;
-    return match(m);
+    return match(
+        [](JSAtom* atom) -> size_t {
+          MOZ_ASSERT(atom);
+          JS::ubi::AtomOrTwoByteChars s(atom);
+          return s.length();
+        },
+        [](const char16_t* chars) -> size_t {
+          MOZ_ASSERT(chars);
+          return NS_strlen(chars);
+        },
+        [](const JS::ubi::EdgeName& ptr) -> size_t {
+          MOZ_ASSERT(ptr);
+          return NS_strlen(ptr.get());
+        });
   }
 
   // Copy the contents of a TwoByteString into the provided buffer. The buffer
@@ -891,37 +876,33 @@ class TwoByteString
 struct TwoByteString::HashPolicy {
   using Lookup = TwoByteString;
 
-  struct HashingMatcher {
-    js::HashNumber match(const JSAtom* atom) {
-      return js::DefaultHasher<const JSAtom*>::hash(atom);
-    }
-
-    js::HashNumber match(const char16_t* chars) {
-      MOZ_ASSERT(chars);
-      auto length = NS_strlen(chars);
-      return HashString(chars, length);
-    }
-
-    js::HashNumber match(const JS::ubi::EdgeName& ptr) {
-      MOZ_ASSERT(ptr);
-      return match(ptr.get());
-    }
-  };
-
   static js::HashNumber hash(const Lookup& l) {
-    HashingMatcher hasher;
-    return l.match(hasher);
+    return l.match(
+        [](const JSAtom* atom) {
+          return js::DefaultHasher<const JSAtom*>::hash(atom);
+        },
+        [](const char16_t* chars) {
+          MOZ_ASSERT(chars);
+          auto length = NS_strlen(chars);
+          return HashString(chars, length);
+        },
+        [](const JS::ubi::EdgeName& ptr) {
+          const char16_t* chars = ptr.get();
+          MOZ_ASSERT(chars);
+          auto length = NS_strlen(chars);
+          return HashString(chars, length);
+        });
   }
 
   struct EqualityMatcher {
     const TwoByteString& rhs;
     explicit EqualityMatcher(const TwoByteString& rhs) : rhs(rhs) {}
 
-    bool match(const JSAtom* atom) {
+    bool operator()(const JSAtom* atom) {
       return rhs.is<JSAtom*>() && rhs.as<JSAtom*>() == atom;
     }
 
-    bool match(const char16_t* chars) {
+    bool operator()(const char16_t* chars) {
       MOZ_ASSERT(chars);
 
       const char16_t* rhsChars = nullptr;
@@ -939,9 +920,9 @@ struct TwoByteString::HashPolicy {
       return memcmp(chars, rhsChars, length * sizeof(char16_t)) == 0;
     }
 
-    bool match(const JS::ubi::EdgeName& ptr) {
+    bool operator()(const JS::ubi::EdgeName& ptr) {
       MOZ_ASSERT(ptr);
-      return match(ptr.get());
+      return operator()(ptr.get());
     }
   };
 
@@ -1349,7 +1330,8 @@ static unsigned long msSinceProcessCreation(const TimeStamp& now) {
   return (unsigned long)duration.ToMilliseconds();
 }
 
-/* static */ already_AddRefed<nsIFile> HeapSnapshot::CreateUniqueCoreDumpFile(
+/* static */
+already_AddRefed<nsIFile> HeapSnapshot::CreateUniqueCoreDumpFile(
     ErrorResult& rv, const TimeStamp& now, nsAString& outFilePath,
     nsAString& outSnapshotId) {
   nsCOMPtr<nsIFile> file;
@@ -1462,7 +1444,8 @@ namespace dom {
 using namespace JS;
 using namespace devtools;
 
-/* static */ void ChromeUtils::SaveHeapSnapshotShared(
+/* static */
+void ChromeUtils::SaveHeapSnapshotShared(
     GlobalObject& global, const HeapSnapshotBoundaries& boundaries,
     nsAString& outFilePath, nsAString& outSnapshotId, ErrorResult& rv) {
   auto start = TimeStamp::Now();
@@ -1514,21 +1497,24 @@ using namespace devtools;
                         edgeCount);
 }
 
-/* static */ void ChromeUtils::SaveHeapSnapshot(
-    GlobalObject& global, const HeapSnapshotBoundaries& boundaries,
-    nsAString& outFilePath, ErrorResult& rv) {
+/* static */
+void ChromeUtils::SaveHeapSnapshot(GlobalObject& global,
+                                   const HeapSnapshotBoundaries& boundaries,
+                                   nsAString& outFilePath, ErrorResult& rv) {
   nsAutoString snapshotId;
   SaveHeapSnapshotShared(global, boundaries, outFilePath, snapshotId, rv);
 }
 
-/* static */ void ChromeUtils::SaveHeapSnapshotGetId(
+/* static */
+void ChromeUtils::SaveHeapSnapshotGetId(
     GlobalObject& global, const HeapSnapshotBoundaries& boundaries,
     nsAString& outSnapshotId, ErrorResult& rv) {
   nsAutoString filePath;
   SaveHeapSnapshotShared(global, boundaries, filePath, outSnapshotId, rv);
 }
 
-/* static */ already_AddRefed<HeapSnapshot> ChromeUtils::ReadHeapSnapshot(
+/* static */
+already_AddRefed<HeapSnapshot> ChromeUtils::ReadHeapSnapshot(
     GlobalObject& global, const nsAString& filePath, ErrorResult& rv) {
   auto start = TimeStamp::Now();
 

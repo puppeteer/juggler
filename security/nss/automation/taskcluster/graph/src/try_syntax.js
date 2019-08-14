@@ -3,8 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import * as queue from "./queue";
+import path from 'path'
+import fs from 'fs'
 import intersect from "intersect";
 import parse_args from "minimist";
+import util from "util";
+import child_process from 'child_process';
+
+let execFile = util.promisify(child_process.execFile);
 
 function parseOptions(opts) {
   opts = parse_args(opts.split(/\s+/), {
@@ -51,7 +57,7 @@ function parseOptions(opts) {
   }
 
   // Parse tools.
-  let allTools = ["clang-format", "scan-build", "hacl", "saw", "abi", "coverage"];
+  let allTools = ["clang-format", "scan-build", "coverity", "hacl", "saw", "abi", "coverage"];
   let tools = intersect(opts.tools.split(/\s*,\s*/), allTools);
 
   // If the given value is "all" run all tools.
@@ -154,11 +160,26 @@ function filter(opts) {
   }
 }
 
-export function initFilter() {
-  let comment = process.env.TC_COMMENT || "";
+async function getCommitComment() {
+  const res = await execFile('hg', ['log', '-r', '.', '-T', '{desc}']);
+  return res.stdout;
+};
+
+export async function initFilter() {
+  let comment = await getCommitComment();
+
+  // Load try_task_config.json
+  // Add parameters to queue for created tasks
+  let config_path = path.normalize(path.join(__dirname, '../../../../try_task_config.json'))
+  if (fs.existsSync(config_path)) {
+    var payload = JSON.parse(fs.readFileSync(config_path));
+    if (payload['version'] == 2) {
+      queue.addParameters(payload['parameters']);
+    }
+  }
 
   // Check for try syntax in changeset comment.
-  let match = comment.match(/^\s*try:\s*(.*)\s*$/);
+  let match = comment.match(/\btry:\s*(.*)\s*$/m);
 
   // Add try syntax filter.
   if (match) {

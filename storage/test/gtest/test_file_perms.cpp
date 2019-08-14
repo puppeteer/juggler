@@ -23,13 +23,13 @@ TEST(storage_file_perms, Test)
   do_check_success(dbFile->GetPermissions(&perms));
 
   // This reflexts the permissions defined by SQLITE_DEFAULT_FILE_PERMISSIONS in
-  // db/sqlite3/src/Makefile.in and must be kept in sync with that
+  // third_party/sqlite3/src/Makefile.in and must be kept in sync with that
 #ifdef ANDROID
   do_check_true(perms == (PR_IRUSR | PR_IWUSR));
 #elif defined(XP_WIN)
-  do_check_true(perms == (PR_IRUSR | PR_IWUSR | PR_IRGRP | PR_IWGRP | PR_IROTH | PR_IWOTH));
+  do_check_true(perms == (PR_IRUSR | PR_IWUSR | PR_IRGRP | PR_IWGRP | PR_IROTH |
+                          PR_IWOTH));
 #else
   do_check_true(perms == (PR_IRUSR | PR_IWUSR | PR_IRGRP | PR_IROTH));
 #endif
 }
-

@@ -4,108 +4,176 @@
 
 var EXPORTED_SYMBOLS = ["LightweightThemeConsumer"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const DEFAULT_THEME_ID = "default-theme@mozilla.org";
-const ICONS = Services.prefs.getStringPref("extensions.webextensions.themes.icons.buttons", "").split(",");
 
-const toolkitVariableMap = [
-  ["--lwt-accent-color", {
-    lwtProperty: "accentcolor",
-    processColor(rgbaChannels, element) {
-      if (!rgbaChannels || rgbaChannels.a == 0) {
-        return "white";
-      }
-      // Remove the alpha channel
-      const {r, g, b} = rgbaChannels;
-      return `rgb(${r}, ${g}, ${b})`;
-    },
-  }],
-  ["--lwt-text-color", {
-    lwtProperty: "textcolor",
-    processColor(rgbaChannels, element) {
-      if (!rgbaChannels) {
-        rgbaChannels = {r: 0, g: 0, b: 0};
-      }
-      // Remove the alpha channel
-      const {r, g, b} = rgbaChannels;
-      element.setAttribute("lwthemetextcolor", _isTextColorDark(r, g, b) ? "dark" : "bright");
-      return `rgba(${r}, ${g}, ${b})`;
-    },
-  }],
-  ["--arrowpanel-background", {
-    lwtProperty: "popup",
-  }],
-  ["--arrowpanel-color", {
-    lwtProperty: "popup_text",
-    processColor(rgbaChannels, element) {
-      const disabledColorVariable = "--panel-disabled-color";
-
-      if (!rgbaChannels) {
-        element.removeAttribute("lwt-popup-brighttext");
-        element.removeAttribute("lwt-popup-darktext");
-        element.style.removeProperty(disabledColorVariable);
-        return null;
-      }
-
-      let {r, g, b, a} = rgbaChannels;
-
-      if (_isTextColorDark(r, g, b)) {
-        element.removeAttribute("lwt-popup-brighttext");
-        element.setAttribute("lwt-popup-darktext", "true");
-      } else {
-        element.removeAttribute("lwt-popup-darktext");
-        element.setAttribute("lwt-popup-brighttext", "true");
-      }
-
-      element.style.setProperty(disabledColorVariable, `rgba(${r}, ${g}, ${b}, 0.5)`);
-      return `rgba(${r}, ${g}, ${b}, ${a})`;
-    },
-  }],
-  ["--arrowpanel-border-color", {
-    lwtProperty: "popup_border",
-  }],
-  ["--lwt-toolbar-field-background-color", {
-    lwtProperty: "toolbar_field",
-  }],
-  ["--lwt-toolbar-field-color", {
-    lwtProperty: "toolbar_field_text",
-    processColor(rgbaChannels, element) {
-      if (!rgbaChannels) {
-        element.removeAttribute("lwt-toolbar-field-brighttext");
-        return null;
-      }
-      const {r, g, b, a} = rgbaChannels;
-      if (_isTextColorDark(r, g, b)) {
-        element.removeAttribute("lwt-toolbar-field-brighttext");
-      } else {
-        element.setAttribute("lwt-toolbar-field-brighttext", "true");
-      }
-      return `rgba(${r}, ${g}, ${b}, ${a})`;
-    },
-  }],
-  ["--lwt-toolbar-field-border-color", {
-    lwtProperty: "toolbar_field_border",
-  }],
-  ["--lwt-toolbar-field-focus", {
-    lwtProperty: "toolbar_field_focus",
-  }],
-  ["--lwt-toolbar-field-focus-color", {
-    lwtProperty: "toolbar_field_text_focus",
-  }],
-  ["--toolbar-field-focus-border-color", {
-    lwtProperty: "toolbar_field_border_focus",
-  }],
-];
-
+ChromeUtils.defineModuleGetter(
+  this,
+  "AppConstants",
+  "resource://gre/modules/AppConstants.jsm"
+);
 // Get the theme variables from the app resource directory.
 // This allows per-app variables.
-ChromeUtils.defineModuleGetter(this, "ThemeContentPropertyList",
-  "resource:///modules/ThemeVariableMap.jsm");
-ChromeUtils.defineModuleGetter(this, "ThemeVariableMap",
-  "resource:///modules/ThemeVariableMap.jsm");
-ChromeUtils.defineModuleGetter(this, "LightweightThemeImageOptimizer",
-  "resource://gre/modules/addons/LightweightThemeImageOptimizer.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "ThemeContentPropertyList",
+  "resource:///modules/ThemeVariableMap.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "ThemeVariableMap",
+  "resource:///modules/ThemeVariableMap.jsm"
+);
+
+const toolkitVariableMap = [
+  [
+    "--lwt-accent-color",
+    {
+      lwtProperty: "accentcolor",
+      processColor(rgbaChannels, element) {
+        if (!rgbaChannels || rgbaChannels.a == 0) {
+          return "white";
+        }
+        // Remove the alpha channel
+        const { r, g, b } = rgbaChannels;
+        return `rgb(${r}, ${g}, ${b})`;
+      },
+    },
+  ],
+  [
+    "--lwt-text-color",
+    {
+      lwtProperty: "textcolor",
+      processColor(rgbaChannels, element) {
+        if (!rgbaChannels) {
+          rgbaChannels = { r: 0, g: 0, b: 0 };
+        }
+        // Remove the alpha channel
+        const { r, g, b } = rgbaChannels;
+        element.setAttribute(
+          "lwthemetextcolor",
+          _isTextColorDark(r, g, b) ? "dark" : "bright"
+        );
+        return `rgba(${r}, ${g}, ${b})`;
+      },
+    },
+  ],
+  [
+    "--arrowpanel-background",
+    {
+      lwtProperty: "popup",
+    },
+  ],
+  [
+    "--arrowpanel-color",
+    {
+      lwtProperty: "popup_text",
+      processColor(rgbaChannels, element) {
+        const disabledColorVariable = "--panel-disabled-color";
+
+        if (!rgbaChannels) {
+          element.removeAttribute("lwt-popup-brighttext");
+          element.removeAttribute("lwt-popup-darktext");
+          element.style.removeProperty(disabledColorVariable);
+          return null;
+        }
+
+        let { r, g, b, a } = rgbaChannels;
+
+        if (_isTextColorDark(r, g, b)) {
+          element.removeAttribute("lwt-popup-brighttext");
+          element.setAttribute("lwt-popup-darktext", "true");
+        } else {
+          element.removeAttribute("lwt-popup-darktext");
+          element.setAttribute("lwt-popup-brighttext", "true");
+        }
+
+        element.style.setProperty(
+          disabledColorVariable,
+          `rgba(${r}, ${g}, ${b}, 0.5)`
+        );
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+      },
+    },
+  ],
+  [
+    "--arrowpanel-border-color",
+    {
+      lwtProperty: "popup_border",
+    },
+  ],
+  [
+    "--lwt-toolbar-field-background-color",
+    {
+      lwtProperty: "toolbar_field",
+    },
+  ],
+  [
+    "--lwt-toolbar-field-color",
+    {
+      lwtProperty: "toolbar_field_text",
+      processColor(rgbaChannels, element) {
+        if (!rgbaChannels) {
+          element.removeAttribute("lwt-toolbar-field-brighttext");
+          return null;
+        }
+        const { r, g, b, a } = rgbaChannels;
+        if (_isTextColorDark(r, g, b)) {
+          element.removeAttribute("lwt-toolbar-field-brighttext");
+        } else {
+          element.setAttribute("lwt-toolbar-field-brighttext", "true");
+        }
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+      },
+    },
+  ],
+  [
+    "--lwt-toolbar-field-border-color",
+    {
+      lwtProperty: "toolbar_field_border",
+    },
+  ],
+  [
+    "--lwt-toolbar-field-focus",
+    {
+      lwtProperty: "toolbar_field_focus",
+    },
+  ],
+  [
+    "--lwt-toolbar-field-focus-color",
+    {
+      lwtProperty: "toolbar_field_text_focus",
+    },
+  ],
+  [
+    "--toolbar-field-focus-border-color",
+    {
+      lwtProperty: "toolbar_field_border_focus",
+    },
+  ],
+  [
+    "--lwt-toolbar-field-highlight",
+    {
+      lwtProperty: "toolbar_field_highlight",
+      processColor(rgbaChannels, element) {
+        if (!rgbaChannels) {
+          element.removeAttribute("lwt-selection");
+          return null;
+        }
+        element.setAttribute("lwt-selection", "true");
+        const { r, g, b, a } = rgbaChannels;
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+      },
+    },
+  ],
+  [
+    "--lwt-toolbar-field-highlight-text",
+    {
+      lwtProperty: "toolbar_field_highlight_text",
+    },
+  ],
+];
 
 function LightweightThemeConsumer(aDocument) {
   this._doc = aDocument;
@@ -114,66 +182,78 @@ function LightweightThemeConsumer(aDocument) {
 
   Services.obs.addObserver(this, "lightweight-theme-styling-update");
 
-  var temp = {};
-  ChromeUtils.import("resource://gre/modules/LightweightThemeManager.jsm", temp);
-  this._update(temp.LightweightThemeManager.currentThemeWithPersistedData);
+  // We're responsible for notifying LightweightThemeManager when the OS is in
+  // dark mode so it can activate the dark theme. We don't want this on Linux
+  // as the default theme picks up the right colors from dark GTK themes.
+  if (AppConstants.platform != "linux") {
+    this.darkThemeMediaQuery = this._win.matchMedia("(-moz-system-dark-theme)");
+    this.darkThemeMediaQuery.addListener(this);
+  }
+
+  const { LightweightThemeManager } = ChromeUtils.import(
+    "resource://gre/modules/LightweightThemeManager.jsm"
+  );
+  this._update(LightweightThemeManager.themeData);
 
   this._win.addEventListener("resolutionchange", this);
   this._win.addEventListener("unload", this, { once: true });
-
-  let darkThemeMediaQuery = this._win.matchMedia("(-moz-system-dark-theme)");
-  darkThemeMediaQuery.addListener(temp.LightweightThemeManager);
-  temp.LightweightThemeManager.systemThemeChanged(darkThemeMediaQuery);
 }
 
 LightweightThemeConsumer.prototype = {
   _lastData: null,
-  // Whether a lightweight theme is enabled.
-  _active: false,
 
   observe(aSubject, aTopic, aData) {
-    if (aTopic != "lightweight-theme-styling-update")
-      return;
-
-    let parsedData = JSON.parse(aData);
-    if (!parsedData) {
-      parsedData = { theme: null, experiment: null };
-    }
-
-    if (parsedData.window && parsedData.window !== this._winId) {
+    if (aTopic != "lightweight-theme-styling-update") {
       return;
     }
 
-    this._update(parsedData.theme, parsedData.experiment);
+    let data = aSubject.wrappedJSObject;
+    if (data.window && data.window !== this._winId) {
+      return;
+    }
+
+    this._update(data);
   },
 
   handleEvent(aEvent) {
+    if (aEvent.media == "(-moz-system-dark-theme)") {
+      this._update(this._lastData);
+      return;
+    }
+
     switch (aEvent.type) {
       case "resolutionchange":
-        if (this._active) {
-          this._update(this._lastData);
-        }
+        this._update(this._lastData);
         break;
       case "unload":
         Services.obs.removeObserver(this, "lightweight-theme-styling-update");
         Services.ppmm.sharedData.delete(`theme/${this._winId}`);
         this._win.removeEventListener("resolutionchange", this);
         this._win = this._doc = null;
+        if (this.darkThemeMediaQuery) {
+          this.darkThemeMediaQuery.removeListener(this);
+          this.darkThemeMediaQuery = null;
+        }
         break;
     }
   },
 
-  _update(theme, experiment) {
-    this._lastData = theme;
-    if (theme) {
-      theme = LightweightThemeImageOptimizer.optimize(theme, this._win.screen);
+  get darkMode() {
+    return this.darkThemeMediaQuery && this.darkThemeMediaQuery.matches;
+  },
+
+  _update(themeData) {
+    this._lastData = themeData;
+
+    let theme = themeData.theme;
+    if (themeData.darkTheme && this.darkMode) {
+      theme = themeData.darkTheme;
     }
-
-    let active = this._active = theme && theme.id !== DEFAULT_THEME_ID;
-
     if (!theme) {
-      theme = {};
+      theme = { id: DEFAULT_THEME_ID };
     }
+
+    let active = (this._active = Object.keys(theme).length);
 
     let root = this._doc.documentElement;
 
@@ -183,28 +263,26 @@ LightweightThemeConsumer.prototype = {
       root.removeAttribute("lwtheme-image");
     }
 
-    if (active && theme.icons) {
-      let activeIcons = Object.keys(theme.icons).join(" ");
-      root.setAttribute("lwthemeicons", activeIcons);
-    } else {
-      root.removeAttribute("lwthemeicons");
-    }
-
-    for (let icon of ICONS) {
-      let value = theme.icons ? theme.icons[`--${icon}-icon`] : null;
-      _setImage(root, active, `--${icon}-icon`, value);
-    }
-
-    this._setExperiment(active, experiment, theme.experimental);
+    this._setExperiment(active, themeData.experiment, theme.experimental);
     _setImage(root, active, "--lwt-header-image", theme.headerURL);
-    _setImage(root, active, "--lwt-additional-images", theme.additionalBackgrounds);
+    _setImage(
+      root,
+      active,
+      "--lwt-additional-images",
+      theme.additionalBackgrounds
+    );
     _setProperties(root, active, theme);
 
-    if (active) {
+    if (theme.id != DEFAULT_THEME_ID || this.darkMode) {
       root.setAttribute("lwtheme", "true");
     } else {
       root.removeAttribute("lwtheme");
       root.removeAttribute("lwthemetextcolor");
+    }
+    if (theme.id == DEFAULT_THEME_ID && this.darkMode) {
+      root.setAttribute("lwt-default-theme-in-dark-mode", "true");
+    } else {
+      root.removeAttribute("lwt-default-theme-in-dark-mode");
     }
 
     let contentThemeData = _getContentProperties(this._doc, active, theme);
@@ -235,7 +313,10 @@ LightweightThemeConsumer.prototype = {
     if (properties.colors) {
       for (const property in properties.colors) {
         const cssVariable = experiment.colors[property];
-        const value = _sanitizeCSSColor(root.ownerDocument, properties.colors[property]);
+        const value = _sanitizeCSSColor(
+          root.ownerDocument,
+          properties.colors[property]
+        );
         usedVariables.push([cssVariable, value]);
       }
     }
@@ -243,7 +324,10 @@ LightweightThemeConsumer.prototype = {
     if (properties.images) {
       for (const property in properties.images) {
         const cssVariable = experiment.images[property];
-        usedVariables.push([cssVariable, `url(${properties.images[property]})`]);
+        usedVariables.push([
+          cssVariable,
+          `url(${properties.images[property]})`,
+        ]);
       }
     }
     if (properties.properties) {
@@ -260,8 +344,10 @@ LightweightThemeConsumer.prototype = {
     if (experiment.stylesheet) {
       /* Stylesheet URLs are validated using WebExtension schemas */
       let stylesheetAttr = `href="${experiment.stylesheet}" type="text/css"`;
-      let stylesheet = this._doc.createProcessingInstruction("xml-stylesheet",
-        stylesheetAttr);
+      let stylesheet = this._doc.createProcessingInstruction(
+        "xml-stylesheet",
+        stylesheetAttr
+      );
       this._doc.insertBefore(stylesheet, root);
       this._lastExperimentData.stylesheet = stylesheet;
     }
@@ -285,7 +371,12 @@ function _setImage(aRoot, aActive, aVariableName, aURLs) {
   if (aURLs && !Array.isArray(aURLs)) {
     aURLs = [aURLs];
   }
-  _setProperty(aRoot, aActive, aVariableName, aURLs && aURLs.map(v => `url("${v.replace(/"/g, '\\"')}")`).join(","));
+  _setProperty(
+    aRoot,
+    aActive,
+    aVariableName,
+    aURLs && aURLs.map(v => `url("${v.replace(/"/g, '\\"')}")`).join(",")
+  );
 }
 
 function _setProperty(elem, active, variableName, value) {
@@ -307,8 +398,9 @@ function _setProperties(root, active, themeData) {
         processColor,
         isColor = true,
       } = definition;
-      let elem = optionalElementID ? root.ownerDocument.getElementById(optionalElementID)
-                                   : root;
+      let elem = optionalElementID
+        ? root.ownerDocument.getElementById(optionalElementID)
+        : root;
       let val = themeData[lwtProperty];
       if (isColor) {
         val = _sanitizeCSSColor(root.ownerDocument, val);
@@ -367,5 +459,5 @@ function _parseRGBA(aColorString) {
 }
 
 function _isTextColorDark(r, g, b) {
-  return (0.2125 * r + 0.7154 * g + 0.0721 * b) <= 110;
+  return 0.2125 * r + 0.7154 * g + 0.0721 * b <= 110;
 }

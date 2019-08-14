@@ -16,11 +16,11 @@
 
 #if defined(MOZILLA_INTERNAL_API)
 
-#include "MainThreadUtils.h"
-#include "mozilla/SystemGroup.h"
-#include "nsISupportsImpl.h"
-#include "nsString.h"
-#include "nsThreadUtils.h"
+#  include "MainThreadUtils.h"
+#  include "mozilla/SystemGroup.h"
+#  include "nsISupportsImpl.h"
+#  include "nsString.h"
+#  include "nsThreadUtils.h"
 
 #endif  // defined(MOZILLA_INTERNAL_API)
 
@@ -48,6 +48,7 @@ class ModuleLoadEvent {
     uintptr_t mBase;
     UniquePtr<wchar_t[]> mLdrName;
     UniquePtr<wchar_t[]> mFullPath;
+    double mLoadDurationMS;
   };
 
   ModuleLoadEvent() = default;
@@ -109,7 +110,7 @@ class DllServicesBase : public Authenticode {
     return mAuthenticode->GetBinaryOrgName(aFilePath);
   }
 
-  void Disable() { DllBlocklist_SetDllServices(nullptr); }
+  void DisableFull() { DllBlocklist_SetFullDllServices(nullptr); }
 
   DllServicesBase(const DllServicesBase&) = delete;
   DllServicesBase(DllServicesBase&&) = delete;
@@ -121,7 +122,8 @@ class DllServicesBase : public Authenticode {
 
   virtual ~DllServicesBase() = default;
 
-  void Enable() { DllBlocklist_SetDllServices(this); }
+  void EnableFull() { DllBlocklist_SetFullDllServices(this); }
+  void EnableBasic() { DllBlocklist_SetBasicDllServices(this); }
 
  private:
   Authenticode* mAuthenticode;
@@ -144,14 +146,14 @@ class DllServices : public detail::DllServicesBase {
     SystemGroup::Dispatch(TaskCategory::Other, runnable.forget());
   }
 
-#if defined(DEBUG)
+#  if defined(DEBUG)
   UniquePtr<wchar_t[]> GetBinaryOrgName(const wchar_t* aFilePath) final {
     // This function may perform disk I/O, so we should never call it on the
     // main thread.
     MOZ_ASSERT(!NS_IsMainThread());
     return detail::DllServicesBase::GetBinaryOrgName(aFilePath);
   }
-#endif  // defined(DEBUG)
+#  endif  // defined(DEBUG)
 
   NS_INLINE_DECL_THREADSAFE_VIRTUAL_REFCOUNTING(DllServices)
 
@@ -165,12 +167,13 @@ class DllServices : public detail::DllServicesBase {
 
 #else
 
-class BasicDllServices : public detail::DllServicesBase {
+class BasicDllServices final : public detail::DllServicesBase {
  public:
-  BasicDllServices() { Enable(); }
+  BasicDllServices() { EnableBasic(); }
 
-  ~BasicDllServices() { Disable(); }
+  ~BasicDllServices() = default;
 
+  // Not useful in this class, so provide a default implementation
   virtual void DispatchDllLoadNotification(PCUNICODE_STRING aDllName) override {
   }
 

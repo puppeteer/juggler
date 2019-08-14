@@ -6,11 +6,56 @@ export class SnippetBase extends React.PureComponent {
     super(props);
     this.onBlockClicked = this.onBlockClicked.bind(this);
     this.onDismissClicked = this.onDismissClicked.bind(this);
+    this.setBlockButtonRef = this.setBlockButtonRef.bind(this);
+    this.onBlockButtonMouseEnter = this.onBlockButtonMouseEnter.bind(this);
+    this.onBlockButtonMouseLeave = this.onBlockButtonMouseLeave.bind(this);
+    this.state = { blockButtonHover: false };
+  }
+
+  componentDidMount() {
+    if (this.blockButtonRef) {
+      this.blockButtonRef.addEventListener(
+        "mouseenter",
+        this.onBlockButtonMouseEnter
+      );
+      this.blockButtonRef.addEventListener(
+        "mouseleave",
+        this.onBlockButtonMouseLeave
+      );
+    }
+  }
+
+  componentWillUnmount() {
+    if (this.blockButtonRef) {
+      this.blockButtonRef.removeEventListener(
+        "mouseenter",
+        this.onBlockButtonMouseEnter
+      );
+      this.blockButtonRef.removeEventListener(
+        "mouseleave",
+        this.onBlockButtonMouseLeave
+      );
+    }
+  }
+
+  setBlockButtonRef(element) {
+    this.blockButtonRef = element;
+  }
+
+  onBlockButtonMouseEnter() {
+    this.setState({ blockButtonHover: true });
+  }
+
+  onBlockButtonMouseLeave() {
+    this.setState({ blockButtonHover: false });
   }
 
   onBlockClicked() {
     if (this.props.provider !== "preview") {
-      this.props.sendUserActionTelemetry({event: "BLOCK", id: this.props.UISurface});
+      this.props.sendUserActionTelemetry({
+        event: "BLOCK",
+        id: this.props.UISurface,
+      });
     }
 
     this.props.onBlock();
@@ -18,7 +63,10 @@ export class SnippetBase extends React.PureComponent {
 
   onDismissClicked() {
     if (this.props.provider !== "preview") {
-      this.props.sendUserActionTelemetry({event: "DISMISS", id: this.props.UISurface});
+      this.props.sendUserActionTelemetry({
+        event: "DISMISS",
+        id: this.props.UISurface,
+      });
     }
 
     this.props.onDismiss();
@@ -31,7 +79,8 @@ export class SnippetBase extends React.PureComponent {
           <div className="footer-content">
             <button
               className="ASRouterButton secondary"
-              onClick={this.onDismissClicked}>
+              onClick={this.onDismissClicked}
+            >
               {this.props.content.scene2_dismiss_button_text}
             </button>
           </div>
@@ -39,22 +88,33 @@ export class SnippetBase extends React.PureComponent {
       );
     }
 
-    const defaultTitle = schema.properties.block_button_text.default;
+    const label =
+      this.props.content.block_button_text ||
+      schema.properties.block_button_text.default;
     return (
-      <button className="blockButton" title={this.props.content.block_button_text || defaultTitle} onClick={this.onBlockClicked} />
+      <button
+        className="blockButton"
+        title={label}
+        aria-label={label}
+        onClick={this.onBlockClicked}
+        ref={this.setBlockButtonRef}
+      />
     );
   }
 
   render() {
-    const {props} = this;
+    const { props } = this;
+    const { blockButtonHover } = this.state;
 
-    const containerClassName = `SnippetBaseContainer${props.className ? ` ${props.className}` : ""}`;
+    const containerClassName = `SnippetBaseContainer${
+      props.className ? ` ${props.className}` : ""
+    }${blockButtonHover ? " active" : ""}`;
 
-    return (<div className={containerClassName} style={this.props.textStyle}>
-      <div className="innerWrapper">
-        {props.children}
+    return (
+      <div className={containerClassName} style={this.props.textStyle}>
+        <div className="innerWrapper">{props.children}</div>
+        {this.renderDismissButton()}
       </div>
-      {this.renderDismissButton()}
-    </div>);
+    );
   }
 }

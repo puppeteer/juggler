@@ -36,7 +36,6 @@ DIRS += [
 ]
 
 XPIDL_SOURCES += [
-    'nsCDefaultURIFixup.idl',
     'nsIContentViewer.idl',
     'nsIContentViewerEdit.idl',
     'nsIDocShell.idl',
@@ -44,6 +43,7 @@ XPIDL_SOURCES += [
     'nsIDocShellTreeOwner.idl',
     'nsIDocumentLoaderFactory.idl',
     'nsILoadContext.idl',
+    'nsILoadURIDelegate.idl',
     'nsIPrivacyTransitionObserver.idl',
     'nsIReflowObserver.idl',
     'nsIRefreshURI.idl',
@@ -76,12 +76,17 @@ EXPORTS.mozilla += [
 
 EXPORTS.mozilla.dom += [
     'BrowsingContext.h',
-    'ChromeBrowsingContext.h'
+    'BrowsingContextFieldList.h',
+    'BrowsingContextGroup.h',
+    'CanonicalBrowsingContext.h',
+    'ChildProcessChannelListener.h',
 ]
 
 UNIFIED_SOURCES += [
     'BrowsingContext.cpp',
-    'ChromeBrowsingContext.cpp',
+    'BrowsingContextGroup.cpp',
+    'CanonicalBrowsingContext.cpp',
+    'ChildProcessChannelListener.cpp',
     'LoadContext.cpp',
     'nsAboutRedirector.cpp',
     'nsDefaultURIFixup.cpp',
@@ -103,6 +108,8 @@ FINAL_LIBRARY = 'xul'
 LOCAL_INCLUDES += [
     '/docshell/shistory',
     '/dom/base',
+    '/dom/bindings',
+    '/js/xpconnect/src',
     '/layout/base',
     '/layout/generic',
     '/layout/style',
@@ -114,8 +121,8 @@ LOCAL_INCLUDES += [
     '/tools/profiler',
 ]
 
-if CONFIG['MOZ_TOOLKIT_SEARCH']:
-    DEFINES['MOZ_TOOLKIT_SEARCH'] = True
-
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']
+
+if CONFIG['MOZ_LAYOUT_DEBUGGER']:
+    DEFINES['MOZ_LAYOUT_DEBUGGER'] = True

@@ -375,7 +375,7 @@ for int_ty in [types.i8, types.i16]:
     )
 
 for int_ty in [types.i8, types.i16]:
-    for op in [ushr_imm, ishl_imm]:
+    for op in [ishl, ishl_imm, ushr, ushr_imm]:
         widen.legalize(
             a << op.bind(int_ty)(b, c),
             Rtl(
@@ -384,29 +384,14 @@ for int_ty in [types.i8, types.i16]:
                 a << ireduce.bind(int_ty)(z)
             ))
 
-    widen.legalize(
-        a << ishl.bind(int_ty)(b, c),
-        Rtl(
-            x << uextend.i32(b),
-            z << ishl.i32(x, c),
-            a << ireduce.bind(int_ty)(z)
-        ))
-
-    widen.legalize(
-        a << ushr.bind(int_ty)(b, c),
-        Rtl(
-            x << uextend.i32(b),
-            z << ushr.i32(x, c),
-            a << ireduce.bind(int_ty)(z)
-        ))
-
-    widen.legalize(
-        a << sshr.bind(int_ty)(b, c),
-        Rtl(
-            x << sextend.i32(b),
-            z << sshr.i32(x, c),
-            a << ireduce.bind(int_ty)(z)
-        ))
+    for op in [sshr, sshr_imm]:
+        widen.legalize(
+            a << op.bind(int_ty)(b, c),
+            Rtl(
+                x << sextend.i32(b),
+                z << op.i32(x, c),
+                a << ireduce.bind(int_ty)(z)
+            ))
 
     for w_cc in [
         intcc.eq, intcc.ne, intcc.ugt, intcc.ult, intcc.uge, intcc.ule
@@ -490,6 +475,26 @@ expand.legalize(
             b << bor(b1, b2)
         ))
 
+# Expansions for fcvt_from_{u,s}int for smaller integer types.
+# These use expand and not widen because the controlling type variable for
+# these instructions are f32/f64, which are legalized as part of the expand
+# group.
+for dest_ty in [types.f32, types.f64]:
+    for src_ty in [types.i8, types.i16]:
+        expand.legalize(
+            a << insts.fcvt_from_uint.bind(dest_ty).bind(src_ty)(b),
+            Rtl(
+                x << uextend.i32(b),
+                a << insts.fcvt_from_uint.bind(dest_ty).i32(x),
+            ))
+
+        expand.legalize(
+            a << insts.fcvt_from_sint.bind(dest_ty).bind(src_ty)(b),
+            Rtl(
+                x << sextend.i32(b),
+                a << insts.fcvt_from_sint.bind(dest_ty).i32(x),
+            ))
+
 # Expansions for immediate operands that are out of range.
 for inst_imm,      inst in [
         (iadd_imm, iadd),
@@ -500,7 +505,7 @@ for inst_imm,      inst in [
         (urem_imm, urem),
         (band_imm, band),
         (bor_imm, bor),
-        (bxor_imm, bor),
+        (bxor_imm, bxor),
         (ifcmp_imm, ifcmp)]:
     expand.legalize(
             a << inst_imm(x, y),
@@ -570,7 +575,7 @@ widen.legalize(
             b1 << band_imm(b, imm64(0xcc)),
             b2 << ushr_imm(b1, imm64(2)),
             b3 << band_imm(b, imm64(0x33)),
-            b4 << ushr_imm(b3, imm64(2)),
+            b4 << ishl_imm(b3, imm64(2)),
             c << bor(b2, b4),
             c1 << band_imm(c, imm64(0xf0)),
             c2 << ushr_imm(c1, imm64(4)),
@@ -590,7 +595,7 @@ widen.legalize(
             b1 << band_imm(b, imm64(0xcccc)),
             b2 << ushr_imm(b1, imm64(2)),
             b3 << band_imm(b, imm64(0x3333)),
-            b4 << ushr_imm(b3, imm64(2)),
+            b4 << ishl_imm(b3, imm64(2)),
             c << bor(b2, b4),
             c1 << band_imm(c, imm64(0xf0f0)),
             c2 << ushr_imm(c1, imm64(4)),
@@ -615,7 +620,7 @@ expand.legalize(
             b1 << band_imm(b, imm64(0xcccccccc)),
             b2 << ushr_imm(b1, imm64(2)),
             b3 << band_imm(b, imm64(0x33333333)),
-            b4 << ushr_imm(b3, imm64(2)),
+            b4 << ishl_imm(b3, imm64(2)),
             c << bor(b2, b4),
             c1 << band_imm(c, imm64(0xf0f0f0f0)),
             c2 << ushr_imm(c1, imm64(4)),
@@ -643,7 +648,7 @@ expand.legalize(
             b1 << band_imm(b, imm64(0xcccccccccccccccc)),
             b2 << ushr_imm(b1, imm64(2)),
             b3 << band_imm(b, imm64(0x3333333333333333)),
-            b4 << ushr_imm(b3, imm64(2)),
+            b4 << ishl_imm(b3, imm64(2)),
             c << bor(b2, b4),
             c1 << band_imm(c, imm64(0xf0f0f0f0f0f0f0f0)),
             c2 << ushr_imm(c1, imm64(4)),

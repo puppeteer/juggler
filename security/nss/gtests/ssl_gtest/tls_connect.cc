@@ -106,6 +106,10 @@ std::string VersionString(uint16_t version) {
   }
 }
 
+// The default anti-replay window for tests.  Tests that rely on a different
+// value call SSL_InitAntiReplay directly.
+static PRTime kAntiReplayWindow = 100 * PR_USEC_PER_SEC;
+
 TlsConnectTestBase::TlsConnectTestBase(SSLProtocolVariant variant,
                                        uint16_t version)
     : variant_(variant),
@@ -167,18 +171,8 @@ void TlsConnectTestBase::CheckShares(
 
 void TlsConnectTestBase::CheckEpochs(uint16_t client_epoch,
                                      uint16_t server_epoch) const {
-  uint16_t read_epoch = 0;
-  uint16_t write_epoch = 0;
-
-  EXPECT_EQ(SECSuccess,
-            SSLInt_GetEpochs(client_->ssl_fd(), &read_epoch, &write_epoch));
-  EXPECT_EQ(server_epoch, read_epoch) << "client read epoch";
-  EXPECT_EQ(client_epoch, write_epoch) << "client write epoch";
-
-  EXPECT_EQ(SECSuccess,
-            SSLInt_GetEpochs(server_->ssl_fd(), &read_epoch, &write_epoch));
-  EXPECT_EQ(client_epoch, read_epoch) << "server read epoch";
-  EXPECT_EQ(server_epoch, write_epoch) << "server write epoch";
+  client_->CheckEpochs(server_epoch, client_epoch);
+  server_->CheckEpochs(client_epoch, server_epoch);
 }
 
 void TlsConnectTestBase::ClearStats() {
@@ -193,12 +187,37 @@ void TlsConnectTestBase::ClearServerCache() {
   SSL_ConfigServerSessionIDCache(1024, 0, 0, g_working_dir_path.c_str());
 }
 
+void TlsConnectTestBase::SaveAlgorithmPolicy() {
+  saved_policies_.clear();
+  for (auto it = algorithms_.begin(); it != algorithms_.end(); ++it) {
+    uint32_t policy;
+    SECStatus rv = NSS_GetAlgorithmPolicy(*it, &policy);
+    ASSERT_EQ(SECSuccess, rv);
+    saved_policies_.push_back(std::make_tuple(*it, policy));
+  }
+}
+
+void TlsConnectTestBase::RestoreAlgorithmPolicy() {
+  for (auto it = saved_policies_.begin(); it != saved_policies_.end(); ++it) {
+    auto algorithm = std::get<0>(*it);
+    auto policy = std::get<1>(*it);
+    SECStatus rv = NSS_SetAlgorithmPolicy(
+        algorithm, policy, NSS_USE_POLICY_IN_SSL | NSS_USE_ALG_IN_SSL_KX);
+    ASSERT_EQ(SECSuccess, rv);
+  }
+}
+
+PRTime TlsConnectTestBase::TimeFunc(void* arg) {
+  return *reinterpret_cast<PRTime*>(arg);
+}
+
 void TlsConnectTestBase::SetUp() {
   SSL_ConfigServerSessionIDCache(1024, 0, 0, g_working_dir_path.c_str());
   SSLInt_ClearSelfEncryptKey();
-  SSLInt_SetTicketLifetime(30);
-  SSL_SetupAntiReplay(1 * PR_USEC_PER_SEC, 1, 3);
+  now_ = PR_Now();
+  ResetAntiReplay(kAntiReplayWindow);
   ClearStats();
+  SaveAlgorithmPolicy();
   Init();
 }
 
@@ -209,6 +228,7 @@ void TlsConnectTestBase::TearDown() {
   SSL_ClearSessionCache();
   SSLInt_ClearSelfEncryptKey();
   SSL_ShutdownServerSessionIDCache();
+  RestoreAlgorithmPolicy();
 }
 
 void TlsConnectTestBase::Init() {
@@ -218,6 +238,14 @@ void TlsConnectTestBase::Init() {
   if (version_) {
     ConfigureVersion(version_);
   }
+}
+
+void TlsConnectTestBase::ResetAntiReplay(PRTime window) {
+  SSLAntiReplayContext* p_anti_replay = nullptr;
+  EXPECT_EQ(SECSuccess,
+            SSL_CreateAntiReplayContext(now_, window, 1, 3, &p_anti_replay));
+  EXPECT_NE(nullptr, p_anti_replay);
+  anti_replay_.reset(p_anti_replay);
 }
 
 void TlsConnectTestBase::Reset() {
@@ -238,6 +266,8 @@ void TlsConnectTestBase::Reset(const std::string& server_name,
     server_->SkipVersionChecks();
   }
 
+  std::cerr << "Reset server:" << server_name << ", client:" << client_name
+            << std::endl;
   Init();
 }
 
@@ -269,10 +299,14 @@ void TlsConnectTestBase::EnsureTlsSetup() {
                                                     : nullptr));
   EXPECT_TRUE(client_->EnsureTlsSetup(client_model_ ? client_model_->ssl_fd()
                                                     : nullptr));
+  server_->SetAntiReplayContext(anti_replay_);
+  EXPECT_EQ(SECSuccess, SSL_SetTimeFunc(client_->ssl_fd(),
+                                        TlsConnectTestBase::TimeFunc, &now_));
+  EXPECT_EQ(SECSuccess, SSL_SetTimeFunc(server_->ssl_fd(),
+                                        TlsConnectTestBase::TimeFunc, &now_));
 }
 
 void TlsConnectTestBase::Handshake() {
-  EnsureTlsSetup();
   client_->SetServerKeyBits(server_->server_key_bits());
   client_->Handshake();
   server_->Handshake();
@@ -289,16 +323,16 @@ void TlsConnectTestBase::EnableExtendedMasterSecret() {
 }
 
 void TlsConnectTestBase::Connect() {
-  server_->StartConnect(server_model_ ? server_model_->ssl_fd() : nullptr);
-  client_->StartConnect(client_model_ ? client_model_->ssl_fd() : nullptr);
+  StartConnect();
   client_->MaybeSetResumptionToken();
   Handshake();
   CheckConnected();
 }
 
 void TlsConnectTestBase::StartConnect() {
-  server_->StartConnect(server_model_ ? server_model_->ssl_fd() : nullptr);
-  client_->StartConnect(client_model_ ? client_model_->ssl_fd() : nullptr);
+  EnsureTlsSetup();
+  server_->StartConnect();
+  client_->StartConnect();
 }
 
 void TlsConnectTestBase::ConnectWithCipherSuite(uint16_t cipher_suite) {
@@ -666,8 +700,9 @@ void TlsConnectTestBase::SendReceive(size_t total) {
 
 // Do a first connection so we can do 0-RTT on the second one.
 void TlsConnectTestBase::SetupForZeroRtt() {
+  // Force rollover of the anti-replay window.
   // If we don't do this, then all 0-RTT attempts will be rejected.
-  SSLInt_RolloverAntiReplay();
+  RolloverAntiReplay();
 
   ConfigureSessionCache(RESUME_BOTH, RESUME_TICKET);
   ConfigureVersion(SSL_LIBRARY_VERSION_TLS_1_3);
@@ -779,12 +814,20 @@ void TlsConnectTestBase::ShiftDtlsTimers() {
     time_shift = time;
   }
 
-  if (time_shift == PR_INTERVAL_NO_TIMEOUT) {
-    return;
+  if (time_shift != PR_INTERVAL_NO_TIMEOUT) {
+    AdvanceTime(PR_IntervalToMicroseconds(time_shift));
+    EXPECT_EQ(SECSuccess,
+              SSLInt_ShiftDtlsTimers(client_->ssl_fd(), time_shift));
+    EXPECT_EQ(SECSuccess,
+              SSLInt_ShiftDtlsTimers(server_->ssl_fd(), time_shift));
   }
+}
 
-  EXPECT_EQ(SECSuccess, SSLInt_ShiftDtlsTimers(client_->ssl_fd(), time_shift));
-  EXPECT_EQ(SECSuccess, SSLInt_ShiftDtlsTimers(server_->ssl_fd(), time_shift));
+void TlsConnectTestBase::AdvanceTime(PRTime time_shift) { now_ += time_shift; }
+
+// Advance time by a full anti-replay window.
+void TlsConnectTestBase::RolloverAntiReplay() {
+  AdvanceTime(kAntiReplayWindow);
 }
 
 TlsConnectGeneric::TlsConnectGeneric()

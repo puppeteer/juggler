@@ -20,7 +20,7 @@
 #include "nsNativeDragTarget.h"
 #include "nsNativeDragSource.h"
 #include "nsClipboard.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsDataObjCollection.h"
 
 #include "nsArrayUtils.h"
@@ -154,7 +154,7 @@ nsresult nsDragService::InvokeDragSessionImpl(
   // Try and get source URI of the items that are being dragged
   nsIURI* uri = nullptr;
 
-  nsCOMPtr<nsIDocument> doc(mSourceDocument);
+  RefPtr<dom::Document> doc(mSourceDocument);
   if (doc) {
     uri = doc->GetDocumentURI();
   }
@@ -251,9 +251,8 @@ static bool LayoutDevicePointToCSSPoint(const LayoutDevicePoint& aDevPos,
 }
 
 //-------------------------------------------------------------------------
-NS_IMETHODIMP
-nsDragService::StartInvokingDragSession(IDataObject* aDataObj,
-                                        uint32_t aActionType) {
+nsresult nsDragService::StartInvokingDragSession(IDataObject* aDataObj,
+                                                 uint32_t aActionType) {
   // To do the drag we need to create an object that
   // implements the IDataObject interface (for OLE)
   RefPtr<nsNativeDragSource> nativeDragSrc =
@@ -281,9 +280,9 @@ nsDragService::StartInvokingDragSession(IDataObject* aDataObj,
   StartDragSession();
   OpenDragPopup();
 
-  RefPtr<IAsyncOperation> pAsyncOp;
+  RefPtr<IDataObjectAsyncCapability> pAsyncOp;
   // Offer to do an async drag
-  if (SUCCEEDED(aDataObj->QueryInterface(IID_IAsyncOperation,
+  if (SUCCEEDED(aDataObj->QueryInterface(IID_IDataObjectAsyncCapability,
                                          getter_AddRefs(pAsyncOp)))) {
     pAsyncOp->SetAsyncMode(VARIANT_TRUE);
   } else {

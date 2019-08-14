@@ -5,7 +5,7 @@
 
 #include "WebGL2Context.h"
 
-#include "gfxPrefs.h"
+#include "mozilla/StaticPrefs.h"
 #include "GLContext.h"
 #include "mozilla/dom/WebGL2RenderingContextBinding.h"
 #include "mozilla/ArrayUtils.h"
@@ -30,13 +30,11 @@ UniquePtr<webgl::FormatUsageAuthority> WebGL2Context::CreateFormatUsage(
   return webgl::FormatUsageAuthority::CreateForWebGL2(gl);
 }
 
-/*static*/ bool WebGL2Context::IsSupported() {
-  return gfxPrefs::WebGL2Enabled();
-}
+/*static*/
+bool WebGL2Context::IsSupported() { return StaticPrefs::webgl_enable_webgl2(); }
 
-/*static*/ WebGL2Context* WebGL2Context::Create() {
-  return new WebGL2Context();
-}
+/*static*/
+WebGL2Context* WebGL2Context::Create() { return new WebGL2Context(); }
 
 JSObject* WebGL2Context::WrapObject(JSContext* cx,
                                     JS::Handle<JSObject*> givenProto) {
@@ -52,7 +50,6 @@ static const gl::GLFeature kRequiredFeatures[] = {
     gl::GLFeature::copy_buffer,
     gl::GLFeature::depth_texture,
     gl::GLFeature::draw_instanced,
-    gl::GLFeature::draw_range_elements,
     gl::GLFeature::element_index_uint,
     gl::GLFeature::frag_color_float,
     gl::GLFeature::frag_depth,
@@ -144,6 +141,11 @@ bool WebGLContext::InitWebGL2(FailureReason* const out_failReason) {
                    &mGLMaxTransformFeedbackSeparateAttribs);
   gl->GetUIntegerv(LOCAL_GL_MAX_UNIFORM_BUFFER_BINDINGS,
                    &mGLMaxUniformBufferBindings);
+
+  mGLMinProgramTexelOffset =
+      gl->GetIntAs<uint32_t>(LOCAL_GL_MIN_PROGRAM_TEXEL_OFFSET);
+  mGLMaxProgramTexelOffset =
+      gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_PROGRAM_TEXEL_OFFSET);
 
   mIndexedUniformBufferBindings.resize(mGLMaxUniformBufferBindings);
 

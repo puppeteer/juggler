@@ -3,45 +3,45 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/GeckoViewChildModule.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/GeckoViewTelemetry.jsm");
+const { GeckoViewChildModule } = ChromeUtils.import(
+  "resource://gre/modules/GeckoViewChildModule.jsm"
+);
+var { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+var { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { HistogramStopwatch } = ChromeUtils.import(
+  "resource://gre/modules/GeckoViewTelemetry.jsm"
+);
 
-XPCOMUtils.defineLazyModuleGetters(this, {
-  Services: "resource://gre/modules/Services.jsm",
-});
-
-const PAGE_LOAD_PROGRESS_PROBE =
-  new HistogramStopwatch("GV_PAGE_LOAD_PROGRESS_MS", content);
+const PAGE_LOAD_PROGRESS_PROBE = new HistogramStopwatch(
+  "GV_PAGE_LOAD_PROGRESS_MS",
+  content
+);
 const PAGE_LOAD_PROBE = new HistogramStopwatch("GV_PAGE_LOAD_MS", content);
+const PAGE_RELOAD_PROBE = new HistogramStopwatch("GV_PAGE_RELOAD_MS", content);
 
 class GeckoViewProgressChild extends GeckoViewChildModule {
   onInit() {
-    debug `onInit`;
+    debug`onInit`;
 
     ProgressTracker.onInit(this);
 
-    const flags = Ci.nsIWebProgress.NOTIFY_PROGRESS |
-                  Ci.nsIWebProgress.NOTIFY_STATE_NETWORK |
-                  Ci.nsIWebProgress.NOTIFY_LOCATION;
-    this.progressFilter =
-      Cc["@mozilla.org/appshell/component/browser-status-filter;1"]
-      .createInstance(Ci.nsIWebProgress);
+    const flags =
+      Ci.nsIWebProgress.NOTIFY_STATE_NETWORK |
+      Ci.nsIWebProgress.NOTIFY_LOCATION;
+    this.progressFilter = Cc[
+      "@mozilla.org/appshell/component/browser-status-filter;1"
+    ].createInstance(Ci.nsIWebProgress);
     this.progressFilter.addProgressListener(this, flags);
-    const webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIWebProgress);
+    const webProgress = docShell
+      .QueryInterface(Ci.nsIInterfaceRequestor)
+      .getInterface(Ci.nsIWebProgress);
     webProgress.addProgressListener(this.progressFilter, flags);
   }
 
-  onProgressChange(aWebProgress, aRequest, aCurSelf, aMaxSelf, aCurTotal, aMaxTotal) {
-    debug `onProgressChange ${aCurSelf}/${aMaxSelf} ${aCurTotal}/${aMaxTotal}`;
-
-    ProgressTracker.handleProgress(null, aCurTotal, aMaxTotal);
-    ProgressTracker.updateProgress();
-  }
-
   onStateChange(aWebProgress, aRequest, aStateFlags, aStatus) {
-    debug `onStateChange: isTopLevel=${aWebProgress.isTopLevel},
+    debug`onStateChange: isTopLevel=${aWebProgress.isTopLevel},
                           flags=${aStateFlags}, status=${aStatus}`;
 
     if (!aWebProgress || !aWebProgress.isTopLevel) {
@@ -54,28 +54,51 @@ class GeckoViewProgressChild extends GeckoViewChildModule {
       return;
     }
 
-    debug `onStateChange: uri=${uri}`;
+    debug`onStateChange: uri=${uri}`;
+
+    let isPageReload = false;
+    if (aWebProgress.loadType & Ci.nsIDocShell.LOAD_CMD_RELOAD) {
+      isPageReload = true;
+    }
 
     if (aStateFlags & Ci.nsIWebProgressListener.STATE_START) {
-      PAGE_LOAD_PROBE.start();
+      if (!isPageReload) {
+        PAGE_LOAD_PROBE.start();
+      } else {
+        PAGE_RELOAD_PROBE.start();
+      }
       ProgressTracker.start(uri);
-    } else if ((aStateFlags & Ci.nsIWebProgressListener.STATE_STOP) &&
-               !aWebProgress.isLoadingDocument) {
-      PAGE_LOAD_PROBE.finish();
+    } else if (
+      aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
+      !aWebProgress.isLoadingDocument
+    ) {
+      if (!isPageReload) {
+        PAGE_LOAD_PROBE.finish();
+      } else {
+        PAGE_RELOAD_PROBE.finish();
+      }
       ProgressTracker.stop();
     } else if (aStateFlags & Ci.nsIWebProgressListener.STATE_REDIRECTING) {
-      PAGE_LOAD_PROBE.start();
+      if (!isPageReload) {
+        PAGE_LOAD_PROBE.start();
+      } else {
+        PAGE_RELOAD_PROBE.start();
+      }
       ProgressTracker.start(uri);
     }
   }
 
   onLocationChange(aWebProgress, aRequest, aLocationURI, aFlags) {
-    if (!aWebProgress || !aWebProgress.isTopLevel ||
-        !aLocationURI || aLocationURI.schemeIs("about")) {
+    if (
+      !aWebProgress ||
+      !aWebProgress.isTopLevel ||
+      !aLocationURI ||
+      aLocationURI.schemeIs("about")
+    ) {
       return;
     }
 
-    debug `onLocationChange: location=${aLocationURI.displaySpec},
+    debug`onLocationChange: location=${aLocationURI.displaySpec},
                              flags=${aFlags}`;
 
     if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_ERROR_PAGE) {
@@ -93,19 +116,25 @@ const ProgressTracker = {
   },
 
   start: function(aUri) {
-    debug `ProgressTracker start ${aUri}`;
+    debug`ProgressTracker start ${aUri}`;
 
     if (this._tracking) {
       PAGE_LOAD_PROGRESS_PROBE.cancel();
       this.stop();
     }
 
-    addEventListener("MozAfterPaint", this,
-                     { capture: false, mozSystemGroup: true });
-    addEventListener("DOMContentLoaded", this,
-                     { capture: false, mozSystemGroup: true });
-    addEventListener("pageshow", this,
-                     { capture: false, mozSystemGroup: true });
+    addEventListener("MozAfterPaint", this, {
+      capture: false,
+      mozSystemGroup: true,
+    });
+    addEventListener("DOMContentLoaded", this, {
+      capture: false,
+      mozSystemGroup: true,
+    });
+    addEventListener("pageshow", this, {
+      capture: false,
+      mozSystemGroup: true,
+    });
 
     this._tracking = true;
     this.clear();
@@ -124,7 +153,7 @@ const ProgressTracker = {
   },
 
   changeLocation: function(aUri) {
-    debug `ProgressTracker changeLocation ${aUri}`;
+    debug`ProgressTracker changeLocation ${aUri}`;
 
     let data = this._data;
     data.locationChange = true;
@@ -132,7 +161,7 @@ const ProgressTracker = {
   },
 
   stop: function() {
-    debug `ProgressTracker stop`;
+    debug`ProgressTracker stop`;
 
     let data = this._data;
     data.pageStop = true;
@@ -140,16 +169,22 @@ const ProgressTracker = {
     this._tracking = false;
 
     if (!data.parsed) {
-      removeEventListener("DOMContentLoaded", this,
-                          { capture: false, mozSystemGroup: true });
+      removeEventListener("DOMContentLoaded", this, {
+        capture: false,
+        mozSystemGroup: true,
+      });
     }
     if (!data.firstPaint) {
-      removeEventListener("MozAfterPaint", this,
-                          { capture: false, mozSystemGroup: true });
+      removeEventListener("MozAfterPaint", this, {
+        capture: false,
+        mozSystemGroup: true,
+      });
     }
     if (!data.pageShow) {
-      removeEventListener("pageshow", this,
-                          { capture: false, mozSystemGroup: true });
+      removeEventListener("pageshow", this, {
+        capture: false,
+        mozSystemGroup: true,
+      });
     }
   },
 
@@ -171,7 +206,7 @@ const ProgressTracker = {
       return;
     }
 
-    debug `ProgressTracker handleEvent: ${aEvent.type}`;
+    debug`ProgressTracker handleEvent: ${aEvent.type}`;
 
     let needsUpdate = false;
 
@@ -179,20 +214,26 @@ const ProgressTracker = {
       case "DOMContentLoaded":
         needsUpdate = needsUpdate || !data.parsed;
         data.parsed = true;
-        removeEventListener("DOMContentLoaded", this,
-                            { capture: false, mozSystemGroup: true });
+        removeEventListener("DOMContentLoaded", this, {
+          capture: false,
+          mozSystemGroup: true,
+        });
         break;
       case "MozAfterPaint":
         needsUpdate = needsUpdate || !data.firstPaint;
         data.firstPaint = true;
-        removeEventListener("MozAfterPaint", this,
-                            { capture: false, mozSystemGroup: true });
+        removeEventListener("MozAfterPaint", this, {
+          capture: false,
+          mozSystemGroup: true,
+        });
         break;
       case "pageshow":
         needsUpdate = needsUpdate || !data.pageShow;
         data.pageShow = true;
-        removeEventListener("pageshow", this,
-                            { capture: false, mozSystemGroup: true });
+        removeEventListener("pageshow", this, {
+          capture: false,
+          mozSystemGroup: true,
+        });
         break;
     }
 
@@ -211,9 +252,6 @@ const ProgressTracker = {
       firstPaint: false,
       pageShow: false,
       parsed: false,
-      totalReceived: 1,
-      totalExpected: 1,
-      channels: {},
     };
   },
 
@@ -227,41 +265,11 @@ const ProgressTracker = {
       firstPaint: this._data.firstPaint,
       pageShow: this._data.pageShow,
       parsed: this._data.parsed,
-      totalReceived: this._data.totalReceived,
-      totalExpected: this._data.totalExpected,
     };
   },
 
-  handleProgress: function(aChannelUri, aProgress, aMax) {
-    debug `ProgressTracker handleProgress ${aChannelUri} ${aProgress}/${aMax}`;
-
-    let data = this._data;
-
-    if (!data.uri) {
-      return;
-    }
-
-    aChannelUri = aChannelUri || data.uri;
-
-    const now = content.performance.now();
-
-    if (!data.channels[aChannelUri]) {
-      data.channels[aChannelUri] = {
-        received: aProgress,
-        max: aMax,
-        expected: (aMax > 0 ? aMax : aProgress * 2),
-        lastUpdate: now,
-      };
-    } else {
-      let channelProgress = data.channels[aChannelUri];
-      channelProgress.received = Math.max(channelProgress.received, aProgress);
-      channelProgress.expected = Math.max(channelProgress.expected, aMax);
-      channelProgress.lastUpdate = now;
-    }
-  },
-
   updateProgress: function() {
-    debug `ProgressTracker updateProgress`;
+    debug`ProgressTracker updateProgress`;
 
     let data = this._data;
 
@@ -269,58 +277,25 @@ const ProgressTracker = {
       return;
     }
 
-    const now = content.performance.now();
-
     let progress = 0;
-
-    if (data.pageStart) {
-      progress += 10;
-    }
-    if (data.firstPaint) {
-      progress += 15;
-    }
-    if (data.parsed) {
-      progress += 15;
-    }
-    if (data.pageShow) {
-      progress += 15;
-    }
-    if (data.locationChange) {
-      progress += 10;
-    }
-
-    data.totalReceived = 1;
-    data.totalExpected = 1;
-    const channelOverdue = now - 300;
-
-    for (let channel in data.channels) {
-      if (data.channels[channel].max < 1 &&
-          channelOverdue > data.channels[channel].lastUpdate) {
-        data.channels[channel].expected = data.channels[channel].received;
-      }
-      data.totalReceived += data.channels[channel].received;
-      data.totalExpected += data.channels[channel].expected;
-    }
-
-    const minExpected = 1024 * 1;
-    const maxExpected = 1024 * 1024 * 0.5;
-
-    if (data.pageStop ||
-        (data.pageStart && data.firstPaint && data.parsed && data.pageShow &&
-         data.totalReceived > minExpected &&
-         data.totalReceived >= data.totalExpected)) {
+    if (data.pageStop || data.pageShow) {
       progress = 100;
-    } else {
-      const a = Math.min(1, (data.totalExpected / maxExpected)) * 30;
-      progress += data.totalReceived / data.totalExpected * a;
+    } else if (data.firstPaint) {
+      progress = 80;
+    } else if (data.parsed) {
+      progress = 55;
+    } else if (data.locationChange) {
+      progress = 30;
+    } else if (data.pageStart) {
+      progress = 15;
     }
-
-    debug `ProgressTracker updateProgress data=${this._debugData()}
-           progress=${progress}`;
 
     if (data.prev >= progress) {
       return;
     }
+
+    debug`ProgressTracker updateProgress data=${this._debugData()}
+           progress=${progress}`;
 
     this.eventDispatcher.sendRequest({
       type: "GeckoView:ProgressChanged",
@@ -329,12 +304,11 @@ const ProgressTracker = {
 
     data.prev = progress;
 
-    if (progress === 100) {
+    if (progress >= 100) {
       PAGE_LOAD_PROGRESS_PROBE.finish();
     }
   },
 };
 
-
-let {debug, warn} = GeckoViewProgressChild.initLogging("GeckoViewProgress");
-let module = GeckoViewProgressChild.create(this);
+const { debug, warn } = GeckoViewProgressChild.initLogging("GeckoViewProgress"); // eslint-disable-line no-unused-vars
+const module = GeckoViewProgressChild.create(this);

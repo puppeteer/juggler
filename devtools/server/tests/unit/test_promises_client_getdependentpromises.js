@@ -7,17 +7,12 @@
 
 "use strict";
 
-const { PromisesFront } = require("devtools/shared/fronts/promises");
-
-var EventEmitter = require("devtools/shared/event-emitter");
-
 add_task(async function() {
-  const client = await startTestDebuggerServer("test-promises-dependentpromises");
-  const parentProcessActors = await getParentProcessActors(client);
+  const { client, promisesFront } = await createMainProcessPromisesFront();
 
   ok(Promise.toString().includes("native code"), "Expect native DOM Promise.");
 
-  await testGetDependentPromises(client, parentProcessActors, () => {
+  await testGetDependentPromises(client, promisesFront, () => {
     const p = new Promise(() => {});
     p.name = "p";
     const q = p.then();
@@ -27,15 +22,12 @@ add_task(async function() {
 
     return p;
   });
+});
 
-  const response = await listTabs(client);
-  const targetTab = findTab(response.tabs, "test-promises-dependentpromises");
-  ok(targetTab, "Found our target tab.");
+add_task(async function() {
+  const { debuggee, client, promisesFront } = await createTabPromisesFront();
 
-  await testGetDependentPromises(client, targetTab, () => {
-    const debuggee =
-      DebuggerServer.getTestGlobal("test-promises-dependentpromises");
-
+  await testGetDependentPromises(client, promisesFront, () => {
     const p = new debuggee.Promise(() => {});
     p.name = "p";
     const q = p.then();
@@ -45,22 +37,20 @@ add_task(async function() {
 
     return p;
   });
-
-  await close(client);
 });
 
-async function testGetDependentPromises(client, form, makePromises) {
-  const front = PromisesFront(client, form);
-
+async function testGetDependentPromises(client, front, makePromises) {
   await front.attach();
   await front.listPromises();
 
   // Get the grip for promise p
   const onNewPromise = new Promise(resolve => {
-    EventEmitter.on(front, "new-promises", promises => {
+    front.on("new-promises", promises => {
       for (const p of promises) {
-        if (p.preview.ownProperties.name &&
-            p.preview.ownProperties.name.value === "p") {
+        if (
+          p.preview.ownProperties.name &&
+          p.preview.ownProperties.name.value === "p"
+        ) {
           resolve(p);
         }
       }
@@ -79,25 +69,37 @@ async function testGetDependentPromises(client, form, makePromises) {
   // dependent promises is correct
   await new Promise(resolve => {
     objectClient.getDependentPromises(response => {
-      const dependentNames = response.promises.map(p =>
-        p.preview.ownProperties.name.value);
+      const dependentNames = response.promises.map(
+        p => p.preview.ownProperties.name.value
+      );
       const expectedDependentNames = ["q", "r"];
 
-      equal(dependentNames.length, expectedDependentNames.length,
-        "Got expected number of dependent promises.");
+      equal(
+        dependentNames.length,
+        expectedDependentNames.length,
+        "Got expected number of dependent promises."
+      );
 
       for (let i = 0; i < dependentNames.length; i++) {
-        equal(dependentNames[i], expectedDependentNames[i],
-          "Got expected dependent name.");
+        equal(
+          dependentNames[i],
+          expectedDependentNames[i],
+          "Got expected dependent name."
+        );
       }
 
       for (const p of response.promises) {
         equal(p.type, "object", "Expect type to be Object.");
         equal(p.class, "Promise", "Expect class to be Promise.");
-        equal(typeof p.promiseState.creationTimestamp, "number",
-          "Expect creation timestamp to be a number.");
-        ok(!p.promiseState.timeToSettle,
-          "Expect time to settle to be undefined.");
+        equal(
+          typeof p.promiseState.creationTimestamp,
+          "number",
+          "Expect creation timestamp to be a number."
+        );
+        ok(
+          !p.promiseState.timeToSettle,
+          "Expect time to settle to be undefined."
+        );
       }
 
       resolve();

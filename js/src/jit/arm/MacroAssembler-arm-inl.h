@@ -79,6 +79,15 @@ void MacroAssembler::move32To64SignExtend(Register src, Register64 dest) {
 }
 
 // ===============================================================
+// Load instructions
+
+void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
+  load32(src, dest);
+}
+
+void MacroAssembler::loadAbiReturnAddress(Register dest) { movePtr(lr, dest); }
+
+// ===============================================================
 // Logical instructions
 
 void MacroAssembler::not32(Register reg) { ma_mvn(reg, reg); }
@@ -490,6 +499,8 @@ void MacroAssembler::neg64(Register64 reg) {
   as_rsb(reg.low, reg.low, Imm8(0), SetCC);
   as_rsc(reg.high, reg.high, Imm8(0));
 }
+
+void MacroAssembler::negPtr(Register reg) { neg32(reg); }
 
 void MacroAssembler::negateDouble(FloatRegister reg) { ma_vneg(reg, reg); }
 
@@ -1694,6 +1705,35 @@ void MacroAssembler::branchTestSymbolImpl(Condition cond, const T& t,
   ma_b(label, c);
 }
 
+void MacroAssembler::branchTestBigInt(Condition cond, Register tag,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, tag, label);
+}
+
+void MacroAssembler::branchTestBigInt(Condition cond, const BaseIndex& address,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, address, label);
+}
+
+void MacroAssembler::branchTestBigInt(Condition cond, const ValueOperand& value,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, value, label);
+}
+
+template <typename T>
+void MacroAssembler::branchTestBigIntImpl(Condition cond, const T& t,
+                                          Label* label) {
+  Condition c = testBigInt(cond, t);
+  ma_b(label, c);
+}
+
+void MacroAssembler::branchTestBigIntTruthy(bool truthy,
+                                            const ValueOperand& value,
+                                            Label* label) {
+  Condition c = testBigIntTruthy(truthy, value);
+  ma_b(label, c);
+}
+
 void MacroAssembler::branchTestNull(Condition cond, Register tag,
                                     Label* label) {
   branchTestNullImpl(cond, tag, label);
@@ -1826,7 +1866,6 @@ void MacroAssembler::branchTestMagic(Condition cond, const Address& valaddr,
 }
 
 void MacroAssembler::branchToComputedAddress(const BaseIndex& addr) {
-  MOZ_ASSERT(addr.base == pc, "Unsupported jump from any other addresses.");
   MOZ_ASSERT(
       addr.offset == 0,
       "NYI: offsets from pc should be shifted by the number of instructions.");
@@ -1835,9 +1874,12 @@ void MacroAssembler::branchToComputedAddress(const BaseIndex& addr) {
   uint32_t scale = Imm32::ShiftOf(addr.scale).value;
 
   ma_ldr(DTRAddr(base, DtrRegImmShift(addr.index, LSL, scale)), pc);
-  // When loading from pc, the pc is shifted to the next instruction, we
-  // add one extra instruction to accomodate for this shifted offset.
-  breakpoint();
+
+  if (base == pc) {
+    // When loading from pc, the pc is shifted to the next instruction, we
+    // add one extra instruction to accomodate for this shifted offset.
+    breakpoint();
+  }
 }
 
 void MacroAssembler::cmp32Move32(Condition cond, Register lhs, Register rhs,
@@ -1859,6 +1901,19 @@ void MacroAssembler::cmp32Move32(Condition cond, Register lhs,
   SecondScratchRegisterScope scratch2(*this);
   ma_ldr(rhs, scratch, scratch2);
   cmp32Move32(cond, lhs, scratch, src, dest);
+}
+
+void MacroAssembler::cmp32Load32(Condition cond, Register lhs,
+                                 const Address& rhs, const Address& src,
+                                 Register dest) {
+  // This is never used, but must be present to facilitate linking on arm.
+  MOZ_CRASH("No known use cases");
+}
+
+void MacroAssembler::cmp32Load32(Condition cond, Register lhs, Register rhs,
+                                 const Address& src, Register dest) {
+  // This is never used, but must be present to facilitate linking on arm.
+  MOZ_CRASH("No known use cases");
 }
 
 void MacroAssembler::test32LoadPtr(Condition cond, const Address& addr,

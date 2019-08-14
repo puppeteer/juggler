@@ -8,7 +8,6 @@
 
 #include "mozilla/Attributes.h"
 #include "nsIProtocolHandler.h"
-#include "nsITextToSubURI.h"
 #include "nsIURI.h"
 #include "nsIMutable.h"
 #include "nsISerializable.h"
@@ -54,13 +53,14 @@ class nsJSProtocolHandler : public nsIProtocolHandler {
 
   nsresult Init();
 
+  static nsresult CreateNewURI(const nsACString& aSpec, const char* aCharset,
+                               nsIURI* aBaseURI, nsIURI** result);
+
  protected:
   virtual ~nsJSProtocolHandler();
 
-  nsresult EnsureUTF8Spec(const nsCString& aSpec, const char* aCharset,
-                          nsACString& aUTF8Spec);
-
-  nsCOMPtr<nsITextToSubURI> mTextToSubURI;
+  static nsresult EnsureUTF8Spec(const nsCString& aSpec, const char* aCharset,
+                                 nsACString& aUTF8Spec);
 };
 
 class nsJSURI final : public mozilla::net::nsSimpleURI {
@@ -76,13 +76,11 @@ class nsJSURI final : public mozilla::net::nsSimpleURI {
   virtual mozilla::net::nsSimpleURI* StartClone(
       RefHandlingEnum refHandlingMode, const nsACString& newRef) override;
   NS_IMETHOD Mutate(nsIURIMutator** _retval) override;
+  NS_IMETHOD_(void) Serialize(mozilla::ipc::URIParams& aParams) override;
 
   // nsISerializable overrides
   NS_IMETHOD Read(nsIObjectInputStream* aStream) override;
   NS_IMETHOD Write(nsIObjectOutputStream* aStream) override;
-
-  // nsIIPCSerializableURI overrides
-  NS_DECL_NSIIPCSERIALIZABLEURI
 
   // Override the nsIClassInfo method GetClassIDNoAlloc to make sure our
   // nsISerializable impl works right.

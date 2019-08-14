@@ -191,10 +191,6 @@ bool CodeGeneratorMIPSShared::generateOutOfLineCode() {
 }
 
 void CodeGeneratorMIPSShared::bailoutFrom(Label* label, LSnapshot* snapshot) {
-  if (masm.bailed()) {
-    return;
-  }
-
   MOZ_ASSERT_IF(!masm.oom(), label->used());
   MOZ_ASSERT_IF(!masm.oom(), !label->bound());
 
@@ -2193,7 +2189,7 @@ void CodeGenerator::visitWasmSelect(LWasmSelect* ins) {
   Register cond = ToRegister(ins->condExpr());
   const LAllocation* falseExpr = ins->falseExpr();
 
-  if (mirType == MIRType::Int32) {
+  if (mirType == MIRType::Int32 || mirType == MIRType::RefOrNull) {
     Register out = ToRegister(ins->output());
     MOZ_ASSERT(ToRegister(ins->trueExpr()) == out,
                "true expr input is reused for output");

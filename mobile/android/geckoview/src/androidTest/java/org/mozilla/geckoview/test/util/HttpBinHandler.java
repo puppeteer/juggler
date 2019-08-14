@@ -16,6 +16,8 @@
 
 package org.mozilla.geckoview.test.util;
 
+import android.content.Context;
+import android.content.res.AssetManager;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
@@ -26,7 +28,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
+import java.math.BigInteger;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Enumeration;
+import java.util.Random;
 
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
@@ -41,6 +47,14 @@ import org.json.JSONObject;
 class HttpBinHandler extends AbstractHandler {
     private static final String LOGTAG = "HttpBinHandler";
     private static final int BUFSIZE = 4096;
+
+    private AssetManager mAssets;
+
+    public HttpBinHandler(@NonNull Context context) {
+        super();
+
+        mAssets = context.getResources().getAssets();
+    }
 
     private static void pipe(final @NonNull InputStream is) throws IOException {
         pipe(is, null);
@@ -163,6 +177,32 @@ class HttpBinHandler extends AbstractHandler {
                 response.put("data", data.toString("UTF-8"));
                 respondJSON(servletResponse, os, response);
                 baseRequest.setHandled(true);
+            } else if (uri.startsWith("/bytes")) {
+                pipe(is);
+
+                final int count = Integer.parseInt(uri.substring("/bytes/".length()));
+
+                final Random random = new Random(System.currentTimeMillis());
+                final byte[] payload = new byte[count];
+                random.nextBytes(payload);
+
+                servletResponse.setStatus(HttpServletResponse.SC_OK);
+                servletResponse.setContentLength(count);
+                servletResponse.setContentType("application/octet-stream");
+
+                final byte[] digest = MessageDigest.getInstance("SHA-256").digest(payload);
+                servletResponse.addHeader("X-SHA-256",
+                        String.format("%064x", new BigInteger(1, digest)));
+
+                os.write(payload);
+                os.flush();
+
+                baseRequest.setHandled(true);
+            } else if (uri.startsWith("/assets")) {
+                pipe(is);
+                pipe(mAssets.open(uri.substring("/assets/".length())), os);
+                os.flush();
+                baseRequest.setHandled(true);
             }
 
             if (!baseRequest.isHandled()) {
@@ -171,6 +211,14 @@ class HttpBinHandler extends AbstractHandler {
             }
         } catch (JSONException e) {
             Log.e(LOGTAG, "JSON error while handling response", e);
+            servletResponse.setStatus(500);
+            baseRequest.setHandled(true);
+        } catch (NoSuchAlgorithmException e) {
+            Log.e(LOGTAG, "Failed to generate digest", e);
+            servletResponse.setStatus(500);
+            baseRequest.setHandled(true);
+        } catch (IOException e) {
+            Log.e(LOGTAG, "Failed to respond", e);
             servletResponse.setStatus(500);
             baseRequest.setHandled(true);
         }

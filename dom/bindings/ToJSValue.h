@@ -23,6 +23,7 @@ namespace mozilla {
 namespace dom {
 
 class Promise;
+class WindowProxyHolder;
 
 // If ToJSValue returns false, it must set an exception on the
 // JSContext.
@@ -221,6 +222,9 @@ ToJSValue(JSContext* aCx, T& aArgument, JS::MutableHandle<JS::Value> aValue) {
   return XPCOMObjectToJsval(aCx, scope, helper, nullptr, true, aValue);
 }
 
+MOZ_MUST_USE bool ToJSValue(JSContext* aCx, const WindowProxyHolder& aArgument,
+                            JS::MutableHandle<JS::Value> aValue);
+
 // Accept nsRefPtr/nsCOMPtr
 template <typename T>
 MOZ_MUST_USE bool ToJSValue(JSContext* aCx, const nsCOMPtr<T>& aArgument,
@@ -349,7 +353,7 @@ MOZ_MUST_USE bool ToJSValue(JSContext* aCx, T* aArguments, size_t aLength,
   // Make sure we're called in a compartment
   MOZ_ASSERT(JS::CurrentGlobalOrNull(aCx));
 
-  JS::AutoValueVector v(aCx);
+  JS::RootedVector<JS::Value> v(aCx);
   if (!v.resize(aLength)) {
     return false;
   }

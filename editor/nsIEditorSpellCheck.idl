@@ -36,6 +36,7 @@ interface nsIEditorSpellCheck : nsISupports
    *
    * @see mozSpellChecker::GetNextMisspelledWord
    */
+  [can_run_script]
   AString       GetNextMisspelledWord();
 
   /**
@@ -64,6 +65,7 @@ interface nsIEditorSpellCheck : nsISupports
    *
    * @see mozSpellChecker::CheckCurrentWord
    */
+  [can_run_script]
   void          ReplaceWord(in AString misspelledWord, in AString replaceWord, in boolean allOccurrences);
 
   /**
@@ -107,7 +109,7 @@ interface nsIEditorSpellCheck : nsISupports
    *
    * @see mozISpellCheckingEngine::GetDictionaryList
    */
-  void          GetDictionaryList([array, size_is(count)] out wstring dictionaryList, out uint32_t count);
+  Array<AString> GetDictionaryList();
 
   /**
    * @see mozSpellChecker::GetCurrentDictionary
@@ -138,17 +140,6 @@ interface nsIEditorSpellCheck : nsISupports
    * after initialization will have no effect.
    */
   void          setFilterType(in unsigned long filterType);
-
-  /**
-   * Like CheckCurrentWord, checks the word you give it, returning true if it's
-   * misspelled. This is faster than CheckCurrentWord because it does not
-   * compute any suggestions.
-   *
-   * Watch out: this does not clear any suggestions left over from previous
-   * calls to CheckCurrentWord, so there may be suggestions, but they will be
-   * invalid.
-   */
-  boolean       CheckCurrentWordNoSuggest(in AString suggestedWord);
 
   /**
    * Update the dictionary in use to be sure it corresponds to what the editor

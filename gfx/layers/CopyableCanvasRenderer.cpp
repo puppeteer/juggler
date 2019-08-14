@@ -36,7 +36,6 @@ using namespace mozilla::gl;
 CopyableCanvasRenderer::CopyableCanvasRenderer()
     : mGLContext(nullptr),
       mBufferProvider(nullptr),
-      mGLFrontbuffer(nullptr),
       mAsyncRenderer(nullptr),
       mIsAlphaPremultiplied(true),
       mOriginPos(gl::OriginPos::TopLeft),
@@ -54,27 +53,20 @@ void CopyableCanvasRenderer::Initialize(const CanvasInitializeData& aData) {
   CanvasRenderer::Initialize(aData);
 
   if (aData.mGLContext) {
+    if (aData.mGLContext->IsDestroyed()) {
+      return;
+    }
     mGLContext = aData.mGLContext;
     mIsAlphaPremultiplied = aData.mIsGLAlphaPremult;
     mOriginPos = gl::OriginPos::BottomLeft;
 
     MOZ_ASSERT(mGLContext->IsOffscreen(), "canvas gl context isn't offscreen");
 
-    if (aData.mFrontbufferGLTex) {
-      gfx::IntSize size(aData.mSize.width, aData.mSize.height);
-      mGLFrontbuffer = SharedSurface_Basic::Wrap(
-          aData.mGLContext, size, aData.mHasAlpha, aData.mFrontbufferGLTex);
-      mBufferProvider = aData.mBufferProvider;
-    }
   } else if (aData.mBufferProvider) {
     mBufferProvider = aData.mBufferProvider;
   } else if (aData.mRenderer) {
     mAsyncRenderer = aData.mRenderer;
     mOriginPos = gl::OriginPos::BottomLeft;
-  } else {
-    MOZ_CRASH(
-        "GFX: CanvasRenderer created without BufferProvider, DrawTarget or "
-        "GLContext?");
   }
 
   mOpaque = !aData.mHasAlpha;
@@ -130,9 +122,7 @@ already_AddRefed<SourceSurface> CopyableCanvasRenderer::ReadbackSurface() {
   }
 
   SharedSurface* frontbuffer = nullptr;
-  if (mGLFrontbuffer) {
-    frontbuffer = mGLFrontbuffer.get();
-  } else if (mGLContext->Screen()) {
+  if (mGLContext->Screen()) {
     const auto& front = mGLContext->Screen()->Front();
     if (front) {
       frontbuffer = front->Surf();

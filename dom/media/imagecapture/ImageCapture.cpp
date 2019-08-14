@@ -13,7 +13,7 @@
 #include "mozilla/dom/ImageCaptureErrorEvent.h"
 #include "mozilla/dom/ImageCaptureErrorEventBinding.h"
 #include "mozilla/dom/VideoStreamTrack.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "CaptureTask.h"
 #include "MediaEngineSource.h"
 
@@ -161,7 +161,7 @@ nsresult ImageCapture::PostBlobEvent(Blob* aBlob) {
 
 nsresult ImageCapture::PostErrorEvent(uint16_t aErrorCode, nsresult aReason) {
   MOZ_ASSERT(NS_IsMainThread());
-  nsresult rv = CheckInnerWindowCorrectness();
+  nsresult rv = CheckCurrentGlobalCorrectness();
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsString errorMsg;
@@ -195,7 +195,7 @@ bool ImageCapture::CheckPrincipal() {
   if (!GetOwner()) {
     return false;
   }
-  nsCOMPtr<nsIDocument> doc = GetOwner()->GetExtantDoc();
+  nsCOMPtr<Document> doc = GetOwner()->GetExtantDoc();
   if (!doc || !principal) {
     return false;
   }

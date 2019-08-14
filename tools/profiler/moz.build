@@ -30,7 +30,6 @@ if CONFIG['MOZ_GECKO_PROFILER']:
         'core/ProfilerMarkerPayload.cpp',
         'core/RegisteredThread.cpp',
         'gecko/ChildProfilerController.cpp',
-        'gecko/nsProfilerFactory.cpp',
         'gecko/nsProfilerStartParams.cpp',
         'gecko/ProfilerChild.cpp',
         'gecko/ProfilerIOInterposeObserver.cpp',
@@ -39,8 +38,12 @@ if CONFIG['MOZ_GECKO_PROFILER']:
     ]
     if CONFIG['MOZ_REPLACE_MALLOC'] and CONFIG['MOZ_PROFILER_MEMORY']:
         SOURCES += [
-            'core/memory_hooks.cpp', # conflicts with platform.h class Thread
+            'core/memory_hooks.cpp', # Non-unified because of order of #includes
         ]
+
+    XPCOM_MANIFESTS += [
+        'gecko/components.conf',
+    ]
 
     if CONFIG['OS_TARGET'] == 'Darwin':
         # This file cannot be built in unified mode because it includes
@@ -158,8 +161,9 @@ if CONFIG['MOZ_TASK_TRACER']:
         'tasktracer/TracedTaskCommon.cpp',
     ]
 
-XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell.ini']
+XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell/xpcshell.ini']
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
+BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += [
@@ -169,6 +173,3 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
 
 with Files('**'):
     BUG_COMPONENT = ('Core', 'Gecko Profiler')
-
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497

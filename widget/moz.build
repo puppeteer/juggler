@@ -59,11 +59,15 @@ if toolkit == 'windows':
 elif toolkit == 'cocoa':
     XPIDL_SOURCES += [
         'nsIMacDockSupport.idl',
+        'nsIMacFinderProgress.idl',
         'nsIMacSharingService.idl',
         'nsIMacWebAppUtils.idl',
         'nsIStandaloneNativeMenu.idl',
         'nsISystemStatusBar.idl',
         'nsITaskbarProgress.idl',
+        'nsITouchBarHelper.idl',
+        'nsITouchBarInput.idl',
+        'nsITouchBarUpdater.idl',
     ]
     EXPORTS += [
         'nsINativeMenuService.h',
@@ -124,9 +128,13 @@ EXPORTS += [
     'GfxInfoBase.h',
     'GfxInfoCollector.h',
     'InputData.h',
+    'nsBaseAppShell.h',
+    'nsBaseDragService.h',
+    'nsBaseFilePicker.h',
     'nsBaseScreen.h',
     'nsBaseWidget.h',
     'nsIDeviceContextSpec.h',
+    'nsIdleService.h',
     'nsIKeyEventInPluginCallback.h',
     'nsIPluginWidget.h',
     'nsIPrintDialogService.h',
@@ -150,6 +158,7 @@ EXPORTS.mozilla += [
     'LookAndFeel.h',
     'MiscEvents.h',
     'MouseEvents.h',
+    'ProcInfo.h',
     'TextEventDispatcher.h',
     'TextEventDispatcherListener.h',
     'TextEvents.h',
@@ -242,10 +251,8 @@ EXPORTS.ipc = ['nsGUIEventIPC.h']
 
 if CONFIG['MOZ_X11']:
     DIRS += ['x11']
-    UNIFIED_SOURCES += [
-        'GfxInfoX11.cpp'
-    ]
     SOURCES += [
+        'GfxInfoX11.cpp',
         'nsShmImage.cpp',
         'WindowSurfaceX11SHM.cpp',
     ]
@@ -328,3 +335,5 @@ if CONFIG['MOZ_ENABLE_D3D10_LAYER']:
     DEFINES['MOZ_ENABLE_D3D10_LAYER'] = True
 
 CXXFLAGS += CONFIG['TK_CFLAGS']
+if CONFIG['MOZ_WAYLAND']:
+    CXXFLAGS += CONFIG['MOZ_WAYLAND_CFLAGS']

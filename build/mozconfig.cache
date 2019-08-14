@@ -14,15 +14,30 @@ if test -z "$bucket" -a -z "$SCCACHE_DISABLE" -a -z "$MOZ_PGO"; then
             # stick an extra character on to make the already-convoluted logic
             # here simpler.
             availability_zone="${TASKCLUSTER_WORKER_GROUP}x"
+        elif [ -n "${SCCACHE_GCS_KEY_PATH}" ]; then
+            # gcp availability_zone is of the form <region>-<letter> where region is e.g. us-west2, and az is us-west2-a
+            gcp_zone=$(wget -T 1 -t 1 -q -O - http://169.254.169.254/computeMetadata/v1beta1/instance/zone || true)
+            availability_zone=${gcp_zone##*/}
         else
             # timeout after 1 second, and don't retry (failure indicates instance is not in ec2 or network issue)
-            # availability_zone is of the form <region><letter> where region is e.g. us-west-2, and az is us-west-2a
+            # ec2 availability_zone is of the form <region><letter> where region is e.g. us-west-2, and az is us-west-2a
             availability_zone=$(wget -T 1 -t 1 -q -O - http://169.254.169.254/latest/meta-data/placement/availability-zone || true)
         fi
         if test -z "$availability_zone" -o "$availability_zone" = "not-ec2"; then
             availability_zone=not-ec2
+        elif [ -n "${SCCACHE_GCS_KEY_PATH}" ]; then
+            # gcp region is az with last two letters trimmed
+            region=${availability_zone::${#availability_zone}-2}
+            case "${GECKO_HEAD_REPOSITORY}" in
+            *hg.mozilla.org/try*)
+                bucket=taskcluster-level-1-sccache-${region}
+                ;;
+            *hg.mozilla.org/integration/autoland*|*hg.mozilla.org/integration/mozilla-inbound*)
+                bucket=taskcluster-level-3-sccache-${region}
+                ;;
+            esac
         else
-            # region is az with last letter trimmed
+            # ec2 region is az with last letter trimmed
             region=${availability_zone%?}
             # set S3 bucket according to tree (level)
             case "${GECKO_HEAD_REPOSITORY}" in
@@ -33,55 +48,17 @@ if test -z "$bucket" -a -z "$SCCACHE_DISABLE" -a -z "$MOZ_PGO"; then
                 bucket=taskcluster-level-3-sccache-${region}
                 ;;
             esac
-
-            # set a dummy master
-            case "${region}" in
-            eu-central-1)
-                master=dummy.euc1.mozilla.com
-                ;;
-            us-east-1)
-                master=dummy.use1.mozilla.com
-                ;;
-            us-west-1)
-                master=dummy.usw1.mozilla.com
-                ;;
-            us-west-2)
-                master=dummy.usw2.mozilla.com
-                ;;
-            esac
         fi
     fi
 fi
 
-# if platform hasn't been determined from buildprops, and we're on windows,
-# it must be set to prevent adding ac_add_options --with-ccache below
-if test -z "$platform"; then
-    # set platform based on the SYSTEMROOT env var
-    case "${SYSTEMROOT}" in
-    *Windows)
-        platform=windows
-        suffix=.exe
-        ;;
-    esac
-fi
-
 if test -n "$bucket"; then
-    mk_add_options "export SCCACHE_BUCKET=$bucket"
-    case "$master" in
-    *us[ew][12].mozilla.com*|*euc1.mozilla.com*)
-        mk_add_options "export SCCACHE_NAMESERVER=169.254.169.253"
-        ;;
-    esac
-    export CCACHE="$topsrcdir/sccache2/sccache${suffix}"
+    if [ -n "${SCCACHE_GCS_KEY_PATH}" ]; then
+        mk_add_options "export SCCACHE_GCS_BUCKET=$bucket"
+    else
+        mk_add_options "export SCCACHE_BUCKET=$bucket"
+    fi
+    export CCACHE="$topsrcdir/sccache/sccache"
     export SCCACHE_VERBOSE_STATS=1
-    mk_add_options MOZBUILD_MANAGE_SCCACHE_DAEMON=${topsrcdir}/sccache2/sccache
-    case "$platform" in
-    win*)
-        # For now, sccache doesn't support separate PDBs so force debug info to be
-        # in object files.
-        mk_add_options "export COMPILE_PDB_FLAG="
-        mk_add_options "export HOST_PDB_FLAG="
-        mk_add_options "export MOZ_DEBUG_FLAGS=-Z7"
-        ;;
-    esac
+    mk_add_options MOZBUILD_MANAGE_SCCACHE_DAEMON=${topsrcdir}/sccache/sccache
 fi

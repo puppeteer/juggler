@@ -2,22 +2,21 @@
 <html>
 <head>
   <title>Test whether we are adding the dummy plugin correctly when there is only 1 plugin and its hidden</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript" src="plugin-utils.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 
 <body>
   <script type="application/javascript">
-  "use strict"
+  "use strict";
   {
     SimpleTest.waitForExplicitFinish();
     let ph = SpecialPowers.Cc["@mozilla.org/plugin/host;1"].getService(SpecialPowers.Ci.nsIPluginHost);
     let plugins = ph.getPluginTags();
     let testPluginName = plugins[0].name;
-    let oldPrefVal = null;
     let prefName = "plugins.navigator.hidden_ctp_plugin";
     try {
-      oldPrefVal = SpecialPowers.getCharPref(prefName);
+      SpecialPowers.getCharPref(prefName);
     } catch (ex) {}
     let promise = SpecialPowers.pushPrefEnv({ set: [[prefName, testPluginName]]});
     promise.then(function() {

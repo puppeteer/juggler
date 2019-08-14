@@ -6,12 +6,12 @@
 #define mozilla_a11_DocManager_h_
 
 #include "mozilla/ClearOnShutdown.h"
-#include "nsIDocument.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDOMEventListener.h"
 #include "nsRefPtrHashtable.h"
 #include "nsIWebProgressListener.h"
 #include "nsWeakReference.h"
-#include "nsIPresShell.h"
 #include "mozilla/StaticPtr.h"
 
 namespace mozilla {
@@ -36,16 +36,20 @@ class DocManager : public nsIWebProgressListener,
   /**
    * Return document accessible for the given DOM node.
    */
-  DocAccessible* GetDocAccessible(nsIDocument* aDocument);
+  DocAccessible* GetDocAccessible(dom::Document* aDocument);
 
   /**
    * Return document accessible for the given presshell.
    */
-  DocAccessible* GetDocAccessible(const nsIPresShell* aPresShell) {
-    if (!aPresShell) return nullptr;
+  DocAccessible* GetDocAccessible(const PresShell* aPresShell) {
+    if (!aPresShell) {
+      return nullptr;
+    }
 
     DocAccessible* doc = aPresShell->GetDocAccessible();
-    if (doc) return doc;
+    if (doc) {
+      return doc;
+    }
 
     return GetDocAccessible(aPresShell->GetDocument());
   }
@@ -60,7 +64,7 @@ class DocManager : public nsIWebProgressListener,
    * Called by document accessible when it gets shutdown.
    */
   void NotifyOfDocumentShutdown(DocAccessible* aDocument,
-                                nsIDocument* aDOMDocument);
+                                dom::Document* aDOMDocument);
 
   void RemoveFromXPCDocumentCache(DocAccessible* aDocument);
 
@@ -142,25 +146,25 @@ class DocManager : public nsIWebProgressListener,
    * @param  aLoadEventType  [in] specifies the event type to fire load event,
    *                           if 0 then no event is fired
    */
-  void HandleDOMDocumentLoad(nsIDocument* aDocument, uint32_t aLoadEventType);
+  void HandleDOMDocumentLoad(dom::Document* aDocument, uint32_t aLoadEventType);
 
   /**
    * Add/remove 'pagehide' and 'DOMContentLoaded' event listeners.
    */
-  void AddListeners(nsIDocument* aDocument, bool aAddPageShowListener);
-  void RemoveListeners(nsIDocument* aDocument);
+  void AddListeners(dom::Document* aDocument, bool aAddPageShowListener);
+  void RemoveListeners(dom::Document* aDocument);
 
   /**
    * Create document or root accessible.
    */
-  DocAccessible* CreateDocOrRootAccessible(nsIDocument* aDocument);
+  DocAccessible* CreateDocOrRootAccessible(dom::Document* aDocument);
 
   /**
    * Clear the cache and shutdown the document accessibles.
    */
   void ClearDocCache();
 
-  typedef nsRefPtrHashtable<nsPtrHashKey<const nsIDocument>, DocAccessible>
+  typedef nsRefPtrHashtable<nsPtrHashKey<const dom::Document>, DocAccessible>
       DocAccessibleHashtable;
   DocAccessibleHashtable mDocAccessibleCache;
 
@@ -182,9 +186,9 @@ class DocManager : public nsIWebProgressListener,
  * Note this returns the doc accessible for the primary pres shell if there is
  * more than one.
  */
-inline DocAccessible* GetExistingDocAccessible(const nsIDocument* aDocument) {
-  nsIPresShell* ps = aDocument->GetShell();
-  return ps ? ps->GetDocAccessible() : nullptr;
+inline DocAccessible* GetExistingDocAccessible(const dom::Document* aDocument) {
+  PresShell* presShell = aDocument->GetPresShell();
+  return presShell ? presShell->GetDocAccessible() : nullptr;
 }
 
 }  // namespace a11y

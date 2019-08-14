@@ -17,6 +17,8 @@ class PRemotePrintJobChild;
 
 class nsPrintingProxy final : public nsIPrintingPromptService,
                               public mozilla::embedding::PPrintingChild {
+  friend class mozilla::embedding::PPrintingChild;
+
  public:
   static already_AddRefed<nsPrintingProxy> GetInstance();
 
@@ -34,25 +36,24 @@ class nsPrintingProxy final : public nsIPrintingPromptService,
                              uint32_t aFlags);
 
  protected:
-  virtual PPrintProgressDialogChild* AllocPPrintProgressDialogChild() override;
+  PPrintProgressDialogChild* AllocPPrintProgressDialogChild() final;
 
-  virtual bool DeallocPPrintProgressDialogChild(
-      PPrintProgressDialogChild* aActor) override;
+  bool DeallocPPrintProgressDialogChild(
+      PPrintProgressDialogChild* aActor) final;
 
-  virtual PPrintSettingsDialogChild* AllocPPrintSettingsDialogChild() override;
+  PPrintSettingsDialogChild* AllocPPrintSettingsDialogChild() final;
 
-  virtual bool DeallocPPrintSettingsDialogChild(
-      PPrintSettingsDialogChild* aActor) override;
+  bool DeallocPPrintSettingsDialogChild(
+      PPrintSettingsDialogChild* aActor) final;
 
-  virtual PRemotePrintJobChild* AllocPRemotePrintJobChild() override;
+  PRemotePrintJobChild* AllocPRemotePrintJobChild() final;
 
-  virtual bool DeallocPRemotePrintJobChild(
-      PRemotePrintJobChild* aActor) override;
+  bool DeallocPRemotePrintJobChild(PRemotePrintJobChild* aActor) final;
 
  private:
   nsPrintingProxy();
 
-  virtual ~nsPrintingProxy();
+  ~nsPrintingProxy() final;
 
   nsresult Init();
 };

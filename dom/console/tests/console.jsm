@@ -2,10 +2,10 @@
  * Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
-var EXPORTED_SYMBOLS = [ "ConsoleTest" ];
+var EXPORTED_SYMBOLS = ["ConsoleTest"];
 
 var ConsoleTest = {
-  go: function(dumpFunction) {
+  go(dumpFunction) {
     console.log("Hello world!");
     console.createInstance().log("Hello world!");
 
@@ -19,9 +19,20 @@ var ConsoleTest = {
     c.log("Hello world!");
     c.trace("Hello world!");
 
-    console.createInstance({ innerID: "LEVEL", maxLogLevel: "Off" }).log("Invisible!");
-    console.createInstance({ innerID: "LEVEL",  maxLogLevel: "All" }).log("Hello world!");
-    console.createInstance({ innerID: "LEVEL", maxLogLevelPref: "foo.pref" }).log("Invisible!");
-    console.createInstance({ innerID: "LEVEL", maxLogLevelPref: "pref.test.console" }).log("Hello world!");
-  }
+    console
+      .createInstance({ innerID: "LEVEL", maxLogLevel: "Off" })
+      .log("Invisible!");
+    console
+      .createInstance({ innerID: "LEVEL", maxLogLevel: "All" })
+      .log("Hello world!");
+    console
+      .createInstance({ innerID: "LEVEL", maxLogLevelPref: "foo.pref" })
+      .log("Invisible!");
+    console
+      .createInstance({
+        innerID: "LEVEL",
+        maxLogLevelPref: "pref.test.console",
+      })
+      .log("Hello world!");
+  },
 };

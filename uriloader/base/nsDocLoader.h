@@ -23,7 +23,6 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIChannelEventSink.h"
-#include "nsISecurityEventSink.h"
 #include "nsISupportsPriority.h"
 #include "nsCOMPtr.h"
 #include "PLDHashTable.h"
@@ -50,7 +49,6 @@ class nsDocLoader : public nsIDocumentLoader,
                     public nsIWebProgress,
                     public nsIInterfaceRequestor,
                     public nsIChannelEventSink,
-                    public nsISecurityEventSink,
                     public nsISupportsPriority {
  public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_THIS_DOCLOADER_IMPL_CID)
@@ -76,8 +74,6 @@ class nsDocLoader : public nsIDocumentLoader,
 
   // nsIProgressEventSink
   NS_DECL_NSIPROGRESSEVENTSINK
-
-  NS_DECL_NSISECURITYEVENTSINK
 
   // nsIRequestObserver methods: (for observing the load group)
   NS_DECL_NSIREQUESTOBSERVER
@@ -108,12 +104,45 @@ class nsDocLoader : public nsIDocumentLoader,
     unsigned long mNotifyMask;
   };
 
+  /**
+   * Fired when a security change occurs due to page transitions,
+   * or end document load. This interface should be called by
+   * a security package (eg Netscape Personal Security Manager)
+   * to notify nsIWebProgressListeners that security state has
+   * changed. State flags are in nsIWebProgressListener.idl
+   */
+  void OnSecurityChange(nsISupports* aContext, uint32_t aState);
+  /**
+   * Fired when a content blocking event occurs during the time
+   * when a document is alive.  This interface should be called
+   * by Gecko to notify nsIWebProgressListeners that there is a
+   * new content blocking event.  Content blocking events are in
+   * nsIWebProgressListeners.idl.
+   */
+  void OnContentBlockingEvent(nsISupports* aContext, uint32_t aEvent);
+
+  void SetDocumentOpenedButNotLoaded() { mDocumentOpenedButNotLoaded = true; }
+
+  bool TreatAsBackgroundLoad();
+
+  void SetFakeOnLoadDispatched() { mHasFakeOnLoadDispatched = true; };
+
+  bool HasFakeOnLoadDispatched() { return mHasFakeOnLoadDispatched; };
+
+  void ResetToFirstLoad() {
+    mHasFakeOnLoadDispatched = false;
+    mIsReadyToHandlePostMessage = false;
+    mTreatAsBackgroundLoad = false;
+  };
+
  protected:
   virtual ~nsDocLoader();
 
   virtual MOZ_MUST_USE nsresult SetDocLoaderParent(nsDocLoader* aLoader);
 
   bool IsBusy();
+
+  void SetBackgroundLoadIframe();
 
   void Destroy();
   virtual void DestroyChildren();
@@ -192,6 +221,13 @@ class nsDocLoader : public nsIDocumentLoader,
     mChildrenInOnload.RemoveObject(aChild);
     DocLoaderIsEmpty(true);
   }
+
+  // DocLoaderIsEmpty should be called whenever the docloader may be empty.
+  // This method is idempotent and does nothing if the docloader is not in
+  // fact empty.  This method _does_ make sure that layout is flushed if our
+  // loadgroup has no active requests before checking for "real" emptiness if
+  // aFlushLayout is true.
+  void DocLoaderIsEmpty(bool aFlushLayout);
 
  protected:
   struct nsStatusInfo : public mozilla::LinkedListElement<nsStatusInfo> {
@@ -287,7 +323,21 @@ class nsDocLoader : public nsIDocumentLoader,
      flushing. */
   bool mIsFlushingLayout;
 
+  bool mTreatAsBackgroundLoad;
+
  private:
+  bool mHasFakeOnLoadDispatched;
+
+  bool mIsReadyToHandlePostMessage;
+  /**
+   * This flag indicates that the loader is waiting for completion of
+   * a document.open-triggered "document load".  This is set when
+   * document.open() happens and sets up a new parser and cleared out
+   * when we go to fire our load event or end up with a new document
+   * channel.
+   */
+  bool mDocumentOpenedButNotLoaded;
+
   static const PLDHashTableOps sRequestInfoHashOps;
 
   // A list of kids that are in the middle of their onload calls and will let
@@ -295,13 +345,6 @@ class nsDocLoader : public nsIDocumentLoader,
   // DocLoaderIsEmpty calls (those coming from requests finishing in our
   // loadgroup) unless this is empty.
   nsCOMArray<nsIDocumentLoader> mChildrenInOnload;
-
-  // DocLoaderIsEmpty should be called whenever the docloader may be empty.
-  // This method is idempotent and does nothing if the docloader is not in
-  // fact empty.  This method _does_ make sure that layout is flushed if our
-  // loadgroup has no active requests before checking for "real" emptiness if
-  // aFlushLayout is true.
-  void DocLoaderIsEmpty(bool aFlushLayout);
 
   int64_t GetMaxTotalProgress();
 
@@ -314,6 +357,16 @@ class nsDocLoader : public nsIDocumentLoader,
 
   // used to clear our internal progress state between loads...
   void ClearInternalProgress();
+
+  /**
+   * Used to test whether we might need to fire a load event.  This
+   * can happen when we have a document load going on, or when we've
+   * had document.open() called and haven't fired the corresponding
+   * load event yet.
+   */
+  bool IsBlockingLoadEvent() const {
+    return mIsLoadingDocument || mDocumentOpenedButNotLoaded;
+  }
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsDocLoader, NS_THIS_DOCLOADER_IMPL_CID)

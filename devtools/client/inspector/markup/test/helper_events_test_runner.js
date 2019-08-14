@@ -6,6 +6,8 @@
 /* import-globals-from helper_diff.js */
 "use strict";
 
+const beautify = require("devtools/shared/jsbeautify/beautify");
+
 loadHelperScript("helper_diff.js");
 
 /**
@@ -13,7 +15,7 @@ loadHelperScript("helper_diff.js");
  * TEST_DATA array.
  */
 async function runEventPopupTests(url, tests) {
-  const {inspector, testActor} = await openInspectorForURL(url);
+  const { inspector, testActor } = await openInspectorForURL(url);
 
   await inspector.markup.expandAll();
 
@@ -48,7 +50,7 @@ async function runEventPopupTests(url, tests) {
  * @param {TestActorFront} testActor
  */
 async function checkEventsForNode(test, inspector, testActor) {
-  const {selector, expected, beforeTest, isSourceMapped} = test;
+  const { selector, expected, beforeTest, isSourceMapped } = test;
   const container = await getContainerForSelector(selector, inspector);
 
   if (typeof beforeTest === "function") {
@@ -56,7 +58,8 @@ async function checkEventsForNode(test, inspector, testActor) {
   }
 
   const evHolder = container.elt.querySelector(
-    ".inspector-badge.interactive[data-event]");
+    ".inspector-badge.interactive[data-event]"
+  );
 
   if (expected.length === 0) {
     // If no event is expected, check that event bubble is hidden.
@@ -76,8 +79,11 @@ async function checkEventsForNode(test, inspector, testActor) {
   // Click button to show tooltip
   info("Clicking evHolder");
   evHolder.scrollIntoView();
-  EventUtils.synthesizeMouseAtCenter(evHolder, {},
-    inspector.markup.doc.defaultView);
+  EventUtils.synthesizeMouseAtCenter(
+    evHolder,
+    {},
+    inspector.markup.doc.defaultView
+  );
   await tooltip.once("shown");
   info("tooltip shown");
 
@@ -92,7 +98,8 @@ async function checkEventsForNode(test, inspector, testActor) {
   const cssSelector = nodeFront.nodeName + "#" + nodeFront.id;
 
   for (let i = 0; i < headers.length; i++) {
-    info("Processing header[" + i + "] for " + cssSelector);
+    const label = `${cssSelector}.${expected[i].type} (index ${i})`;
+    info(`${label} START`);
 
     const header = headers[i];
     const type = header.querySelector(".event-tooltip-event-type");
@@ -102,21 +109,32 @@ async function checkEventsForNode(test, inspector, testActor) {
 
     info("Looking for " + type.textContent);
 
-    is(type.textContent, expected[i].type,
-       "type matches for " + cssSelector);
-    is(filename.textContent, expected[i].filename,
-       "filename matches for " + cssSelector);
+    is(type.textContent, expected[i].type, "type matches for " + cssSelector);
+    is(
+      filename.textContent,
+      expected[i].filename,
+      "filename matches for " + cssSelector
+    );
 
-    is(attributes.length, expected[i].attributes.length,
-       "we have the correct number of attributes");
+    is(
+      attributes.length,
+      expected[i].attributes.length,
+      "we have the correct number of attributes"
+    );
 
     for (let j = 0; j < expected[i].attributes.length; j++) {
-      is(attributes[j].textContent, expected[i].attributes[j],
-         "attribute[" + j + "] matches for " + cssSelector);
+      is(
+        attributes[j].textContent,
+        expected[i].attributes[j],
+        "attribute[" + j + "] matches for " + cssSelector
+      );
     }
 
-    is(header.classList.contains("content-expanded"), false,
-        "We are not in expanded state");
+    is(
+      header.classList.contains("content-expanded"),
+      false,
+      "We are not in expanded state"
+    );
 
     // Make sure the header is not hidden by scrollbars before clicking.
     header.scrollIntoView();
@@ -125,15 +143,39 @@ async function checkEventsForNode(test, inspector, testActor) {
     EventUtils.synthesizeMouse(header, 2, 2, {}, type.ownerGlobal);
     await tooltip.once("event-tooltip-ready");
 
-    is(header.classList.contains("content-expanded"), true,
-        "We are in expanded state and icon changed");
+    is(
+      header.classList.contains("content-expanded") &&
+        contentBox.hasAttribute("open"),
+      true,
+      "We are in expanded state and icon changed"
+    );
+
+    is(
+      tooltip.panel.querySelectorAll(".event-header.content-expanded")
+        .length === 1 &&
+        tooltip.panel.querySelectorAll(".event-tooltip-content-box[open]")
+          .length === 1,
+      true,
+      "Only one event box is expanded at a time"
+    );
 
     const editor = tooltip.eventTooltip._eventEditors.get(contentBox).editor;
-    testDiff(editor.getText(), expected[i].handler,
-       "handler matches for " + cssSelector, ok);
+    const tidiedHandler = beautify.js(expected[i].handler, {
+      indent_size: 2,
+    });
+    testDiff(
+      editor.getText(),
+      tidiedHandler,
+      "handler matches for " + cssSelector,
+      ok
+    );
+
+    info(`${label} END`);
   }
 
+  const tooltipHidden = tooltip.once("hidden");
   tooltip.hide();
+  await tooltipHidden;
 }
 
 /**
@@ -157,7 +199,7 @@ function testDiff(text1, text2, msg) {
 
   const result = textDiff(text1, text2);
 
-  for (const {atom, operation} of result) {
+  for (const { atom, operation } of result) {
     switch (operation) {
       case "add":
         out += "+ " + atom + "\n";

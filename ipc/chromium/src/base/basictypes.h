@@ -37,21 +37,21 @@ const int64_t kint64max = ((int64_t)GG_LONGLONG(0x7FFFFFFFFFFFFFFF));
 
 // Platform- and hardware-dependent printf specifiers
 #if defined(OS_POSIX)
-#define PRId64L "I64d"
-#define PRIu64L "I64u"
-#define PRIx64L "I64x"
+#  define PRId64L "I64d"
+#  define PRIu64L "I64u"
+#  define PRIx64L "I64x"
 #elif defined(OS_WIN)
-#define PRId64L L"I64d"
-#define PRIu64L L"I64u"
-#define PRIx64L L"I64x"
+#  define PRId64L L"I64d"
+#  define PRIu64L L"I64u"
+#  define PRIx64L L"I64x"
 #endif
 
 // A macro to disallow the copy constructor and operator= functions
 // This should be used in the private: declarations for a class
 #undef DISALLOW_COPY_AND_ASSIGN
 #define DISALLOW_COPY_AND_ASSIGN(TypeName) \
-  TypeName(const TypeName &);              \
-  void operator=(const TypeName &)
+  TypeName(const TypeName&);               \
+  void operator=(const TypeName&)
 
 // An older, deprecated, politically incorrect name for the above.
 #undef DISALLOW_EVIL_CONSTRUCTORS
@@ -154,7 +154,7 @@ char (&ArraySizeHelper(const T (&array)[N]))[N];
 // but the proposal was submitted too late.  It will probably make
 // its way into the language in the future.
 template <typename To, typename From>
-inline To implicit_cast(From const &f) {
+inline To implicit_cast(From const& f) {
   return f;
 }
 
@@ -162,9 +162,9 @@ inline To implicit_cast(From const &f) {
 // triggers compiler warnings with gcc 4.8 and higher, so mark the typedef
 // as permissibly-unused to disable the warnings.
 #if defined(__GNUC__)
-#define COMPILE_ASSERT_UNUSED_ATTRIBUTE __attribute__((unused))
+#  define COMPILE_ASSERT_UNUSED_ATTRIBUTE __attribute__((unused))
 #else
-#define COMPILE_ASSERT_UNUSED_ATTRIBUTE /* nothing */
+#  define COMPILE_ASSERT_UNUSED_ATTRIBUTE /* nothing */
 #endif
 
 // The COMPILE_ASSERT macro can be used to verify that a compile time
@@ -187,9 +187,9 @@ inline To implicit_cast(From const &f) {
 template <bool>
 struct CompileAssert {};
 
-#define COMPILE_ASSERT(expr, msg)     \
-  typedef CompileAssert<(bool(expr))> \
-      msg[bool(expr) ? 1 : -1] COMPILE_ASSERT_UNUSED_ATTRIBUTE
+#  define COMPILE_ASSERT(expr, msg)     \
+    typedef CompileAssert<(bool(expr))> \
+        msg[bool(expr) ? 1 : -1] COMPILE_ASSERT_UNUSED_ATTRIBUTE
 #endif
 
 // Implementation details of COMPILE_ASSERT:

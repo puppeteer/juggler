@@ -10,13 +10,17 @@
 #include "nsIDOMEventListener.h"
 #include "nsBoxFrame.h"
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 class nsButtonBoxFrame : public nsBoxFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsButtonBoxFrame)
 
-  friend nsIFrame* NS_NewButtonBoxFrame(nsIPresShell* aPresShell);
+  friend nsIFrame* NS_NewButtonBoxFrame(mozilla::PresShell* aPresShell);
 
-  explicit nsButtonBoxFrame(ComputedStyle* aStyle, ClassID = kClassID);
+  nsButtonBoxFrame(ComputedStyle*, nsPresContext*, ClassID = kClassID);
 
   virtual void Init(nsIContent* aContent, nsContainerFrame* aParent,
                     nsIFrame* aPrevInFlow) override;
@@ -31,6 +35,7 @@ class nsButtonBoxFrame : public nsBoxFrame {
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual void MouseClicked(mozilla::WidgetGUIEvent* aEvent);
 
   void Blurred();

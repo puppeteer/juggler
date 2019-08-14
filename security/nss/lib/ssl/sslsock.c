@@ -20,6 +20,7 @@
 #include "pk11pqg.h"
 #include "pk11pub.h"
 #include "tls13esni.h"
+#include "tls13subcerts.h"
 
 static const sslSocketOps ssl_default_ops = { /* No SSL. */
                                               ssl_DefConnect,
@@ -75,6 +76,7 @@ static sslOptions ssl_defaults = {
     .enableFalseStart = PR_FALSE,
     .cbcRandomIV = PR_TRUE,
     .enableOCSPStapling = PR_FALSE,
+    .enableDelegatedCredentials = PR_FALSE,
     .enableALPN = PR_TRUE,
     .reuseServerECDHEKey = PR_TRUE,
     .enableFallbackSCSV = PR_FALSE,
@@ -86,7 +88,8 @@ static sslOptions ssl_defaults = {
     .enableTls13CompatMode = PR_FALSE,
     .enableDtlsShortHeader = PR_FALSE,
     .enableHelloDowngradeCheck = PR_FALSE,
-    .enableV2CompatibleHello = PR_FALSE
+    .enableV2CompatibleHello = PR_FALSE,
+    .enablePostHandshakeAuth = PR_FALSE
 };
 
 /*
@@ -276,6 +279,8 @@ ssl_DupSocket(sslSocket *os)
         goto loser;
     }
     ss->vrange = os->vrange;
+    ss->now = os->now;
+    ss->nowArg = os->nowArg;
 
     ss->peerID = !os->peerID ? NULL : PORT_Strdup(os->peerID);
     ss->url = !os->url ? NULL : PORT_Strdup(os->url);
@@ -369,6 +374,13 @@ ssl_DupSocket(sslSocket *os)
                 goto loser;
             }
         }
+        if (os->antiReplay) {
+            ss->antiReplay = tls13_RefAntiReplayContext(os->antiReplay);
+            PORT_Assert(ss->antiReplay); /* Can't fail. */
+            if (!ss->antiReplay) {
+                goto loser;
+            }
+        }
 
         /* Create security data */
         rv = ssl_CopySecurityInfo(ss, os);
@@ -457,6 +469,7 @@ ssl_DestroySocketContents(sslSocket *ss)
     ssl_ClearPRCList(&ss->ssl3.hs.dtlsRcvdHandshake, NULL);
 
     tls13_DestroyESNIKeys(ss->esniKeys);
+    tls13_ReleaseAntiReplayContext(ss->antiReplay);
 }
 
 /*
@@ -782,6 +795,10 @@ SSL_OptionSet(PRFileDesc *fd, PRInt32 which, PRIntn val)
             ss->opt.enableOCSPStapling = val;
             break;
 
+        case SSL_ENABLE_DELEGATED_CREDENTIALS:
+            ss->opt.enableDelegatedCredentials = val;
+            break;
+
         case SSL_ENABLE_NPN:
             break;
 
@@ -840,6 +857,10 @@ SSL_OptionSet(PRFileDesc *fd, PRInt32 which, PRIntn val)
 
         case SSL_ENABLE_V2_COMPATIBLE_HELLO:
             ss->opt.enableV2CompatibleHello = val;
+            break;
+
+        case SSL_ENABLE_POST_HANDSHAKE_AUTH:
+            ss->opt.enablePostHandshakeAuth = val;
             break;
 
         default:
@@ -948,6 +969,9 @@ SSL_OptionGet(PRFileDesc *fd, PRInt32 which, PRIntn *pVal)
         case SSL_ENABLE_OCSP_STAPLING:
             val = ss->opt.enableOCSPStapling;
             break;
+        case SSL_ENABLE_DELEGATED_CREDENTIALS:
+            val = ss->opt.enableDelegatedCredentials;
+            break;
         case SSL_ENABLE_NPN:
             val = PR_FALSE;
             break;
@@ -989,6 +1013,9 @@ SSL_OptionGet(PRFileDesc *fd, PRInt32 which, PRIntn *pVal)
             break;
         case SSL_ENABLE_V2_COMPATIBLE_HELLO:
             val = ss->opt.enableV2CompatibleHello;
+            break;
+        case SSL_ENABLE_POST_HANDSHAKE_AUTH:
+            val = ss->opt.enablePostHandshakeAuth;
             break;
         default:
             PORT_SetError(SEC_ERROR_INVALID_ARGS);
@@ -1083,6 +1110,9 @@ SSL_OptionGetDefault(PRInt32 which, PRIntn *pVal)
         case SSL_ENABLE_OCSP_STAPLING:
             val = ssl_defaults.enableOCSPStapling;
             break;
+        case SSL_ENABLE_DELEGATED_CREDENTIALS:
+            val = ssl_defaults.enableDelegatedCredentials;
+            break;
         case SSL_ENABLE_NPN:
             val = PR_FALSE;
             break;
@@ -1121,6 +1151,9 @@ SSL_OptionGetDefault(PRInt32 which, PRIntn *pVal)
             break;
         case SSL_ENABLE_V2_COMPATIBLE_HELLO:
             val = ssl_defaults.enableV2CompatibleHello;
+            break;
+        case SSL_ENABLE_POST_HANDSHAKE_AUTH:
+            val = ssl_defaults.enablePostHandshakeAuth;
             break;
         default:
             PORT_SetError(SEC_ERROR_INVALID_ARGS);
@@ -1270,6 +1303,10 @@ SSL_OptionSetDefault(PRInt32 which, PRIntn val)
             ssl_defaults.enableOCSPStapling = val;
             break;
 
+        case SSL_ENABLE_DELEGATED_CREDENTIALS:
+            ssl_defaults.enableDelegatedCredentials = val;
+            break;
+
         case SSL_ENABLE_NPN:
             break;
 
@@ -1323,6 +1360,10 @@ SSL_OptionSetDefault(PRInt32 which, PRIntn val)
 
         case SSL_ENABLE_V2_COMPATIBLE_HELLO:
             ssl_defaults.enableV2CompatibleHello = val;
+            break;
+
+        case SSL_ENABLE_POST_HANDSHAKE_AUTH:
+            ssl_defaults.enablePostHandshakeAuth = val;
             break;
 
         default:
@@ -2200,6 +2241,8 @@ SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
 
     ss->opt = sm->opt;
     ss->vrange = sm->vrange;
+    ss->now = sm->now;
+    ss->nowArg = sm->nowArg;
     PORT_Memcpy(ss->cipherSuites, sm->cipherSuites, sizeof sm->cipherSuites);
     PORT_Memcpy(ss->ssl3.dtlsSRTPCiphers, sm->ssl3.dtlsSRTPCiphers,
                 sizeof(PRUint16) * sm->ssl3.dtlsSRTPCipherCount);
@@ -2269,6 +2312,29 @@ SSL_ReconfigFD(PRFileDesc *model, PRFileDesc *fd)
         }
         ss->ssl3.ca_list = CERT_DupDistNames(sm->ssl3.ca_list);
         if (!ss->ssl3.ca_list) {
+            return NULL;
+        }
+    }
+
+    /* Copy ESNI. */
+    tls13_DestroyESNIKeys(ss->esniKeys);
+    ss->esniKeys = NULL;
+    if (sm->esniKeys) {
+        ss->esniKeys = tls13_CopyESNIKeys(sm->esniKeys);
+        if (!ss->esniKeys) {
+            return NULL;
+        }
+    }
+
+    /* Copy anti-replay context. */
+    if (ss->antiReplay) {
+        tls13_ReleaseAntiReplayContext(ss->antiReplay);
+        ss->antiReplay = NULL;
+    }
+    if (sm->antiReplay) {
+        ss->antiReplay = tls13_RefAntiReplayContext(sm->antiReplay);
+        PORT_Assert(ss->antiReplay);
+        if (!ss->antiReplay) {
             return NULL;
         }
     }
@@ -3644,6 +3710,7 @@ ssl_SetDefaultsFromEnvironment(void)
         char *ev;
         firsttime = 0;
 #ifdef DEBUG
+        ssl_trace_iob = NULL;
         ev = PR_GetEnvSecure("SSLDEBUGFILE");
         if (ev && ev[0]) {
             ssl_trace_iob = fopen(ev, "w");
@@ -3665,6 +3732,7 @@ ssl_SetDefaultsFromEnvironment(void)
         }
 #endif /* DEBUG */
 #ifdef NSS_ALLOW_SSLKEYLOGFILE
+        ssl_keylog_iob = NULL;
         ev = PR_GetEnvSecure("SSLKEYLOGFILE");
         if (ev && ev[0]) {
             ssl_keylog_iob = fopen(ev, "a");
@@ -3885,6 +3953,15 @@ ssl_FreeEphemeralKeyPairs(sslSocket *ss)
     }
 }
 
+PRTime
+ssl_Time(const sslSocket *ss)
+{
+    if (!ss->now) {
+        return PR_Now();
+    }
+    return ss->now(ss->nowArg);
+}
+
 /*
 ** Create a newsocket structure for a file descriptor.
 */
@@ -3900,7 +3977,7 @@ ssl_NewSocket(PRBool makeLocks, SSLProtocolVariant protocolVariant)
         makeLocks = PR_TRUE;
 
     /* Make a new socket and get it ready */
-    ss = (sslSocket *)PORT_ZAlloc(sizeof(sslSocket));
+    ss = PORT_ZNew(sslSocket);
     if (!ss) {
         return NULL;
     }
@@ -3958,6 +4035,7 @@ ssl_NewSocket(PRBool makeLocks, SSLProtocolVariant protocolVariant)
     dtls_InitTimers(ss);
 
     ss->esniKeys = NULL;
+    ss->antiReplay = NULL;
 
     if (makeLocks) {
         rv = ssl_MakeLocks(ss);
@@ -4024,20 +4102,36 @@ struct {
     void *function;
 } ssl_experimental_functions[] = {
 #ifndef SSL_DISABLE_EXPERIMENTAL_API
+    EXP(AeadDecrypt),
+    EXP(AeadEncrypt),
+    EXP(CreateAntiReplayContext),
+    EXP(DelegateCredential),
+    EXP(DestroyAead),
+    EXP(DestroyResumptionTokenInfo),
+    EXP(EnableESNI),
+    EXP(EncodeESNIKeys),
+    EXP(GetCurrentEpoch),
     EXP(GetExtensionSupport),
+    EXP(GetResumptionTokenInfo),
     EXP(HelloRetryRequestCallback),
     EXP(InstallExtensionHooks),
+    EXP(HkdfExtract),
+    EXP(HkdfExpandLabel),
+    EXP(HkdfExpandLabelWithMech),
     EXP(KeyUpdate),
+    EXP(MakeAead),
+    EXP(RecordLayerData),
+    EXP(RecordLayerWriteCallback),
+    EXP(ReleaseAntiReplayContext),
+    EXP(SecretCallback),
+    EXP(SendCertificateRequest),
     EXP(SendSessionTicket),
+    EXP(SetAntiReplayContext),
+    EXP(SetESNIKeyPair),
     EXP(SetMaxEarlyDataSize),
-    EXP(SetupAntiReplay),
     EXP(SetResumptionTokenCallback),
     EXP(SetResumptionToken),
-    EXP(GetResumptionTokenInfo),
-    EXP(DestroyResumptionTokenInfo),
-    EXP(SetESNIKeyPair),
-    EXP(EncodeESNIKeys),
-    EXP(EnableESNI),
+    EXP(SetTimeFunc),
 #endif
     { "", NULL }
 };
@@ -4071,6 +4165,21 @@ ssl_ClearPRCList(PRCList *list, void (*f)(void *))
         }
         PORT_Free(cursor);
     }
+}
+
+SECStatus
+SSLExp_SetTimeFunc(PRFileDesc *fd, SSLTimeFunc f, void *arg)
+{
+    sslSocket *ss = ssl_FindSocket(fd);
+
+    if (!ss) {
+        SSL_DBG(("%d: SSL[%d]: bad socket in SSL_SetTimeFunc",
+                 SSL_GETPID(), fd));
+        return SECFailure;
+    }
+    ss->now = f;
+    ss->nowArg = arg;
+    return SECSuccess;
 }
 
 /* Experimental APIs for session cache handling. */
@@ -4156,7 +4265,7 @@ SSLExp_SetResumptionToken(PRFileDesc *fd, const PRUint8 *token,
     /* Use the sid->cached as marker that this is from an external cache and
      * we don't have to look up anything in the NSS internal cache. */
     sid->cached = in_external_cache;
-    sid->lastAccessTime = ssl_TimeSec();
+    sid->lastAccessTime = ssl_Time(ss);
 
     ss->sec.ci.sid = sid;
 

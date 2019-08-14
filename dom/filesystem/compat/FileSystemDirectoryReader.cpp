@@ -36,6 +36,7 @@ class PromiseHandler final : public PromiseNativeHandler {
     MOZ_ASSERT(aSuccessCallback);
   }
 
+  MOZ_CAN_RUN_SCRIPT
   virtual void ResolvedCallback(JSContext* aCx,
                                 JS::Handle<JS::Value> aValue) override {
     if (NS_WARN_IF(!aValue.isObject())) {
@@ -86,7 +87,7 @@ class PromiseHandler final : public PromiseNativeHandler {
       sequence[i] = entry;
     }
 
-    mSuccessCallback->HandleEvent(sequence);
+    mSuccessCallback->Call(sequence);
   }
 
   virtual void RejectedCallback(JSContext* aCx,
@@ -106,7 +107,7 @@ class PromiseHandler final : public PromiseNativeHandler {
 
   RefPtr<FileSystemDirectoryEntry> mParentEntry;
   RefPtr<FileSystem> mFileSystem;
-  RefPtr<FileSystemEntriesCallback> mSuccessCallback;
+  const RefPtr<FileSystemEntriesCallback> mSuccessCallback;
   RefPtr<ErrorCallback> mErrorCallback;
 };
 

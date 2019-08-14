@@ -19,15 +19,20 @@
 #include "GPUVideoImage.h"
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "GeneratedJNIWrappers.h"
-#include "AndroidSurfaceTexture.h"
-#include "GLImages.h"
-#include "GLLibraryEGL.h"
+#  include "GeneratedJNIWrappers.h"
+#  include "AndroidSurfaceTexture.h"
+#  include "GLImages.h"
+#  include "GLLibraryEGL.h"
 #endif
 
 #ifdef XP_MACOSX
-#include "MacIOSurfaceImage.h"
-#include "GLContextCGL.h"
+#  include "MacIOSurfaceImage.h"
+#  include "GLContextCGL.h"
+#endif
+
+#ifdef XP_WIN
+#  include "mozilla/layers/D3D11ShareHandleImage.h"
+#  include "mozilla/layers/D3D11YCbCrImage.h"
 #endif
 
 using mozilla::layers::PlanarYCbCrData;
@@ -692,9 +697,12 @@ bool GLBlitHelper::BlitImageToFramebuffer(layers::Image* const srcImage,
     case ImageFormat::GPU_VIDEO:
       return BlitImage(static_cast<layers::GPUVideoImage*>(srcImage), destSize,
                        destOrigin);
+    case ImageFormat::D3D11_SHARE_HANDLE_TEXTURE:
+      return BlitImage(static_cast<layers::D3D11ShareHandleImage*>(srcImage),
+                       destSize, destOrigin);
     case ImageFormat::D3D11_YCBCR_IMAGE:
-      return BlitImage((layers::D3D11YCbCrImage*)srcImage, destSize,
-                       destOrigin);
+      return BlitImage(static_cast<layers::D3D11YCbCrImage*>(srcImage),
+                       destSize, destOrigin);
     case ImageFormat::D3D9_RGB32_TEXTURE:
       return false;  // todo
 #endif
@@ -927,7 +935,7 @@ bool GLBlitHelper::BlitImage(layers::MacIOSurfaceImage* const srcImage,
   baseArgs.destSize = destSize;
 
   DrawBlitProg::YUVArgs yuvArgs;
-  yuvArgs.colorSpace = YUVColorSpace::BT601;
+  yuvArgs.colorSpace = gfx::YUVColorSpace::BT601;
 
   const DrawBlitProg::YUVArgs* pYuvArgs = nullptr;
 

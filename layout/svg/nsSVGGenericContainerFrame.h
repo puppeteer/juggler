@@ -16,15 +16,19 @@
 
 class nsAtom;
 class nsIFrame;
-class nsIPresShell;
+
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
 
 class nsSVGGenericContainerFrame final : public nsSVGDisplayContainerFrame {
-  friend nsIFrame* NS_NewSVGGenericContainerFrame(nsIPresShell* aPresShell,
-                                                  ComputedStyle* aStyle);
+  friend nsIFrame* NS_NewSVGGenericContainerFrame(
+      mozilla::PresShell* aPresShell, ComputedStyle* aStyle);
 
  protected:
-  explicit nsSVGGenericContainerFrame(ComputedStyle* aStyle)
-      : nsSVGDisplayContainerFrame(aStyle, kClassID) {}
+  explicit nsSVGGenericContainerFrame(ComputedStyle* aStyle,
+                                      nsPresContext* aPresContext)
+      : nsSVGDisplayContainerFrame(aStyle, aPresContext, kClassID) {}
 
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGGenericContainerFrame)

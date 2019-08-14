@@ -14,6 +14,8 @@ class LSDatabaseChild;
 class LSSnapshot;
 
 class LSDatabase final {
+  class Observer;
+
   LSDatabaseChild* mActor;
 
   LSSnapshot* mSnapshot;
@@ -22,6 +24,8 @@ class LSDatabase final {
 
   bool mAllowedToClose;
   bool mRequestedAllowToClose;
+
+  static StaticRefPtr<Observer> sObserver;
 
  public:
   explicit LSDatabase(const nsACString& aOrigin);
@@ -39,6 +43,12 @@ class LSDatabase final {
     MOZ_ASSERT(mActor);
 
     mActor = nullptr;
+  }
+
+  bool HasActiveSnapshot() const {
+    AssertIsOnOwningThread();
+
+    return !!mSnapshot;
   }
 
   bool IsAllowedToClose() const {
@@ -75,7 +85,8 @@ class LSDatabase final {
  private:
   ~LSDatabase();
 
-  nsresult EnsureSnapshot(LSObject* aObject, bool aExplicit = false);
+  nsresult EnsureSnapshot(LSObject* aObject, const nsAString& aKey,
+                          bool aExplicit = false);
 
   void AllowToClose();
 };

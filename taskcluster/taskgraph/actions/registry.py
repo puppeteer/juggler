@@ -12,6 +12,9 @@ import re
 from slugid import nice as slugid
 from types import FunctionType
 from collections import namedtuple
+
+from six import text_type
+
 from taskgraph import create
 from taskgraph.config import load_graph_config
 from taskgraph.util import taskcluster, yaml, hash
@@ -22,7 +25,7 @@ from mozbuild.util import memoize
 actions = []
 callbacks = {}
 
-Action = namedtuple('Action', ['order', 'kind', 'cb_name', 'generic', 'action_builder'])
+Action = namedtuple('Action', ['order', 'cb_name', 'generic', 'action_builder'])
 
 
 def is_json(data):
@@ -37,7 +40,7 @@ def is_json(data):
 @memoize
 def read_taskcluster_yml(filename):
     '''Load and parse .taskcluster.yml, memoized to save some time'''
-    return yaml.load_yaml(*os.path.split(filename))
+    return yaml.load_yaml(filename)
 
 
 @memoize
@@ -52,7 +55,7 @@ def hash_taskcluster_yml(filename):
 
 def register_callback_action(name, title, symbol, description, order=10000,
                              context=[], available=lambda parameters: True,
-                             schema=None, kind='task', generic=True, cb_name=None):
+                             schema=None, generic=True, cb_name=None):
     """
     Register an action callback that can be triggered from supporting
     user interfaces, such as Treeherder.
@@ -108,11 +111,8 @@ def register_callback_action(name, title, symbol, description, order=10000,
     schema : dict
         JSON schema specifying input accepted by the action.
         This is optional and can be left ``null`` if no input is taken.
-    kind : string
-        The action kind to define - must be one of `task` or `hook`.  Only for
-        transitional purposes.
     generic : boolean
-        For kind=hook, whether this is a generic action or has its own permissions.
+        Whether this is a generic action or has its own permissions.
     cb_name : string
         The name under which this function should be registered, defaulting to
         `name`.  This is used to generation actionPerm for non-generic hook
@@ -127,8 +127,8 @@ def register_callback_action(name, title, symbol, description, order=10000,
     """
     mem = {"registered": False}  # workaround nonlocal missing in 2.x
 
-    assert isinstance(title, basestring), 'title must be a string'
-    assert isinstance(description, basestring), 'description must be a string'
+    assert isinstance(title, text_type), 'title must be a string'
+    assert isinstance(description, text_type), 'description must be a string'
     title = title.strip()
     description = description.strip()
 
@@ -138,15 +138,14 @@ def register_callback_action(name, title, symbol, description, order=10000,
         context = lambda params: context_value  # noqa
 
     def register_callback(cb, cb_name=cb_name):
-        assert isinstance(name, basestring), 'name must be a string'
+        assert isinstance(name, text_type), 'name must be a string'
         assert isinstance(order, int), 'order must be an integer'
-        assert kind in ('task', 'hook'), 'kind must be task or hook'
         assert callable(schema) or is_json(schema), 'schema must be a JSON compatible object'
         assert isinstance(cb, FunctionType), 'callback must be a function'
         # Allow for json-e > 25 chars in the symbol.
         if '$' not in symbol:
             assert 1 <= len(symbol) <= 25, 'symbol must be between 1 and 25 characters'
-        assert isinstance(symbol, basestring), 'symbol must be a string'
+        assert isinstance(symbol, text_type), 'symbol must be a string'
 
         assert not mem['registered'], 'register_callback_action must be used as decorator'
         if not cb_name:
@@ -197,81 +196,51 @@ def register_callback_action(name, title, symbol, description, order=10000,
             if schema:
                 rv['schema'] = schema(graph_config=graph_config) if callable(schema) else schema
 
-            # for kind=task, we embed the task from .taskcluster.yml in the action, with
-            # suitable context
-            if kind == 'task':
-                # tasks get all of the scopes the original push did, yuck; this is not
-                # done with kind = hook.
-                repo_scope = 'assume:repo:{}/{}:branch:default'.format(
-                    match.group(1), match.group(2))
-                action['repo_scope'] = repo_scope
+            trustDomain = graph_config['trust-domain']
+            level = parameters['level']
+            tcyml_hash = hash_taskcluster_yml(graph_config.taskcluster_yml)
 
-                taskcluster_yml = read_taskcluster_yml(graph_config.taskcluster_yml)
-                if taskcluster_yml['version'] != 1:
-                    raise Exception(
-                        'actions.json must be updated to work with .taskcluster.yml')
+            # the tcyml_hash is prefixed with `/` in the hookId, so users will be granted
+            # hooks:trigger-hook:project-gecko/in-tree-action-3-myaction/*; if another
+            # action was named `myaction/release`, then the `*` in the scope would also
+            # match that action.  To prevent such an accident, we prohibit `/` in hook
+            # names.
+            if '/' in actionPerm:
+                raise Exception('`/` is not allowed in action names; use `-`')
 
-                tasks = taskcluster_yml['tasks']
-                if not isinstance(tasks, list):
-                    raise Exception(
-                        '.taskcluster.yml "tasks" must be a list for action tasks')
-
-                rv.update({
-                    'kind': 'task',
-                    'task': {
-                        '$let': {
-                            'tasks_for': 'action',
-                            'repository': repository,
-                            'push': push,
-                            'action': action,
-                        },
-                        'in': tasks[0],
+            rv.update({
+                'kind': 'hook',
+                'hookGroupId': 'project-{}'.format(trustDomain),
+                'hookId': 'in-tree-action-{}-{}/{}'.format(level, actionPerm, tcyml_hash),
+                'hookPayload': {
+                    # provide the decision-task parameters as context for triggerHook
+                    "decision": {
+                        'action': action,
+                        'repository': repository,
+                        'push': push,
+                        # parameters is long, so fetch it from the actions.json variables
+                        'parameters': {'$eval': 'parameters'},
                     },
-                })
 
-            # for kind=hook
-            elif kind == 'hook':
-                trustDomain = graph_config['trust-domain']
-                level = parameters['level']
-                tcyml_hash = hash_taskcluster_yml(graph_config.taskcluster_yml)
-
-                # the tcyml_hash is prefixed with `/` in the hookId, so users will be granted
-                # hooks:trigger-hook:project-gecko/in-tree-action-3-myaction/*; if another
-                # action was named `myaction/release`, then the `*` in the scope would also
-                # match that action.  To prevent such an accident, we prohibit `/` in hook
-                # names.
-                if '/' in actionPerm:
-                    raise Exception('`/` is not allowed in action names; use `-`')
-
-                rv.update({
-                    'kind': 'hook',
-                    'hookGroupId': 'project-{}'.format(trustDomain),
-                    'hookId': 'in-tree-action-{}-{}/{}'.format(level, actionPerm, tcyml_hash),
-                    'hookPayload': {
-                        # provide the decision-task parameters as context for triggerHook
-                        "decision": {
-                            'action': action,
-                            'repository': repository,
-                            'push': push,
-                            # parameters is long, so fetch it from the actions.json variables
-                            'parameters': {'$eval': 'parameters'},
-                        },
-
-                        # and pass everything else through from our own context
-                        "user": {
-                            'input': {'$eval': 'input'},
-                            'taskId': {'$eval': 'taskId'},  # target taskId (or null)
-                            'taskGroupId': {'$eval': 'taskGroupId'},  # target task group
-                        }
-                    },
-                })
+                    # and pass everything else through from our own context
+                    "user": {
+                        'input': {'$eval': 'input'},
+                        'taskId': {'$eval': 'taskId'},  # target taskId (or null)
+                        'taskGroupId': {'$eval': 'taskGroupId'},  # target task group
+                    }
+                },
+                'extra': {
+                    'actionPerm': actionPerm,
+                },
+            })
 
             return rv
 
-        actions.append(Action(order, kind, cb_name, generic, action_builder))
+        actions.append(Action(order, cb_name, generic, action_builder))
 
         mem['registered'] = True
         callbacks[cb_name] = cb
+        return cb
     return register_callback
 
 
@@ -318,9 +287,6 @@ def sanity_check_task_scope(callback, parameters, graph_config):
     else:
         raise Exception('No action with cb_name {}'.format(callback))
 
-    if action.kind == 'task':
-        return  # task kinds don't have sane scopes, so bail out
-
     actionPerm = 'generic' if action.generic else action.cb_name
 
     repo_param = '{}head_repository'.format(graph_config['project-repo-param-prefix'])
@@ -355,15 +321,7 @@ def trigger_action_callback(task_group_id, task_id, input, callback, parameters,
     if not test:
         sanity_check_task_scope(callback, parameters, graph_config)
 
-    # fetch the target task, if taskId was given
-    # FIXME: many actions don't need this, so move this fetch into the callbacks
-    # that do need it
-    if task_id:
-        task = taskcluster.get_task_definition(task_id)
-    else:
-        task = None
-
-    cb(Parameters(**parameters), graph_config, input, task_group_id, task_id, task)
+    cb(Parameters(**parameters), graph_config, input, task_group_id, task_id)
 
 
 def _load(graph_config):

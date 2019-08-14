@@ -7,7 +7,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1044556
   <meta charset="utf-8">
   <title>Test for Bug 1044556</title>
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/AddTask.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://global/skin"/>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"/>
   <script type="application/javascript" src="head.js"></script>
@@ -18,9 +17,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1044556
   "use strict";
 
   ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
-  ChromeUtils.import("resource://gre/modules/Messaging.jsm");
-  ChromeUtils.import("resource://gre/modules/Task.jsm");
+  const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+  const {EventDispatcher} = ChromeUtils.import("resource://gre/modules/Messaging.jsm");
 
   // The chrome window
   let chromeWin = Services.wm.getMostRecentWindow("navigator:browser");

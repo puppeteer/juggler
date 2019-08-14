@@ -4,11 +4,11 @@
 
 "use strict";
 
-const { TargetFactory } = require("devtools/client/framework/target");
 const { DebuggerServer } = require("devtools/server/main");
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
-const { remoteClientManager } =
-  require("devtools/client/shared/remote-debugging/remote-client-manager");
+const {
+  remoteClientManager,
+} = require("devtools/client/shared/remote-debugging/remote-client-manager");
 
 /**
  * Construct a Target for a given URL object having various query parameters:
@@ -44,35 +44,67 @@ exports.targetFromURL = async function targetFromURL(url) {
   const params = url.searchParams;
 
   // Clients retrieved from the remote-client-manager are already connected.
-  if (!params.get("remoteId")) {
+  const isCachedClient = params.get("remoteId");
+  if (!isCachedClient) {
     // Connect any other client.
     await client.connect();
   }
 
+  const id = params.get("id");
   const type = params.get("type");
+  const chrome = params.has("chrome");
+
+  try {
+    return await _targetFromURL(client, id, type, chrome);
+  } catch (e) {
+    if (!isCachedClient) {
+      // If the client was not cached, then the client was created here. If the target
+      // creation failed, we should close the client.
+      await client.close();
+    }
+    throw e;
+  }
+};
+
+async function _targetFromURL(client, id, type, chrome) {
   if (!type) {
     throw new Error("targetFromURL, missing type parameter");
   }
-  let id = params.get("id");
-  // Allows to spawn a chrome enabled target for any context
-  // (handy to debug chrome stuff in a content process)
-  let chrome = params.has("chrome");
 
-  let form, front;
+  let front;
   if (type === "tab") {
     // Fetch target for a remote tab
     id = parseInt(id, 10);
     if (isNaN(id)) {
-      throw new Error(`targetFromURL, wrong tab id '${id}', should be a number`);
+      throw new Error(
+        `targetFromURL, wrong tab id '${id}', should be a number`
+      );
     }
     try {
-      const response = await client.getTab({ outerWindowID: id });
-      form = response.tab;
+      front = await client.mainRoot.getTab({ outerWindowID: id });
     } catch (ex) {
       if (ex.startsWith("Protocol error (noTab)")) {
-        throw new Error(`targetFromURL, tab with outerWindowID '${id}' doesn't exist`);
+        throw new Error(
+          `targetFromURL, tab with outerWindowID '${id}' doesn't exist`
+        );
       }
       throw ex;
+    }
+  } else if (type === "extension") {
+    const addonFront = await client.mainRoot.getAddon({ id });
+
+    if (!addonFront) {
+      throw new Error(`targetFromURL, extension with id '${id}' doesn't exist`);
+    }
+
+    front = await addonFront.connect();
+  } else if (type === "worker") {
+    front = await client.mainRoot.getWorker(id);
+
+    if (!front) {
+      throw new Error(
+        `targetFromURL, worker with actor id '${id}' doesn't exist`
+      );
     }
   } else if (type == "process") {
     // Fetch target for a remote chrome actor
@@ -83,7 +115,6 @@ exports.targetFromURL = async function targetFromURL(url) {
         id = 0;
       }
       front = await client.mainRoot.getProcess(id);
-      chrome = true;
     } catch (ex) {
       if (ex.error == "noProcess") {
         throw new Error(`targetFromURL, process with id '${id}' doesn't exist`);
@@ -98,11 +129,9 @@ exports.targetFromURL = async function targetFromURL(url) {
       if (isNaN(id)) {
         throw new Error("targetFromURL, window requires id parameter");
       }
-      const response = await client.mainRoot.getWindow({
+      front = await client.mainRoot.getWindow({
         outerWindowID: id,
       });
-      form = response.window;
-      chrome = true;
     } catch (ex) {
       if (ex.error == "notFound") {
         throw new Error(`targetFromURL, window with id '${id}' doesn't exist`);
@@ -113,8 +142,14 @@ exports.targetFromURL = async function targetFromURL(url) {
     throw new Error(`targetFromURL, unsupported type '${type}' parameter`);
   }
 
-  return TargetFactory.forRemoteTab({ client, form, activeTab: front, chrome });
-};
+  // Allows to spawn a chrome enabled target for any context
+  // (handy to debug chrome stuff in a content process)
+  if (chrome) {
+    front.forceChrome();
+  }
+
+  return front;
+}
 
 /**
  * Create a DebuggerClient for a given URL object having various query parameters:
@@ -138,7 +173,11 @@ async function clientFromURL(url) {
   // If a remote id was provided we should already have a connected client available.
   const remoteId = params.get("remoteId");
   if (remoteId) {
-    return remoteClientManager.getClientByRemoteId(remoteId);
+    const client = remoteClientManager.getClientByRemoteId(remoteId);
+    if (!client) {
+      throw new Error(`Could not find client with remote id: ${remoteId}`);
+    }
+    return client;
   }
 
   const host = params.get("host");

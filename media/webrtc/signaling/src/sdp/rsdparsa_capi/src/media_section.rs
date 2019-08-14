@@ -48,22 +48,34 @@ pub unsafe extern "C" fn sdp_rust_get_media_type(sdp_media: *const SdpMedia) -> 
 #[derive(Clone, Copy)]
 pub enum RustSdpProtocolValue {
     RtpSavpf,
+    UdpTlsRtpSavp,
+    TcpDtlsRtpSavp,
     UdpTlsRtpSavpf,
     TcpTlsRtpSavpf,
+    TcpDtlsRtpSavpf,
     DtlsSctp,
     UdpDtlsSctp,
     TcpDtlsSctp,
+    RtpAvp,
+    RtpAvpf,
+    RtpSavp,
 }
 
 impl<'a> From<&'a SdpProtocolValue> for RustSdpProtocolValue {
     fn from(val: &SdpProtocolValue) -> Self {
         match *val {
             SdpProtocolValue::RtpSavpf => RustSdpProtocolValue::RtpSavpf,
+            SdpProtocolValue::UdpTlsRtpSavp => RustSdpProtocolValue::UdpTlsRtpSavp,
+            SdpProtocolValue::TcpDtlsRtpSavp => RustSdpProtocolValue::TcpDtlsRtpSavp,
             SdpProtocolValue::UdpTlsRtpSavpf => RustSdpProtocolValue::UdpTlsRtpSavpf,
             SdpProtocolValue::TcpTlsRtpSavpf => RustSdpProtocolValue::TcpTlsRtpSavpf,
+            SdpProtocolValue::TcpDtlsRtpSavpf => RustSdpProtocolValue::TcpDtlsRtpSavpf,
             SdpProtocolValue::DtlsSctp => RustSdpProtocolValue::DtlsSctp,
             SdpProtocolValue::UdpDtlsSctp => RustSdpProtocolValue::UdpDtlsSctp,
             SdpProtocolValue::TcpDtlsSctp => RustSdpProtocolValue::TcpDtlsSctp,
+            SdpProtocolValue::RtpAvp => RustSdpProtocolValue::RtpAvp,
+            SdpProtocolValue::RtpAvpf => RustSdpProtocolValue::RtpAvpf,
+            SdpProtocolValue::RtpSavp => RustSdpProtocolValue::RtpSavp,
         }
     }
 }

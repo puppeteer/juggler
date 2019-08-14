@@ -5,8 +5,7 @@
   <link rel="stylesheet" type="text/css"
         href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
 
   <script type="application/javascript"
           src="../common.js"></script>
@@ -171,7 +170,6 @@
       gQueue.push(new recreateRelatives("container", "label", "input"));
 
       gQueue.invoke(); // will call SimpleTest.finish()
-
     }
 
     SimpleTest.waitForExplicitFinish();

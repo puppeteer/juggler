@@ -5,7 +5,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=897221
 -->
 <head>
   <title>Test for User Agent Updates</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -202,7 +202,7 @@ SpecialPowers.pushPrefEnv({
 }, function () {
   // Sets the OVERRIDES var in the chrome script.
   // We do this to avoid code duplication.
-  chromeScript.sendSyncMessage("set-overrides", OVERRIDES);
+  chromeScript.sendAsyncMessage("set-overrides", OVERRIDES);
 
   // testProfileLoad, testDownload, and testProfileSave must run in this order
   // because testDownload depends on testProfileLoad and testProfileSave depends
@@ -218,7 +218,7 @@ const chromeScript = SpecialPowers.loadChromeScript(_ => {
 
   var _notifyOnUpdate = false;
 
-  ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
+  const {FileUtils} = ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
   var FU = FileUtils;
 
   const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
@@ -235,7 +235,7 @@ const chromeScript = SpecialPowers.loadChromeScript(_ => {
   const PREF_UPDATES_ENABLED = PREF_UPDATES + "enabled";
   const PREF_UPDATES_LASTUPDATED = PREF_UPDATES + "lastupdated";
 
-  let { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
+  let { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
   Services.prefs.addObserver(PREF_UPDATES_LASTUPDATED, () => {
     if (_notifyOnUpdate) {
       _notifyOnUpdate = false; // Only notify once, for the first update.

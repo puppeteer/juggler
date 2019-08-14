@@ -1,20 +1,24 @@
 //! Data flow graph tracking Instructions, Values, and EBBs.
 
-use entity::{self, PrimaryMap, SecondaryMap};
-use ir;
-use ir::builder::ReplaceBuilder;
-use ir::extfunc::ExtFuncData;
-use ir::instructions::{BranchInfo, CallInfo, InstructionData};
-use ir::types;
-use ir::{Ebb, FuncRef, Inst, SigRef, Signature, Type, Value, ValueList, ValueListPool};
-use isa::TargetIsa;
-use packed_option::ReservedValue;
-use std::fmt;
-use std::iter;
-use std::mem;
-use std::ops::{Index, IndexMut};
-use std::u16;
-use write::write_operands;
+use crate::entity::{self, PrimaryMap, SecondaryMap};
+use crate::ir;
+use crate::ir::builder::ReplaceBuilder;
+use crate::ir::extfunc::ExtFuncData;
+use crate::ir::instructions::{BranchInfo, CallInfo, InstructionData};
+use crate::ir::types;
+use crate::ir::{
+    Ebb, FuncRef, Inst, SigRef, Signature, Type, Value, ValueLabelAssignments, ValueList,
+    ValueListPool,
+};
+use crate::isa::TargetIsa;
+use crate::packed_option::ReservedValue;
+use crate::write::write_operands;
+use core::fmt;
+use core::iter;
+use core::mem;
+use core::ops::{Index, IndexMut};
+use core::u16;
+use std::collections::HashMap;
 
 /// A data flow graph defines all instructions and extended basic blocks in a function as well as
 /// the data flow dependencies between them. The DFG also tracks values which can be either
@@ -60,6 +64,9 @@ pub struct DataFlowGraph {
 
     /// External function references. These are functions that can be called directly.
     pub ext_funcs: PrimaryMap<FuncRef, ExtFuncData>,
+
+    /// Saves Value labels.
+    pub values_labels: Option<HashMap<Value, ValueLabelAssignments>>,
 }
 
 impl DataFlowGraph {
@@ -73,6 +80,7 @@ impl DataFlowGraph {
             values: PrimaryMap::new(),
             signatures: PrimaryMap::new(),
             ext_funcs: PrimaryMap::new(),
+            values_labels: None,
         }
     }
 
@@ -85,6 +93,7 @@ impl DataFlowGraph {
         self.values.clear();
         self.signatures.clear();
         self.ext_funcs.clear();
+        self.values_labels = None;
     }
 
     /// Get the total number of instructions created in this function, whether they are currently
@@ -116,6 +125,13 @@ impl DataFlowGraph {
     /// Get the total number of values.
     pub fn num_values(&self) -> usize {
         self.values.len()
+    }
+
+    /// Starts collection of debug information.
+    pub fn collect_debug_info(&mut self) {
+        if self.values_labels.is_none() {
+            self.values_labels = Some(HashMap::new());
+        }
     }
 }
 
@@ -410,7 +426,7 @@ impl DataFlowGraph {
     }
 
     /// Returns an object that displays `inst`.
-    pub fn display_inst<'a, I: Into<Option<&'a TargetIsa>>>(
+    pub fn display_inst<'a, I: Into<Option<&'a dyn TargetIsa>>>(
         &'a self,
         inst: Inst,
         isa: I,
@@ -802,9 +818,9 @@ impl DataFlowGraph {
             .remove(num as usize, &mut self.value_lists);
         for index in num..(self.num_ebb_params(ebb) as u16) {
             match self.values[self.ebbs[ebb]
-                                  .params
-                                  .get(index as usize, &self.value_lists)
-                                  .unwrap()]
+                .params
+                .get(index as usize, &self.value_lists)
+                .unwrap()]
             {
                 ValueData::Param { ref mut num, .. } => {
                     *num -= 1;
@@ -893,7 +909,7 @@ impl EbbData {
 }
 
 /// Object that can display an instruction.
-pub struct DisplayInst<'a>(&'a DataFlowGraph, Option<&'a TargetIsa>, Inst);
+pub struct DisplayInst<'a>(&'a DataFlowGraph, Option<&'a dyn TargetIsa>, Inst);
 
 impl<'a> fmt::Display for DisplayInst<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -1063,9 +1079,9 @@ impl DataFlowGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cursor::{Cursor, FuncCursor};
-    use ir::types;
-    use ir::{Function, InstructionData, Opcode, TrapCode};
+    use crate::cursor::{Cursor, FuncCursor};
+    use crate::ir::types;
+    use crate::ir::{Function, InstructionData, Opcode, TrapCode};
     use std::string::ToString;
 
     #[test]
@@ -1218,8 +1234,8 @@ mod tests {
 
     #[test]
     fn aliases() {
-        use ir::condcodes::IntCC;
-        use ir::InstBuilder;
+        use crate::ir::condcodes::IntCC;
+        use crate::ir::InstBuilder;
 
         let mut func = Function::new();
         let ebb0 = func.dfg.make_ebb();

@@ -14,15 +14,15 @@
 #include "mozilla/BasicEvents.h"
 
 class nsGlobalWindowOuter;
-class nsIPresShell;
 class nsIWidget;
 class nsPresContext;
-class nsIDocument;
 class nsView;
 struct nsPoint;
 
 namespace mozilla {
+class PresShell;
 namespace dom {
+class Document;
 class Element;
 }  // namespace dom
 namespace layers {
@@ -77,14 +77,15 @@ class nsDOMWindowUtils final : public nsIDOMWindowUtils,
   nsIWidget* GetWidget(nsPoint* aOffset = nullptr);
   nsIWidget* GetWidgetForElement(mozilla::dom::Element* aElement);
 
-  nsIPresShell* GetPresShell();
+  mozilla::PresShell* GetPresShell();
   nsPresContext* GetPresContext();
-  nsIDocument* GetDocument();
+  mozilla::dom::Document* GetDocument();
   mozilla::layers::LayerTransactionChild* GetLayerTransaction();
   mozilla::layers::WebRenderBridgeChild* GetWebRenderBridge();
+  mozilla::layers::CompositorBridgeChild* GetCompositorBridge();
 
   // Until callers are annotated.
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD SendMouseEventCommon(
       const nsAString& aType, float aX, float aY, int32_t aButton,
       int32_t aClickCount, int32_t aModifiers, bool aIgnoreRootScrollFrame,
@@ -92,13 +93,14 @@ class nsDOMWindowUtils final : public nsIDOMWindowUtils,
       bool aToWindow, bool* aPreventDefault, bool aIsDOMEventSynthesized,
       bool aIsWidgetEventSynthesized, int32_t aButtons);
 
-  NS_IMETHOD SendTouchEventCommon(const nsAString& aType,
-                                  uint32_t* aIdentifiers, int32_t* aXs,
-                                  int32_t* aYs, uint32_t* aRxs, uint32_t* aRys,
-                                  float* aRotationAngles, float* aForces,
-                                  uint32_t aCount, int32_t aModifiers,
-                                  bool aIgnoreRootScrollFrame, bool aToWindow,
-                                  bool* aPreventDefault);
+  MOZ_CAN_RUN_SCRIPT
+  nsresult SendTouchEventCommon(
+      const nsAString& aType, const nsTArray<uint32_t>& aIdentifiers,
+      const nsTArray<int32_t>& aXs, const nsTArray<int32_t>& aYs,
+      const nsTArray<uint32_t>& aRxs, const nsTArray<uint32_t>& aRys,
+      const nsTArray<float>& aRotationAngles, const nsTArray<float>& aForces,
+      int32_t aModifiers, bool aIgnoreRootScrollFrame, bool aToWindow,
+      bool* aPreventDefault);
 };
 
 #endif

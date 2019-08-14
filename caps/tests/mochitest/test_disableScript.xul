@@ -6,7 +6,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=840488
 -->
 <window title="Mozilla Bug 840488"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
 
   <!-- test results are displayed in the html:body -->
   <body xmlns="http://www.w3.org/1999/xhtml">
@@ -24,7 +24,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=840488
   /** Test for all the different ways that script can be disabled for a given global. **/
 
   SimpleTest.waitForExplicitFinish();
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
+  const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
   const ssm = Services.scriptSecurityManager;
   function makeURI(uri) { return Services.io.newURI(uri); }
   const path = "/tests/caps/tests/mochitest/file_disableScript.html";
@@ -143,7 +143,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=840488
     checkScriptEnabled(rootWin, true);
 
     // Privileged frames are immune to docshell flags.
-    ok(ssm.isSystemPrincipal(chromeWin.document.nodePrincipal), "Sanity check for System Principal");
+    ok(chromeWin.document.nodePrincipal.isSystemPrincipal, "Sanity check for System Principal");
     setScriptEnabledForDocShell(chromeWin, false);
     checkScriptEnabled(chromeWin, true);
     setScriptEnabledForDocShell(chromeWin, true);

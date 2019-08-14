@@ -17,6 +17,9 @@
   "saveScreenshotSelectedArea": {
     "message": "ذخیره"
   },
+  "uploadScreenshotSelectedArea": {
+    "message": "بارگذاری"
+  },
   "saveScreenshotVisibleArea": {
     "message": "ذخیره ناحیه قابل مشاهده"
   },
@@ -28,6 +31,9 @@
   },
   "downloadScreenshot": {
     "message": "دریافت"
+  },
+  "downloadScreenshotTitle": {
+    "message": "دریافت تصاویرگرفته شده از صفحه"
   },
   "downloadOnlyNotice": {
     "message": "شما در حال حاضر در حالت فقط-دریافت هستید."
@@ -63,6 +69,9 @@
   },
   "copyScreenshot": {
     "message": "رونوشت"
+  },
+  "copyScreenshotTitle": {
+    "message": "برداشت تصاویرگرفته شده از صفحه به کلیپ بورد"
   },
   "notificationImageCopiedTitle": {
     "message": "رونوشت تصویر تهیه شد"
@@ -122,8 +131,8 @@
   "genericErrorDetails": {
     "message": "مطمئن نیستیم چه اتفاقی افتاده است. می‌خواهید دوباره امتحان کنید یا از یک صفحهٔ دیگر عکس بگیرید؟"
   },
-  "tourBodyIntro": {
-    "message": "بدون خارج شدن از فایرفاکس، عکس بگیرید، ذخیره کنید و به اشتراک بگذارید."
+  "tourBodyIntroServerless": {
+    "message": "گرفتن،‌ برداشت و دریافت تصاویر گرفته شده از صفحه بدون ترک کردن فایرفاکس."
   },
   "tourHeaderPageAction": {
     "message": "روش جدیدی برای ذخیره کردن"
@@ -142,12 +151,6 @@
   },
   "tourBodyFullPage": {
     "message": "برای گرفتن عکس از ناحیه قابل مشاهده در پنجره یا تمام صفحه از دکمه‌های بالا سمت راست استفاده کنید."
-  },
-  "tourHeaderDownloadUpload": {
-    "message": "همانطور که می‌پسندید"
-  },
-  "tourBodyDownloadUpload": {
-    "message": "عکس‌های بریده شده خود را برای به اشتراک‌گذاری راحت‌تر روی وب ذخیره کنید، یا آن‌ها را روی رایانه خود دریافت کنید. همچنین برای دیدن همهٔ عکس‌هایی که گرفتید می‌توانید روی دکمه «عکس‌های من» کلیک کنید."
   },
   "tourSkip": {
     "message": "رد کردن"

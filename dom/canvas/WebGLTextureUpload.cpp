@@ -8,9 +8,9 @@
 #include <algorithm>
 
 #include "CanvasUtils.h"
-#include "gfxPrefs.h"
 #include "GLBlitHelper.h"
 #include "GLContext.h"
+#include "mozilla/Casting.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/dom/HTMLVideoElement.h"
@@ -18,6 +18,7 @@
 #include "mozilla/dom/ImageData.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Scoped.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
 #include "ScopedGLHelpers.h"
 #include "TexUnpackBlob.h"
@@ -163,13 +164,13 @@ static bool ValidateUnpackInfo(WebGLContext* webgl,
 static UniquePtr<webgl::TexUnpackBytes> FromView(
     WebGLContext* webgl, TexImageTarget target, uint32_t width, uint32_t height,
     uint32_t depth, const dom::ArrayBufferView* view, GLuint viewElemOffset,
-    GLuint viewElemLengthOverride) {
+    GLuint viewElemLengthOverride, const GLenum errorVal) {
   const bool isClientData = true;
   const uint8_t* bytes = nullptr;
   size_t availByteCount = 0;
   if (view) {
     if (!webgl->ValidateArrayBufferView(
-            *view, viewElemOffset, viewElemLengthOverride,
+            *view, viewElemOffset, viewElemLengthOverride, errorVal,
             const_cast<uint8_t**>(&bytes), &availByteCount)) {
       return nullptr;
     }
@@ -327,7 +328,7 @@ UniquePtr<webgl::TexUnpackBlob> WebGLContext::FromDomElem(
   uint32_t elemWidth = 0;
   uint32_t elemHeight = 0;
   layers::Image* layersImage = nullptr;
-  if (!gfxPrefs::WebGLDisableDOMBlitUploads() && sfer.mLayersImage) {
+  if (!StaticPrefs::webgl_disable_DOM_blit_uploads() && sfer.mLayersImage) {
     layersImage = sfer.mLayersImage;
     elemWidth = layersImage->GetSize().width;
     elemHeight = layersImage->GetSize().height;
@@ -438,7 +439,8 @@ UniquePtr<webgl::TexUnpackBlob> WebGLContext::From(
   }
 
   return FromView(this, target, width, height, depth, src.mView,
-                  src.mViewElemOffset, src.mViewElemLengthOverride);
+                  src.mViewElemOffset, src.mViewElemLengthOverride,
+                  LOCAL_GL_INVALID_OPERATION);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1093,12 +1095,16 @@ void WebGLTexture::TexStorage(TexTarget target, GLsizei levels,
 
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Ran out of memory during texture allocation.");
+    Truncate();
     return;
   }
   if (error) {
-    MOZ_RELEASE_ASSERT(false, "GFX: We should have caught all other errors.");
-    mContext->ErrorInvalidOperation(
-        "Unexpected error during texture allocation.");
+    mContext->GenerateError(error, "Unexpected error from driver.");
+    const nsPrintfCString call(
+        "DoTexStorage(0x%04x, %i, 0x%04x, %i,%i,%i) -> 0x%04x", target.get(),
+        levels, sizedFormat, width, height, depth, error);
+    gfxCriticalError() << "Unexpected error from driver: "
+                       << call.BeginReading();
     return;
   }
 
@@ -1120,7 +1126,7 @@ void WebGLTexture::TexStorage(TexTarget target, GLsizei levels,
   }
 
   mImmutable = true;
-  mImmutableLevelCount = levels;
+  mImmutableLevelCount = AutoAssertCast(levels);
   ClampLevelBaseAndMax();
 }
 
@@ -1227,6 +1233,7 @@ void WebGLTexture::TexImage(TexImageTarget target, GLint level,
 
   if (glError == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Driver ran out of memory during upload.");
+    Truncate();
     return;
   }
 
@@ -1307,6 +1314,7 @@ void WebGLTexture::TexSubImage(TexImageTarget target, GLint level,
 
   if (glError == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Driver ran out of memory during upload.");
+    Truncate();
     return;
   }
 
@@ -1351,7 +1359,8 @@ UniquePtr<webgl::TexUnpackBytes> WebGLContext::FromCompressed(
   }
 
   return FromView(this, target, width, height, depth, src.mView,
-                  src.mViewElemOffset, src.mViewElemLengthOverride);
+                  src.mViewElemOffset, src.mViewElemLengthOverride,
+                  LOCAL_GL_INVALID_VALUE);
 }
 
 void WebGLTexture::CompressedTexImage(TexImageTarget target, GLint level,
@@ -1406,20 +1415,23 @@ void WebGLTexture::CompressedTexImage(TexImageTarget target, GLint level,
                                mContext->mBoundPixelUnpackBuffer);
 
   // Warning: Possibly shared memory.  See bug 1225033.
-  GLenum error = DoCompressedTexImage(
+  const auto error = DoCompressedTexImage(
       mContext->gl, target, level, internalFormat, blob->mWidth, blob->mHeight,
       blob->mDepth, blob->mAvailBytes, blob->mPtr);
   mContext->OnDataAllocCall();
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Ran out of memory during upload.");
+    Truncate();
     return;
   }
   if (error) {
-    MOZ_RELEASE_ASSERT(false, "GFX: We should have caught all other errors.");
-    mContext->GenerateWarning(
-        "Unexpected error during texture upload. Context"
-        " lost.");
-    mContext->ForceLoseContext();
+    mContext->GenerateError(error, "Unexpected error from driver.");
+    const nsPrintfCString call(
+        "DoCompressedTexImage(0x%04x, %i, 0x%04x, %u,%u,%u, %u) -> 0x%04x",
+        target.get(), level, internalFormat, blob->mWidth, blob->mHeight,
+        blob->mDepth, uint32_t(blob->mAvailBytes), error);
+    gfxCriticalError() << "Unexpected error from driver: "
+                       << call.BeginReading();
     return;
   }
 
@@ -1550,20 +1562,25 @@ void WebGLTexture::CompressedTexSubImage(
                                mContext->mBoundPixelUnpackBuffer);
 
   // Warning: Possibly shared memory.  See bug 1225033.
-  GLenum error = DoCompressedTexSubImage(
+  const auto error = DoCompressedTexSubImage(
       mContext->gl, target, level, xOffset, yOffset, zOffset, blob->mWidth,
       blob->mHeight, blob->mDepth, sizedUnpackFormat, blob->mAvailBytes,
       blob->mPtr);
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     mContext->ErrorOutOfMemory("Ran out of memory during upload.");
+    Truncate();
     return;
   }
   if (error) {
-    MOZ_RELEASE_ASSERT(false, "GFX: We should have caught all other errors.");
-    mContext->GenerateWarning(
-        "Unexpected error during texture upload. Context"
-        " lost.");
-    mContext->ForceLoseContext();
+    mContext->GenerateError(error, "Unexpected error from driver.");
+    const nsPrintfCString call(
+        "DoCompressedTexSubImage(0x%04x, %i, %i,%i,%i, %u,%u,%u, 0x%04x, %u) "
+        "-> 0x%04x",
+        target.get(), level, xOffset, yOffset, zOffset, blob->mWidth,
+        blob->mHeight, blob->mDepth, sizedUnpackFormat,
+        uint32_t(blob->mAvailBytes), error);
+    gfxCriticalError() << "Unexpected error from driver: "
+                       << call.BeginReading();
     return;
   }
 
@@ -1710,24 +1727,24 @@ ScopedCopyTexImageSource::ScopedCopyTexImageSource(
   // Now create the swizzled FB we'll be exposing.
 
   GLuint rgbaRB = 0;
-  gl->fGenRenderbuffers(1, &rgbaRB);
-  gl::ScopedBindRenderbuffer scopedRB(gl, rgbaRB);
-  gl->fRenderbufferStorage(LOCAL_GL_RENDERBUFFER, sizedFormat, srcWidth,
-                           srcHeight);
-
   GLuint rgbaFB = 0;
-  gl->fGenFramebuffers(1, &rgbaFB);
-  gl->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, rgbaFB);
-  gl->fFramebufferRenderbuffer(LOCAL_GL_FRAMEBUFFER, LOCAL_GL_COLOR_ATTACHMENT0,
-                               LOCAL_GL_RENDERBUFFER, rgbaRB);
+  {
+    gl->fGenRenderbuffers(1, &rgbaRB);
+    gl::ScopedBindRenderbuffer scopedRB(gl, rgbaRB);
+    gl->fRenderbufferStorage(LOCAL_GL_RENDERBUFFER, sizedFormat, srcWidth,
+                             srcHeight);
 
-  const GLenum status = gl->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
-  if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE) {
-    MOZ_CRASH("GFX: Temp framebuffer is not complete.");
+    gl->fGenFramebuffers(1, &rgbaFB);
+    gl->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, rgbaFB);
+    gl->fFramebufferRenderbuffer(LOCAL_GL_FRAMEBUFFER,
+                                 LOCAL_GL_COLOR_ATTACHMENT0,
+                                 LOCAL_GL_RENDERBUFFER, rgbaRB);
+
+    const GLenum status = gl->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER);
+    if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE) {
+      MOZ_CRASH("GFX: Temp framebuffer is not complete.");
+    }
   }
-
-  // Restore RB binding.
-  scopedRB.Unwrap();  // This function should really have a better name.
 
   // Draw-blit rgbaTex into rgbaFB.
   const gfx::IntSize srcSize(srcWidth, srcHeight);
@@ -1736,10 +1753,6 @@ ScopedCopyTexImageSource::ScopedCopyTexImageSource(
     gl->BlitHelper()->DrawBlitTextureToFramebuffer(scopedTex.Texture(), srcSize,
                                                    srcSize);
   }
-
-  // Restore Tex2D binding and destroy the temp tex.
-  scopedBindTex.Unwrap();
-  scopedTex.Unwrap();
 
   // Leave RB and FB alive, and FB bound.
   mRB = rgbaRB;
@@ -1810,6 +1823,15 @@ static const webgl::FormatUsageInfo* ValidateCopyDestUsage(
     GLenum internalFormat) {
   const auto& fua = webgl->mFormatUsage;
 
+  switch (internalFormat) {
+    case LOCAL_GL_R8_SNORM:
+    case LOCAL_GL_RG8_SNORM:
+    case LOCAL_GL_RGB8_SNORM:
+    case LOCAL_GL_RGBA8_SNORM:
+      webgl->ErrorInvalidEnum("SNORM formats are invalid for CopyTexImage.");
+      return nullptr;
+  }
+
   auto dstUsage = fua->GetSizedTexUsage(internalFormat);
   if (!dstUsage) {
     // Ok, maybe it's unsized.
@@ -1872,22 +1894,26 @@ static const webgl::FormatUsageInfo* ValidateCopyDestUsage(
   return dstUsage;
 }
 
-bool WebGLTexture::ValidateCopyTexImageForFeedback(uint32_t level,
-                                                   GLint layer) const {
-  const auto& fb = mContext->mBoundReadFramebuffer;
+static bool ValidateCopyTexImageForFeedback(const WebGLContext& webgl,
+                                            const WebGLTexture& tex,
+                                            const uint8_t mipLevel,
+                                            const uint32_t zLayer) {
+  const auto& fb = webgl.BoundReadFb();
   if (fb) {
-    const auto& attach = fb->ColorReadBuffer();
-    MOZ_ASSERT(attach);
+    MOZ_ASSERT(fb->ColorReadBuffer());
+    const auto& attach = *fb->ColorReadBuffer();
+    MOZ_ASSERT(attach.ZLayerCount() ==
+               1);  // Multiview invalid for copyTexImage.
 
-    if (attach->Texture() == this && attach->Layer() == layer &&
-        uint32_t(attach->MipLevel()) == level) {
+    if (attach.Texture() == &tex && attach.Layer() == zLayer &&
+        attach.MipLevel() == mipLevel) {
       // Note that the TexImageTargets *don't* have to match for this to be
       // undefined per GLES 3.0.4 p211, thus an INVALID_OP in WebGL.
-      mContext->ErrorInvalidOperation(
+      webgl.ErrorInvalidOperation(
           "Feedback loop detected, as this texture"
           " is already attached to READ_FRAMEBUFFER's"
           " READ_BUFFER-selected COLOR_ATTACHMENT%u.",
-          attach->mAttachmentPoint);
+          attach.mAttachmentPoint);
       return false;
     }
   }
@@ -1895,8 +1921,9 @@ bool WebGLTexture::ValidateCopyTexImageForFeedback(uint32_t level,
 }
 
 static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
-                                const WebGLTexture* tex, TexImageTarget target,
-                                GLint level, GLint xWithinSrc, GLint yWithinSrc,
+                                WebGLTexture* const tex,
+                                const TexImageTarget target, GLint level,
+                                GLint xWithinSrc, GLint yWithinSrc,
                                 uint32_t srcTotalWidth, uint32_t srcTotalHeight,
                                 const webgl::FormatUsageInfo* srcUsage,
                                 GLint xOffset, GLint yOffset, GLint zOffset,
@@ -1923,6 +1950,7 @@ static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
   ////
 
   GLenum error = 0;
+  nsCString errorText;
   do {
     const auto& idealUnpack = dstUsage->idealUnpack;
     if (!isSubImage) {
@@ -1930,12 +1958,12 @@ static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
 
       if (uint32_t(rwWidth) != dstWidth || uint32_t(rwHeight) != dstHeight) {
         const auto& pi = idealUnpack->ToPacking();
-        CheckedUint32 byteCount = BytesPerPixel(pi);
+        CheckedInt<size_t> byteCount = BytesPerPixel(pi);
         byteCount *= dstWidth;
         byteCount *= dstHeight;
 
         if (byteCount.isValid()) {
-          buffer = calloc(1, byteCount.value());
+          buffer = calloc(1u, byteCount.value());
         }
 
         if (!buffer.get()) {
@@ -1948,7 +1976,15 @@ static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
       gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 1);
       error = DoTexImage(gl, target, level, idealUnpack, dstWidth, dstHeight, 1,
                          buffer.get());
-      if (error) break;
+      if (error) {
+        errorText = nsPrintfCString(
+            "DoTexImage(0x%04x, %i, {0x%04x, 0x%04x, 0x%04x}, %u,%u,1) -> "
+            "0x%04x",
+            target.get(), level, idealUnpack->internalFormat,
+            idealUnpack->unpackFormat, idealUnpack->unpackType, dstWidth,
+            dstHeight, error);
+        break;
+      }
     }
 
     if (!rwWidth || !rwHeight) {
@@ -1962,13 +1998,20 @@ static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
 
     error = DoCopyTexSubImage(gl, target, level, writeX, writeY, zOffset, readX,
                               readY, rwWidth, rwHeight);
-    if (error) break;
+    if (error) {
+      errorText = nsPrintfCString(
+          "DoCopyTexSubImage(0x%04x, %i, %i,%i,%i, %i,%i, %u,%u) -> 0x%04x",
+          target.get(), level, writeX, writeY, zOffset, readX, readY, rwWidth,
+          rwHeight, error);
+      break;
+    }
 
     return true;
   } while (false);
 
   if (error == LOCAL_GL_OUT_OF_MEMORY) {
     webgl->ErrorOutOfMemory("Ran out of memory during texture copy.");
+    tex->Truncate();
     return false;
   }
 
@@ -1979,9 +2022,9 @@ static bool DoCopyTexOrSubImage(WebGLContext* webgl, bool isSubImage,
     return false;
   }
 
-  MOZ_RELEASE_ASSERT(false, "GFX: We should have caught all other errors.");
-  webgl->GenerateWarning("Unexpected error during texture copy. Context lost.");
-  webgl->ForceLoseContext();
+  webgl->GenerateError(error, "Unexpected error from driver.");
+  gfxCriticalError() << "Unexpected error from driver: "
+                     << errorText.BeginReading();
   return false;
 }
 
@@ -2016,7 +2059,10 @@ void WebGLTexture::CopyTexImage2D(TexImageTarget target, GLint level,
     return;
   }
 
-  if (!ValidateCopyTexImageForFeedback(level)) return;
+  const uint32_t zOffset = 0;
+  if (!ValidateCopyTexImageForFeedback(*mContext, *this,
+                                       AssertedCast<uint8_t>(level), zOffset))
+    return;
 
   ////////////////////////////////////
   // Check that source and dest info are compatible
@@ -2102,7 +2148,10 @@ void WebGLTexture::CopyTexSubImage(TexImageTarget target, GLint level,
     return;
   }
 
-  if (!ValidateCopyTexImageForFeedback(level, zOffset)) return;
+  if (!ValidateCopyTexImageForFeedback(*mContext, *this,
+                                       AssertedCast<uint8_t>(level),
+                                       AssertedCast<uint32_t>(zOffset)))
+    return;
 
   ////////////////////////////////////
   // Check that source and dest info are compatible

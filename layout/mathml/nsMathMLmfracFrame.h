@@ -10,6 +10,10 @@
 #include "mozilla/Attributes.h"
 #include "nsMathMLContainerFrame.h"
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 //
 // <mfrac> -- form a fraction from two subexpressions
 //
@@ -54,7 +58,7 @@ class nsMathMLmfracFrame final : public nsMathMLContainerFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsMathMLmfracFrame)
 
-  friend nsIFrame* NS_NewMathMLmfracFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewMathMLmfracFrame(mozilla::PresShell* aPresShell,
                                           ComputedStyle* aStyle);
 
   virtual eMathMLFrameType GetMathMLFrameType() override;
@@ -88,8 +92,9 @@ class nsMathMLmfracFrame final : public nsMathMLContainerFrame {
   uint8_t ScriptIncrement(nsIFrame* aFrame) override;
 
  protected:
-  explicit nsMathMLmfracFrame(ComputedStyle* aStyle)
-      : nsMathMLContainerFrame(aStyle, kClassID),
+  explicit nsMathMLmfracFrame(ComputedStyle* aStyle,
+                              nsPresContext* aPresContext)
+      : nsMathMLContainerFrame(aStyle, aPresContext, kClassID),
         mLineRect(),
         mSlashChar(nullptr),
         mLineThickness(0),

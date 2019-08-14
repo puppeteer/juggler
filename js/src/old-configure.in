@@ -13,7 +13,7 @@ AC_CANONICAL_SYSTEM
 
 dnl ========================================================
 dnl =
-dnl = Don't change the following two lines.  Doing so breaks:
+dnl = Don't change the following lines. Doing so breaks:
 dnl =
 dnl = CFLAGS="-foo" ./configure
 dnl =
@@ -50,7 +50,6 @@ NSPR_MINVER=4.9.2
 
 dnl Set the minimum version of toolkit libs used by mozilla
 dnl ========================================================
-WINDRES_VERSION=2.14.90
 W32API_VERSION=3.14
 
 dnl Set various checks
@@ -88,9 +87,6 @@ dnl ========================================================
 dnl Checks for compilers.
 dnl ========================================================
 
-dnl AR_FLAGS set here so HOST_AR_FLAGS can be set correctly (see bug 538269)
-AR_FLAGS='crs $@'
-
 if test "$COMPILE_ENVIRONMENT"; then
 
 # Note:
@@ -109,24 +105,7 @@ else
     AC_PROG_CXX
     AC_PROG_RANLIB
     MOZ_PATH_PROGS(AS, $AS as, $CC)
-    AC_CHECK_PROGS(AR, ar, :)
     AC_CHECK_PROGS(STRIP, strip, :)
-    AC_CHECK_PROGS(WINDRES, windres, :)
-    if test -z "$HOST_CC"; then
-        HOST_CC='$(CC)'
-    fi
-    if test -z "$HOST_CXX"; then
-        HOST_CXX='$(CXX)'
-    fi
-    if test -z "$HOST_RANLIB"; then
-        HOST_RANLIB='$(RANLIB)'
-    fi
-    if test -z "$HOST_AR"; then
-        HOST_AR='$(AR)'
-    fi
-    if test -z "$HOST_AR_FLAGS"; then
-        HOST_AR_FLAGS='$(AR_FLAGS)'
-    fi
 fi
 
 MOZ_TOOL_VARIABLES
@@ -149,15 +128,9 @@ case "$target" in
         if test -z "$CLANG_CL"; then
             CPPFLAGS="$CPPFLAGS -utf-8"
         fi
-        # MSVC warning C4800 warns when a value is implicitly cast to bool,
-        # because this also forces narrowing to a single byte, which can be a
-        # perf hit.  But this matters so little in practice (and often we want
-        # that behavior) that it's better to turn it off.
         # _CRT_SECURE_NO_WARNINGS disables warnings about using MSVC-specific
         # secure CRT functions.
-        # MSVC warning C4595 warns non-member operator new or delete functions
-        # may not be declared inline, as of VS2015 Update 2.
-        CXXFLAGS="$CXXFLAGS -wd4800 -wd4595 -D_CRT_SECURE_NO_WARNINGS"
+        CXXFLAGS="$CXXFLAGS -D_CRT_SECURE_NO_WARNINGS"
         AC_LANG_SAVE
         AC_LANG_C
         AC_TRY_COMPILE([#include <stdio.h>],
@@ -174,31 +147,13 @@ case "$target" in
         _MSVC_VER_FILTER='s|.*[^!-~]([0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?).*|\1|p'
         changequote([,])
 
-        _MSC_VER=`echo ${CC_VERSION} | cut -c 1-2,4-5`
-
         AC_DEFINE(_CRT_SECURE_NO_WARNINGS)
         AC_DEFINE(_CRT_NONSTDC_NO_WARNINGS)
         AC_DEFINE(_USE_MATH_DEFINES) # Otherwise MSVC's math.h doesn't #define M_PI.
 
-        if test "$_MSC_VER" -ge "1910"; then # VS2017+
-            # C5038: Enable initializer list order warnings
-            # The -w1#### flag treats warning C#### as if it was a warning level
-            # 1 warning, and thus enables it because we enable /W3 warnings. We
-            # don't use -we#### because it would enable warning C#### but treat
-            # it as an error, even in third-party code.
-            # https://docs.microsoft.com/en-us/cpp/build/reference/compiler-option-warning-level
-            CXXFLAGS="$CXXFLAGS -w15038"
-        fi
-
         _CC_SUITE=14
         MSVC_C_RUNTIME_DLL=vcruntime140.dll
         MSVC_CXX_RUNTIME_DLL=msvcp140.dll
-
-        # C5026: move constructor was implicitly defined as deleted
-        CXXFLAGS="$CXXFLAGS -wd5026"
-
-        # C5027: move assignment operator was implicitly defined as deleted
-        CXXFLAGS="$CXXFLAGS -wd5027"
 
         # -Zc:sizedDealloc- disables C++14 global sized deallocation (see bug 1160146)
         CXXFLAGS="$CXXFLAGS -Zc:sizedDealloc-"
@@ -241,25 +196,6 @@ case "$target" in
         if test "$res" != "yes"; then
             AC_MSG_ERROR([w32api version $W32API_VERSION or higher required.])
         fi
-        # Check windres version
-        AC_MSG_CHECKING([for windres version >= $WINDRES_VERSION])
-        _WINDRES_VERSION=`${WINDRES} --version 2>&1 | grep -i windres 2>/dev/null | $AWK '{ print $3 }'`
-        AC_MSG_RESULT([$_WINDRES_VERSION])
-        _WINDRES_MAJOR_VERSION=`echo $_WINDRES_VERSION | $AWK -F\. '{ print $1 }'`
-        _WINDRES_MINOR_VERSION=`echo $_WINDRES_VERSION | $AWK -F\. '{ print $2 }'`
-        _WINDRES_RELEASE_VERSION=`echo $_WINDRES_VERSION | $AWK -F\. '{ print $3 }'`
-        WINDRES_MAJOR_VERSION=`echo $WINDRES_VERSION | $AWK -F\. '{ print $1 }'`
-        WINDRES_MINOR_VERSION=`echo $WINDRES_VERSION | $AWK -F\. '{ print $2 }'`
-        WINDRES_RELEASE_VERSION=`echo $WINDRES_VERSION | $AWK -F\. '{ print $3 }'`
-        if test "$_WINDRES_MAJOR_VERSION" -lt "$WINDRES_MAJOR_VERSION" -o \
-                "$_WINDRES_MAJOR_VERSION" -eq "$WINDRES_MAJOR_VERSION" -a \
-                "$_WINDRES_MINOR_VERSION" -lt "$WINDRES_MINOR_VERSION" -o \
-                "$_WINDRES_MAJOR_VERSION" -eq "$WINDRES_MAJOR_VERSION" -a \
-                "$_WINDRES_MINOR_VERSION" -eq "$WINDRES_MINOR_VERSION" -a \
-                "$_WINDRES_RELEASE_VERSION" -lt "$WINDRES_RELEASE_VERSION"
-        then
-            AC_MSG_ERROR([windres version $WINDRES_VERSION or higher is required to build.])
-        fi
     fi # !GNU_CC
 
     AC_DEFINE_UNQUOTED(WINVER,0x$WINVER)
@@ -300,8 +236,6 @@ if test -n "$SBCONF"; then
 fi
 AC_SUBST(QEMU_CANT_RUN_JS_SHELL)
 
-AC_SUBST(_MSC_VER)
-
 AC_SUBST(GNU_CC)
 AC_SUBST(GNU_CXX)
 
@@ -309,50 +243,6 @@ dnl ========================================================
 dnl Checks for programs.
 dnl ========================================================
 if test "$COMPILE_ENVIRONMENT"; then
-
-dnl ========================================================
-dnl = Mac OS X SDK support
-dnl ========================================================
-MACOS_SDK_DIR=
-MOZ_ARG_WITH_STRING(macos-sdk,
-[  --with-macos-sdk=dir    Location of platform SDK to use (Mac OS X only)],
-    MACOS_SDK_DIR=$withval)
-
-dnl MACOS_SDK_DIR will be set to the SDK location whenever one is in use.
-AC_SUBST(MACOS_SDK_DIR)
-
-if test "$MACOS_SDK_DIR"; then
-  dnl Sync this section with the ones in NSPR and NSS.
-  dnl Changes to the cross environment here need to be accounted for in
-  dnl the libIDL checks (below) and xpidl build.
-
-  if test ! -d "$MACOS_SDK_DIR"; then
-    AC_MSG_ERROR([SDK not found.  When using --with-macos-sdk, you must
-specify a valid SDK.  SDKs are installed when the optional cross-development
-tools are selected during the Xcode/Developer Tools installation.])
-  fi
-
-  CFLAGS="$CFLAGS -isysroot ${MACOS_SDK_DIR}"
-  CXXFLAGS="$CXXFLAGS -isysroot ${MACOS_SDK_DIR}"
-
-  dnl CPP/CXXCPP needs to be set for MOZ_CHECK_HEADER.
-  CPP="$CPP -isysroot ${MACOS_SDK_DIR}"
-  CXXCPP="$CXXCPP -isysroot ${MACOS_SDK_DIR}"
-
-  AC_LANG_SAVE
-  AC_MSG_CHECKING([for valid compiler/Mac OS X SDK combination])
-  AC_LANG_CPLUSPLUS
-  AC_TRY_COMPILE([#include <new>
-                 int main() { return 0; }],
-   result=yes,
-   result=no)
-  AC_LANG_RESTORE
-  AC_MSG_RESULT($result)
-
-  if test "$result" = "no" ; then
-    AC_MSG_ERROR([The selected compiler and Mac OS X SDK are incompatible.])
-  fi
-fi
 
 AC_PATH_XTRA
 
@@ -397,7 +287,6 @@ AC_SUBST(MOZJS_ALPHA)
 dnl ========================================================
 dnl set the defaults first
 dnl ========================================================
-AR_EXTRACT='$(AR) x'
 MOZ_USER_DIR=".mozilla"
 
 MOZ_FIX_LINK_PATHS="-Wl,-rpath-link,${DIST}/bin -Wl,-rpath-link,${prefix}/lib"
@@ -407,8 +296,7 @@ dnl ==============================================================
 MOZ_ARCH_OPTS
 
 dnl ========================================================
-dnl Android libstdc++, placed here so it can use MOZ_ARCH
-dnl computed above.
+dnl Android libstdc++
 dnl ========================================================
 
 MOZ_ANDROID_CPU_ARCH
@@ -514,14 +402,11 @@ dnl ========================================================
 case "$host" in
 *mingw*)
     if test -n "$_WIN32_MSVC"; then
-        HOST_AR=lib
-        HOST_AR_FLAGS='-NOLOGO -OUT:$@'
         HOST_CFLAGS="$HOST_CFLAGS -nologo"
-        HOST_RANLIB='echo ranlib'
     else
         HOST_CFLAGS="$HOST_CFLAGS -mwindows"
     fi
-    HOST_CFLAGS="$HOST_CFLAGS -DXP_WIN32 -DXP_WIN -DWIN32 -D_WIN32 -D_CRT_SECURE_NO_WARNINGS"
+    HOST_CFLAGS="$HOST_CFLAGS -DXP_WIN -DWIN32 -D_WIN32 -D_CRT_SECURE_NO_WARNINGS"
     HOST_OPTIMIZE_FLAGS="${HOST_OPTIMIZE_FLAGS=-O2}"
     HOST_BIN_SUFFIX=.exe
 
@@ -556,8 +441,6 @@ case "$host" in
     ;;
 esac
 
-MOZ_DOING_LTO(lto_is_enabled)
-
 dnl ========================================================
 dnl Add optional and non-optional hardening flags from toolchain.configure
 dnl ========================================================
@@ -565,6 +448,7 @@ dnl ========================================================
 CFLAGS="$CFLAGS $MOZ_HARDENING_CFLAGS_JS"
 CPPFLAGS="$CPPFLAGS $MOZ_HARDENING_CFLAGS_JS"
 CXXFLAGS="$CXXFLAGS $MOZ_HARDENING_CFLAGS_JS"
+LDFLAGS="$LDFLAGS $MOZ_HARDENING_LDFLAGS_JS"
 
 dnl ========================================================
 dnl System overrides of the defaults for target
@@ -593,11 +477,9 @@ case "$target" in
     fi
     LDFLAGS=$_SAVE_LDFLAGS
 
-    if test "x$lto_is_enabled" = "xyes"; then
-        echo "Skipping -dead_strip because lto is enabled."
     dnl DTrace and -dead_strip don't interact well. See bug 403132.
     dnl ===================================================================
-    elif test "x$enable_dtrace" = "xyes"; then
+    if test "x$enable_dtrace" = "xyes"; then
         echo "Skipping -dead_strip because DTrace is enabled. See bug 403132."
     else
         dnl check for the presence of the -dead_strip linker flag
@@ -646,7 +528,6 @@ case "$target" in
 *-mingw*)
     DSO_CFLAGS=
     DSO_PIC_CFLAGS=
-    RC=rc.exe
     if test -n "$GNU_CC" -o -n "$CLANG_CC"; then
         CC="$CC -mwindows"
         CXX="$CXX -mwindows"
@@ -654,7 +535,6 @@ case "$target" in
         CFLAGS="$CFLAGS -mms-bitfields"
         CXXFLAGS="$CXXFLAGS -mms-bitfields"
         DSO_LDOPTS='-shared'
-        RC='$(WINDRES)'
         # Use temp file for windres (bug 213281)
         RCFLAGS='-O coff --use-temp-file'
         # mingw doesn't require kernel32, user32, and advapi32 explicitly
@@ -675,19 +555,6 @@ case "$target" in
         WIN32_GUI_EXE_LDFLAGS=-mwindows
     else
         TARGET_COMPILER_ABI=msvc
-        HOST_CC='$(CC)'
-        HOST_CXX='$(CXX)'
-        case "$LINKER" in
-        *lld*)
-            AR='llvm-lib'
-            AR_FLAGS='-llvmlibthin -out:$@'
-            ;;
-        *)
-            AR='lib'
-            AR_FLAGS='-NOLOGO -OUT:$@'
-            ;;
-        esac
-        AR_EXTRACT=
         RANLIB='echo not_ranlib'
         STRIP='echo not_strip'
         PKG_SKIP_STRIP=1
@@ -724,20 +591,10 @@ case "$target" in
         if test -z "$MOZ_ASAN"; then
             CFLAGS="$CFLAGS -Gw"
             CXXFLAGS="$CXXFLAGS -Gw"
+        else
+            # String tail merging doesn't play nice with ASan's ODR checker.
+            LDFLAGS="$LDFLAGS -opt:nolldtailmerge"
         fi
-        # khuey says we can safely ignore MSVC warning C4251
-        # MSVC warning C4244 (implicit type conversion may lose data) warns
-        # and requires workarounds for perfectly valid code.  Also, GCC/clang
-        # don't warn about it by default. So for consistency/sanity, we turn
-        # it off on MSVC, too.
-        # MSVC warning C4267 warns for narrowing type conversions from size_t
-        # to 32-bit integer types on 64-bit platforms.  Since this is virtually
-        # the same thing as C4244, we disable C4267, too.
-        CFLAGS="$CFLAGS -wd4244 -wd4267"
-        CXXFLAGS="$CXXFLAGS -wd4244 -wd4267 -wd4251"
-        # Silence "warning C4065: switch statement contains 'default' but no
-        # 'case' labels".  See bug 1461304.
-        CXXFLAGS="$CXXFLAGS -wd4065"
         if test -n "$CLANG_CL"; then
             # XXX We should combine some of these with our generic GCC-style
             # warning checks.
@@ -803,9 +660,6 @@ case "$target" in
             # is annoying, and rather noisy.
             CXXFLAGS="$CXXFLAGS -Wno-used-but-marked-unused"
         fi
-        # make 'foo == bar;' error out
-        CFLAGS="$CFLAGS -we4553"
-        CXXFLAGS="$CXXFLAGS -we4553"
         LIBS="$LIBS kernel32.lib user32.lib gdi32.lib winmm.lib wsock32.lib advapi32.lib"
         MOZ_DEBUG_LDFLAGS='-DEBUG'
         WARNINGS_AS_ERRORS='-WX'
@@ -1101,46 +955,41 @@ fi
 
 dnl Checks for library functions.
 dnl ========================================================
-AC_PROG_GCC_TRADITIONAL
-AC_FUNC_MEMCMP
 AC_CHECK_FUNCS([getc_unlocked _getc_nolock gmtime_r localtime_r pthread_getname_np pthread_get_name_np])
 
 dnl check for clock_gettime(), the CLOCK_MONOTONIC clock
-dnl avoid this on Darwin, since depending on your system config, we may think
-dnl it exists but it really doesn't
-case "$OS_TARGET" in
-Darwin)
-  ;;
-*)
-  AC_CACHE_CHECK(for clock_gettime(CLOCK_MONOTONIC),
-                 ac_cv_clock_monotonic,
-                 [for libs in "" -lrt; do
-                      _SAVE_LIBS="$LIBS"
-                      LIBS="$LIBS $libs"
-                      AC_TRY_LINK([#include <time.h>],
-                                   [ struct timespec ts;
-                                     clock_gettime(CLOCK_MONOTONIC, &ts); ],
-                                   ac_cv_clock_monotonic=$libs
-                                   LIBS="$_SAVE_LIBS"
-                                   break,
-                                   ac_cv_clock_monotonic=no)
-                      LIBS="$_SAVE_LIBS"
-                  done])
-  if test "$ac_cv_clock_monotonic" != "no"; then
-      HAVE_CLOCK_MONOTONIC=1
-      REALTIME_LIBS=$ac_cv_clock_monotonic
-      AC_DEFINE(HAVE_CLOCK_MONOTONIC)
-      AC_SUBST(HAVE_CLOCK_MONOTONIC)
-      AC_SUBST_LIST(REALTIME_LIBS)
-  fi
-  ;;
-esac
+AC_CACHE_CHECK(for clock_gettime(CLOCK_MONOTONIC),
+               ac_cv_clock_monotonic,
+               [for libs in "" -lrt; do
+                    _SAVE_LIBS="$LIBS"
+                    _SAVE_CFLAGS="$CFLAGS"
+                    LIBS="$LIBS $libs"
+                    CFLAGS="$CFLAGS $DSO_PIC_CFLAGS"
+dnl clock_gettime is available on OSX since 10.12, so depending on MACOSX_DEPLOYMENT_TARGET,
+dnl we should or not be able to use it. To detect if we can, we need to make the
+dnl availability attribute strict, so that compilation fails when the target is < 10.12.
+                    AC_TRY_LINK([#define availability(os, ...) availability(os, strict, __VA_ARGS)
+                                 #include <time.h>],
+                                 [ struct timespec ts;
+                                   clock_gettime(CLOCK_MONOTONIC, &ts); ],
+                                 ac_cv_clock_monotonic=$libs
+                                 LIBS="$_SAVE_LIBS"
+                                 break,
+                                 ac_cv_clock_monotonic=no)
+                    LIBS="$_SAVE_LIBS"
+                    CFLAGS="$_SAVE_CFLAGS"
+                done])
+if test "$ac_cv_clock_monotonic" != "no"; then
+    HAVE_CLOCK_MONOTONIC=1
+    REALTIME_LIBS=$ac_cv_clock_monotonic
+    AC_DEFINE(HAVE_CLOCK_MONOTONIC)
+    AC_SUBST(HAVE_CLOCK_MONOTONIC)
+    AC_SUBST_LIST(REALTIME_LIBS)
+fi
 
 dnl Checks for math functions.
 dnl ========================================================
 AC_CHECK_LIB(m, sin)
-AC_CHECK_LIB(m, sincos, AC_DEFINE(HAVE_SINCOS))
-AC_CHECK_LIB(m, __sincos, AC_DEFINE(HAVE___SINCOS))
 
 AC_CACHE_CHECK(
     [for res_ninit()],
@@ -1253,30 +1102,6 @@ if test "$GNU_CC"; then
 
   TARGET_COMPILER_ABI="${TARGET_COMPILER_ABI-${ARM_ABI_PREFIX}gcc3}"
 fi
-
-dnl See if a dynamic_cast to void* gives the most derived object.
-AC_CACHE_CHECK(for C++ dynamic_cast to void*,
-               ac_cv_cpp_dynamic_cast_void_ptr,
-               [AC_TRY_RUN([class X { int i; public: virtual ~X() { } };
-                            class Y { int j; public: virtual ~Y() { } };
-                            class Z : public X, public Y { int k; };
-
-                            int main() {
-                                 Z mdo;
-                                 X *subx = (X*)&mdo;
-                                 Y *suby = (Y*)&mdo;
-                                 return !((((void*)&mdo != (void*)subx) &&
-                                           ((void*)&mdo == dynamic_cast<void*>(subx))) ||
-                                          (((void*)&mdo != (void*)suby) &&
-                                           ((void*)&mdo == dynamic_cast<void*>(suby))));
-                            }],
-                           ac_cv_cpp_dynamic_cast_void_ptr=yes,
-                           ac_cv_cpp_dynamic_cast_void_ptr=no,
-                           ac_cv_cpp_dynamic_cast_void_ptr=no)])
-if test "$ac_cv_cpp_dynamic_cast_void_ptr" = yes ; then
-   AC_DEFINE(HAVE_CPP_DYNAMIC_CAST_TO_VOID_PTR)
-fi
-
 
 # try harder, when checking for __thread support, see bug 521750 comment #33 and below
 # We pass MOZ_OPTIMIZE_LDFLAGS to the linker because if dead_strip is
@@ -1404,8 +1229,6 @@ if test -n "${MOZ_CONFIGURE_OPTIMIZE_FLAGS}"; then
     MOZ_OPTIMIZE_FLAGS=${MOZ_CONFIGURE_OPTIMIZE_FLAGS}
 fi
 
-MOZ_SET_FRAMEPTR_FLAGS
-
 if test "$COMPILE_ENVIRONMENT"; then
 if test -n "$MOZ_OPTIMIZE"; then
     AC_MSG_CHECKING([for valid optimization flags])
@@ -1434,7 +1257,6 @@ if test -n "$MOZ_OPTIMIZE"; then
 fi
 fi # COMPILE_ENVIRONMENT
 
-AC_SUBST_LIST(MOZ_FRAMEPTR_FLAGS)
 AC_SUBST_LIST(MOZ_OPTIMIZE_FLAGS)
 AC_SUBST_LIST(MOZ_OPTIMIZE_LDFLAGS)
 AC_SUBST_LIST(MOZ_PGO_OPTIMIZE_FLAGS)
@@ -1476,7 +1298,6 @@ if test "$MOZ_MEMORY"; then
   esac
 fi
 AC_SUBST(MOZ_GLUE_IN_PROGRAM)
-AC_SUBST_LIST(MOZ_GLUE_WRAP_LDFLAGS)
 
 dnl ========================================================
 dnl instruments
@@ -1680,12 +1501,8 @@ dnl = Maintainer debug option (no --enable equivalent)
 dnl =
 dnl ========================================================
 
-AC_SUBST(AR)
-AC_SUBST(AR_FLAGS)
-AC_SUBST(AR_EXTRACT)
 AC_SUBST(NM)
 AC_SUBST_LIST(ASFLAGS)
-AC_SUBST(RC)
 AC_SUBST(RCFLAGS)
 AC_SUBST(WINDRES)
 AC_SUBST(IMPLIB)
@@ -1769,9 +1586,6 @@ AC_SUBST_LIST(HOST_CPPFLAGS)
 AC_SUBST_LIST(HOST_CXXFLAGS)
 AC_SUBST(HOST_LDFLAGS)
 AC_SUBST_LIST(HOST_OPTIMIZE_FLAGS)
-AC_SUBST(HOST_AR)
-AC_SUBST(HOST_AR_FLAGS)
-AC_SUBST(HOST_RANLIB)
 AC_SUBST(HOST_BIN_SUFFIX)
 
 AC_SUBST(TARGET_XPCOM_ABI)
@@ -1781,7 +1595,6 @@ AC_SUBST_LIST(DSO_PIC_CFLAGS)
 AC_SUBST(DSO_LDOPTS)
 AC_SUBST(BIN_SUFFIX)
 AC_SUBST(USE_N32)
-AC_SUBST(CC_VERSION)
 AC_SUBST(MOZ_LINKER)
 AC_SUBST(WIN32_CONSOLE_EXE_LDFLAGS)
 AC_SUBST(WIN32_GUI_EXE_LDFLAGS)
@@ -1818,8 +1631,6 @@ dnl ========================================================
 
 MOZ_CHECK_ALLOCATOR
 
-AC_CHECK_FUNCS(localeconv)
-
 AC_SUBST(ac_configure_args)
 
 if test -n "$JS_STANDALONE"; then
@@ -1844,9 +1655,5 @@ AC_DEFINE(NO_NSPR_10_SUPPORT)
 dnl Spit out some output
 dnl ========================================================
 MOZ_CREATE_CONFIG_STATUS()
-
-if test "$JS_STANDALONE"; then
-  MOZ_RUN_ALL_SUBCONFIGURES()
-fi
 
 rm -fr confdefs* $ac_clean_files

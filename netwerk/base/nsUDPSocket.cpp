@@ -270,6 +270,9 @@ void nsUDPSocket::OnMsgAttach() {
 
   // if we hit an error while trying to attach then bail...
   if (NS_FAILED(mCondition)) {
+    UDPSOCKET_LOG(("nsUDPSocket::OnMsgAttach: TryAttach FAILED err=0x%" PRIx32
+                   " [this=%p]\n",
+                   static_cast<uint32_t>(mCondition), this));
     NS_ASSERTION(!mAttached, "should not be attached already");
     OnSocketDetached(mFD);
   }
@@ -383,6 +386,8 @@ UDPMessageProxy::GetOutputStream(nsIOutputStream** aOutputStream) {
 //-----------------------------------------------------------------------------
 
 void nsUDPSocket::OnSocketReady(PRFileDesc* fd, int16_t outFlags) {
+  UDPSOCKET_LOG(
+      ("nsUDPSocket::OnSocketReady: flags=%d [this=%p]\n", outFlags, this));
   NS_ASSERTION(NS_SUCCEEDED(mCondition), "oops");
   NS_ASSERTION(mFD == fd, "wrong file descriptor");
   NS_ASSERTION(outFlags != -1, "unexpected timeout condition reached");
@@ -394,16 +399,23 @@ void nsUDPSocket::OnSocketReady(PRFileDesc* fd, int16_t outFlags) {
   }
 
   PRNetAddr prClientAddr;
-  uint32_t count;
+  int32_t count;
   // Bug 1252755 - use 9216 bytes to allign with nICEr and transportlayer to
   // support the maximum size of jumbo frames
   char buff[9216];
   count = PR_RecvFrom(mFD, buff, sizeof(buff), 0, &prClientAddr,
                       PR_INTERVAL_NO_WAIT);
+  if (count < 0) {
+    UDPSOCKET_LOG(
+        ("nsUDPSocket::OnSocketReady: PR_RecvFrom failed [this=%p]\n", this));
+    return;
+  }
   mByteReadCount += count;
 
   FallibleTArray<uint8_t> data;
   if (!data.AppendElements(buff, count, fallible)) {
+    UDPSOCKET_LOG((
+        "nsUDPSocket::OnSocketReady: AppendElements FAILED [this=%p]\n", this));
     mCondition = NS_ERROR_UNEXPECTED;
     return;
   }
@@ -437,6 +449,7 @@ void nsUDPSocket::OnSocketReady(PRFileDesc* fd, int16_t outFlags) {
 }
 
 void nsUDPSocket::OnSocketDetached(PRFileDesc* fd) {
+  UDPSOCKET_LOG(("nsUDPSocket::OnSocketDetached [this=%p]\n", this));
   // force a failure condition if none set; maybe the STS is shutting down :-/
   if (NS_SUCCEEDED(mCondition)) mCondition = NS_ERROR_ABORT;
 
@@ -969,8 +982,7 @@ PendingSend::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
   NetAddr addr;
   if (NS_SUCCEEDED(rec->GetNextAddr(mPort, &addr))) {
     uint32_t count;
-    nsresult rv = mSocket->SendWithAddress(&addr, mData.Elements(),
-                                           mData.Length(), &count);
+    nsresult rv = mSocket->SendWithAddress(&addr, mData, &count);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1047,7 +1059,7 @@ class SendRequestRunnable : public Runnable {
 NS_IMETHODIMP
 SendRequestRunnable::Run() {
   uint32_t count;
-  mSocket->SendWithAddress(&mAddr, mData.Elements(), mData.Length(), &count);
+  mSocket->SendWithAddress(&mAddr, mData, &count);
   return NS_OK;
 }
 
@@ -1073,17 +1085,14 @@ nsUDPSocket::AsyncListen(nsIUDPSocketListener* aListener) {
 }
 
 NS_IMETHODIMP
-nsUDPSocket::Send(const nsACString& aHost, uint16_t aPort, const uint8_t* aData,
-                  uint32_t aDataLength, uint32_t* _retval) {
+nsUDPSocket::Send(const nsACString& aHost, uint16_t aPort,
+                  const nsTArray<uint8_t>& aData, uint32_t* _retval) {
   NS_ENSURE_ARG_POINTER(_retval);
-  if (!((aData && aDataLength > 0) || (!aData && !aDataLength))) {
-    return NS_ERROR_INVALID_ARG;
-  }
 
   *_retval = 0;
 
   FallibleTArray<uint8_t> fallibleArray;
-  if (!fallibleArray.InsertElementsAt(0, aData, aDataLength, fallible)) {
+  if (!fallibleArray.InsertElementsAt(0, aData, fallible)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -1093,27 +1102,26 @@ nsUDPSocket::Send(const nsACString& aHost, uint16_t aPort, const uint8_t* aData,
   nsresult rv = ResolveHost(aHost, mOriginAttributes, listener);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  *_retval = aDataLength;
+  *_retval = aData.Length();
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsUDPSocket::SendWithAddr(nsINetAddr* aAddr, const uint8_t* aData,
-                          uint32_t aDataLength, uint32_t* _retval) {
+nsUDPSocket::SendWithAddr(nsINetAddr* aAddr, const nsTArray<uint8_t>& aData,
+                          uint32_t* _retval) {
   NS_ENSURE_ARG(aAddr);
-  NS_ENSURE_ARG(aData);
   NS_ENSURE_ARG_POINTER(_retval);
 
   NetAddr netAddr;
   aAddr->GetNetAddr(&netAddr);
-  return SendWithAddress(&netAddr, aData, aDataLength, _retval);
+  return SendWithAddress(&netAddr, aData, _retval);
 }
 
 NS_IMETHODIMP
-nsUDPSocket::SendWithAddress(const NetAddr* aAddr, const uint8_t* aData,
-                             uint32_t aDataLength, uint32_t* _retval) {
+nsUDPSocket::SendWithAddress(const NetAddr* aAddr,
+                             const nsTArray<uint8_t>& aData,
+                             uint32_t* _retval) {
   NS_ENSURE_ARG(aAddr);
-  NS_ENSURE_ARG(aData);
   NS_ENSURE_ARG_POINTER(_retval);
 
   *_retval = 0;
@@ -1130,8 +1138,9 @@ nsUDPSocket::SendWithAddress(const NetAddr* aAddr, const uint8_t* aData,
       // socket is not initialized or has been closed
       return NS_ERROR_FAILURE;
     }
-    int32_t count = PR_SendTo(mFD, aData, sizeof(uint8_t) * aDataLength, 0,
-                              &prAddr, PR_INTERVAL_NO_WAIT);
+    int32_t count =
+        PR_SendTo(mFD, aData.Elements(), sizeof(uint8_t) * aData.Length(), 0,
+                  &prAddr, PR_INTERVAL_NO_WAIT);
     if (count < 0) {
       PRErrorCode code = PR_GetError();
       return ErrorAccordingToNSPR(code);
@@ -1140,7 +1149,7 @@ nsUDPSocket::SendWithAddress(const NetAddr* aAddr, const uint8_t* aData,
     *_retval = count;
   } else {
     FallibleTArray<uint8_t> fallibleArray;
-    if (!fallibleArray.InsertElementsAt(0, aData, aDataLength, fallible)) {
+    if (!fallibleArray.InsertElementsAt(0, aData, fallible)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
 
@@ -1148,7 +1157,7 @@ nsUDPSocket::SendWithAddress(const NetAddr* aAddr, const uint8_t* aData,
         new SendRequestRunnable(this, *aAddr, std::move(fallibleArray)),
         NS_DISPATCH_NORMAL);
     NS_ENSURE_SUCCESS(rv, rv);
-    *_retval = aDataLength;
+    *_retval = aData.Length();
   }
   return NS_OK;
 }

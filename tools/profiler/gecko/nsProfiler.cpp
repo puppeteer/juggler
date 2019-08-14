@@ -4,32 +4,36 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <string>
-#include <sstream>
-#include "GeckoProfiler.h"
-#include "nsIFileStreams.h"
 #include "nsProfiler.h"
+
+#include "GeckoProfiler.h"
 #include "nsProfilerStartParams.h"
-#include "nsMemory.h"
-#include "nsString.h"
-#include "mozilla/Services.h"
-#include "nsIObserverService.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsILoadContext.h"
-#include "nsIWebNavigation.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "shared-libraries.h"
+#include "platform.h"
+#include "ProfilerParent.h"
+
 #include "js/JSON.h"
 #include "js/Value.h"
-#include "mozilla/ErrorResult.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/TypedArray.h"
+#include "mozilla/ErrorResult.h"
 #include "mozilla/Move.h"
+#include "mozilla/Services.h"
 #include "mozilla/SystemGroup.h"
+#include "nsIFileStreams.h"
+#include "nsIInterfaceRequestor.h"
+#include "nsIInterfaceRequestorUtils.h"
+#include "nsILoadContext.h"
+#include "nsIObserverService.h"
+#include "nsIWebNavigation.h"
 #include "nsLocalFile.h"
+#include "nsMemory.h"
+#include "nsString.h"
 #include "nsThreadUtils.h"
-#include "ProfilerParent.h"
-#include "platform.h"
+#include "shared-libraries.h"
+#include "zlib.h"
+
+#include <string>
+#include <sstream>
 
 using namespace mozilla;
 
@@ -101,10 +105,21 @@ nsProfiler::CanProfile(bool* aCanProfile) {
   return NS_OK;
 }
 
+static nsresult FillVectorFromStringArray(Vector<const char*>& aVector,
+                                          const nsTArray<nsCString>& aArray) {
+  if (NS_WARN_IF(!aVector.reserve(aArray.Length()))) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  for (auto& entry : aArray) {
+    aVector.infallibleAppend(entry.get());
+  }
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsProfiler::StartProfiler(uint32_t aEntries, double aInterval,
-                          const char** aFeatures, uint32_t aFeatureCount,
-                          const char** aFilters, uint32_t aFilterCount,
+                          const nsTArray<nsCString>& aFeatures,
+                          const nsTArray<nsCString>& aFilters,
                           double aDuration) {
   if (mLockedForPrivateBrowsing) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -112,9 +127,22 @@ nsProfiler::StartProfiler(uint32_t aEntries, double aInterval,
 
   ResetGathering();
 
-  uint32_t features = ParseFeaturesFromStringArray(aFeatures, aFeatureCount);
+  Vector<const char*> featureStringVector;
+  nsresult rv = FillVectorFromStringArray(featureStringVector, aFeatures);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  uint32_t features = ParseFeaturesFromStringArray(
+      featureStringVector.begin(), featureStringVector.length());
   Maybe<double> duration = aDuration > 0.0 ? Some(aDuration) : Nothing();
-  profiler_start(aEntries, aInterval, features, aFilters, aFilterCount,
+
+  Vector<const char*> filterStringVector;
+  rv = FillVectorFromStringArray(filterStringVector, aFilters);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  profiler_start(PowerOfTwo32(aEntries), aInterval, features,
+                 filterStringVector.begin(), filterStringVector.length(),
                  duration);
 
   return NS_OK;
@@ -126,7 +154,6 @@ nsProfiler::StopProfiler() {
   if (mPromiseHolder.isSome()) {
     mPromiseHolder->RejectIfExists(NS_ERROR_DOM_ABORT_ERR, __func__);
   }
-  mExitProfiles.Clear();
   ResetGathering();
 
   profiler_stop();
@@ -154,7 +181,13 @@ nsProfiler::ResumeSampling() {
 
 NS_IMETHODIMP
 nsProfiler::AddMarker(const char* aMarker) {
-  profiler_add_marker(aMarker);
+  profiler_add_marker(aMarker, JS::ProfilingCategoryPair::OTHER);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsProfiler::ClearAllPages() {
+  profiler_clear_all_pages();
   return NS_OK;
 }
 
@@ -247,41 +280,42 @@ nsProfiler::GetProfileDataAsync(double aSinceTime, JSContext* aCx,
   }
 
   StartGathering(aSinceTime)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [promise](nsCString aResult) {
-               AutoJSAPI jsapi;
-               if (NS_WARN_IF(!jsapi.Init(promise->GlobalJSObject()))) {
-                 // We're really hosed if we can't get a JS context for some
-                 // reason.
-                 promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
-                 return;
-               }
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [promise](nsCString aResult) {
+            AutoJSAPI jsapi;
+            if (NS_WARN_IF(!jsapi.Init(promise->GetGlobalObject()))) {
+              // We're really hosed if we can't get a JS context for some
+              // reason.
+              promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
+              return;
+            }
 
-               JSContext* cx = jsapi.cx();
+            JSContext* cx = jsapi.cx();
 
-               // Now parse the JSON so that we resolve with a JS Object.
-               JS::RootedValue val(cx);
-               {
-                 NS_ConvertUTF8toUTF16 js_string(aResult);
-                 if (!JS_ParseJSON(
-                         cx, static_cast<const char16_t*>(js_string.get()),
-                         js_string.Length(), &val)) {
-                   if (!jsapi.HasException()) {
-                     promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
-                   } else {
-                     JS::RootedValue exn(cx);
-                     DebugOnly<bool> gotException = jsapi.StealException(&exn);
-                     MOZ_ASSERT(gotException);
+            // Now parse the JSON so that we resolve with a JS Object.
+            JS::RootedValue val(cx);
+            {
+              NS_ConvertUTF8toUTF16 js_string(aResult);
+              if (!JS_ParseJSON(cx,
+                                static_cast<const char16_t*>(js_string.get()),
+                                js_string.Length(), &val)) {
+                if (!jsapi.HasException()) {
+                  promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
+                } else {
+                  JS::RootedValue exn(cx);
+                  DebugOnly<bool> gotException = jsapi.StealException(&exn);
+                  MOZ_ASSERT(gotException);
 
-                     jsapi.ClearException();
-                     promise->MaybeReject(cx, exn);
-                   }
-                 } else {
-                   promise->MaybeResolve(val);
-                 }
-               }
-             },
-             [promise](nsresult aRv) { promise->MaybeReject(aRv); });
+                  jsapi.ClearException();
+                  promise->MaybeReject(exn);
+                }
+              } else {
+                promise->MaybeResolve(val);
+              }
+            }
+          },
+          [promise](nsresult aRv) { promise->MaybeReject(aRv); });
 
   promise.forget(aPromise);
   return NS_OK;
@@ -312,28 +346,123 @@ nsProfiler::GetProfileDataAsArrayBuffer(double aSinceTime, JSContext* aCx,
   }
 
   StartGathering(aSinceTime)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [promise](nsCString aResult) {
-               AutoJSAPI jsapi;
-               if (NS_WARN_IF(!jsapi.Init(promise->GlobalJSObject()))) {
-                 // We're really hosed if we can't get a JS context for some
-                 // reason.
-                 promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
-                 return;
-               }
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [promise](nsCString aResult) {
+            AutoJSAPI jsapi;
+            if (NS_WARN_IF(!jsapi.Init(promise->GetGlobalObject()))) {
+              // We're really hosed if we can't get a JS context for some
+              // reason.
+              promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
+              return;
+            }
 
-               JSContext* cx = jsapi.cx();
-               JSObject* typedArray = dom::ArrayBuffer::Create(
-                   cx, aResult.Length(),
-                   reinterpret_cast<const uint8_t*>(aResult.Data()));
-               if (typedArray) {
-                 JS::RootedValue val(cx, JS::ObjectValue(*typedArray));
-                 promise->MaybeResolve(val);
-               } else {
-                 promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
-               }
-             },
-             [promise](nsresult aRv) { promise->MaybeReject(aRv); });
+            JSContext* cx = jsapi.cx();
+            JSObject* typedArray = dom::ArrayBuffer::Create(
+                cx, aResult.Length(),
+                reinterpret_cast<const uint8_t*>(aResult.Data()));
+            if (typedArray) {
+              JS::RootedValue val(cx, JS::ObjectValue(*typedArray));
+              promise->MaybeResolve(val);
+            } else {
+              promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
+            }
+          },
+          [promise](nsresult aRv) { promise->MaybeReject(aRv); });
+
+  promise.forget(aPromise);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsProfiler::GetProfileDataAsGzippedArrayBuffer(double aSinceTime,
+                                               JSContext* aCx,
+                                               Promise** aPromise) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!profiler_is_active()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (NS_WARN_IF(!aCx)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsIGlobalObject* globalObject = xpc::CurrentNativeGlobal(aCx);
+  if (NS_WARN_IF(!globalObject)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  ErrorResult result;
+  RefPtr<Promise> promise = Promise::Create(globalObject, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.StealNSResult();
+  }
+
+  StartGathering(aSinceTime)
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [promise](nsCString aResult) {
+            AutoJSAPI jsapi;
+            if (NS_WARN_IF(!jsapi.Init(promise->GetGlobalObject()))) {
+              // We're really hosed if we can't get a JS context for some
+              // reason.
+              promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
+              return;
+            }
+
+            // Compress a buffer via zlib (as with `compress()`), but emit a
+            // gzip header as well. Like `compress()`, this is limited to 4GB in
+            // size, but that shouldn't be an issue for our purposes.
+            uLongf outSize = compressBound(aResult.Length());
+            FallibleTArray<uint8_t> outBuff;
+            if (!outBuff.SetLength(outSize, fallible)) {
+              promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
+              return;
+            }
+
+            int zerr;
+            z_stream stream;
+            stream.zalloc = nullptr;
+            stream.zfree = nullptr;
+            stream.opaque = nullptr;
+            stream.next_out = (Bytef*)outBuff.Elements();
+            stream.avail_out = outBuff.Length();
+            stream.next_in = (z_const Bytef*)aResult.Data();
+            stream.avail_in = aResult.Length();
+
+            // A windowBits of 31 is the default (15) plus 16 for emitting a
+            // gzip header; a memLevel of 8 is the default.
+            zerr = deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED,
+                                /* windowBits */ 31, /* memLevel */ 8,
+                                Z_DEFAULT_STRATEGY);
+            if (zerr != Z_OK) {
+              promise->MaybeReject(NS_ERROR_FAILURE);
+              return;
+            }
+
+            zerr = deflate(&stream, Z_FINISH);
+            outSize = stream.total_out;
+            deflateEnd(&stream);
+
+            if (zerr != Z_STREAM_END) {
+              promise->MaybeReject(NS_ERROR_FAILURE);
+              return;
+            }
+
+            outBuff.TruncateLength(outSize);
+
+            JSContext* cx = jsapi.cx();
+            JSObject* typedArray = dom::ArrayBuffer::Create(
+                cx, outBuff.Length(), outBuff.Elements());
+            if (typedArray) {
+              JS::RootedValue val(cx, JS::ObjectValue(*typedArray));
+              promise->MaybeResolve(val);
+            } else {
+              promise->MaybeReject(NS_ERROR_OUT_OF_MEMORY);
+            }
+          },
+          [promise](nsresult aRv) { promise->MaybeReject(aRv); });
 
   promise.forget(aPromise);
   return NS_OK;
@@ -367,24 +496,25 @@ nsProfiler::DumpProfileToFileAsync(const nsACString& aFilename,
   nsCString filename(aFilename);
 
   StartGathering(aSinceTime)
-      ->Then(GetMainThreadSerialEventTarget(), __func__,
-             [filename, promise](const nsCString& aResult) {
-               nsCOMPtr<nsIFile> file =
-                   do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);
-               nsresult rv = file->InitWithNativePath(filename);
-               if (NS_FAILED(rv)) {
-                 MOZ_CRASH();
-               }
-               nsCOMPtr<nsIFileOutputStream> of = do_CreateInstance(
-                   "@mozilla.org/network/file-output-stream;1");
-               of->Init(file, -1, -1, 0);
-               uint32_t sz;
-               of->Write(aResult.get(), aResult.Length(), &sz);
-               of->Close();
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [filename, promise](const nsCString& aResult) {
+            nsCOMPtr<nsIFile> file =
+                do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);
+            nsresult rv = file->InitWithNativePath(filename);
+            if (NS_FAILED(rv)) {
+              MOZ_CRASH();
+            }
+            nsCOMPtr<nsIFileOutputStream> of =
+                do_CreateInstance("@mozilla.org/network/file-output-stream;1");
+            of->Init(file, -1, -1, 0);
+            uint32_t sz;
+            of->Write(aResult.get(), aResult.Length(), &sz);
+            of->Close();
 
-               promise->MaybeResolveWithUndefined();
-             },
-             [promise](nsresult aRv) { promise->MaybeReject(aRv); });
+            promise->MaybeResolveWithUndefined();
+          },
+          [promise](nsresult aRv) { promise->MaybeReject(aRv); });
 
   promise.forget(aPromise);
   return NS_OK;
@@ -418,7 +548,7 @@ nsProfiler::GetSymbolTable(const nsACString& aDebugPath,
           GetMainThreadSerialEventTarget(), __func__,
           [promise](const SymbolTable& aSymbolTable) {
             AutoJSAPI jsapi;
-            if (NS_WARN_IF(!jsapi.Init(promise->GlobalJSObject()))) {
+            if (NS_WARN_IF(!jsapi.Init(promise->GetGlobalObject()))) {
               // We're really hosed if we can't get a JS context for some
               // reason.
               promise->MaybeReject(NS_ERROR_DOM_UNKNOWN_ERR);
@@ -465,9 +595,9 @@ nsProfiler::IsActive(bool* aIsActive) {
   return NS_OK;
 }
 
-static void GetArrayOfStringsForFeatures(uint32_t aFeatures, uint32_t* aCount,
-                                         char*** aFeatureList) {
-#define COUNT_IF_SET(n_, str_, Name_)           \
+static void GetArrayOfStringsForFeatures(uint32_t aFeatures,
+                                         nsTArray<nsCString>& aFeatureList) {
+#define COUNT_IF_SET(n_, str_, Name_, desc_)    \
   if (ProfilerFeature::Has##Name_(aFeatures)) { \
     len++;                                      \
   }
@@ -478,34 +608,29 @@ static void GetArrayOfStringsForFeatures(uint32_t aFeatures, uint32_t* aCount,
 
 #undef COUNT_IF_SET
 
-  auto featureList = static_cast<char**>(moz_xmalloc(len * sizeof(char*)));
+  aFeatureList.SetCapacity(len);
 
-#define DUP_IF_SET(n_, str_, Name_)             \
+#define DUP_IF_SET(n_, str_, Name_, desc_)      \
   if (ProfilerFeature::Has##Name_(aFeatures)) { \
-    featureList[i] = moz_xstrdup(str_);         \
-    i++;                                        \
+    aFeatureList.AppendElement(str_);           \
   }
 
   // Insert the strings for the features in use.
-  size_t i = 0;
   PROFILER_FOR_EACH_FEATURE(DUP_IF_SET)
 
 #undef DUP_IF_SET
-
-  *aFeatureList = featureList;
-  *aCount = len;
 }
 
 NS_IMETHODIMP
-nsProfiler::GetFeatures(uint32_t* aCount, char*** aFeatureList) {
+nsProfiler::GetFeatures(nsTArray<nsCString>& aFeatureList) {
   uint32_t features = profiler_get_available_features();
-  GetArrayOfStringsForFeatures(features, aCount, aFeatureList);
+  GetArrayOfStringsForFeatures(features, aFeatureList);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsProfiler::GetAllFeatures(uint32_t* aCount, char*** aFeatureList) {
-  GetArrayOfStringsForFeatures((uint32_t)-1, aCount, aFeatureList);
+nsProfiler::GetAllFeatures(nsTArray<nsCString>& aFeatureList) {
+  GetArrayOfStringsForFeatures((uint32_t)-1, aFeatureList);
   return NS_OK;
 }
 
@@ -560,21 +685,7 @@ void nsProfiler::GatheredOOPProfile(const nsACString& aProfile) {
 
 void nsProfiler::ReceiveShutdownProfile(const nsCString& aProfile) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-
-  Maybe<ProfilerBufferInfo> bufferInfo = profiler_get_buffer_info();
-  if (!bufferInfo) {
-    // The profiler is not running. Discard the profile.
-    return;
-  }
-
-  // Append the exit profile to mExitProfiles so that it can be picked up when
-  // a profile is requested.
-  uint64_t bufferPosition = bufferInfo->mRangeEnd;
-  mExitProfiles.AppendElement(ExitProfile{aProfile, bufferPosition});
-
-  // This is a good time to clear out exit profiles whose time ranges have no
-  // overlap with this process's profile buffer contents any more.
-  ClearExpiredExitProfiles();
+  profiler_received_exit_profile(aProfile);
 }
 
 RefPtr<nsProfiler::GatheringPromise> nsProfiler::StartGathering(
@@ -613,12 +724,11 @@ RefPtr<nsProfiler::GatheringPromise> nsProfiler::StartGathering(
 
   mWriter->StartArrayProperty("processes");
 
-  ClearExpiredExitProfiles();
-
   // If we have any process exit profiles, add them immediately.
-  for (auto& exitProfile : mExitProfiles) {
-    if (!exitProfile.mJSON.IsEmpty()) {
-      mWriter->Splice(exitProfile.mJSON.get());
+  Vector<nsCString> exitProfiles = profiler_move_exit_profiles();
+  for (auto& exitProfile : exitProfiles) {
+    if (!exitProfile.IsEmpty()) {
+      mWriter->Splice(exitProfile.get());
     }
   }
 
@@ -633,15 +743,16 @@ RefPtr<nsProfiler::GatheringPromise> nsProfiler::StartGathering(
   mPendingProfiles = profiles.Length();
   RefPtr<nsProfiler> self = this;
   for (auto profile : profiles) {
-    profile->Then(GetMainThreadSerialEventTarget(), __func__,
-                  [self](const mozilla::ipc::Shmem& aResult) {
-                    const nsDependentCSubstring profileString(
-                        aResult.get<char>(), aResult.Size<char>() - 1);
-                    self->GatheredOOPProfile(profileString);
-                  },
-                  [self](ipc::ResponseRejectReason aReason) {
-                    self->GatheredOOPProfile(NS_LITERAL_CSTRING(""));
-                  });
+    profile->Then(
+        GetMainThreadSerialEventTarget(), __func__,
+        [self](mozilla::ipc::Shmem&& aResult) {
+          const nsDependentCSubstring profileString(aResult.get<char>(),
+                                                    aResult.Size<char>() - 1);
+          self->GatheredOOPProfile(profileString);
+        },
+        [self](ipc::ResponseRejectReason&& aReason) {
+          self->GatheredOOPProfile(NS_LITERAL_CSTRING(""));
+        });
   }
   if (!mPendingProfiles) {
     FinishGathering();
@@ -703,8 +814,10 @@ void nsProfiler::FinishGathering() {
   mWriter->End();
 
   UniquePtr<char[]> buf = mWriter->WriteFunc()->CopyData();
-  nsCString result(buf.get());
-  mPromiseHolder->Resolve(result, __func__);
+  size_t len = strlen(buf.get());
+  nsCString result;
+  result.Adopt(buf.release(), len);
+  mPromiseHolder->Resolve(std::move(result), __func__);
 
   ResetGathering();
 }
@@ -714,15 +827,4 @@ void nsProfiler::ResetGathering() {
   mPendingProfiles = 0;
   mGathering = false;
   mWriter.reset();
-}
-
-void nsProfiler::ClearExpiredExitProfiles() {
-  Maybe<ProfilerBufferInfo> bufferInfo = profiler_get_buffer_info();
-  MOZ_RELEASE_ASSERT(bufferInfo,
-                     "the profiler should be running at the moment");
-  uint64_t bufferRangeStart = bufferInfo->mRangeStart;
-  // Discard any exit profiles that were gathered before bufferRangeStart.
-  mExitProfiles.RemoveElementsBy([bufferRangeStart](ExitProfile& aExitProfile) {
-    return aExitProfile.mBufferPositionAtGatherTime < bufferRangeStart;
-  });
 }

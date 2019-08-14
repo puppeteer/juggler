@@ -237,6 +237,21 @@ nsWindowMediator::GetMostRecentWindow(const char16_t* inType,
 }
 
 NS_IMETHODIMP
+nsWindowMediator::GetMostRecentBrowserWindow(mozIDOMWindowProxy** outWindow) {
+  nsresult rv = GetMostRecentWindow(u"navigator:browser", outWindow);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+#ifdef MOZ_WIDGET_ANDROID
+  if (!*outWindow) {
+    rv = GetMostRecentWindow(u"navigator:geckoview", outWindow);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+#endif
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsWindowMediator::GetMostRecentNonPBWindow(const char16_t* aType,
                                            mozIDOMWindowProxy** aWindow) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -306,8 +321,7 @@ nsWindowMediator::GetOuterWindowWithId(uint64_t aWindowID,
                                        mozIDOMWindowProxy** aWindow) {
   RefPtr<nsGlobalWindowOuter> window =
       nsGlobalWindowOuter::GetOuterWindowWithId(aWindowID);
-  nsCOMPtr<nsPIDOMWindowOuter> outer = window ? window->AsOuter() : nullptr;
-  outer.forget(aWindow);
+  window.forget(aWindow);
   return NS_OK;
 }
 
@@ -320,14 +334,13 @@ nsWindowMediator::GetCurrentInnerWindowWithId(uint64_t aWindowID,
   // not found
   if (!window) return NS_OK;
 
-  nsCOMPtr<nsPIDOMWindowInner> inner = window->AsInner();
-  nsCOMPtr<nsPIDOMWindowOuter> outer = inner->GetOuterWindow();
+  nsCOMPtr<nsPIDOMWindowOuter> outer = window->GetOuterWindow();
   NS_ENSURE_TRUE(outer, NS_ERROR_UNEXPECTED);
 
   // outer is already using another inner, so it's same as not found
-  if (outer->GetCurrentInnerWindow() != inner) return NS_OK;
+  if (outer->GetCurrentInnerWindow() != window) return NS_OK;
 
-  inner.forget(aWindow);
+  window.forget(aWindow);
   return NS_OK;
 }
 

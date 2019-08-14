@@ -51,8 +51,8 @@ impl GeckoRestyleDamage {
         let mut reset_only = false;
         let hint = unsafe {
             bindings::Gecko_CalcStyleDifference(
-                old_style,
-                new_style,
+                old_style.as_gecko_computed_style(),
+                new_style.as_gecko_computed_style(),
                 &mut any_style_changed,
                 &mut reset_only,
             )
@@ -83,7 +83,7 @@ impl GeckoRestyleDamage {
     /// Gets restyle damage to reconstruct the entire frame, subsuming all
     /// other damage.
     pub fn reconstruct() -> Self {
-        GeckoRestyleDamage(structs::nsChangeHint_nsChangeHint_ReconstructFrame)
+        GeckoRestyleDamage(structs::nsChangeHint::nsChangeHint_ReconstructFrame)
     }
 }
 

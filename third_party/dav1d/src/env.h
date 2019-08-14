@@ -25,8 +25,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DAV1D_SRC_ENV_H__
-#define __DAV1D_SRC_ENV_H__
+#ifndef DAV1D_SRC_ENV_H
+#define DAV1D_SRC_ENV_H
 
 #include <assert.h>
 #include <stddef.h>
@@ -602,32 +602,19 @@ static inline int get_coef_skip_ctx(const TxfmInfo *const t_dim,
         }
 #undef MERGE_CTX
 
-        const int max = imin(la | ll, 4);
-        const int min = imin(imin(la, ll), 4);
+        const int max = imin((int) (la | ll), 4);
+        const int min = imin(imin((int) la, (int) ll), 4);
 
         return skip_contexts[min][max];
     }
 }
 
-static inline int get_coef_nz_ctx(uint8_t *const levels, const int scan_idx,
-                                  const int rc, const int is_eob,
+static inline int get_coef_nz_ctx(uint8_t *const levels,
                                   const enum RectTxfmSize tx,
-                                  const enum TxClass tx_class)
+                                  const enum TxClass tx_class,
+                                  const int x, const int y,
+                                  const ptrdiff_t stride)
 {
-    const TxfmInfo *const t_dim = &dav1d_txfm_dimensions[tx];
-
-    if (is_eob) {
-        if (scan_idx == 0)         return 0;
-        const int eighth_sz = imin(t_dim->w, 8) * imin(t_dim->h, 8) * 2;
-        if (scan_idx <= eighth_sz) return 1;
-        const int quart_sz = eighth_sz * 2;
-        if (scan_idx <= quart_sz)  return 2;
-        return 3;
-    }
-
-    const int x = rc >> (2 + imin(t_dim->lh, 3));
-    const int y = rc & (4 * imin(t_dim->h, 8) - 1);
-    const ptrdiff_t stride = 4 * (imin(t_dim->h, 8) + 1);
     static const uint8_t offsets[3][5][2 /* x, y */] = {
         [TX_CLASS_2D] = {
             { 0, 1 }, { 1, 0 }, { 2, 0 }, { 0, 2 }, { 1, 1 }
@@ -643,8 +630,7 @@ static inline int get_coef_nz_ctx(uint8_t *const levels, const int scan_idx,
         mag += imin(levels[(x + off[i][0]) * stride + (y + off[i][1])], 3);
     const int ctx = imin((mag + 1) >> 1, 4);
     if (tx_class == TX_CLASS_2D) {
-        return !rc ? 0 :
-            dav1d_nz_map_ctx_offset[tx][imin(y, 4)][imin(x, 4)] + ctx;
+        return dav1d_nz_map_ctx_offset[tx][imin(y, 4)][imin(x, 4)] + ctx;
     } else {
         return 26 + imin((tx_class == TX_CLASS_V) ? y : x, 2) * 5 + ctx;
     }
@@ -686,13 +672,10 @@ static inline int get_dc_sign_ctx(const TxfmInfo *const t_dim,
 }
 
 static inline int get_br_ctx(const uint8_t *const levels,
-                             const int rc, const enum RectTxfmSize tx,
-                             const enum TxClass tx_class)
+                             const int ac, const enum TxClass tx_class,
+                             const int x, const int y,
+                             const ptrdiff_t stride)
 {
-    const TxfmInfo *const t_dim = &dav1d_txfm_dimensions[tx];
-    const int x = rc >> (imin(t_dim->lh, 3) + 2);
-    const int y = rc & (4 * imin(t_dim->h, 8) - 1);
-    const int stride = 4 * (imin(t_dim->h, 8) + 1);
     int mag = 0;
     static const uint8_t offsets_from_txclass[3][3][2] = {
         [TX_CLASS_2D] = { { 0, 1 }, { 1, 0 }, { 1, 1 } },
@@ -704,7 +687,7 @@ static inline int get_br_ctx(const uint8_t *const levels,
         mag += levels[(x + offsets[i][1]) * stride + y + offsets[i][0]];
 
     mag = imin((mag + 1) >> 1, 6);
-    if (rc == 0) return mag;
+    if (!ac) return mag;
     switch (tx_class) {
     case TX_CLASS_2D:
         if (y < 2 && x < 2) return mag + 7;
@@ -754,4 +737,4 @@ static inline mv get_gmv_2d(const Dav1dWarpedMotionParams *const gmv,
     }
 }
 
-#endif /* __DAV1D_SRC_ENV_H__ */
+#endif /* DAV1D_SRC_ENV_H */

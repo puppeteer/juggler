@@ -4,13 +4,11 @@
 
 //! Data needed to style a Gecko document.
 
-use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use crate::context::QuirksMode;
 use crate::dom::TElement;
-use crate::gecko_bindings::bindings::{self, RawServoStyleSet};
-use crate::gecko_bindings::structs::StyleSheet as DomStyleSheet;
-use crate::gecko_bindings::structs::{nsIDocument, StyleSheetInfo};
-use crate::gecko_bindings::structs::{RawGeckoPresContextBorrowed, ServoStyleSetSizes};
+use crate::gecko_bindings::bindings;
+use crate::gecko_bindings::structs::{self, RawServoStyleSet, ServoStyleSetSizes};
+use crate::gecko_bindings::structs::{StyleSheet as DomStyleSheet, StyleSheetInfo};
 use crate::gecko_bindings::sugar::ownership::{HasArcFFI, HasBoxFFI, HasFFI, HasSimpleFFI};
 use crate::invalidation::media_queries::{MediaListKey, ToMediaListKey};
 use crate::media_queries::{Device, MediaList};
@@ -19,6 +17,7 @@ use crate::selector_parser::SnapshotMap;
 use crate::shared_lock::{Locked, SharedRwLockReadGuard, StylesheetGuards};
 use crate::stylesheets::{CssRule, Origin, StylesheetContents, StylesheetInDocument};
 use crate::stylist::Stylist;
+use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use malloc_size_of::MallocSizeOfOps;
 use servo_arc::Arc;
 use std::fmt;
@@ -143,16 +142,10 @@ pub struct PerDocumentStyleDataImpl {
 pub struct PerDocumentStyleData(AtomicRefCell<PerDocumentStyleDataImpl>);
 
 impl PerDocumentStyleData {
-    /// Create a dummy `PerDocumentStyleData`.
-    pub fn new(pres_context: RawGeckoPresContextBorrowed) -> Self {
-        let device = Device::new(pres_context);
-
-        // FIXME(emilio, tlin): How is this supposed to work with XBL? This is
-        // right now not always honored, see bug 1405543...
-        //
-        // Should we just force XBL Stylists to be NoQuirks?
-        let quirks_mode =
-            unsafe { (*device.pres_context().mDocument.raw::<nsIDocument>()).mCompatMode };
+    /// Create a `PerDocumentStyleData`.
+    pub fn new(document: *const structs::Document) -> Self {
+        let device = Device::new(document);
+        let quirks_mode = device.document().mCompatMode;
 
         PerDocumentStyleData(AtomicRefCell::new(PerDocumentStyleDataImpl {
             stylist: Stylist::new(device, quirks_mode.into()),
@@ -193,13 +186,7 @@ impl PerDocumentStyleDataImpl {
     /// Returns whether visited styles are enabled.
     #[inline]
     pub fn visited_styles_enabled(&self) -> bool {
-        let doc = self
-            .stylist
-            .device()
-            .pres_context()
-            .mDocument
-            .raw::<nsIDocument>();
-        unsafe { bindings::Gecko_VisitedStylesEnabled(doc) }
+        unsafe { bindings::Gecko_VisitedStylesEnabled(self.stylist.device().document()) }
     }
 
     /// Measure heap usage.

@@ -6,7 +6,7 @@
   <title>Dragging the scrollbar on a page with a fixed-positioned element just past the right edge of the content</title>
   <script type="application/javascript" src="apz_test_native_event_utils.js"></script>
   <script type="application/javascript" src="apz_test_utils.js"></script>
-  <script type="application/javascript" src="/tests/SimpleTest/paint_listener.js"></script>
+  <script src="/tests/SimpleTest/paint_listener.js"></script>
   <style>
     body {
       height: 2000px;
@@ -28,7 +28,7 @@
 function* test(testDriver) {
   var root = document.scrollingElement;
   var scrollPos = root.scrollTop;
-  document.addEventListener('scroll', () => {
+  document.addEventListener("scroll", () => {
     ok(root.scrollTop > scrollPos, "document scrolled after dragging scrollbar");
     setTimeout(testDriver, 0);
   }, {once: true});

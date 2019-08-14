@@ -10,20 +10,10 @@
 // nsGkAtom, so we only build when included into internal libs:
 #ifdef MOZILLA_INTERNAL_API
 
-#include "mozilla/Scoped.h"
-#include "nsString.h"
-#include "unicode/unum.h"  // for UNumberFormat
+#  include "nsString.h"
+#  include "unicode/unum.h"  // for UNumberFormat
 
 class nsIContent;
-
-struct ScopedUNumberFormatTraits {
-  typedef UNumberFormat* type;
-  static type empty() { return nullptr; }
-  static void release(type handle) {
-    if (handle) unum_close(handle);
-  }
-};
-typedef mozilla::Scoped<ScopedUNumberFormatTraits> AutoCloseUNumberFormat;
 
 class ICUUtils {
  public:
@@ -83,7 +73,7 @@ class ICUUtils {
    */
   static nsresult UErrorToNsResult(const UErrorCode aErrorCode);
 
-#if 0
+#  if 0
   // Currently disabled because using C++ API doesn't play nicely with enabling
   // system ICU.
 
@@ -94,7 +84,7 @@ class ICUUtils {
 
   static void ToMozString(UnicodeString& aICUString, nsAString& aMozString);
   static void ToICUString(nsAString& aMozString, UnicodeString& aICUString);
-#endif
+#  endif
 };
 
 #endif /* MOZILLA_INTERNAL_API */

@@ -25,6 +25,7 @@
  */
 
 #include "hb-ot-shape-complex-indic.hh"
+#include "hb-ot-shape-complex-vowel-constraints.hh"
 #include "hb-ot-layout.hh"
 
 
@@ -95,42 +96,41 @@ static const indic_config_t indic_configs[] =
  * Indic shaper.
  */
 
-struct feature_list_t {
-  hb_tag_t tag;
-  hb_ot_map_feature_flags_t flags;
-};
-
-static const feature_list_t
+static const hb_ot_map_feature_t
 indic_features[] =
 {
   /*
    * Basic features.
    * These features are applied in order, one at a time, after initial_reordering.
    */
-  {HB_TAG('n','u','k','t'), F_GLOBAL},
-  {HB_TAG('a','k','h','n'), F_GLOBAL},
-  {HB_TAG('r','p','h','f'), F_NONE},
-  {HB_TAG('r','k','r','f'), F_GLOBAL},
-  {HB_TAG('p','r','e','f'), F_NONE},
-  {HB_TAG('b','l','w','f'), F_NONE},
-  {HB_TAG('a','b','v','f'), F_NONE},
-  {HB_TAG('h','a','l','f'), F_NONE},
-  {HB_TAG('p','s','t','f'), F_NONE},
-  {HB_TAG('v','a','t','u'), F_GLOBAL},
-  {HB_TAG('c','j','c','t'), F_GLOBAL},
+  {HB_TAG('n','u','k','t'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('a','k','h','n'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('r','p','h','f'),        F_MANUAL_JOINERS},
+  {HB_TAG('r','k','r','f'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('p','r','e','f'),        F_MANUAL_JOINERS},
+  {HB_TAG('b','l','w','f'),        F_MANUAL_JOINERS},
+  {HB_TAG('a','b','v','f'),        F_MANUAL_JOINERS},
+  {HB_TAG('h','a','l','f'),        F_MANUAL_JOINERS},
+  {HB_TAG('p','s','t','f'),        F_MANUAL_JOINERS},
+  {HB_TAG('v','a','t','u'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('c','j','c','t'), F_GLOBAL_MANUAL_JOINERS},
   /*
    * Other features.
-   * These features are applied all at once, after final_reordering.
+   * These features are applied all at once, after final_reordering
+   * but before clearing syllables.
    * Default Bengali font in Windows for example has intermixed
    * lookups for init,pres,abvs,blws features.
    */
-  {HB_TAG('i','n','i','t'), F_NONE},
-  {HB_TAG('p','r','e','s'), F_GLOBAL},
-  {HB_TAG('a','b','v','s'), F_GLOBAL},
-  {HB_TAG('b','l','w','s'), F_GLOBAL},
-  {HB_TAG('p','s','t','s'), F_GLOBAL},
-  {HB_TAG('h','a','l','n'), F_GLOBAL},
-  /* Positioning features, though we don't care about the types. */
+  {HB_TAG('i','n','i','t'),        F_MANUAL_JOINERS},
+  {HB_TAG('p','r','e','s'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('a','b','v','s'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('b','l','w','s'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('p','s','t','s'), F_GLOBAL_MANUAL_JOINERS},
+  {HB_TAG('h','a','l','n'), F_GLOBAL_MANUAL_JOINERS},
+  /*
+   * Positioning features.
+   * We don't care about the types.
+   */
   {HB_TAG('d','i','s','t'), F_GLOBAL},
   {HB_TAG('a','b','v','m'), F_GLOBAL},
   {HB_TAG('b','l','w','m'), F_GLOBAL},
@@ -158,12 +158,13 @@ enum {
   _BLWS,
   _PSTS,
   _HALN,
+
   _DIST,
   _ABVM,
   _BLWM,
 
   INDIC_NUM_FEATURES,
-  INDIC_BASIC_FEATURES = INIT /* Don't forget to update this! */
+  INDIC_BASIC_FEATURES = INIT, /* Don't forget to update this! */
 };
 
 static void
@@ -191,25 +192,27 @@ collect_features_indic (hb_ot_shape_planner_t *plan)
   /* Do this before any lookups have been applied. */
   map->add_gsub_pause (setup_syllables);
 
-  map->add_global_bool_feature (HB_TAG('l','o','c','l'));
+  map->enable_feature (HB_TAG('l','o','c','l'));
   /* The Indic specs do not require ccmp, but we apply it here since if
    * there is a use of it, it's typically at the beginning. */
-  map->add_global_bool_feature (HB_TAG('c','c','m','p'));
+  map->enable_feature (HB_TAG('c','c','m','p'));
 
 
   unsigned int i = 0;
   map->add_gsub_pause (initial_reordering);
+
   for (; i < INDIC_BASIC_FEATURES; i++) {
-    map->add_feature (indic_features[i].tag, 1, indic_features[i].flags | F_MANUAL_ZWJ | F_MANUAL_ZWNJ);
+    map->add_feature (indic_features[i]);
     map->add_gsub_pause (nullptr);
   }
-  map->add_gsub_pause (final_reordering);
-  for (; i < INDIC_NUM_FEATURES; i++) {
-    map->add_feature (indic_features[i].tag, 1, indic_features[i].flags | F_MANUAL_ZWJ | F_MANUAL_ZWNJ);
-  }
 
-  map->add_global_bool_feature (HB_TAG('c','a','l','t'));
-  map->add_global_bool_feature (HB_TAG('c','l','i','g'));
+  map->add_gsub_pause (final_reordering);
+
+  for (; i < INDIC_NUM_FEATURES; i++)
+    map->add_feature (indic_features[i]);
+
+  map->enable_feature (HB_TAG('c','a','l','t'));
+  map->enable_feature (HB_TAG('c','l','i','g'));
 
   map->add_gsub_pause (clear_syllables);
 }
@@ -217,13 +220,13 @@ collect_features_indic (hb_ot_shape_planner_t *plan)
 static void
 override_features_indic (hb_ot_shape_planner_t *plan)
 {
-  plan->map.add_feature (HB_TAG('l','i','g','a'), 0, F_GLOBAL);
+  plan->map.disable_feature (HB_TAG('l','i','g','a'));
 }
 
 
 struct would_substitute_feature_t
 {
-  inline void init (const hb_ot_map_t *map, hb_tag_t feature_tag, bool zero_context_)
+  void init (const hb_ot_map_t *map, hb_tag_t feature_tag, bool zero_context_)
   {
     zero_context = zero_context_;
     map->get_stage_lookups (0/*GSUB*/,
@@ -231,12 +234,12 @@ struct would_substitute_feature_t
 			    &lookups, &count);
   }
 
-  inline bool would_substitute (const hb_codepoint_t *glyphs,
-				unsigned int          glyphs_count,
-				hb_face_t            *face) const
+  bool would_substitute (const hb_codepoint_t *glyphs,
+			 unsigned int          glyphs_count,
+			 hb_face_t            *face) const
   {
     for (unsigned int i = 0; i < count; i++)
-      if (hb_ot_layout_lookup_would_substitute_fast (face, lookups[i].index, glyphs, glyphs_count, zero_context))
+      if (hb_ot_layout_lookup_would_substitute (face, lookups[i].index, glyphs, glyphs_count, zero_context))
 	return true;
     return false;
   }
@@ -249,9 +252,7 @@ struct would_substitute_feature_t
 
 struct indic_shape_plan_t
 {
-  ASSERT_POD ();
-
-  inline bool load_virama_glyph (hb_font_t *font, hb_codepoint_t *pglyph) const
+  bool load_virama_glyph (hb_font_t *font, hb_codepoint_t *pglyph) const
   {
     hb_codepoint_t glyph = virama_glyph.get_relaxed ();
     if (unlikely (glyph == (hb_codepoint_t) -1))
@@ -273,6 +274,11 @@ struct indic_shape_plan_t
   const indic_config_t *config;
 
   bool is_old_spec;
+#ifndef HB_NO_UNISCRIBE_BUG_COMPATIBLE
+  bool uniscribe_bug_compatible;
+#else
+  static constexpr bool uniscribe_bug_compatible = false;
+#endif
   mutable hb_atomic_int_t virama_glyph;
 
   would_substitute_feature_t rphf;
@@ -298,6 +304,9 @@ data_create_indic (const hb_ot_shape_plan_t *plan)
     }
 
   indic_plan->is_old_spec = indic_plan->config->has_old_spec && ((plan->map.chosen_script[0] & 0x000000FFu) != '2');
+#ifndef HB_NO_UNISCRIBE_BUG_COMPATIBLE
+  indic_plan->uniscribe_bug_compatible = hb_options ().uniscribe_bug_compatible;
+#endif
   indic_plan->virama_glyph.set_relaxed (-1);
 
   /* Use zero-context would_substitute() matching for new-spec of the main
@@ -642,7 +651,7 @@ initial_reordering_consonant_syllable (const hb_ot_shape_plan_t *plan,
   /* Reorder characters */
 
   for (unsigned int i = start; i < base; i++)
-    info[i].indic_position() = MIN (POS_PRE_C, (indic_position_t) info[i].indic_position());
+    info[i].indic_position() = hb_min (POS_PRE_C, (indic_position_t) info[i].indic_position());
 
   if (base < end)
     info[base].indic_position() = POS_BASE_C;
@@ -783,8 +792,10 @@ initial_reordering_consonant_syllable (const hb_ot_shape_plan_t *plan,
      *
      * We could use buffer->sort() for this, if there was no special
      * reordering of pre-base stuff happening later...
+     * We don't want to merge_clusters all of that, which buffer->sort()
+     * would.
      */
-    if (indic_plan->is_old_spec || end - base > 127)
+    if (indic_plan->is_old_spec || end - start > 127)
       buffer->merge_clusters (base, end);
     else
     {
@@ -796,7 +807,7 @@ initial_reordering_consonant_syllable (const hb_ot_shape_plan_t *plan,
 	  unsigned int j = start + info[i].syllable();
 	  while (j != i)
 	  {
-	    max = MAX (max, j);
+	    max = hb_max (max, j);
 	    unsigned int next = start + info[j].syllable();
 	    info[j].syllable() = 255; /* So we don't process j later again. */
 	    j = next;
@@ -916,7 +927,8 @@ initial_reordering_standalone_cluster (const hb_ot_shape_plan_t *plan,
   /* We treat placeholder/dotted-circle as if they are consonants, so we
    * should just chain.  Only if not in compatibility mode that is... */
 
-  if (hb_options ().uniscribe_bug_compatible)
+  const indic_shape_plan_t *indic_plan = (const indic_shape_plan_t *) plan->data;
+  if (indic_plan->uniscribe_bug_compatible)
   {
     /* For dotted-circle, this is what Uniscribe does:
      * If dotted-circle is the last glyph, it just does nothing.
@@ -958,7 +970,11 @@ insert_dotted_circles (const hb_ot_shape_plan_t *plan HB_UNUSED,
 		       hb_font_t *font,
 		       hb_buffer_t *buffer)
 {
-  /* Note: This loop is extra overhead, but should not be measurable. */
+  if (unlikely (buffer->flags & HB_BUFFER_FLAG_DO_NOT_INSERT_DOTTED_CIRCLE))
+    return;
+
+  /* Note: This loop is extra overhead, but should not be measurable.
+   * TODO Use a buffer scratch flag to remove the loop. */
   bool has_broken_syllables = false;
   unsigned int count = buffer->len;
   hb_glyph_info_t *info = buffer->info;
@@ -997,7 +1013,6 @@ insert_dotted_circles (const hb_ot_shape_plan_t *plan HB_UNUSED,
       ginfo.cluster = buffer->cur().cluster;
       ginfo.mask = buffer->cur().mask;
       ginfo.syllable() = buffer->cur().syllable();
-      /* TODO Set glyph_props? */
 
       /* Insert dottedcircle after possible Repha. */
       while (buffer->idx < buffer->len && buffer->successful &&
@@ -1010,7 +1025,6 @@ insert_dotted_circles (const hb_ot_shape_plan_t *plan HB_UNUSED,
     else
       buffer->next_glyph ();
   }
-
   buffer->swap_buffers ();
 }
 
@@ -1192,9 +1206,14 @@ final_reordering_syllable (const hb_ot_shape_plan_t *plan,
 	      goto search;
 	    }
 	  }
-	  /* -> If ZWNJ follows this halant, position is moved after it. */
-	  if (info[new_pos + 1].indic_category() == OT_ZWNJ)
-	    new_pos++;
+	  /* -> If ZWNJ follows this halant, position is moved after it.
+	   *
+	   * IMPLEMENTATION NOTES:
+	   *
+	   * This is taken care of by the state-machine. A Halant,ZWNJ is a terminating
+	   * sequence for a consonant syllable; any pre-base matras occurring after it
+	   * will belong to the subsequent syllable.
+	   */
 	}
       }
       else
@@ -1217,14 +1236,14 @@ final_reordering_syllable (const hb_ot_shape_plan_t *plan,
 
 	  /* Note: this merge_clusters() is intentionally *after* the reordering.
 	   * Indic matra reordering is special and tricky... */
-	  buffer->merge_clusters (new_pos, MIN (end, base + 1));
+	  buffer->merge_clusters (new_pos, hb_min (end, base + 1));
 
 	  new_pos--;
 	}
     } else {
       for (unsigned int i = start; i < base; i++)
 	if (info[i].indic_position () == POS_PRE_M) {
-	  buffer->merge_clusters (i, MIN (end, base + 1));
+	  buffer->merge_clusters (i, hb_min (end, base + 1));
 	  break;
 	}
     }
@@ -1356,14 +1375,16 @@ final_reordering_syllable (const hb_ot_shape_plan_t *plan,
        * Uniscribe doesn't do this.
        * TEST: U+0930,U+094D,U+0915,U+094B,U+094D
        */
-      if (!hb_options ().uniscribe_bug_compatible &&
-	  unlikely (is_halant (info[new_reph_pos]))) {
+      if (!indic_plan->uniscribe_bug_compatible &&
+	  unlikely (is_halant (info[new_reph_pos])))
+      {
 	for (unsigned int i = base + 1; i < new_reph_pos; i++)
 	  if (info[i].indic_category() == OT_M) {
 	    /* Ok, got it. */
 	    new_reph_pos--;
 	  }
       }
+
       goto reph_move;
     }
 
@@ -1462,7 +1483,7 @@ final_reordering_syllable (const hb_ot_shape_plan_t *plan,
   /*
    * Finish off the clusters and go home!
    */
-  if (hb_options ().uniscribe_bug_compatible)
+  if (indic_plan->uniscribe_bug_compatible)
   {
     switch ((hb_tag_t) plan->props.script)
     {
@@ -1509,6 +1530,14 @@ clear_syllables (const hb_ot_shape_plan_t *plan HB_UNUSED,
     info[i].syllable() = 0;
 }
 
+
+static void
+preprocess_text_indic (const hb_ot_shape_plan_t *plan,
+		       hb_buffer_t              *buffer,
+		       hb_font_t                *font)
+{
+  _hb_preprocess_text_vowel_constraints (plan, buffer, font);
+}
 
 static bool
 decompose_indic (const hb_ot_shape_normalize_context_t *c,
@@ -1568,11 +1597,10 @@ decompose_indic (const hb_ot_shape_normalize_context_t *c,
      *   https://docs.microsoft.com/en-us/typography/script-development/sinhala#shaping
      */
 
+
     const indic_shape_plan_t *indic_plan = (const indic_shape_plan_t *) c->plan->data;
-
     hb_codepoint_t glyph;
-
-    if (hb_options ().uniscribe_bug_compatible ||
+    if (indic_plan->uniscribe_bug_compatible ||
 	(c->font->get_nominal_glyph (ab, &glyph) &&
 	 indic_plan->pstf.would_substitute (&glyph, 1, c->font->face)))
     {
@@ -1609,13 +1637,13 @@ const hb_ot_complex_shaper_t _hb_ot_complex_shaper_indic =
   override_features_indic,
   data_create_indic,
   data_destroy_indic,
-  nullptr, /* preprocess_text */
+  preprocess_text_indic,
   nullptr, /* postprocess_glyphs */
   HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS_NO_SHORT_CIRCUIT,
   decompose_indic,
   compose_indic,
   setup_masks_indic,
-  nullptr, /* disable_otl */
+  HB_TAG_NONE, /* gpos_tag */
   nullptr, /* reorder_marks */
   HB_OT_SHAPE_ZERO_WIDTH_MARKS_NONE,
   false, /* fallback_position */

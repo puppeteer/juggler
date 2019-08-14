@@ -7,20 +7,20 @@
 #define nsCopySupport_h__
 
 #include "nsError.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsStringFwd.h"
 #include "mozilla/EventForwards.h"
 
 class nsINode;
-class nsIDocument;
 class nsIImageLoadingContent;
 class nsIContent;
 class nsITransferable;
-class nsIPresShell;
 class nsILoadContext;
 
 namespace mozilla {
+class PresShell;
 namespace dom {
+class Document;
 class Selection;
 }  // namespace dom
 }  // namespace mozilla
@@ -29,28 +29,39 @@ class nsCopySupport {
   // class of static helper functions for copy support
  public:
   static nsresult ClearSelectionCache();
-  static nsresult HTMLCopy(mozilla::dom::Selection* aSel, nsIDocument* aDoc,
-                           int16_t aClipboardID, bool aWithRubyAnnotation);
+
+  /**
+   * @param aDoc Needs to be not nullptr.
+   */
+  static nsresult EncodeDocumentWithContextAndPutToClipboard(
+      mozilla::dom::Selection* aSel, mozilla::dom::Document* aDoc,
+      int16_t aClipboardID, bool aWithRubyAnnotation);
 
   // Get the selection, or entire document, in the format specified by the mime
   // type (text/html or text/plain). If aSel is non-null, use it, otherwise get
   // the entire doc.
   static nsresult GetContents(const nsACString& aMimeType, uint32_t aFlags,
-                              mozilla::dom::Selection* aSel, nsIDocument* aDoc,
-                              nsAString& outdata);
+                              mozilla::dom::Selection* aSel,
+                              mozilla::dom::Document* aDoc, nsAString& outdata);
 
   static nsresult ImageCopy(nsIImageLoadingContent* aImageElement,
                             nsILoadContext* aLoadContext, int32_t aCopyFlags);
 
-  // Get the selection as a transferable. Similar to HTMLCopy except does
-  // not deal with the clipboard.
+  // Get the selection as a transferable.
+  // @param aSelection Can be nullptr.
+  // @param aDocument Needs to be not nullptr.
+  // @param aTransferable Needs to be not nullptr.
   static nsresult GetTransferableForSelection(
-      mozilla::dom::Selection* aSelection, nsIDocument* aDocument,
+      mozilla::dom::Selection* aSelection, mozilla::dom::Document* aDocument,
       nsITransferable** aTransferable);
 
   // Same as GetTransferableForSelection, but doesn't skip invisible content.
+  // @param aNode Needs to be not nullptr.
+  // @param aDoc Needs to be not nullptr.
+  // @param aTransferable Needs to be not nullptr.
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
-  static nsresult GetTransferableForNode(nsINode* aNode, nsIDocument* aDoc,
+  static nsresult GetTransferableForNode(nsINode* aNode,
+                                         mozilla::dom::Document* aDoc,
                                          nsITransferable** aTransferable);
   /**
    * Retrieve the selection for the given document. If the current focus
@@ -58,14 +69,14 @@ class nsCopySupport {
    * and this focused content node returned. Otherwise, aSelection will be
    * set to the document's selection and null will be returned.
    */
-  static nsIContent* GetSelectionForCopy(nsIDocument* aDocument,
+  static nsIContent* GetSelectionForCopy(mozilla::dom::Document* aDocument,
                                          mozilla::dom::Selection** aSelection);
 
   /**
    * Returns true if a copy operation is currently permitted based on the
    * current focus and selection within the specified document.
    */
-  static bool CanCopy(nsIDocument* aDocument);
+  static bool CanCopy(mozilla::dom::Document* aDocument);
 
   /**
    * Fires a cut, copy or paste event, on the given presshell, depending
@@ -93,9 +104,10 @@ class nsCopySupport {
    *
    * If the event is cancelled or an error occurs, false will be returned.
    */
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   static bool FireClipboardEvent(mozilla::EventMessage aEventMessage,
                                  int32_t aClipboardType,
-                                 nsIPresShell* aPresShell,
+                                 mozilla::PresShell* aPresShell,
                                  mozilla::dom::Selection* aSelection,
                                  bool* aActionTaken = nullptr);
 };

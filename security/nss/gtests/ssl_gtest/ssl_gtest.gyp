@@ -21,6 +21,7 @@
         'ssl_ciphersuite_unittest.cc',
         'ssl_custext_unittest.cc',
         'ssl_damage_unittest.cc',
+        'ssl_debug_env_unittest.cc',
         'ssl_dhe_unittest.cc',
         'ssl_drop_unittest.cc',
         'ssl_ecdh_unittest.cc',
@@ -32,11 +33,12 @@
         'ssl_gather_unittest.cc',
         'ssl_gtest.cc',
         'ssl_hrr_unittest.cc',
-        'ssl_keylog_unittest.cc',
         'ssl_keyupdate_unittest.cc',
         'ssl_loopback_unittest.cc',
         'ssl_misc_unittest.cc',
+        'ssl_primitive_unittest.cc',
         'ssl_record_unittest.cc',
+        'ssl_recordsep_unittest.cc',
         'ssl_recordsize_unittest.cc',
         'ssl_resumption_unittest.cc',
         'ssl_renegotiation_unittest.cc',
@@ -52,7 +54,8 @@
         'tls_filter.cc',
         'tls_hkdf_unittest.cc',
         'tls_esni_unittest.cc',
-        'tls_protect.cc'
+        'tls_protect.cc',
+        'tls_subcerts_unittest.cc'
       ],
       'dependencies': [
         '<(DEPTH)/exports.gyp:nss_exports',
@@ -74,7 +77,7 @@
         '<(DEPTH)/lib/libpkix/libpkix.gyp:libpkix',
       ],
       'conditions': [
-        [ 'test_build==1', {
+        [ 'static_libs==1', {
           'dependencies': [
             '<(DEPTH)/lib/pk11wrap/pk11wrap.gyp:pk11wrap_static',
           ],
@@ -89,6 +92,14 @@
         [ 'disable_dbm==0', {
           'dependencies': [
             '<(DEPTH)/lib/dbm/src/src.gyp:dbm',
+          ],
+        }],
+        [ 'enable_sslkeylogfile==1 and sanitizer_flags==0', {
+          'sources': [
+            'ssl_keylog_unittest.cc',
+          ],
+          'defines': [
+            'NSS_ALLOW_SSLKEYLOGFILE',
           ],
         }],
       ],

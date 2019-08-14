@@ -7,6 +7,7 @@
 #ifndef frontend_SourceNotes_h
 #define frontend_SourceNotes_h
 
+#include <stddef.h>  // ptrdiff_t
 #include <stdint.h>
 
 #include "jstypes.h"
@@ -187,8 +188,8 @@ class SrcNote {
     M(SRC_COLSPAN,      "colspan",     SrcNote::ColSpan::Count) \
     M(SRC_NEWLINE,      "newline",     0)  /* Bytecode follows a source newline. */                \
     M(SRC_SETLINE,      "setline",     SrcNote::SetLine::Count) \
-    M(SRC_UNUSED22,     "unused22",    0)  /* Unused. */                                           \
-    M(SRC_UNUSED23,     "unused23",    0)  /* Unused. */                                           \
+    M(SRC_BREAKPOINT,   "breakpoint",  0)  /* Bytecode is a recommended breakpoint. */             \
+    M(SRC_STEP_SEP,     "step-sep",    0)  /* Bytecode is the first in a new steppable area. */    \
     M(SRC_XDELTA,       "xdelta",      0)  /* 24-31 are for extended delta notes. */
 // clang-format on
 

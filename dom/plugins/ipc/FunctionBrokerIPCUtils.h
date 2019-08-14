@@ -1,3 +1,9 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #ifndef dom_plugins_ipc_functionbrokeripcutils_h
 #define dom_plugins_ipc_functionbrokeripcutils_h 1
 
@@ -5,11 +11,11 @@
 
 #if defined(XP_WIN)
 
-#define SECURITY_WIN32
-#include <security.h>
-#include <wininet.h>
-#include <schannel.h>
-#include <commdlg.h>
+#  define SECURITY_WIN32
+#  include <security.h>
+#  include <wininet.h>
+#  include <schannel.h>
+#  include <commdlg.h>
 
 #endif  // defined(XP_WIN)
 
@@ -48,10 +54,10 @@ enum FunctionHookId {
   ID_FreeCredentialsHandle,
   ID_PrintDlgW,
   ID_CreateMutexW
-#if defined(MOZ_SANDBOX)
+#  if defined(MOZ_SANDBOX)
   ,
   ID_GetFileAttributesW
-#endif  // defined(MOZ_SANDBOX)
+#  endif  // defined(MOZ_SANDBOX)
   ,
   ID_FunctionHookCount
 #else   // defined(XP_WIN)

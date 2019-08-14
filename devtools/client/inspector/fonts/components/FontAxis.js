@@ -4,7 +4,10 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createFactory,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const FontPropertyValue = createFactory(require("./FontPropertyValue"));
@@ -15,8 +18,9 @@ class FontAxis extends PureComponent {
   static get propTypes() {
     return {
       axis: PropTypes.shape(Types.fontVariationAxis),
+      disabled: PropTypes.bool.isRequired,
       onChange: PropTypes.func.isRequired,
-      value: PropTypes.string.isRequired,
+      value: PropTypes.number.isRequired,
     };
   }
 
@@ -51,6 +55,7 @@ class FontAxis extends PureComponent {
 
     return FontPropertyValue({
       className: "font-control-axis",
+      disabled: this.props.disabled,
       label: axis.name,
       min: axis.minValue,
       minLabel: true,

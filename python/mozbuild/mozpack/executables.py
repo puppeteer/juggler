@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, unicode_literals
 
 import os
 import struct
@@ -23,6 +23,7 @@ ELF_SIGNATURE = 0x7f454c46  # Elf binary
 UNKNOWN = 0
 MACHO = 1
 ELF = 2
+
 
 def get_type(path):
     '''
@@ -108,8 +109,8 @@ def may_elfhack(path):
     # the right flag, but checking the file extension works too.
     from buildconfig import substs
     return ('USE_ELF_HACK' in substs and substs['USE_ELF_HACK'] and
-        path.endswith(substs['DLL_SUFFIX']) and
-        'COMPILE_ENVIRONMENT' in substs and substs['COMPILE_ENVIRONMENT'])
+            path.endswith(substs['DLL_SUFFIX']) and
+            'COMPILE_ENVIRONMENT' in substs and substs['COMPILE_ENVIRONMENT'])
 
 
 def elfhack(path):
@@ -131,7 +132,7 @@ def xz_compress(path):
     if open(path, 'rb').read(5)[1:] == '7zXZ':
         print('%s is already compressed' % path)
         return
-    
+
     from buildconfig import substs
     xz = substs.get('XZ')
     cmd = [xz, '-zkf', path]

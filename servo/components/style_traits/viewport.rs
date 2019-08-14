@@ -28,10 +28,7 @@ define_css_keyword_enum! {
 ///
 /// <https://drafts.csswg.org/css-device-adapt/#viewport-desc>
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(
-    feature = "servo",
-    derive(Deserialize, Serialize, MallocSizeOf)
-)]
+#[cfg_attr(feature = "servo", derive(Deserialize, Serialize, MallocSizeOf))]
 pub struct ViewportConstraints {
     /// Width and height:
     ///  * https://drafts.csswg.org/css-device-adapt/#width-desc
@@ -83,7 +80,7 @@ impl ToCss for ViewportConstraints {
 }
 
 /// <https://drafts.csswg.org/css-device-adapt/#descdef-viewport-zoom>
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, ToShmem)]
 #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum Zoom {
     /// A number value.

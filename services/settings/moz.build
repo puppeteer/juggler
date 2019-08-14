@@ -5,21 +5,28 @@
 with Files('**'):
     BUG_COMPONENT = ('Firefox', 'Remote Settings Client')
 
+TEST_DIRS += ['test']
+
 DIRS += [
     'dumps',
 ]
 
 EXTRA_COMPONENTS += [
-    'RemoteSettingsComponents.js',
     'servicesSettings.manifest',
 ]
 
 EXTRA_JS_MODULES['services-settings'] += [
+    'Attachments.jsm',
     'remote-settings.js',
     'RemoteSettingsClient.jsm',
+    'RemoteSettingsComponents.jsm',
     'RemoteSettingsWorker.js',
     'RemoteSettingsWorker.jsm',
     'Utils.jsm',
+]
+
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']

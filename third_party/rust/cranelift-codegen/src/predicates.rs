@@ -1,7 +1,7 @@
 //! Predicate functions for testing instruction fields.
 //!
 //! This module defines functions that are used by the instruction predicates defined by
-//! `lib/codegen/meta-python/cdsl/predicates.py` classes.
+//! `cranelift-codegen/meta-python/cdsl/predicates.py` classes.
 //!
 //! The predicates the operate on integer fields use `Into<i64>` as a shared trait bound. This
 //! bound is implemented by all the native integer types as well as `Imm64`.
@@ -9,7 +9,7 @@
 //! Some of these predicates may be unused in certain ISA configurations, so we suppress the
 //! dead code warning.
 
-use ir;
+use crate::ir;
 
 /// Check that a 64-bit floating point value is zero.
 #[allow(dead_code)]
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn cvt_imm64() {
-        use ir::immediates::Imm64;
+        use crate::ir::immediates::Imm64;
 
         let x1 = Imm64::new(-8);
         let x2 = Imm64::new(8);

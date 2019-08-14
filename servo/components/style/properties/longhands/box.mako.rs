@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
-<% from data import Keyword, Method, to_rust_ident, to_camel_case%>
+<% from data import ALL_AXES, Keyword, Method, to_rust_ident, to_camel_case%>
 
 <% data.new_style_struct("Box",
                          inherited=False,
@@ -29,6 +29,17 @@ ${helpers.single_keyword(
     gecko_constant_prefix="NS_STYLE_TOP_LAYER",
     gecko_ffi_name="mTopLayer",
     products="gecko",
+    animation_value_type="none",
+    enabled_in="ua",
+    spec="Internal (not web-exposed)",
+)}
+
+// An internal-only property for elements in a top layer
+// https://fullscreen.spec.whatwg.org/#top-layer
+${helpers.single_keyword(
+    "-servo-top-layer",
+    "none top",
+    products="servo",
     animation_value_type="none",
     enabled_in="ua",
     spec="Internal (not web-exposed)",
@@ -100,34 +111,37 @@ ${helpers.single_keyword("-servo-overflow-clip-box", "padding-box content-box",
     )}
 % endfor
 
-<%
-    overflow_custom_consts = { "-moz-hidden-unscrollable": "CLIP" }
-%>
-
 // FIXME(pcwalton, #2742): Implement scrolling for `scroll` and `auto`.
 //
 // We allow it to apply to placeholders for UA sheets, which set it !important.
-${helpers.single_keyword(
-    "overflow-x",
-    "visible hidden scroll auto",
+% for (axis, logical) in ALL_AXES:
+    <% full_name = "overflow-{}".format(axis) %>
+    ${helpers.predefined_type(
+        full_name,
+        "Overflow",
+        "computed::Overflow::Visible",
+        logical_group="overflow",
+        logical=logical,
+        animation_value_type="discrete",
+        flags="APPLIES_TO_PLACEHOLDER",
+        spec="https://drafts.csswg.org/css-overflow-3/#propdef-{}".format(full_name),
+        needs_context=False,
+        servo_restyle_damage = "reflow",
+        gecko_pref="layout.css.overflow-logical.enabled" if logical else None,
+    )}
+% endfor
+
+${helpers.predefined_type(
+    "overflow-anchor",
+    "OverflowAnchor",
+    "computed::OverflowAnchor::Auto",
+    initial_specified_value="specified::OverflowAnchor::Auto",
+    products="gecko",
+    needs_context=False,
+    gecko_pref="layout.css.scroll-anchoring.enabled",
+    spec="https://drafts.csswg.org/css-scroll-anchoring/#exclusion-api",
     animation_value_type="discrete",
-    extra_gecko_values="-moz-hidden-unscrollable",
-    custom_consts=overflow_custom_consts,
-    gecko_constant_prefix="NS_STYLE_OVERFLOW",
-    flags="APPLIES_TO_PLACEHOLDER",
-    spec="https://drafts.csswg.org/css-overflow/#propdef-overflow-x",
-    servo_restyle_damage = "reflow",
 )}
-
-// FIXME(pcwalton, #2742): Implement scrolling for `scroll` and `auto`.
-//
-// We allow it to apply to placeholders for UA sheets, which set it !important.
-<%helpers:longhand name="overflow-y" animation_value_type="discrete"
-                   flags="APPLIES_TO_PLACEHOLDER",
-                   spec="https://drafts.csswg.org/css-overflow/#propdef-overflow-y"
-                   servo_restyle_damage = "reflow">
-    pub use super::overflow_x::{SpecifiedValue, parse, get_initial_value, computed_value};
-</%helpers:longhand>
 
 <% transition_extra_prefixes = "moz:layout.css.prefixes.transitions webkit" %>
 
@@ -290,41 +304,6 @@ ${helpers.predefined_type(
     allowed_in_keyframe_block=False,
 )}
 
-% for axis in ["x", "y"]:
-    ${helpers.predefined_type(
-        "scroll-snap-points-" + axis,
-        "ScrollSnapPoint",
-        "computed::ScrollSnapPoint::none()",
-        animation_value_type="discrete",
-        gecko_pref="layout.css.scroll-snap.enabled",
-        products="gecko",
-        spec="Nonstandard (https://www.w3.org/TR/2015/WD-css-snappoints-1-20150326/#scroll-snap-points)",
-    )}
-% endfor
-
-${helpers.predefined_type(
-    "scroll-snap-destination",
-    "Position",
-    "computed::Position::zero()",
-    products="gecko",
-    gecko_pref="layout.css.scroll-snap.enabled",
-    boxed=True,
-    spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
-    animation_value_type="discrete",
-)}
-
-${helpers.predefined_type(
-    "scroll-snap-coordinate",
-    "Position",
-    "computed::Position::zero()",
-    vector=True,
-    products="gecko",
-    gecko_pref="layout.css.scroll-snap.enabled",
-    spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-destination)",
-    animation_value_type="discrete",
-    allow_empty="NotInitial",
-)}
-
 <% transform_extra_prefixes = "moz:layout.css.prefixes.transforms webkit" %>
 
 ${helpers.predefined_type(
@@ -333,7 +312,6 @@ ${helpers.predefined_type(
     "generics::transform::Transform::none()",
     extra_prefixes=transform_extra_prefixes,
     animation_value_type="ComputedValue",
-    gecko_ffi_name="mSpecifiedTransform",
     flags="CREATES_STACKING_CONTEXT FIXPOS_CB \
            GETCS_NEEDS_LAYOUT_FLUSH CAN_ANIMATE_ON_COMPOSITOR",
     spec="https://drafts.csswg.org/css-transforms/#propdef-transform",
@@ -346,7 +324,7 @@ ${helpers.predefined_type(
     "generics::transform::Rotate::None",
     animation_value_type="ComputedValue",
     boxed=True,
-    flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+    flags="CREATES_STACKING_CONTEXT FIXPOS_CB CAN_ANIMATE_ON_COMPOSITOR",
     gecko_pref="layout.css.individual-transform.enabled",
     spec="https://drafts.csswg.org/css-transforms-2/#individual-transforms",
     servo_restyle_damage = "reflow_out_of_flow",
@@ -358,7 +336,7 @@ ${helpers.predefined_type(
     "generics::transform::Scale::None",
     animation_value_type="ComputedValue",
     boxed=True,
-    flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+    flags="CREATES_STACKING_CONTEXT FIXPOS_CB CAN_ANIMATE_ON_COMPOSITOR",
     gecko_pref="layout.css.individual-transform.enabled",
     spec="https://drafts.csswg.org/css-transforms-2/#individual-transforms",
     servo_restyle_damage = "reflow_out_of_flow",
@@ -370,7 +348,7 @@ ${helpers.predefined_type(
     "generics::transform::Translate::None",
     animation_value_type="ComputedValue",
     boxed=True,
-    flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+    flags="CREATES_STACKING_CONTEXT FIXPOS_CB CAN_ANIMATE_ON_COMPOSITOR",
     gecko_pref="layout.css.individual-transform.enabled",
     spec="https://drafts.csswg.org/css-transforms-2/#individual-transforms",
     servo_restyle_damage="reflow_out_of_flow",
@@ -386,6 +364,31 @@ ${helpers.predefined_type(
     gecko_pref="layout.css.motion-path.enabled",
     flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
     spec="https://drafts.fxtf.org/motion-1/#offset-path-property",
+    servo_restyle_damage="reflow_out_of_flow"
+)}
+
+// Motion Path Module Level 1
+${helpers.predefined_type(
+    "offset-distance",
+    "LengthPercentage",
+    "computed::LengthPercentage::zero()",
+    products="gecko",
+    animation_value_type="ComputedValue",
+    gecko_pref="layout.css.motion-path.enabled",
+    spec="https://drafts.fxtf.org/motion-1/#offset-distance-property",
+    servo_restyle_damage="reflow_out_of_flow"
+)}
+
+// Motion Path Module Level 1
+${helpers.predefined_type(
+    "offset-rotate",
+    "OffsetRotate",
+    "computed::OffsetRotate::auto()",
+    products="gecko",
+    animation_value_type="ComputedValue",
+    gecko_pref="layout.css.motion-path.enabled",
+    spec="https://drafts.fxtf.org/motion-1/#offset-rotate-property",
+    servo_restyle_damage="reflow_out_of_flow"
 )}
 
 // CSSOM View Module
@@ -393,24 +396,29 @@ ${helpers.predefined_type(
 ${helpers.single_keyword(
     "scroll-behavior",
     "auto smooth",
-    gecko_pref="layout.css.scroll-behavior.property-enabled",
     products="gecko",
     spec="https://drafts.csswg.org/cssom-view/#propdef-scroll-behavior",
     animation_value_type="discrete",
 )}
 
-% for axis in ["x", "y"]:
-    ${helpers.predefined_type(
-        "scroll-snap-type-" + axis,
-        "ScrollSnapType",
-        "computed::ScrollSnapType::None",
-        products="gecko",
-        needs_context=False,
-        gecko_pref="layout.css.scroll-snap.enabled",
-        spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/scroll-snap-type-x)",
-        animation_value_type="discrete",
-    )}
-% endfor
+${helpers.predefined_type(
+    "scroll-snap-align",
+    "ScrollSnapAlign",
+    "computed::ScrollSnapAlign::none()",
+    products="gecko",
+    gecko_pref="layout.css.scroll-snap-v1.enabled",
+    spec="https://drafts.csswg.org/css-scroll-snap-1/#scroll-snap-align",
+    animation_value_type="discrete",
+)}
+
+${helpers.predefined_type(
+    "scroll-snap-type",
+    "ScrollSnapType",
+    "computed::ScrollSnapType::none()",
+    products="gecko",
+    spec="https://drafts.csswg.org/css-scroll-snap-1/#scroll-snap-type",
+    animation_value_type="discrete",
+)}
 
 % for axis in ["x", "y"]:
     ${helpers.predefined_type(
@@ -431,7 +439,6 @@ ${helpers.single_keyword(
     "isolation",
     "auto isolate",
     products="gecko",
-    gecko_pref="layout.css.isolation.enabled",
     spec="https://drafts.fxtf.org/compositing/#isolation",
     flags="CREATES_STACKING_CONTEXT",
     animation_value_type="discrete",
@@ -563,6 +570,7 @@ ${helpers.predefined_type(
     flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
     gecko_pref="layout.css.contain.enabled",
     spec="https://drafts.csswg.org/css-contain/#contain-property",
+    enabled_in="chrome",
 )}
 
 // Non-standard
@@ -584,6 +592,8 @@ ${helpers.predefined_type(
     products="gecko",
     animation_value_type="none",
     gecko_ffi_name="mBinding",
+    gecko_pref="layout.css.moz-binding.content.enabled",
+    enabled_in="chrome",
     spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-binding)",
 )}
 
@@ -616,10 +626,10 @@ ${helpers.predefined_type(
 
 ${helpers.predefined_type(
     "shape-margin",
-    "NonNegativeLengthOrPercentage",
-    "computed::NonNegativeLengthOrPercentage::zero()",
+    "NonNegativeLengthPercentage",
+    "computed::NonNegativeLengthPercentage::zero()",
     products="gecko",
-    animation_value_type="NonNegativeLengthOrPercentage",
+    animation_value_type="NonNegativeLengthPercentage",
     flags="APPLIES_TO_FIRST_LETTER",
     spec="https://drafts.csswg.org/css-shapes/#shape-margin-property",
 )}
@@ -629,8 +639,7 @@ ${helpers.predefined_type(
     "basic_shape::FloatAreaShape",
     "generics::basic_shape::ShapeSource::None",
     products="gecko",
-    boxed=True,
-    animation_value_type="ComputedValue",
+    animation_value_type="basic_shape::FloatAreaShape",
     flags="APPLIES_TO_FIRST_LETTER",
     spec="https://drafts.csswg.org/css-shapes/#shape-outside-property",
 )}
@@ -643,4 +652,17 @@ ${helpers.predefined_type(
     gecko_pref="layout.css.touch_action.enabled",
     animation_value_type="discrete",
     spec="https://compat.spec.whatwg.org/#touch-action",
+)}
+
+// Note that we only implement -webkit-line-clamp as a single, longhand
+// property for now, but the spec defines line-clamp as a shorthand for separate
+// max-lines, block-ellipsis, and continue properties.
+${helpers.predefined_type(
+    "-webkit-line-clamp",
+    "PositiveIntegerOrNone",
+    "Either::Second(None_)",
+    gecko_pref="layout.css.webkit-line-clamp.enabled",
+    animation_value_type="Integer",
+    products="gecko",
+    spec="https://drafts.csswg.org/css-overflow-3/#line-clamp",
 )}

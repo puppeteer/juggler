@@ -8,6 +8,7 @@
 #define mozilla_dom_SVGSwitchElement_h
 
 #include "mozilla/dom/SVGGraphicsElement.h"
+#include "nsCOMPtr.h"
 
 class nsSVGSwitchFrame;
 
@@ -28,7 +29,7 @@ class SVGSwitchElement final : public SVGSwitchElementBase {
       already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo));
   explicit SVGSwitchElement(
       already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
-  ~SVGSwitchElement();
+  ~SVGSwitchElement() = default;
   virtual JSObject* WrapNode(JSContext* aCx,
                              JS::Handle<JSObject*> aGivenProto) override;
 

@@ -24,18 +24,18 @@ CrashReporterClient::~CrashReporterClient() {
 }
 
 void CrashReporterClient::AnnotateCrashReport(CrashReporter::Annotation aKey,
-                                              const nsCString& aData) {
+                                              const nsACString& aData) {
   StaticMutexAutoLock lock(sLock);
   mMetadata->AnnotateCrashReport(aKey, aData);
 }
 
-void CrashReporterClient::AppendAppNotes(const nsCString& aData) {
+void CrashReporterClient::AppendAppNotes(const nsACString& aData) {
   StaticMutexAutoLock lock(sLock);
   mMetadata->AppendAppNotes(aData);
 }
 
-/* static */ void CrashReporterClient::InitSingletonWithShmem(
-    const Shmem& aShmem) {
+/* static */
+void CrashReporterClient::InitSingletonWithShmem(const Shmem& aShmem) {
   {
     StaticMutexAutoLock lock(sLock);
 
@@ -46,12 +46,14 @@ void CrashReporterClient::AppendAppNotes(const nsCString& aData) {
   CrashReporter::NotifyCrashReporterClientCreated();
 }
 
-/* static */ void CrashReporterClient::DestroySingleton() {
+/* static */
+void CrashReporterClient::DestroySingleton() {
   StaticMutexAutoLock lock(sLock);
   sClientSingleton = nullptr;
 }
 
-/* static */ RefPtr<CrashReporterClient> CrashReporterClient::GetSingleton() {
+/* static */
+RefPtr<CrashReporterClient> CrashReporterClient::GetSingleton() {
   StaticMutexAutoLock lock(sLock);
   return sClientSingleton;
 }

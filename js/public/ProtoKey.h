@@ -37,25 +37,25 @@
 #define ERROR_CLASP(TYPE) (&ErrorObject::classes[TYPE])
 
 #ifdef EXPOSE_INTL_API
-#define IF_INTL(REAL, IMAGINARY) REAL
+#  define IF_INTL(REAL, IMAGINARY) REAL
 #else
-#define IF_INTL(REAL, IMAGINARY) IMAGINARY
+#  define IF_INTL(REAL, IMAGINARY) IMAGINARY
 #endif
 
-#ifdef ENABLE_BINARYDATA
-#define IF_BDATA(REAL, IMAGINARY) REAL
+#ifdef ENABLE_TYPED_OBJECTS
+#  define IF_TYPEDOBJ(REAL, IMAGINARY) REAL
 #else
-#define IF_BDATA(REAL, IMAGINARY) IMAGINARY
+#  define IF_TYPEDOBJ(REAL, IMAGINARY) IMAGINARY
 #endif
 
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
-#define IF_SAB(REAL, IMAGINARY) REAL
+#  define IF_SAB(REAL, IMAGINARY) REAL
 #else
-#define IF_SAB(REAL, IMAGINARY) IMAGINARY
+#  define IF_SAB(REAL, IMAGINARY) IMAGINARY
 #endif
 
 #define JS_FOR_PROTOTYPES_(REAL, IMAGINARY, REAL_IF_INTL, REAL_IF_BDATA,     \
-                           REAL_IF_SAB, REAL_IF_BIGINT)                      \
+                           REAL_IF_SAB)                                      \
   IMAGINARY(Null, InitNullClass, dummy)                                      \
   REAL(Object, InitViaClassSpec, OCLASP(Plain))                              \
   REAL(Function, InitViaClassSpec, &JSFunction::class_)                      \
@@ -90,7 +90,9 @@
   REAL(Float32Array, InitViaClassSpec, TYPED_ARRAY_CLASP(Float32))           \
   REAL(Float64Array, InitViaClassSpec, TYPED_ARRAY_CLASP(Float64))           \
   REAL(Uint8ClampedArray, InitViaClassSpec, TYPED_ARRAY_CLASP(Uint8Clamped)) \
-  REAL_IF_BIGINT(BigInt, InitViaClassSpec, OCLASP(BigInt))                   \
+  REAL(BigInt64Array, InitViaClassSpec, TYPED_ARRAY_CLASP(BigInt64))         \
+  REAL(BigUint64Array, InitViaClassSpec, TYPED_ARRAY_CLASP(BigUint64))       \
+  REAL(BigInt, InitViaClassSpec, OCLASP(BigInt))                             \
   REAL(Proxy, InitProxyClass, &js::ProxyClass)                               \
   REAL(WeakMap, InitViaClassSpec, OCLASP(WeakMap))                           \
   REAL(Map, InitViaClassSpec, OCLASP(Map))                                   \
@@ -129,10 +131,9 @@
   IMAGINARY(WasmTable, dummy, dummy)                                         \
   IMAGINARY(WasmGlobal, dummy, dummy)
 
-#define JS_FOR_PROTOTYPES(REAL, IMAGINARY)                               \
-  JS_FOR_PROTOTYPES_(REAL, IMAGINARY, IF_INTL(REAL, IMAGINARY),          \
-                     IF_BDATA(REAL, IMAGINARY), IF_SAB(REAL, IMAGINARY), \
-                     IF_BIGINT(REAL, IMAGINARY))
+#define JS_FOR_PROTOTYPES(REAL, IMAGINARY)                      \
+  JS_FOR_PROTOTYPES_(REAL, IMAGINARY, IF_INTL(REAL, IMAGINARY), \
+                     IF_TYPEDOBJ(REAL, IMAGINARY), IF_SAB(REAL, IMAGINARY))
 
 #define JS_FOR_EACH_PROTOTYPE(MACRO) JS_FOR_PROTOTYPES(MACRO, MACRO)
 

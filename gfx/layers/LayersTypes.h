@@ -13,6 +13,7 @@
 #include "mozilla/DefineEnum.h"  // for MOZ_DEFINE_ENUM
 #include "mozilla/gfx/Point.h"   // for IntPoint
 #include "mozilla/Maybe.h"
+#include "mozilla/TimeStamp.h"  // for TimeStamp
 #include "mozilla/TypedEnumBits.h"
 #include "nsRegion.h"
 #include "nsStyleConsts.h"
@@ -21,7 +22,7 @@
 #include "mozilla/Logging.h"  // for PR_LOG
 
 #ifndef MOZ_LAYERS_HAVE_LOG
-#define MOZ_LAYERS_HAVE_LOG
+#  define MOZ_LAYERS_HAVE_LOG
 #endif
 #define MOZ_LAYERS_LOG(_args) \
   MOZ_LOG(LayerManager::GetLog(), LogLevel::Debug, _args)
@@ -40,10 +41,6 @@ namespace IPC {
 template <typename T>
 struct ParamTraits;
 }  // namespace IPC
-
-namespace android {
-class MOZ_EXPORT GraphicBuffer;
-}  // namespace android
 
 namespace mozilla {
 namespace layers {
@@ -156,6 +153,16 @@ enum class LayersBackend : int8_t {
   LAYERS_CLIENT,
   LAYERS_WR,
   LAYERS_LAST
+};
+
+enum class TextureType : int8_t {
+  Unknown = 0,
+  D3D11,
+  DIB,
+  X11,
+  MacIOSurface,
+  AndroidNativeWindow,
+  Last
 };
 
 enum class BufferMode : int8_t { BUFFER_NONE, BUFFERED };
@@ -364,7 +371,7 @@ typedef Maybe<LayerRect> MaybeLayerRect;
 // This is used to communicate Layers across IPC channels. The Handle is valid
 // for layers in the same PLayerTransaction. Handles are created by
 // ClientLayerManager, and are cached in LayerTransactionParent on first use.
-class LayerHandle {
+class LayerHandle final {
   friend struct IPC::ParamTraits<mozilla::layers::LayerHandle>;
 
  public:
@@ -386,7 +393,7 @@ class LayerHandle {
 // valid for layers in the same PLayerTransaction or PImageBridge. Handles are
 // created by ClientLayerManager or ImageBridgeChild, and are cached in the
 // parent side on first use.
-class CompositableHandle {
+class CompositableHandle final {
   friend struct IPC::ParamTraits<mozilla::layers::CompositableHandle>;
 
  public:
@@ -410,7 +417,44 @@ MOZ_DEFINE_ENUM_CLASS_WITH_BASE(ScrollDirection, uint32_t, (
   eVertical,
   eHorizontal
 ));
+
+MOZ_DEFINE_ENUM_CLASS_WITH_BASE(CompositionPayloadType, uint8_t, (
+  /**
+   * A |CompositionPayload| with this type indicates a key press happened
+   * before composition and will be used to determine latency between key press
+   * and presentation in |mozilla::Telemetry::KEYPRESS_PRESENT_LATENCY|
+   */
+  eKeyPress,
+
+  /**
+   * A |CompositionPayload| with this type indicates that an APZ scroll event
+   * occurred that will be included in the composition.
+   */
+  eAPZScroll,
+
+  /**
+   * A |CompositionPayload| with this type indicates that an APZ pinch-to-zoom
+   * event occurred that will be included in the composition.
+   */
+  eAPZPinchZoom,
+
+  /**
+   * A |CompositionPayload| with this type indicates that content was painted
+   * that will be included in the composition.
+   */
+  eContentPaint
+));
 // clang-format on
+
+struct CompositionPayload {
+  bool operator==(const CompositionPayload& aOther) const {
+    return mType == aOther.mType && mTimeStamp == aOther.mTimeStamp;
+  }
+  /* The type of payload that is in this composition */
+  CompositionPayloadType mType;
+  /* When this payload was generated */
+  TimeStamp mTimeStamp;
+};
 
 }  // namespace layers
 }  // namespace mozilla

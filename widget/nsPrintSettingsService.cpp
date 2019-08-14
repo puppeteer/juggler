@@ -133,10 +133,7 @@ nsPrintSettingsService::SerializeToPrintData(nsIPrintSettings* aSettings,
   aSettings->GetFooterStrCenter(data->footerStrCenter());
   aSettings->GetFooterStrRight(data->footerStrRight());
 
-  aSettings->GetHowToEnableFrameUI(&data->howToEnableFrameUI());
   aSettings->GetIsCancelled(&data->isCancelled());
-  aSettings->GetPrintFrameTypeUsage(&data->printFrameTypeUsage());
-  aSettings->GetPrintFrameType(&data->printFrameType());
   aSettings->GetPrintSilent(&data->printSilent());
   aSettings->GetShrinkToFit(&data->shrinkToFit());
   aSettings->GetShowPrintProgress(&data->showPrintProgress());
@@ -176,8 +173,6 @@ nsPrintSettingsService::SerializeToPrintData(nsIPrintSettings* aSettings,
   // data->deviceName() default-initializes
   data->printableWidthInInches() = 0;
   data->printableHeightInInches() = 0;
-  data->isFramesetDocument() = false;
-  data->isFramesetFrameSelected() = false;
   data->isIFrameSelected() = false;
   data->isRangeSelection() = false;
   // data->GTKPrintSettings() default-initializes
@@ -241,10 +236,7 @@ nsPrintSettingsService::DeserializeToPrintSettings(const PrintData& data,
   settings->SetFooterStrCenter(data.footerStrCenter());
   settings->SetFooterStrRight(data.footerStrRight());
 
-  settings->SetHowToEnableFrameUI(data.howToEnableFrameUI());
   settings->SetIsCancelled(data.isCancelled());
-  settings->SetPrintFrameTypeUsage(data.printFrameTypeUsage());
-  settings->SetPrintFrameType(data.printFrameType());
   settings->SetPrintSilent(data.printSilent());
   settings->SetShrinkToFit(data.shrinkToFit());
   settings->SetShowPrintProgress(data.showPrintProgress());
@@ -319,20 +311,20 @@ static void WriteDebugStr(const char* aArg1, const char* aArg2,
 }
 const char* kWriteStr = "Write Pref:";
 const char* kReadStr = "Read Pref:";
-#define DUMP_STR(_a1, _a2, _a3) \
-  WriteDebugStr((_a1), GetPrefName((_a2), aPrefName), (_a3));
-#define DUMP_BOOL(_a1, _a2, _a3)                                \
-  printf("%s %s = %s \n", (_a1), GetPrefName((_a2), aPrefName), \
-         (_a3) ? "T" : "F");
-#define DUMP_INT(_a1, _a2, _a3) \
-  printf("%s %s = %d \n", (_a1), GetPrefName((_a2), aPrefName), (_a3));
-#define DUMP_DBL(_a1, _a2, _a3) \
-  printf("%s %s = %10.5f \n", (_a1), GetPrefName((_a2), aPrefName), (_a3));
+#  define DUMP_STR(_a1, _a2, _a3) \
+    WriteDebugStr((_a1), GetPrefName((_a2), aPrefName), (_a3));
+#  define DUMP_BOOL(_a1, _a2, _a3)                                \
+    printf("%s %s = %s \n", (_a1), GetPrefName((_a2), aPrefName), \
+           (_a3) ? "T" : "F");
+#  define DUMP_INT(_a1, _a2, _a3) \
+    printf("%s %s = %d \n", (_a1), GetPrefName((_a2), aPrefName), (_a3));
+#  define DUMP_DBL(_a1, _a2, _a3) \
+    printf("%s %s = %10.5f \n", (_a1), GetPrefName((_a2), aPrefName), (_a3));
 #else
-#define DUMP_STR(_a1, _a2, _a3)
-#define DUMP_BOOL(_a1, _a2, _a3)
-#define DUMP_INT(_a1, _a2, _a3)
-#define DUMP_DBL(_a1, _a2, _a3)
+#  define DUMP_STR(_a1, _a2, _a3)
+#  define DUMP_BOOL(_a1, _a2, _a3)
+#  define DUMP_INT(_a1, _a2, _a3)
+#  define DUMP_DBL(_a1, _a2, _a3)
 #endif /* DEBUG_rods_X */
 //----------------------------------------------------------------------
 

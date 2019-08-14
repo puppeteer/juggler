@@ -6,6 +6,7 @@
 
 xpcom_glue_src_lcppsrcs = [
     'FileUtils.cpp',
+    'MemUtils.cpp',
     'XREAppData.cpp',
 ]
 
@@ -19,6 +20,3 @@ xpcom_gluens_src_lcppsrcs = [
 xpcom_gluens_src_cppsrcs = [
     '/xpcom/glue/%s' % s for s in xpcom_gluens_src_lcppsrcs
 ]
-
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497

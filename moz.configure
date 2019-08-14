@@ -28,11 +28,21 @@ imply_option('--enable-artifact-build-symbols',
              depends(artifact_builds)(lambda v: False if v is None else None),
              reason='--disable-artifact-builds')
 
-option('--enable-artifact-build-symbols',
+option('--enable-artifact-build-symbols', nargs='?', choices=('full',),
        help='Download symbols when artifact builds are enabled.')
 
+@depends('--enable-artifact-build-symbols', 'MOZ_AUTOMATION', target)
+def enable_artifact_build_symbols(value, automation, target):
+    if len(value):
+        return value[0]
+    if bool(value):
+        if target.os == 'Android' and not automation:
+            return 'full'
+        return True
+    return None
+
 set_config('MOZ_ARTIFACT_BUILD_SYMBOLS',
-           depends_if('--enable-artifact-build-symbols')(lambda _: True))
+           enable_artifact_build_symbols)
 
 @depends('--enable-artifact-builds')
 def imply_disable_compile_environment(value):
@@ -119,13 +129,18 @@ def debug_rust():
 set_config('MOZ_DEBUG_RUST', debug_rust)
 set_define('MOZ_DEBUG_RUST', debug_rust)
 
+js_option(env='MOZ_PGO', help='Build with profile guided optimizations')
+
+set_config('MOZ_PGO', depends('MOZ_PGO')(lambda x: bool(x)))
+
+include('build/moz.configure/toolchain.configure',
+        when='--enable-compile-environment')
+
 include('build/moz.configure/pkg.configure')
 # Make this assignment here rather than in pkg.configure to avoid
 # requiring this file in unit tests.
 add_old_configure_assignment('PKG_CONFIG', pkg_config)
 
-include('build/moz.configure/toolchain.configure',
-        when='--enable-compile-environment')
 include('build/moz.configure/memory.configure',
         when='--enable-compile-environment')
 include('build/moz.configure/headers.configure',
@@ -175,7 +190,7 @@ def library_name_info_template(host_or_target):
         if host_or_target.kernel == 'WINNT':
             # There aren't artifacts for mingw builds, so it's OK that the
             # results are inaccurate in that case.
-            if compiler and compiler.type not in ('msvc', 'clang-cl'):
+            if compiler and compiler.type != 'clang-cl':
                 return namespace(
                     dll=namespace(prefix='', suffix='.dll'),
                     lib=namespace(prefix='lib', suffix='a'),
@@ -233,9 +248,6 @@ set_config('IMPORT_LIB_SUFFIX', library_name_info.import_lib.suffix)
 set_define('MOZ_DLL_PREFIX', depends(library_name_info.dll.prefix)(lambda s: '"%s"' % s))
 set_define('MOZ_DLL_SUFFIX', depends(library_name_info.dll.suffix)(lambda s: '"%s"' % s))
 
-# Depends on host_library_name_info, so needs to go here.
-include('build/moz.configure/bindgen.configure',
-        when='--enable-compile-environment')
 include(include_project_configure)
 
 @depends('--help')
@@ -308,15 +320,16 @@ option('--disable-gtest-in-build',
        when='--enable-compile-environment')
 
 # Determine whether to build the gtest xul. This happens in automation
-# on Desktop platforms with the exception of Windows PGO, where linking
-# xul-gtest.dll takes too long.
+# on Android and Desktop platforms with the exception of:
+#  - Windows PGO, where linking xul-gtest.dll takes too long;
+#  - Android other than x86_64, where gtest is not required.
 @depends('MOZ_PGO', build_project, target, 'MOZ_AUTOMATION', '--disable-gtest-in-build',
          enable_tests, when='--enable-compile-environment')
 def build_gtest(pgo, build_project, target, automation, enabled, enable_tests):
     if not enable_tests or not enabled:
         return None
-    if (automation and build_project == 'browser' and
-        not (pgo and target.os == 'WINNT')):
+    if (automation and build_project in ('browser', 'mobile/android') and
+        not ((pgo and target.os == 'WINNT') or (target.os == 'Android' and target.cpu != 'x86_64'))):
         return True
 
 set_config('LINK_GTEST_DURING_COMPILE', build_gtest)
@@ -439,9 +452,13 @@ include(tup_include)
 
 option(env='WATCHMAN', nargs=1, help='Path to the watchman program')
 
-@depends('WATCHMAN')
+@depends(host, 'WATCHMAN')
 @checking('for watchman', callback=lambda w: w.path if w else 'not found')
-def watchman(prog):
+def watchman(host, prog):
+    # On Windows, `watchman` is only supported on 64-bit hosts.
+    if host.os == 'WINNT' and host.cpu != 'x86_64':
+        return
+
     if not prog:
         prog = find_program('watchman')
 
@@ -581,25 +598,63 @@ set_config('MAKENSISU_FLAGS', nsis_flags)
 
 check_prog('7Z', ('7z', '7za'), allow_missing=True, when=target_is_windows)
 
+
+@depends(host_c_compiler, c_compiler, bindgen_config_paths)
+def llvm_objdump(host_c_compiler, c_compiler, bindgen_config_paths):
+    clang = None
+    for compiler in (host_c_compiler, c_compiler):
+        if compiler and compiler.type == 'clang':
+            clang = compiler.compiler
+            break
+        elif compiler and compiler.type == 'clang-cl':
+            clang = os.path.join(os.path.dirname(compiler.compiler), 'clang')
+            break
+
+    if not clang and bindgen_config_paths:
+        clang = bindgen_config_paths.clang_path
+    llvm_objdump = 'llvm-objdump'
+    if clang:
+        out = check_cmd_output(clang, '--print-prog-name=llvm-objdump',
+                               onerror=lambda: None)
+        if out:
+            llvm_objdump = out.rstrip()
+    return (llvm_objdump,)
+
+
+llvm_objdump = check_prog('LLVM_OBJDUMP', llvm_objdump, what='llvm-objdump',
+                          when='--enable-compile-environment',
+                          paths=toolchain_search_path)
+
+add_old_configure_assignment('LLVM_OBJDUMP', llvm_objdump)
+
+
+# Please do not add configure checks from here on.
+
 # Fallthrough to autoconf-based configure
 include('build/moz.configure/old.configure')
+
+# JS Subconfigure.
+include('js/sub.configure', when=compile_environment & toolkit)
+
 
 @depends(check_build_environment, build_project)
 @imports('__sandbox__')
 @imports('glob')
+@imports(_from='os.path', _import='exists')
 def config_status_deps(build_env, build_project):
 
     topsrcdir = build_env.topsrcdir
     topobjdir = build_env.topobjdir
 
-    if not build_env.topobjdir.endswith('js/src'):
-        extra_deps = [
-            os.path.join(topsrcdir, build_project, 'confvars.sh'),
-            os.path.join(topobjdir, '.mozconfig.json'),
-        ]
+    if not topobjdir.endswith('js/src'):
+        extra_deps = [os.path.join(topobjdir, '.mozconfig.json')]
     else:
         # mozconfig changes may impact js configure.
         extra_deps = [os.path.join(topobjdir[:-7], '.mozconfig.json')]
+
+    confvars = os.path.join(topsrcdir, build_project, 'confvars.sh')
+    if exists(confvars):
+        extra_deps.append(confvars)
 
     return list(__sandbox__._all_paths) + extra_deps + [
         os.path.join(topsrcdir, 'CLOBBER'),

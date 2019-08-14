@@ -5,7 +5,7 @@
 
 #include "mozilla/MemoryReporting.h"
 #if defined(HAVE_POSIX_MEMALIGN)
-#include "gfxAlphaRecovery.h"
+#  include "gfxAlphaRecovery.h"
 #endif
 #include "gfxImageSurface.h"
 
@@ -151,8 +151,9 @@ gfxImageSurface::~gfxImageSurface() {
   if (mOwnsData) free(mData);
 }
 
-/*static*/ long gfxImageSurface::ComputeStride(const IntSize& aSize,
-                                               gfxImageFormat aFormat) {
+/*static*/
+long gfxImageSurface::ComputeStride(const IntSize& aSize,
+                                    gfxImageFormat aFormat) {
   long stride;
 
   if (aFormat == SurfaceFormat::A8R8G8B8_UINT32)

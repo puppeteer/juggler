@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 add_task(function instanceof_xrays() {
   let sandbox = Cu.Sandbox(null);
@@ -117,7 +117,7 @@ add_task(function instanceof_xrays() {
 add_task(function instanceof_dom_xrays_hasInstance() {
   const principal = Services.scriptSecurityManager.createNullPrincipal({});
   const webnav = Services.appShell.createWindowlessBrowser(false);
-  webnav.docShell.createAboutBlankContentViewer(principal);
+  webnav.docShell.createAboutBlankContentViewer(principal, principal);
   let window = webnav.document.defaultView;
 
   let sandbox = Cu.Sandbox(principal);

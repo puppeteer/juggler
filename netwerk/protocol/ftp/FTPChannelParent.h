@@ -21,7 +21,7 @@ class nsILoadContext;
 namespace mozilla {
 
 namespace dom {
-class TabParent;
+class BrowserParent;
 class PBrowserOrId;
 }  // namespace dom
 
@@ -77,8 +77,8 @@ class FTPChannelParent final : public PFTPChannelParent,
 
   bool DoAsyncOpen(const URIParams& aURI, const uint64_t& aStartPos,
                    const nsCString& aEntityID,
-                   const OptionalIPCStream& aUploadStream,
-                   const OptionalLoadInfoArgs& aLoadInfoArgs,
+                   const Maybe<IPCStream>& aUploadStream,
+                   const Maybe<LoadInfoArgs>& aLoadInfoArgs,
                    const uint32_t& aLoadFlags);
 
   // used to connect redirected-to channel in parent with just created
@@ -132,7 +132,7 @@ class FTPChannelParent final : public PFTPChannelParent,
   // Set if we successfully suspended the nsHttpChannel for diversion. Unset
   // when we call ResumeForDiversion.
   bool mSuspendedForDiversion;
-  RefPtr<mozilla::dom::TabParent> mTabParent;
+  RefPtr<mozilla::dom::BrowserParent> mBrowserParent;
 
   RefPtr<ChannelEventQueue> mEventQ;
 

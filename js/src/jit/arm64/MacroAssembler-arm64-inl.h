@@ -67,6 +67,16 @@ void MacroAssembler::move32To64SignExtend(Register src, Register64 dest) {
 }
 
 // ===============================================================
+// Load instructions
+
+void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
+  load32(src, dest);
+  move32To64SignExtend(dest, Register64(dest));
+}
+
+void MacroAssembler::loadAbiReturnAddress(Register dest) { movePtr(lr, dest); }
+
+// ===============================================================
 // Logical instructions
 
 void MacroAssembler::not32(Register reg) {
@@ -268,7 +278,8 @@ void MacroAssembler::add64(Imm64 imm, Register64 dest) {
 CodeOffset MacroAssembler::sub32FromStackPtrWithPatch(Register dest) {
   vixl::UseScratchRegisterScope temps(this);
   const ARMRegister scratch = temps.AcquireX();
-  AutoForbidPools afp(this, /* max number of instructions in scope = */ 3);
+  AutoForbidPoolsAndNops afp(this,
+                             /* max number of instructions in scope = */ 3);
   CodeOffset offs = CodeOffset(currentOffset());
   movz(scratch, 0, 0);
   movk(scratch, 0, 16);
@@ -473,6 +484,10 @@ void MacroAssembler::inc64(AbsoluteAddress dest) {
 
 void MacroAssembler::neg32(Register reg) {
   Negs(ARMRegister(reg, 32), Operand(ARMRegister(reg, 32)));
+}
+
+void MacroAssembler::negPtr(Register reg) {
+  Negs(ARMRegister(reg, 64), Operand(ARMRegister(reg, 64)));
 }
 
 void MacroAssembler::negateFloat(FloatRegister reg) {
@@ -816,8 +831,8 @@ void MacroAssembler::branch32(Condition cond, const AbsoluteAddress& lhs,
                               Imm32 rhs, Label* label) {
   vixl::UseScratchRegisterScope temps(this);
   const Register scratch = temps.AcquireX().asUnsized();
-  movePtr(ImmPtr(lhs.addr), scratch);
-  branch32(cond, Address(scratch, 0), rhs, label);
+  load32(lhs, scratch);
+  branch32(cond, scratch, rhs, label);
 }
 
 void MacroAssembler::branch32(Condition cond, const BaseIndex& lhs, Imm32 rhs,
@@ -1402,6 +1417,35 @@ void MacroAssembler::branchTestSymbolImpl(Condition cond, const T& t,
   B(label, c);
 }
 
+void MacroAssembler::branchTestBigInt(Condition cond, Register tag,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, tag, label);
+}
+
+void MacroAssembler::branchTestBigInt(Condition cond, const BaseIndex& address,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, address, label);
+}
+
+void MacroAssembler::branchTestBigInt(Condition cond, const ValueOperand& value,
+                                      Label* label) {
+  branchTestBigIntImpl(cond, value, label);
+}
+
+template <typename T>
+void MacroAssembler::branchTestBigIntImpl(Condition cond, const T& t,
+                                          Label* label) {
+  Condition c = testBigInt(cond, t);
+  B(label, c);
+}
+
+void MacroAssembler::branchTestBigIntTruthy(bool truthy,
+                                            const ValueOperand& value,
+                                            Label* label) {
+  Condition c = testBigIntTruthy(truthy, value);
+  B(label, c);
+}
+
 void MacroAssembler::branchTestNull(Condition cond, Register tag,
                                     Label* label) {
   branchTestNullImpl(cond, tag, label);
@@ -1526,8 +1570,10 @@ void MacroAssembler::branchTestMagic(Condition cond, const Address& valaddr,
 }
 
 void MacroAssembler::branchToComputedAddress(const BaseIndex& addr) {
-  // Not used by Rabaldr.
-  MOZ_CRASH("NYI - branchToComputedAddress");
+  vixl::UseScratchRegisterScope temps(&this->asVIXL());
+  const ARMRegister scratch64 = temps.AcquireX();
+  loadPtr(addr, scratch64.asUnsized());
+  Br(scratch64);
 }
 
 void MacroAssembler::cmp32Move32(Condition cond, Register lhs, Register rhs,
@@ -1543,6 +1589,17 @@ void MacroAssembler::cmp32Move32(Condition cond, Register lhs,
   cmp32(lhs, rhs);
   Csel(ARMRegister(dest, 32), ARMRegister(src, 32), ARMRegister(dest, 32),
        cond);
+}
+
+void MacroAssembler::cmp32Load32(Condition cond, Register lhs,
+                                 const Address& rhs, const Address& src,
+                                 Register dest) {
+  MOZ_CRASH("NYI");
+}
+
+void MacroAssembler::cmp32Load32(Condition cond, Register lhs, Register rhs,
+                                 const Address& src, Register dest) {
+  MOZ_CRASH("NYI");
 }
 
 void MacroAssembler::cmp32MovePtr(Condition cond, Register lhs, Imm32 rhs,

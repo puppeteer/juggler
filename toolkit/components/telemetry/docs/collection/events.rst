@@ -12,7 +12,7 @@ For events recorded into Firefox Telemetry we also provide an API that opaquely 
 
 .. important::
 
-    Every new data collection in Firefox needs a `data collection review <https://wiki.mozilla.org/Firefox/Data_Collection#Requesting_Approval>`_ from a data collection peer. Just set the feedback? flag for one of the data peers. We try to reply within a business day.
+    Every new or changed data collection in Firefox needs a `data collection review <https://wiki.mozilla.org/Firefox/Data_Collection>`__ from a Data Steward.
 
 .. _events.serializationformat:
 
@@ -74,6 +74,8 @@ Only ``value`` and the values of ``extra`` will be truncated if over the specifi
 Any other ``String`` going over its limit will be reported as an error and the operation
 aborted.
 
+.. _eventdefinition:
+
 The YAML definition file
 ========================
 
@@ -133,6 +135,14 @@ The following event properties are valid:
   - ``fennec``
   - ``geckoview``
   - ``all`` (record on all products)
+- ``operating_systems`` *(optional, list of strings)*: This field restricts recording to certain operating systems only. It defaults to ``all``. Currently supported values are:
+
+   - ``mac``
+   - ``linux``
+   - ``windows``
+   - ``android``
+   - ``unix``
+   - ``all`` (record on all operating systems)
 
 .. note::
 
@@ -188,7 +198,9 @@ Example:
 
   Services.telemetry.setEventRecordingEnabled(category, enabled);
 
-Event recording is currently disabled by default. Privileged add-ons and Firefox code can enable & disable recording events for specific categories using this function.
+Event recording is currently disabled by default for events registered in Events.yaml.
+Dynamically-registered events (those registered using ``registerEvents()``) are enabled by default, and cannot be disabled.
+Privileged add-ons and Firefox code can enable & disable recording events for specific categories using this function.
 
 Example:
 
@@ -203,6 +215,8 @@ Example:
 
   Even if your event category isn't enabled, counts of events that attempted to be recorded will
   be :ref:`summarized <events.event-summary>`.
+
+.. _registerevents:
 
 ``registerEvents()``
 ~~~~~~~~~~~~~~~~~~~~
@@ -223,7 +237,7 @@ Register new events from add-ons.
   * ``expired`` - *(optional, bool)* Whether this event entry is expired. This allows recording it without error, but it will be discarded. Defaults to false.
 
 For events recorded from add-ons, registration happens at runtime. Any new events must first be registered through this function before they can be recorded.
-The registered categories will automatically be enabled for recording.
+The registered categories will automatically be enabled for recording, and cannot be disabled.
 If a dynamic event uses the same category as a static event, the category will also be enabled upon registration.
 
 After registration, the events can be recorded through the ``recordEvent()`` function. They will be submitted in event pings like static events are, under the ``dynamic`` process.
@@ -301,6 +315,23 @@ example above, if ``interaction.click.document`` was registered with ``registerE
 the dynamic-process scalar ``telemetry.dynamic_event_counts`` would have a key
 ``interaction#click#document`` with the value ``6``.
 
+Testing
+=======
+
+Tests involving Event Telemetry often follow this four-step form:
+
+1. ``Services.telemetry.clearEvents();`` To minimize the effects of prior code and tests.
+2. ``Services.telemetry.setEventRecordingEnabled(myCategory, true);`` To enable the collection of
+   your events. (May or may not be relevant in your case)
+3. ``runTheCode();`` This is part of the test where you call the code that's supposed to collect
+   Event Telemetry.
+4. ``TelemetryTestUtils.assertEvents(expected, filter, options);`` This will check the
+   events recorded by Event Telemetry against your provided list of expected events.
+   If you only need to check the number of events recorded, you can use
+   ``TelemetryTestUtils.assertNumberOfEvents(expectedNum, filter, options);``.
+   Both utilities have `helpful inline documentation <https://hg.mozilla.org/mozilla-central/file/tip/toolkit/components/telemetry/tests/utils/TelemetryTestUtils.jsm>`_.
+
+
 Version History
 ===============
 
@@ -316,3 +347,4 @@ Version History
 
    - Enabled support for adding events in artifact builds and build-faster workflows (`bug 1448945 <https://bugzilla.mozilla.org/show_bug.cgi?id=1448945>`_).
    - Added summarization of events (`bug 1440673 <https://bugzilla.mozilla.org/show_bug.cgi?id=1440673>`_).
+- Firefox 66: Replace ``cpp_guard`` with ``operating_systems`` (`bug 1482912 <https://bugzilla.mozilla.org/show_bug.cgi?id=1482912>`_)`

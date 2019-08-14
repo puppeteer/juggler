@@ -5,21 +5,23 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 // Keep in (case-insensitive) order:
+#include "mozilla/PresShell.h"
 #include "nsContainerFrame.h"
 #include "nsFrame.h"
 #include "nsGkAtoms.h"
 #include "SVGObserverUtils.h"
-#include "nsSVGFilters.h"
+#include "SVGFilters.h"
 
 using namespace mozilla;
 
 class SVGFEUnstyledLeafFrame final : public nsFrame {
-  friend nsIFrame* NS_NewSVGFEUnstyledLeafFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewSVGFEUnstyledLeafFrame(mozilla::PresShell* aPresShell,
                                                 ComputedStyle* aStyle);
 
  protected:
-  explicit SVGFEUnstyledLeafFrame(ComputedStyle* aStyle)
-      : nsFrame(aStyle, kClassID) {
+  explicit SVGFEUnstyledLeafFrame(ComputedStyle* aStyle,
+                                  nsPresContext* aPresContext)
+      : nsFrame(aStyle, aPresContext, kClassID) {
     AddStateBits(NS_FRAME_SVG_LAYOUT | NS_FRAME_IS_NONDISPLAY);
   }
 
@@ -52,9 +54,10 @@ class SVGFEUnstyledLeafFrame final : public nsFrame {
   }
 };
 
-nsIFrame* NS_NewSVGFEUnstyledLeafFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewSVGFEUnstyledLeafFrame(PresShell* aPresShell,
                                        ComputedStyle* aStyle) {
-  return new (aPresShell) SVGFEUnstyledLeafFrame(aStyle);
+  return new (aPresShell)
+      SVGFEUnstyledLeafFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(SVGFEUnstyledLeafFrame)

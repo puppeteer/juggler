@@ -19,11 +19,11 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/dom/CryptoKey.h"
 #include "mozilla/dom/RTCCertificateBinding.h"
-#include "mtransport/dtlsidentity.h"
 #include "js/StructuredClone.h"
 #include "js/TypeDecls.h"
 
 namespace mozilla {
+class DtlsIdentity;
 namespace dom {
 
 class ObjectOrString;
@@ -56,8 +56,11 @@ class RTCCertificate final : public nsISupports, public nsWrapperCache {
   const UniqueCERTCertificate& Certificate() const { return mCertificate; }
 
   // Structured clone methods
-  bool WriteStructuredClone(JSStructuredCloneWriter* aWriter) const;
-  bool ReadStructuredClone(JSStructuredCloneReader* aReader);
+  bool WriteStructuredClone(JSContext* aCx,
+                            JSStructuredCloneWriter* aWriter) const;
+  static already_AddRefed<RTCCertificate> ReadStructuredClone(
+      JSContext* aCx, nsIGlobalObject* aGlobal,
+      JSStructuredCloneReader* aReader);
 
  private:
   ~RTCCertificate() {}

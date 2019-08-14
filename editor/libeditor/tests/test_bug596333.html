@@ -5,9 +5,9 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=596333
 -->
 <head>
   <title>Test for Bug 596333</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
-  <script type="text/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
+  <script src="/tests/SimpleTest/EventUtils.js"></script>
   <script src="spellcheck.js"></script>
 </head>
 <body>
@@ -51,7 +51,13 @@ function paste(str) {
   s.data = str;
   trans.setTransferData("text/unicode", s, str.length * 2);
 
+  let inputEvent = null;
+  window.addEventListener("input", aEvent => { inputEvent = aEvent; }, {once: true});
   getEditor().pasteTransferable(trans);
+  is(inputEvent.type, "input", "input event should be fired");
+  is(inputEvent.inputType, "insertFromPaste", "inputType should be insertFromPaste");
+  is(inputEvent.data, str, `data should be "${str}"`);
+  is(inputEvent.dataTransfer, null, "dataTransfer should be null on <textarea>");
 }
 
 function runOnFocus() {

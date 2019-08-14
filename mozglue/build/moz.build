@@ -15,6 +15,7 @@ else:
     Library('mozglue')
 
 if CONFIG['OS_TARGET'] == 'Android':
+    LDFLAGS += ['-Wl,--version-script,%s/mozglue.ver' % SRCDIR]
     SOURCES += [
         'BionicGlue.cpp',
     ]
@@ -37,15 +38,6 @@ if CONFIG['OS_TARGET'] == 'WINNT':
     ]
     RCINCLUDE = 'mozglue.rc'
 
-    if CONFIG['MOZ_PGO'] and CONFIG['CC_TYPE'] == 'clang-cl':
-        SOURCES += ['cygprofile.cpp']
-        SOURCES['cygprofile.cpp'].pgo_generate_only = True
-
-    if CONFIG['CC_TYPE'] == "msvc":
-        CFLAGS += ['-guard:cf']
-        CXXFLAGS += ['-guard:cf']
-        LDFLAGS += ['-guard:cf']
-
 if CONFIG['MOZ_WIDGET_TOOLKIT']:
 
     if CONFIG['MOZ_MEMORY'] and FORCE_SHARED_LIB:
@@ -63,15 +55,12 @@ if CONFIG['MOZ_WIDGET_TOOLKIT']:
             '/memory/build',
         ]
 
-        if CONFIG['CC_TYPE'] == "msvc":
-            SOURCES += ['WindowsCFGStatus.cpp']
         SOURCES += [
             'Authenticode.cpp',
             'UntrustedDllsHandler.cpp',
             'WindowsDllBlocklist.cpp',
         ]
 
-        DisableStlWrapping()
         OS_LIBS += [
             'crypt32',
             'version',
@@ -94,7 +83,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT']:
         'arm.h',
         'mips.h',
         'SSE.h',
-        'WindowsCFGStatus.h',
         'WindowsDllBlocklist.h',
     ]
 
@@ -122,10 +110,8 @@ USE_LIBS += [
     'mfbt',
 ]
 
-DEFINES['IMPL_MFBT'] = True
+LIBRARY_DEFINES['IMPL_MFBT'] = True
 LIBRARY_DEFINES['MOZ_HAS_MOZGLUE'] = True
-
-LDFLAGS += CONFIG['MOZ_GLUE_WRAP_LDFLAGS']
 
 if CONFIG['OS_TARGET'] == 'Darwin':
     # On OSX 10.10.3, a dead lock happens in some cases involving dynamic
@@ -141,6 +127,3 @@ if CONFIG['MOZ_LINKER'] and CONFIG['CPU_ARCH'] == 'arm':
     LDFLAGS += ['-Wl,-version-script,%s/arm-eabi-filter' % SRCDIR]
 
 DIST_INSTALL = True
-
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497

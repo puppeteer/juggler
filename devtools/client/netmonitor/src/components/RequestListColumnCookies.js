@@ -9,8 +9,6 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { fetchNetworkUpdatePacket } = require("../utils/request-utils");
 
-const { div } = dom;
-
 class RequestListColumnCookies extends Component {
   static get propTypes() {
     return {
@@ -30,8 +28,12 @@ class RequestListColumnCookies extends Component {
   }
 
   shouldComponentUpdate(nextProps) {
-    let { requestCookies: currRequestCookies = { cookies: [] } } = this.props.item;
-    let { requestCookies: nextRequestCookies = { cookies: [] } } = nextProps.item;
+    let {
+      requestCookies: currRequestCookies = { cookies: [] },
+    } = this.props.item;
+    let {
+      requestCookies: nextRequestCookies = { cookies: [] },
+    } = nextProps.item;
     currRequestCookies = currRequestCookies.cookies || currRequestCookies;
     nextRequestCookies = nextRequestCookies.cookies || nextRequestCookies;
     return currRequestCookies !== nextRequestCookies;
@@ -40,12 +42,14 @@ class RequestListColumnCookies extends Component {
   render() {
     let { requestCookies = { cookies: [] } } = this.props.item;
     requestCookies = requestCookies.cookies || requestCookies;
-    const requestCookiesLength = requestCookies.length > 0 ? requestCookies.length : "";
-    return (
-      div({
+    const requestCookiesLength =
+      requestCookies.length > 0 ? requestCookies.length : "";
+    return dom.td(
+      {
         className: "requests-list-column requests-list-cookies",
         title: requestCookiesLength,
-      }, requestCookiesLength)
+      },
+      requestCookiesLength
     );
   }
 }

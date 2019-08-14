@@ -12,11 +12,17 @@
 
 #include "mozilla/dom/PBrowserChild.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/PWindowGlobalChild.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 
 namespace mozilla {
 namespace recordreplay {
 namespace parent {
+
+static bool ActiveChildIsRecording() {
+  ChildProcessInfo* child = GetActiveChild();
+  return child && child->IsRecording();
+}
 
 static bool HandleMessageInMiddleman(ipc::Side aSide,
                                      const IPC::Message& aMessage) {
@@ -29,7 +35,8 @@ static bool HandleMessageInMiddleman(ipc::Side aSide,
   // Handle messages that should be sent to both the middleman and the
   // child process.
   if (  // Initialization that must be performed in both processes.
-      type == dom::PContent::Msg_PBrowserConstructor__ID ||
+      type == dom::PContent::Msg_ConstructBrowser__ID ||
+      type == dom::PContent::Msg_RegisterBrowsingContextGroup__ID ||
       type == dom::PContent::Msg_RegisterChrome__ID ||
       type == dom::PContent::Msg_SetXPCOMProcessAttributes__ID ||
       type == dom::PContent::Msg_UpdateSharedData__ID ||
@@ -73,9 +80,10 @@ static bool HandleMessageInMiddleman(ipc::Side aSide,
     ipc::IProtocol::Result r =
         contentChild->PContentChild::OnMessageReceived(aMessage);
     MOZ_RELEASE_ASSERT(r == ipc::IProtocol::MsgProcessed);
-    if (type == dom::PContent::Msg_SetXPCOMProcessAttributes__ID) {
-      // Preferences are initialized via the SetXPCOMProcessAttributes message.
-      PreferencesLoaded();
+    if (type == dom::PContent::Msg_RegisterChrome__ID) {
+      // After the RegisterChrome message we can load chrome JS and finish
+      // initialization.
+      ChromeRegistered();
     }
     return false;
   }
@@ -114,6 +122,22 @@ static bool HandleMessageInMiddleman(ipc::Side aSide,
     ipc::IProtocol::Result r = compositorChild->OnMessageReceived(aMessage);
     MOZ_RELEASE_ASSERT(r == ipc::IProtocol::MsgProcessed);
     return true;
+  }
+
+  // PWindowGlobal messages could be going to actors in either process.
+  // Receive them here if there is an actor with the right routing ID.
+  if (type >= dom::PWindowGlobal::PWindowGlobalStart &&
+      type <= dom::PWindowGlobal::PWindowGlobalEnd) {
+    dom::ContentChild* contentChild = dom::ContentChild::GetSingleton();
+
+    ipc::IProtocol* actor = contentChild->Lookup(aMessage.routing_id());
+    if (actor) {
+      ipc::IProtocol::Result r =
+          contentChild->PContentChild::OnMessageReceived(aMessage);
+      MOZ_RELEASE_ASSERT(r == ipc::IProtocol::MsgProcessed);
+      return true;
+    }
+    return false;
   }
 
   return false;
@@ -179,6 +203,15 @@ class MiddlemanProtocol : public ipc::IToplevelProtocol {
 
   virtual void RemoveManagee(int32_t, IProtocol*) override {
     MOZ_CRASH("MiddlemanProtocol::RemoveManagee");
+  }
+
+  virtual void DeallocManagee(int32_t, IProtocol*) override {
+    MOZ_CRASH("MiddlemanProtocol::DeallocManagee");
+  }
+
+  virtual void AllManagedActors(
+      nsTArray<RefPtr<ipc::ActorLifecycleProxy>>& aActors) const override {
+    aActors.Clear();
   }
 
   static void ForwardMessageAsync(MiddlemanProtocol* aProtocol,
@@ -250,7 +283,9 @@ class MiddlemanProtocol : public ipc::IToplevelProtocol {
 
     if (mSide == ipc::ChildSide) {
       AutoMarkMainThreadWaitingForIPDLReply blocked;
-      ActiveRecordingChild()->WaitUntil([&]() { return !!aReply; });
+      while (!aReply) {
+        MOZ_CRASH("NYI");
+      }
     } else {
       MonitorAutoLock lock(*gMonitor);
       while (!aReply) {
@@ -291,7 +326,9 @@ class MiddlemanProtocol : public ipc::IToplevelProtocol {
 
     if (mSide == ipc::ChildSide) {
       AutoMarkMainThreadWaitingForIPDLReply blocked;
-      ActiveRecordingChild()->WaitUntil([&]() { return !!aReply; });
+      while (!aReply) {
+        MOZ_CRASH("NYI");
+      }
     } else {
       MonitorAutoLock lock(*gMonitor);
       while (!aReply) {
@@ -301,10 +338,6 @@ class MiddlemanProtocol : public ipc::IToplevelProtocol {
 
     PrintSpew("SyncCallDone\n");
     return MsgProcessed;
-  }
-
-  virtual int32_t GetProtocolTypeId() override {
-    MOZ_CRASH("MiddlemanProtocol::GetProtocolTypeId");
   }
 
   virtual void OnChannelClose() override {

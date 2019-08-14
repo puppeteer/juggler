@@ -19,7 +19,7 @@
 #include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/NodeFilterBinding.h"
 #include "mozilla/dom/ProcessingInstruction.h"
-#include "mozilla/dom/TabParent.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/TreeWalker.h"
 #include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
@@ -33,18 +33,19 @@
 #include "nsIContent.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDocShell.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDocumentEncoder.h"
 #include "nsILoadContext.h"
 #include "nsIProtocolHandler.h"
 #include "nsISHEntry.h"
 #include "nsISupportsPrimitives.h"
-#include "nsITabParent.h"
+#include "nsIRemoteTab.h"
 #include "nsIURIMutator.h"
 #include "nsIWebBrowserPersist.h"
 #include "nsIWebNavigation.h"
 #include "nsIWebPageDescriptor.h"
 #include "nsNetUtil.h"
+#include "nsQueryObject.h"
 
 namespace mozilla {
 
@@ -59,7 +60,7 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTION(WebBrowserPersistLocalDocument, mDocument)
 
 WebBrowserPersistLocalDocument::WebBrowserPersistLocalDocument(
-    nsIDocument* aDocument)
+    dom::Document* aDocument)
     : mDocument(aDocument), mPersistFlags(0) {
   MOZ_ASSERT(mDocument);
 }
@@ -133,7 +134,7 @@ WebBrowserPersistLocalDocument::GetReferrer(nsAString& aReferrer) {
 
 NS_IMETHODIMP
 WebBrowserPersistLocalDocument::GetContentDisposition(nsAString& aCD) {
-  nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetDefaultView();
+  nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetWindow();
   if (NS_WARN_IF(!window)) {
     aCD.SetIsVoid(true);
     return NS_OK;
@@ -176,7 +177,7 @@ WebBrowserPersistLocalDocument::GetPrincipal(nsIPrincipal** aPrincipal) {
 }
 
 already_AddRefed<nsISHEntry> WebBrowserPersistLocalDocument::GetHistory() {
-  nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetDefaultView();
+  nsCOMPtr<nsPIDOMWindowOuter> window = mDocument->GetWindow();
   if (NS_WARN_IF(!window)) {
     return nullptr;
   }
@@ -283,7 +284,7 @@ void ResourceReader::DocumentDone(nsresult aStatus) {
 }
 
 nsresult ResourceReader::OnWalkSubframe(nsINode* aNode) {
-  nsCOMPtr<nsIFrameLoaderOwner> loaderOwner = do_QueryInterface(aNode);
+  RefPtr<nsFrameLoaderOwner> loaderOwner = do_QueryObject(aNode);
   NS_ENSURE_STATE(loaderOwner);
   RefPtr<nsFrameLoader> loader = loaderOwner->GetFrameLoader();
   NS_ENSURE_STATE(loader);
@@ -344,7 +345,10 @@ nsresult ResourceReader::OnWalkURI(const nsACString& aURISpec,
 
   rv = NS_NewURI(getter_AddRefs(uri), aURISpec, mParent->GetCharacterSet(),
                  mCurrentBaseURI);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    // We don't want to break saving a page in case of a malformed URI.
+    return NS_OK;
+  }
   return OnWalkURI(uri, aContentPolicyType);
 }
 
@@ -816,7 +820,7 @@ PersistNodeFixup::FixupNode(nsINode* aNodeIn, bool* aSerializeCloneKids,
     // FromContent on, since it represents multiple elements. Since we've
     // already checked IsHTMLElement here, just cast as we were doing.
     auto* base = static_cast<dom::HTMLSharedElement*>(content.get());
-    nsIDocument* ownerDoc = base->OwnerDoc();
+    dom::Document* ownerDoc = base->OwnerDoc();
 
     nsAutoString href;
     base->GetHref(href);  // Doesn't matter if this fails

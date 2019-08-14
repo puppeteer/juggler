@@ -5,23 +5,25 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/EventStates.h"
+#include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/HTMLFormSubmission.h"
 #include "mozilla/dom/HTMLObjectElement.h"
 #include "mozilla/dom/HTMLObjectElementBinding.h"
 #include "mozilla/dom/ElementInlines.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "nsAttrValueInlines.h"
 #include "nsGkAtoms.h"
 #include "nsError.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIPluginDocument.h"
 #include "nsIObjectFrame.h"
 #include "nsNPAPIPluginInstance.h"
 #include "nsIWidget.h"
 #include "nsContentUtils.h"
 #ifdef XP_MACOSX
-#include "mozilla/EventDispatcher.h"
-#include "mozilla/dom/Event.h"
-#include "nsFocusManager.h"
+#  include "mozilla/EventDispatcher.h"
+#  include "mozilla/dom/Event.h"
+#  include "nsFocusManager.h"
 #endif
 
 namespace mozilla {
@@ -86,7 +88,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED(
     HTMLObjectElement, nsGenericHTMLFormElement, imgINotificationObserver,
-    nsIRequestObserver, nsIStreamListener, nsIFrameLoaderOwner,
+    nsIRequestObserver, nsIStreamListener, nsFrameLoaderOwner,
     nsIObjectLoadingContent, nsIImageLoadingContent, nsIChannelEventSink,
     nsIConstraintValidation)
 
@@ -195,42 +197,42 @@ HTMLObjectElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
 
 #endif  // #ifdef XP_MACOSX
 
-nsresult HTMLObjectElement::BindToTree(nsIDocument* aDocument,
-                                       nsIContent* aParent,
-                                       nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLFormElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult HTMLObjectElement::BindToTree(BindContext& aContext,
+                                       nsINode& aParent) {
+  nsresult rv = nsGenericHTMLFormElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = nsObjectLoadingContent::BindToTree(aDocument, aParent, aBindingParent);
+  rv = nsObjectLoadingContent::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Don't kick off load from being bound to a plugin document - the plugin
   // document will call nsObjectLoadingContent::InitializeFromChannel() for the
   // initial load.
-  nsCOMPtr<nsIPluginDocument> pluginDoc = do_QueryInterface(aDocument);
-
-  // If we already have all the children, start the load.
-  if (mIsDoneAddingChildren && !pluginDoc) {
-    void (HTMLObjectElement::*start)() = &HTMLObjectElement::StartObjectLoad;
-    nsContentUtils::AddScriptRunner(
-        NewRunnableMethod("dom::HTMLObjectElement::BindToTree", this, start));
+  if (IsInComposedDoc()) {
+    nsCOMPtr<nsIPluginDocument> pluginDoc =
+        do_QueryInterface(&aContext.OwnerDoc());
+    // If we already have all the children, start the load.
+    if (mIsDoneAddingChildren && !pluginDoc) {
+      void (HTMLObjectElement::*start)() = &HTMLObjectElement::StartObjectLoad;
+      nsContentUtils::AddScriptRunner(
+          NewRunnableMethod("dom::HTMLObjectElement::BindToTree", this, start));
+    }
   }
 
   return NS_OK;
 }
 
-void HTMLObjectElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void HTMLObjectElement::UnbindFromTree(bool aNullParent) {
 #ifdef XP_MACOSX
-  // When a page is reloaded (when an nsIDocument's content is removed), the
+  // When a page is reloaded (when an Document's content is removed), the
   // focused element isn't necessarily sent an eBlur event. See
   // nsFocusManager::ContentRemoved(). This means that a widget may think it
   // still contains a focused plugin when it doesn't -- which in turn can
   // disable text input in the browser window. See bug 1137229.
   OnFocusBlurPlugin(this, false);
 #endif
-  nsObjectLoadingContent::UnbindFromTree(aDeep, aNullParent);
-  nsGenericHTMLFormElement::UnbindFromTree(aDeep, aNullParent);
+  nsObjectLoadingContent::UnbindFromTree(aNullParent);
+  nsGenericHTMLFormElement::UnbindFromTree(aNullParent);
 }
 
 nsresult HTMLObjectElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
@@ -275,7 +277,7 @@ nsresult HTMLObjectElement::AfterMaybeChangeAttr(int32_t aNamespaceID,
 }
 
 bool HTMLObjectElement::IsFocusableForTabIndex() {
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (!doc || doc->HasFlag(NODE_IS_EDITABLE)) {
     return false;
   }
@@ -289,7 +291,7 @@ bool HTMLObjectElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
                                         int32_t* aTabIndex) {
   // TODO: this should probably be managed directly by IsHTMLFocusable.
   // See bug 597242.
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (!doc || doc->HasFlag(NODE_IS_EDITABLE)) {
     if (aTabIndex) {
       *aTabIndex = TabIndex();
@@ -374,11 +376,14 @@ int32_t HTMLObjectElement::TabIndexDefault() {
   return IsFocusableForTabIndex() ? 0 : -1;
 }
 
-nsPIDOMWindowOuter* HTMLObjectElement::GetContentWindow(
+Nullable<WindowProxyHolder> HTMLObjectElement::GetContentWindow(
     nsIPrincipal& aSubjectPrincipal) {
-  nsIDocument* doc = GetContentDocument(aSubjectPrincipal);
+  Document* doc = GetContentDocument(aSubjectPrincipal);
   if (doc) {
-    return doc->GetWindow();
+    nsPIDOMWindowOuter* win = doc->GetWindow();
+    if (win) {
+      return WindowProxyHolder(win->GetBrowsingContext());
+    }
   }
 
   return nullptr;

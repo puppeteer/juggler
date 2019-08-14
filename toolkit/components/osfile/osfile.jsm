@@ -8,12 +8,17 @@
 
 if (typeof Components != "undefined") {
   this.EXPORTED_SYMBOLS = ["OS"];
-  ChromeUtils.import("resource://gre/modules/osfile/osfile_async_front.jsm", this);
+  ChromeUtils.import(
+    "resource://gre/modules/osfile/osfile_async_front.jsm",
+    this
+  );
 } else {
   /* eslint-env worker */
   importScripts("resource://gre/modules/workers/require.js");
 
   var SharedAll = require("resource://gre/modules/osfile/osfile_shared_allthreads.jsm");
+
+  /* eslint-disable no-unused-vars */
 
   // At this stage, we need to import all sources at once to avoid
   // a unique failure on tbpl + talos that seems caused by a
@@ -31,6 +36,8 @@ if (typeof Components != "undefined") {
       "resource://gre/modules/osfile/osfile_unix_front.jsm"
     );
   }
+
+  /* eslint-enable no-unused-vars */
 
   OS.Path = require("resource://gre/modules/osfile/ospath.jsm");
 }

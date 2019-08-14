@@ -13,16 +13,26 @@ XPCOMUtils.defineLazyGetter(this, "PREFIX", function() {
 
 XPCOMUtils.defineLazyGetter(this, "tests", function() {
   return [
-     new Test(PREFIX + "/test_both.html",
-              null, start_testBoth, null),
-     new Test(PREFIX + "/test_ctype_override.txt",
-              null, start_test_ctype_override_txt, null),
-     new Test(PREFIX + "/test_status_override.html",
-              null, start_test_status_override_html, null),
-     new Test(PREFIX + "/test_status_override_nodesc.txt",
-              null, start_test_status_override_nodesc_txt, null),
-     new Test(PREFIX + "/caret_test.txt^",
-              null, start_caret_test_txt_, null),
+    new Test(PREFIX + "/test_both.html", null, start_testBoth, null),
+    new Test(
+      PREFIX + "/test_ctype_override.txt",
+      null,
+      start_test_ctype_override_txt,
+      null
+    ),
+    new Test(
+      PREFIX + "/test_status_override.html",
+      null,
+      start_test_status_override_html,
+      null
+    ),
+    new Test(
+      PREFIX + "/test_status_override_nodesc.txt",
+      null,
+      start_test_status_override_nodesc_txt,
+      null
+    ),
+    new Test(PREFIX + "/caret_test.txt^", null, start_caret_test_txt_, null),
   ];
 });
 
@@ -37,31 +47,30 @@ function run_test() {
   runHttpTests(tests, testComplete(srv));
 }
 
-
 // TEST DATA
 
-function start_testBoth(ch, cx) {
+function start_testBoth(ch) {
   Assert.equal(ch.responseStatus, 501);
   Assert.equal(ch.responseStatusText, "Unimplemented");
 
   Assert.equal(ch.getResponseHeader("Content-Type"), "text/plain");
 }
 
-function start_test_ctype_override_txt(ch, cx) {
+function start_test_ctype_override_txt(ch) {
   Assert.equal(ch.getResponseHeader("Content-Type"), "text/html");
 }
 
-function start_test_status_override_html(ch, cx) {
+function start_test_status_override_html(ch) {
   Assert.equal(ch.responseStatus, 404);
   Assert.equal(ch.responseStatusText, "Can't Find This");
 }
 
-function start_test_status_override_nodesc_txt(ch, cx) {
+function start_test_status_override_nodesc_txt(ch) {
   Assert.equal(ch.responseStatus, 732);
   Assert.equal(ch.responseStatusText, "");
 }
 
-function start_caret_test_txt_(ch, cx) {
+function start_caret_test_txt_(ch) {
   Assert.equal(ch.responseStatus, 500);
   Assert.equal(ch.responseStatusText, "This Isn't A Server Error");
 

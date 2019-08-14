@@ -5,10 +5,8 @@
   <link rel="stylesheet" type="text/css"
         href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
 
   <script type="application/javascript"
           src="../common.js"></script>
@@ -49,7 +47,7 @@
 
       this.check = function showAlert_finalCheck(aEvent) {
         var dialog = aEvent.accessible.DOMNode;
-        var info = dialog.ui.infoBody;
+        var info = dialog.querySelector(".tabmodalprompt-infoBody");
         testRelation(info, RELATION_DESCRIPTION_FOR, dialog);
         testRelation(dialog, RELATION_DESCRIBED_BY, info);
       };

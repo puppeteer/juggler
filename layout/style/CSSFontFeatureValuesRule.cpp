@@ -46,11 +46,19 @@ void CSSFontFeatureValuesRule::GetValueText(nsAString& aValueText) {
 
 void CSSFontFeatureValuesRule::SetFontFamily(const nsAString& aFontFamily,
                                              ErrorResult& aRv) {
+  if (IsReadOnly()) {
+    return;
+  }
+
   aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
 }
 
 void CSSFontFeatureValuesRule::SetValueText(const nsAString& aValueText,
                                             ErrorResult& aRv) {
+  if (IsReadOnly()) {
+    return;
+  }
+
   aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
 }
 
@@ -59,7 +67,8 @@ void CSSFontFeatureValuesRule::SetValueText(const nsAString& aValueText,
 
 bool CSSFontFeatureValuesRule::IsCCLeaf() const { return Rule::IsCCLeaf(); }
 
-/* virtual */ JSObject* CSSFontFeatureValuesRule::WrapObject(
+/* virtual */
+JSObject* CSSFontFeatureValuesRule::WrapObject(
     JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
   return CSSFontFeatureValuesRule_Binding::Wrap(aCx, this, aGivenProto);
 }

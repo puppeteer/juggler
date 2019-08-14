@@ -8,7 +8,10 @@
 
 #include "ds/OrderedHashTable.h"
 #include "gc/FreeOp.h"
+#include "js/PropertySpec.h"
 #include "js/Utility.h"
+#include "vm/BigIntType.h"
+#include "vm/EqualityOperations.h"  // js::SameValue
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -26,8 +29,6 @@ using namespace js;
 using mozilla::IsNaN;
 using mozilla::NumberEqualsInt32;
 
-using JS::DoubleNaNValue;
-
 /*** HashableValue **********************************************************/
 
 bool HashableValue::setValue(JSContext* cx, HandleValue v) {
@@ -43,13 +44,12 @@ bool HashableValue::setValue(JSContext* cx, HandleValue v) {
     int32_t i;
     if (NumberEqualsInt32(d, &i)) {
       // Normalize int32_t-valued doubles to int32_t for faster hashing and
-      // testing.
+      // testing. Note: we use NumberEqualsInt32 here instead of NumberIsInt32
+      // because we want -0 and 0 to be normalized to the same thing.
       value = Int32Value(i);
-    } else if (IsNaN(d)) {
-      // NaNs with different bits must hash and test identically.
-      value = DoubleNaNValue();
     } else {
-      value = v;
+      // Normalize the sign bit of a NaN.
+      value = JS::CanonicalizedDoubleValue(d);
     }
   } else {
     value = v;
@@ -57,7 +57,7 @@ bool HashableValue::setValue(JSContext* cx, HandleValue v) {
 
   MOZ_ASSERT(value.isUndefined() || value.isNull() || value.isBoolean() ||
              value.isNumber() || value.isString() || value.isSymbol() ||
-             value.isObject() || IF_BIGINT(value.isBigInt(), false));
+             value.isObject() || value.isBigInt());
   return true;
 }
 
@@ -78,11 +78,9 @@ static HashNumber HashValue(const Value& v,
   if (v.isSymbol()) {
     return v.toSymbol()->hash();
   }
-#ifdef ENABLE_BIGINT
   if (v.isBigInt()) {
-    return v.toBigInt()->hash();
+    return MaybeForwarded(v.toBigInt())->hash();
   }
-#endif
   if (v.isObject()) {
     return hcs.scramble(v.asRawBits());
   }
@@ -99,17 +97,11 @@ bool HashableValue::operator==(const HashableValue& other) const {
   // Two HashableValues are equal if they have equal bits.
   bool b = (value.asRawBits() == other.value.asRawBits());
 
-#ifdef ENABLE_BIGINT
   // BigInt values are considered equal if they represent the same
-  // integer. This test should use a comparison function that doesn't
-  // require a JSContext once one is defined in the BigInt class.
+  // mathematical value.
   if (!b && (value.isBigInt() && other.value.isBigInt())) {
-    JSContext* cx = TlsContext.get();
-    RootedValue valueRoot(cx, value);
-    RootedValue otherRoot(cx, other.value);
-    SameValue(cx, valueRoot, otherRoot, &b);
+    b = BigInt::equal(value.toBigInt(), other.value.toBigInt());
   }
-#endif
 
 #ifdef DEBUG
   bool same;
@@ -141,7 +133,6 @@ static const ClassOps MapIteratorObjectClassOps = {nullptr, /* addProperty */
                                                    MapIteratorObject::finalize};
 
 static const ClassExtension MapIteratorObjectClassExtension = {
-    nullptr, /* weakmapKeyDelegateOp */
     MapIteratorObject::objectMoved};
 
 const Class MapIteratorObject::class_ = {
@@ -171,8 +162,9 @@ inline MapObject::IteratorKind MapIteratorObject::kind() const {
   return MapObject::IteratorKind(i);
 }
 
-/* static */ bool GlobalObject::initMapIteratorProto(
-    JSContext* cx, Handle<GlobalObject*> global) {
+/* static */
+bool GlobalObject::initMapIteratorProto(JSContext* cx,
+                                        Handle<GlobalObject*> global) {
   Rooted<JSObject*> base(
       cx, GlobalObject::getOrCreateIteratorPrototype(cx, global));
   if (!base) {
@@ -348,7 +340,8 @@ bool MapIteratorObject::next(Handle<MapIteratorObject*> mapIterator,
   return false;
 }
 
-/* static */ JSObject* MapIteratorObject::createResultPair(JSContext* cx) {
+/* static */
+JSObject* MapIteratorObject::createResultPair(JSContext* cx) {
   RootedArrayObject resultPairObj(
       cx, NewDenseFullyAllocatedArray(cx, 2, nullptr, TenuredObject));
   if (!resultPairObj) {
@@ -418,19 +411,20 @@ const JSFunctionSpec MapObject::methods[] = {
     JS_SELF_HOSTED_FN("forEach", "MapForEach", 2, 0),
     // MapEntries only exists to preseve the equal identity of
     // entries and @@iterator.
-    JS_SELF_HOSTED_FN("entries", "MapEntries", 0, 0),
-    JS_SELF_HOSTED_SYM_FN(iterator, "MapEntries", 0, 0), JS_FS_END};
+    JS_SELF_HOSTED_FN("entries", "$MapEntries", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "$MapEntries", 0, 0), JS_FS_END};
 
 const JSPropertySpec MapObject::staticProperties[] = {
-    JS_SELF_HOSTED_SYM_GET(species, "MapSpecies", 0), JS_PS_END};
+    JS_SELF_HOSTED_SYM_GET(species, "$MapSpecies", 0), JS_PS_END};
 
 template <class Range>
 static void TraceKey(Range& r, const HashableValue& key, JSTracer* trc) {
   HashableValue newKey = key.trace(trc);
 
   if (newKey.get() != key.get()) {
-    // The hash function only uses the bits of the Value, so it is safe to
-    // rekey even when the object or string has been modified by the GC.
+    // The hash function must take account of the fact that the thing being
+    // hashed may have been moved by GC. This is only an issue for BigInt as for
+    // other types the hash function only uses the bits of the Value.
     r.rekeyFront(newKey);
   }
 }
@@ -617,7 +611,7 @@ MapObject* MapObject::create(JSContext* cx,
     return nullptr;
   }
 
-  mapObj->initPrivate(map.release());
+  InitObjectPrivate(mapObj, map.release(), MemoryUse::MapObjectTable);
   mapObj->initReservedSlot(NurseryKeysSlot, PrivateValue(nullptr));
   mapObj->initReservedSlot(HasNurseryMemorySlot,
                            JS::BooleanValue(insideNursery));
@@ -627,12 +621,14 @@ MapObject* MapObject::create(JSContext* cx,
 void MapObject::finalize(FreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
   if (ValueMap* map = obj->as<MapObject>().getData()) {
-    fop->delete_(map);
+    fop->delete_(obj, map, MemoryUse::MapObjectTable);
   }
 }
 
-/* static */ void MapObject::sweepAfterMinorGC(FreeOp* fop, MapObject* mapobj) {
-  if (IsInsideNursery(mapobj) && !IsForwarded(mapobj)) {
+/* static */
+void MapObject::sweepAfterMinorGC(FreeOp* fop, MapObject* mapobj) {
+  bool wasInsideNursery = IsInsideNursery(mapobj);
+  if (wasInsideNursery && !IsForwarded(mapobj)) {
     finalize(fop, mapobj);
     return;
   }
@@ -640,6 +636,10 @@ void MapObject::finalize(FreeOp* fop, JSObject* obj) {
   mapobj = MaybeForwarded(mapobj);
   mapobj->getData()->destroyNurseryRanges();
   SetHasNurseryMemory(mapobj, false);
+
+  if (wasInsideNursery) {
+    AddCellMemory(mapobj, sizeof(ValueMap), MemoryUse::MapObjectTable);
+  }
 }
 
 bool MapObject::construct(JSContext* cx, unsigned argc, Value* vp) {
@@ -650,7 +650,7 @@ bool MapObject::construct(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Map, &proto)) {
     return false;
   }
 
@@ -912,7 +912,6 @@ static const ClassOps SetIteratorObjectClassOps = {nullptr, /* addProperty */
                                                    SetIteratorObject::finalize};
 
 static const ClassExtension SetIteratorObjectClassExtension = {
-    nullptr, /* weakmapKeyDelegateOp */
     SetIteratorObject::objectMoved};
 
 const Class SetIteratorObject::class_ = {
@@ -941,8 +940,9 @@ inline SetObject::IteratorKind SetIteratorObject::kind() const {
   return SetObject::IteratorKind(i);
 }
 
-/* static */ bool GlobalObject::initSetIteratorProto(
-    JSContext* cx, Handle<GlobalObject*> global) {
+/* static */
+bool GlobalObject::initSetIteratorProto(JSContext* cx,
+                                        Handle<GlobalObject*> global) {
   Rooted<JSObject*> base(
       cx, GlobalObject::getOrCreateIteratorPrototype(cx, global));
   if (!base) {
@@ -1088,7 +1088,8 @@ bool SetIteratorObject::next(Handle<SetIteratorObject*> setIterator,
   return false;
 }
 
-/* static */ JSObject* SetIteratorObject::createResult(JSContext* cx) {
+/* static */
+JSObject* SetIteratorObject::createResult(JSContext* cx) {
   RootedArrayObject resultObj(
       cx, NewDenseFullyAllocatedArray(cx, 1, nullptr, TenuredObject));
   if (!resultObj) {
@@ -1159,12 +1160,12 @@ const JSFunctionSpec SetObject::methods[] = {
     JS_SELF_HOSTED_FN("forEach", "SetForEach", 2, 0),
     // SetValues only exists to preseve the equal identity of
     // values, keys and @@iterator.
-    JS_SELF_HOSTED_FN("values", "SetValues", 0, 0),
-    JS_SELF_HOSTED_FN("keys", "SetValues", 0, 0),
-    JS_SELF_HOSTED_SYM_FN(iterator, "SetValues", 0, 0), JS_FS_END};
+    JS_SELF_HOSTED_FN("values", "$SetValues", 0, 0),
+    JS_SELF_HOSTED_FN("keys", "$SetValues", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "$SetValues", 0, 0), JS_FS_END};
 
 const JSPropertySpec SetObject::staticProperties[] = {
-    JS_SELF_HOSTED_SYM_GET(species, "SetSpecies", 0), JS_PS_END};
+    JS_SELF_HOSTED_SYM_GET(species, "$SetSpecies", 0), JS_PS_END};
 
 bool SetObject::keys(JSContext* cx, HandleObject obj,
                      JS::MutableHandle<GCVector<JS::Value>> keys) {
@@ -1224,7 +1225,7 @@ SetObject* SetObject::create(JSContext* cx,
     return nullptr;
   }
 
-  obj->initPrivate(set.release());
+  InitObjectPrivate(obj, set.release(), MemoryUse::MapObjectTable);
   obj->initReservedSlot(NurseryKeysSlot, PrivateValue(nullptr));
   obj->initReservedSlot(HasNurseryMemorySlot, JS::BooleanValue(insideNursery));
   return obj;
@@ -1243,12 +1244,14 @@ void SetObject::finalize(FreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
   SetObject* setobj = static_cast<SetObject*>(obj);
   if (ValueSet* set = setobj->getData()) {
-    fop->delete_(set);
+    fop->delete_(obj, set, MemoryUse::MapObjectTable);
   }
 }
 
-/* static */ void SetObject::sweepAfterMinorGC(FreeOp* fop, SetObject* setobj) {
-  if (IsInsideNursery(setobj) && !IsForwarded(setobj)) {
+/* static */
+void SetObject::sweepAfterMinorGC(FreeOp* fop, SetObject* setobj) {
+  bool wasInsideNursery = IsInsideNursery(setobj);
+  if (wasInsideNursery && !IsForwarded(setobj)) {
     finalize(fop, setobj);
     return;
   }
@@ -1256,6 +1259,10 @@ void SetObject::finalize(FreeOp* fop, JSObject* obj) {
   setobj = MaybeForwarded(setobj);
   setobj->getData()->destroyNurseryRanges();
   SetHasNurseryMemory(setobj, false);
+
+  if (wasInsideNursery) {
+    AddCellMemory(setobj, sizeof(ValueSet), MemoryUse::MapObjectTable);
+  }
 }
 
 bool SetObject::isBuiltinAdd(HandleValue add) {
@@ -1270,7 +1277,7 @@ bool SetObject::construct(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Set, &proto)) {
     return false;
   }
 

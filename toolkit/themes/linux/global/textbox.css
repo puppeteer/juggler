@@ -21,8 +21,7 @@ textbox {
   color: -moz-FieldText;
 }
 
-html|*.textbox-input,
-html|*.textbox-textarea {
+html|*.textbox-input {
   -moz-appearance: none;
   margin: 0;
   border: none;
@@ -33,9 +32,6 @@ html|*.textbox-textarea {
   text-shadow: inherit;
   box-sizing: border-box;
   -moz-box-flex: 1;
-}
-
-html|*.textbox-input {
   text-align: inherit;
 }
 
@@ -68,14 +64,13 @@ textbox.plain {
   border: none !important;
 }
 
-textbox.plain html|*.textbox-input,
-textbox.plain html|*.textbox-textarea {
+textbox.plain html|*.textbox-input {
   padding: 0px !important;
 }
 
 /* ::::: search textbox ::::: */
 
-textbox:not([searchbutton]) > moz-input-box > .textbox-search-sign {
+textbox:not([searchbutton]) > .textbox-search-sign {
   list-style-image: url(chrome://global/skin/icons/search-textbox.svg);
   margin-inline-end: 5px;
 }
@@ -85,7 +80,7 @@ textbox:not([searchbutton]) > moz-input-box > .textbox-search-sign {
 }
 
 .textbox-search-clear {
-  list-style-image: url(moz-icon://stock/gtk-clear?size=menu);
+  list-style-image: url(chrome://global/skin/icons/searchfield-cancel.svg);
 }
 
 .textbox-search-icon[searchbutton]:not([disabled]) ,

@@ -24,7 +24,6 @@
 #include "nsIXULBrowserWindow.h"
 #include "nsIPrincipal.h"
 #include "nsIURIFixup.h"
-#include "nsCDefaultURIFixup.h"
 #include "nsIWebNavigation.h"
 #include "nsDocShellCID.h"
 #include "nsIExternalURLHandlerService.h"
@@ -32,14 +31,16 @@
 #include "nsIWidget.h"
 #include "nsWindowWatcher.h"
 #include "mozilla/BrowserElementParent.h"
+#include "mozilla/Components.h"
 #include "mozilla/NullPrincipal.h"
+#include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
 
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIURI.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #if defined(XP_MACOSX)
-#include "nsThreadUtils.h"
+#  include "nsThreadUtils.h"
 #endif
 
 #include "mozilla/Preferences.h"
@@ -180,21 +181,21 @@ nsContentTreeOwner::GetPrimaryContentShell(nsIDocShellTreeItem** aShell) {
 }
 
 NS_IMETHODIMP
-nsContentTreeOwner::TabParentAdded(nsITabParent* aTab, bool aPrimary) {
+nsContentTreeOwner::RemoteTabAdded(nsIRemoteTab* aTab, bool aPrimary) {
   NS_ENSURE_STATE(mXULWindow);
-  return mXULWindow->TabParentAdded(aTab, aPrimary);
+  return mXULWindow->RemoteTabAdded(aTab, aPrimary);
 }
 
 NS_IMETHODIMP
-nsContentTreeOwner::TabParentRemoved(nsITabParent* aTab) {
+nsContentTreeOwner::RemoteTabRemoved(nsIRemoteTab* aTab) {
   NS_ENSURE_STATE(mXULWindow);
-  return mXULWindow->TabParentRemoved(aTab);
+  return mXULWindow->RemoteTabRemoved(aTab);
 }
 
 NS_IMETHODIMP
-nsContentTreeOwner::GetPrimaryTabParent(nsITabParent** aTab) {
+nsContentTreeOwner::GetPrimaryRemoteTab(nsIRemoteTab** aTab) {
   NS_ENSURE_STATE(mXULWindow);
-  return mXULWindow->GetPrimaryTabParent(aTab);
+  return mXULWindow->GetPrimaryRemoteTab(aTab);
 }
 
 NS_IMETHODIMP
@@ -361,7 +362,8 @@ NS_IMETHODIMP nsContentTreeOwner::OnBeforeLinkTraversal(
 
 NS_IMETHODIMP nsContentTreeOwner::ShouldLoadURI(
     nsIDocShell* aDocShell, nsIURI* aURI, nsIURI* aReferrer, bool aHasPostData,
-    nsIPrincipal* aTriggeringPrincipal, bool* _retval) {
+    nsIPrincipal* aTriggeringPrincipal, nsIContentSecurityPolicy* aCsp,
+    bool* _retval) {
   NS_ENSURE_STATE(mXULWindow);
 
   nsCOMPtr<nsIXULBrowserWindow> xulBrowserWindow;
@@ -370,7 +372,7 @@ NS_IMETHODIMP nsContentTreeOwner::ShouldLoadURI(
   if (xulBrowserWindow)
     return xulBrowserWindow->ShouldLoadURI(aDocShell, aURI, aReferrer,
                                            aHasPostData, aTriggeringPrincipal,
-                                           _retval);
+                                           aCsp, _retval);
 
   *_retval = true;
   return NS_OK;
@@ -385,7 +387,8 @@ NS_IMETHODIMP nsContentTreeOwner::ShouldLoadURIInThisProcess(nsIURI* aURI,
 
 NS_IMETHODIMP nsContentTreeOwner::ReloadInFreshProcess(
     nsIDocShell* aDocShell, nsIURI* aURI, nsIURI* aReferrer,
-    nsIPrincipal* aTriggeringPrincipal, uint32_t aLoadFlags, bool* aRetVal) {
+    nsIPrincipal* aTriggeringPrincipal, uint32_t aLoadFlags,
+    nsIContentSecurityPolicy* aCsp, bool* aRetVal) {
   NS_WARNING("Cannot reload in fresh process from a nsContentTreeOwner!");
   *aRetVal = false;
   return NS_OK;
@@ -649,8 +652,7 @@ NS_IMETHODIMP nsContentTreeOwner::SetTitle(const nsAString& aTitle) {
       //
       nsCOMPtr<nsIDocShellTreeItem> dsitem;
       GetPrimaryContentShell(getter_AddRefs(dsitem));
-      nsCOMPtr<nsIScriptObjectPrincipal> doc =
-          do_QueryInterface(dsitem ? dsitem->GetDocument() : nullptr);
+      RefPtr<dom::Document> doc = dsitem ? dsitem->GetDocument() : nullptr;
       if (doc) {
         nsCOMPtr<nsIURI> uri;
         nsIPrincipal* principal = doc->GetPrincipal();
@@ -660,7 +662,7 @@ NS_IMETHODIMP nsContentTreeOwner::SetTitle(const nsAString& aTitle) {
             //
             // remove any user:pass information
             //
-            nsCOMPtr<nsIURIFixup> fixup(do_GetService(NS_URIFIXUP_CONTRACTID));
+            nsCOMPtr<nsIURIFixup> fixup(components::URIFixup::Service());
             if (fixup) {
               nsCOMPtr<nsIURI> tmpuri;
               nsresult rv =
@@ -684,7 +686,7 @@ NS_IMETHODIMP nsContentTreeOwner::SetTitle(const nsAString& aTitle) {
         }
       }
     }
-    nsIDocument* document = docShellElement->OwnerDoc();
+    dom::Document* document = docShellElement->OwnerDoc();
     ErrorResult rv;
     document->SetTitle(title, rv);
     return rv.StealNSResult();
@@ -701,11 +703,13 @@ nsContentTreeOwner::ProvideWindow(
     mozIDOMWindowProxy* aParent, uint32_t aChromeFlags, bool aCalledFromJS,
     bool aPositionSpecified, bool aSizeSpecified, nsIURI* aURI,
     const nsAString& aName, const nsACString& aFeatures, bool aForceNoOpener,
-    nsDocShellLoadState* aLoadState, bool* aWindowIsNew,
+    bool aForceNoReferrer, nsDocShellLoadState* aLoadState, bool* aWindowIsNew,
     mozIDOMWindowProxy** aReturn) {
   NS_ENSURE_ARG_POINTER(aParent);
 
-  auto* parent = nsPIDOMWindowOuter::From(aParent);
+  auto* parentWin = nsPIDOMWindowOuter::From(aParent);
+  dom::BrowsingContext* parent =
+      parentWin ? parentWin->GetBrowsingContext() : nullptr;
 
   *aReturn = nullptr;
 
@@ -760,7 +764,8 @@ nsContentTreeOwner::ProvideWindow(
   }
 
   int32_t openLocation = nsWindowWatcher::GetWindowOpenLocation(
-      parent, aChromeFlags, aCalledFromJS, aPositionSpecified, aSizeSpecified);
+      parentWin, aChromeFlags, aCalledFromJS, aPositionSpecified,
+      aSizeSpecified);
 
   if (openLocation != nsIBrowserDOMWindow::OPEN_NEWTAB &&
       openLocation != nsIBrowserDOMWindow::OPEN_CURRENTWINDOW) {
@@ -792,6 +797,9 @@ nsContentTreeOwner::ProvideWindow(
     if (aForceNoOpener) {
       flags |= nsIBrowserDOMWindow::OPEN_NO_OPENER;
     }
+    if (aForceNoReferrer) {
+      flags |= nsIBrowserDOMWindow::OPEN_NO_REFERRER;
+    }
 
     // Get a new rendering area from the browserDOMWin.
     // Since we are not loading any URI, we follow the principle of least
@@ -801,8 +809,8 @@ nsContentTreeOwner::ProvideWindow(
     // ourselves.
     RefPtr<NullPrincipal> nullPrincipal =
         NullPrincipal::CreateWithoutOriginAttributes();
-    return browserDOMWin->CreateContentWindow(aURI, aParent, openLocation,
-                                              flags, nullPrincipal, aReturn);
+    return browserDOMWin->CreateContentWindow(
+        aURI, aParent, openLocation, flags, nullPrincipal, nullptr, aReturn);
   }
 }
 

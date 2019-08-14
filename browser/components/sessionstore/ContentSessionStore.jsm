@@ -14,20 +14,16 @@ function debug(msg) {
   Services.console.logStringMessage("SessionStoreContent: " + msg);
 }
 
-ChromeUtils.defineModuleGetter(this, "FormData",
-  "resource://gre/modules/FormData.jsm");
-
-ChromeUtils.defineModuleGetter(this, "ContentRestore",
-  "resource:///modules/sessionstore/ContentRestore.jsm");
-ChromeUtils.defineModuleGetter(this, "SessionHistory",
-  "resource://gre/modules/sessionstore/SessionHistory.jsm");
-ChromeUtils.defineModuleGetter(this, "SessionStorage",
-  "resource:///modules/sessionstore/SessionStorage.jsm");
-
-ChromeUtils.defineModuleGetter(this, "Utils",
-  "resource://gre/modules/sessionstore/Utils.jsm");
-const ssu = Cc["@mozilla.org/browser/sessionstore/utils;1"]
-              .getService(Ci.nsISessionStoreUtils);
+ChromeUtils.defineModuleGetter(
+  this,
+  "ContentRestore",
+  "resource:///modules/sessionstore/ContentRestore.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "SessionHistory",
+  "resource://gre/modules/sessionstore/SessionHistory.jsm"
+);
 
 // A bound to the size of data to store for DOM Storage.
 const DOM_STORAGE_LIMIT_PREF = "browser.sessionstore.dom_storage_limit";
@@ -40,15 +36,6 @@ const PREF_INTERVAL = "browser.sessionstore.interval";
 
 const kNoIndex = Number.MAX_SAFE_INTEGER;
 const kLastIndex = Number.MAX_SAFE_INTEGER - 1;
-
-/**
- * A function that will recursively call |cb| to collect data for all
- * non-dynamic frames in the current frame/docShell tree.
- */
-function mapFrameTree(mm, callback) {
-  let [data] = Utils.mapFrameTree(mm.content, callback);
-  return data;
-}
 
 class Handler {
   constructor(store) {
@@ -87,7 +74,10 @@ class StateChangeNotifier extends Handler {
     this._observers = new Set();
     let ifreq = this.mm.docShell.QueryInterface(Ci.nsIInterfaceRequestor);
     let webProgress = ifreq.getInterface(Ci.nsIWebProgress);
-    webProgress.addProgressListener(this, Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT);
+    webProgress.addProgressListener(
+      this,
+      Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT
+    );
   }
 
   /**
@@ -139,9 +129,10 @@ class StateChangeNotifier extends Handler {
     }
   }
 }
-StateChangeNotifier.prototype.QueryInterface =
-  ChromeUtils.generateQI([Ci.nsIWebProgressListener,
-                          Ci.nsISupportsWeakReference]);
+StateChangeNotifier.prototype.QueryInterface = ChromeUtils.generateQI([
+  Ci.nsIWebProgressListener,
+  Ci.nsISupportsWeakReference,
+]);
 
 /**
  * Listens for and handles content events that we need for the
@@ -151,11 +142,16 @@ class EventListener extends Handler {
   constructor(store) {
     super(store);
 
-    ssu.addDynamicFrameFilteredListener(this.mm, "load", this, true);
+    SessionStoreUtils.addDynamicFrameFilteredListener(
+      this.mm,
+      "load",
+      this,
+      true
+    );
   }
 
   handleEvent(event) {
-    let {content} = this.mm;
+    let { content } = this.mm;
 
     // Ignore load events from subframes.
     if (event.target != content.document) {
@@ -163,8 +159,10 @@ class EventListener extends Handler {
     }
 
     if (content.document.documentURI.startsWith("about:reader")) {
-      if (event.type == "load" &&
-          !content.document.body.classList.contains("loaded")) {
+      if (
+        event.type == "load" &&
+        !content.document.body.classList.contains("loaded")
+      ) {
         // Don't restore the scroll position of an about:reader page at this
         // point; listen for the custom event dispatched from AboutReader.jsm.
         content.addEventListener("AboutReaderContentReady", this);
@@ -198,7 +196,6 @@ class SessionHistoryListener extends Handler {
 
     this._fromIdx = kNoIndex;
 
-
     // The state change observer is needed to handle initial subframe loads.
     // It will redundantly invalidate with the SHistoryListener in some cases
     // but these invalidations are very cheap.
@@ -209,7 +206,8 @@ class SessionHistoryListener extends Handler {
     // waiting to add the listener later because these notifications are cheap.
     // We will likely only collect once since we are batching collection on
     // a delay.
-    this.mm.docShell.QueryInterface(Ci.nsIWebNavigation)
+    this.mm.docShell
+      .QueryInterface(Ci.nsIWebNavigation)
       .sessionHistory.legacySHistory.addSHistoryListener(this);
 
     // Collect data if we start with a non-empty shistory.
@@ -229,7 +227,8 @@ class SessionHistoryListener extends Handler {
   }
 
   uninit() {
-    let sessionHistory = this.mm.docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
+    let sessionHistory = this.mm.docShell.QueryInterface(Ci.nsIWebNavigation)
+      .sessionHistory;
     if (sessionHistory) {
       sessionHistory.legacySHistory.removeSHistoryListener(this);
     }
@@ -291,64 +290,28 @@ class SessionHistoryListener extends Handler {
     this.collectFrom(oldIndex);
   }
 
-  OnHistoryGotoIndex(index, gotoURI) {
+  OnHistoryGotoIndex() {
     // We ought to collect the previously current entry as well, see bug 1350567.
     this.collectFrom(kLastIndex);
   }
 
-  OnHistoryPurge(numEntries) {
+  OnHistoryPurge() {
     this.collect();
   }
 
-  OnHistoryReload(reloadURI, reloadFlags) {
+  OnHistoryReload() {
     this.collect();
     return true;
   }
 
-  OnHistoryReplaceEntry(index) {
+  OnHistoryReplaceEntry() {
     this.collect();
   }
 }
-SessionHistoryListener.prototype.QueryInterface =
-  ChromeUtils.generateQI([Ci.nsISHistoryListener,
-                          Ci.nsISupportsWeakReference]);
-
-/**
- * Listens for scroll position changes. Whenever the user scrolls the top-most
- * frame we update the scroll position and will restore it when requested.
- *
- * Causes a SessionStore:update message to be sent that contains the current
- * scroll positions as a tree of strings. If no frame of the whole frame tree
- * is scrolled this will return null so that we don't tack a property onto
- * the tabData object in the parent process.
- *
- * Example:
- *   {scroll: "100,100", children: [null, null, {scroll: "200,200"}]}
- */
-class ScrollPositionListener extends Handler {
-  constructor(store) {
-    super(store);
-
-    ssu.addDynamicFrameFilteredListener(this.mm, "scroll", this, false);
-    this.stateChangeNotifier.addObserver(this);
-  }
-
-  handleEvent() {
-    this.messageQueue.push("scroll", () => this.collect());
-  }
-
-  onPageLoadCompleted() {
-    this.messageQueue.push("scroll", () => this.collect());
-  }
-
-  onPageLoadStarted() {
-    this.messageQueue.push("scroll", () => null);
-  }
-
-  collect() {
-    return mapFrameTree(this.mm, ssu.collectScrollPosition.bind(ssu));
-  }
-}
+SessionHistoryListener.prototype.QueryInterface = ChromeUtils.generateQI([
+  Ci.nsISHistoryListener,
+  Ci.nsISupportsWeakReference,
+]);
 
 /**
  * Listens for changes to input elements. Whenever the value of an input
@@ -371,7 +334,12 @@ class FormDataListener extends Handler {
   constructor(store) {
     super(store);
 
-    ssu.addDynamicFrameFilteredListener(this.mm, "input", this, true);
+    SessionStoreUtils.addDynamicFrameFilteredListener(
+      this.mm,
+      "input",
+      this,
+      true
+    );
     this.stateChangeNotifier.addObserver(this);
   }
 
@@ -384,40 +352,7 @@ class FormDataListener extends Handler {
   }
 
   collect() {
-    return mapFrameTree(this.mm, FormData.collect);
-  }
-}
-
-/**
- * Listens for changes to docShell capabilities. Whenever a new load is started
- * we need to re-check the list of capabilities and send message when it has
- * changed.
- *
- * Causes a SessionStore:update message to be sent that contains the currently
- * disabled docShell capabilities (all nsIDocShell.allow* properties set to
- * false) as a string - i.e. capability names separate by commas.
- */
-class DocShellCapabilitiesListener extends Handler {
-  constructor(store) {
-    super(store);
-
-    /**
-     * This field is used to compare the last docShell capabilities to the ones
-     * that have just been collected. If nothing changed we won't send a message.
-     */
-    this._latestCapabilities = "";
-
-    this.stateChangeNotifier.addObserver(this);
-  }
-
-  onPageLoadStarted() {
-    let caps = ssu.collectDocShellCapabilities(this.mm.docShell);
-
-    // Send new data only when the capability list changes.
-    if (caps != this._latestCapabilities) {
-      this._latestCapabilities = caps;
-      this.messageQueue.push("disallow", () => caps || null);
-    }
+    return SessionStoreUtils.collectFormData(this.mm.content);
   }
 }
 
@@ -444,13 +379,13 @@ class SessionStorageListener extends Handler {
     // The event listener waiting for MozSessionStorageChanged events.
     this._listener = null;
 
-    Services.obs.addObserver(this, "browser:purge-domain-data");
+    Services.obs.addObserver(this, "browser:purge-sessionStorage");
     this.stateChangeNotifier.addObserver(this);
     this.resetEventListener();
   }
 
   uninit() {
-    Services.obs.removeObserver(this, "browser:purge-domain-data");
+    Services.obs.removeObserver(this, "browser:purge-sessionStorage");
   }
 
   observe() {
@@ -465,15 +400,22 @@ class SessionStorageListener extends Handler {
 
   resetEventListener() {
     if (!this._listener) {
-      this._listener =
-        ssu.addDynamicFrameFilteredListener(this.mm, "MozSessionStorageChanged",
-                                            this, true);
+      this._listener = SessionStoreUtils.addDynamicFrameFilteredListener(
+        this.mm,
+        "MozSessionStorageChanged",
+        this,
+        true
+      );
     }
   }
 
   removeEventListener() {
-    ssu.removeDynamicFrameFilteredListener(this.mm, "MozSessionStorageChanged",
-                                           this._listener, true);
+    SessionStoreUtils.removeDynamicFrameFilteredListener(
+      this.mm,
+      "MozSessionStorageChanged",
+      this._listener,
+      true
+    );
     this._listener = null;
   }
 
@@ -482,7 +424,7 @@ class SessionStorageListener extends Handler {
       return;
     }
 
-    let {content} = this.mm;
+    let { content } = this.mm;
 
     // How much data does DOMSessionStorage contain?
     let usage = content.windowUtils.getStorageUsage(event.storageArea);
@@ -496,7 +438,7 @@ class SessionStorageListener extends Handler {
       return;
     }
 
-    let {url, key, newValue} = event;
+    let { url, key, newValue } = event;
     let uri = Services.io.newURI(url);
     let domain = uri.prePath;
     if (!this._changes) {
@@ -530,13 +472,16 @@ class SessionStorageListener extends Handler {
       return;
     }
 
-    let {content} = this.mm;
+    let { content } = this.mm;
 
     // We need the entire session storage, let's reset the pending individual change
     // messages.
     this.resetChanges();
 
-    this.messageQueue.push("storage", () => SessionStorage.collect(content));
+    this.messageQueue.push("storage", () => {
+      let data = SessionStoreUtils.collectSessionStorage(content);
+      return Object.keys(data).length ? data : null;
+    });
   }
 
   onPageLoadCompleted() {
@@ -548,38 +493,6 @@ class SessionStorageListener extends Handler {
     this.collect();
   }
 }
-
-/**
- * Listen for changes to the privacy status of the tab.
- * By definition, tabs start in non-private mode.
- *
- * Causes a SessionStore:update message to be sent for
- * field "isPrivate". This message contains
- *  |true| if the tab is now private
- *  |null| if the tab is now public - the field is therefore
- *  not saved.
- */
-class PrivacyListener extends Handler {
-  constructor(store) {
-    super(store);
-
-    this.mm.docShell.addWeakPrivacyTransitionObserver(this);
-
-    // Check that value at startup as it might have
-    // been set before the frame script was loaded.
-    if (this.mm.docShell.QueryInterface(Ci.nsILoadContext).usePrivateBrowsing) {
-      this.messageQueue.push("isPrivate", () => true);
-    }
-  }
-
-  // Ci.nsIPrivacyTransitionObserver
-  privateModeChanged(enabled) {
-    this.messageQueue.push("isPrivate", () => enabled || null);
-  }
-}
-PrivacyListener.prototype.QueryInterface =
-  ChromeUtils.generateQI([Ci.nsIPrivacyTransitionObserver,
-                          Ci.nsISupportsWeakReference]);
 
 /**
  * A message queue that takes collected data and will take care of sending it
@@ -635,11 +548,8 @@ class MessageQueue extends Handler {
      */
     this._idleScheduled = false;
 
-
-    this.timeoutDisabled =
-      Services.prefs.getBoolPref(TIMEOUT_DISABLED_PREF);
-    this._timeoutWaitIdlePeriodMs =
-      Services.prefs.getIntPref(PREF_INTERVAL);
+    this.timeoutDisabled = Services.prefs.getBoolPref(TIMEOUT_DISABLED_PREF);
+    this._timeoutWaitIdlePeriodMs = Services.prefs.getIntPref(PREF_INTERVAL);
 
     Services.prefs.addObserver(TIMEOUT_DISABLED_PREF, this);
     Services.prefs.addObserver(PREF_INTERVAL, this);
@@ -689,12 +599,14 @@ class MessageQueue extends Handler {
     if (topic == "nsPref:changed") {
       switch (data) {
         case TIMEOUT_DISABLED_PREF:
-          this.timeoutDisabled =
-            Services.prefs.getBoolPref(TIMEOUT_DISABLED_PREF);
+          this.timeoutDisabled = Services.prefs.getBoolPref(
+            TIMEOUT_DISABLED_PREF
+          );
           break;
         case PREF_INTERVAL:
-          this._timeoutWaitIdlePeriodMs =
-            Services.prefs.getIntPref(PREF_INTERVAL);
+          this._timeoutWaitIdlePeriodMs = Services.prefs.getIntPref(
+            PREF_INTERVAL
+          );
           break;
         default:
           debug("received unknown message '" + data + "'");
@@ -720,7 +632,10 @@ class MessageQueue extends Handler {
     if (!this._timeout && !this._timeoutDisabled) {
       // Wait a little before sending the message to batch multiple changes.
       this._timeout = setTimeoutWithTarget(
-        () => this.sendWhenIdle(), this.BATCH_DELAY_MS, this.mm.tabEventTarget);
+        () => this.sendWhenIdle(),
+        this.BATCH_DELAY_MS,
+        this.mm.tabEventTarget
+      );
     }
   }
 
@@ -739,7 +654,10 @@ class MessageQueue extends Handler {
     }
 
     if (deadline) {
-      if (deadline.didTimeout || deadline.timeRemaining() > this.NEEDED_IDLE_PERIOD_MS) {
+      if (
+        deadline.didTimeout ||
+        deadline.timeRemaining() > this.NEEDED_IDLE_PERIOD_MS
+      ) {
         this.send();
         return;
       }
@@ -747,8 +665,9 @@ class MessageQueue extends Handler {
       // Bail out if there's a pending run.
       return;
     }
-    ChromeUtils.idleDispatch((deadline_) => this.sendWhenIdle(deadline_),
-                             {timeout: this._timeoutWaitIdlePeriodMs});
+    ChromeUtils.idleDispatch(deadline_ => this.sendWhenIdle(deadline_), {
+      timeout: this._timeoutWaitIdlePeriodMs,
+    });
     this._idleScheduled = true;
   }
 
@@ -794,13 +713,16 @@ class MessageQueue extends Handler {
     try {
       // Send all data to the parent process.
       this.mm.sendAsyncMessage("SessionStore:update", {
-        data, flushID,
+        data,
+        flushID,
         isFinal: options.isFinal || false,
         epoch: this.store.epoch,
       });
     } catch (ex) {
       if (ex && ex.result == Cr.NS_ERROR_OUT_OF_MEMORY) {
-        Services.telemetry.getHistogramById("FX_SESSION_RESTORE_SEND_UPDATE_CAUSED_OOM").add(1);
+        Services.telemetry
+          .getHistogramById("FX_SESSION_RESTORE_SEND_UPDATE_CAUSED_OOM")
+          .add(1);
         this.mm.sendAsyncMessage("SessionStore:error");
       }
     }
@@ -828,20 +750,16 @@ class ContentSessionStore {
 
     this.contentRestoreInitialized = false;
 
-    XPCOMUtils.defineLazyGetter(this, "contentRestore",
-                                () => {
-                                  this.contentRestoreInitialized = true;
-                                  return new ContentRestore(mm);
-                                });
+    XPCOMUtils.defineLazyGetter(this, "contentRestore", () => {
+      this.contentRestoreInitialized = true;
+      return new ContentRestore(mm);
+    });
 
     this.handlers = [
       new EventListener(this),
       new FormDataListener(this),
       new SessionHistoryListener(this),
       new SessionStorageListener(this),
-      new ScrollPositionListener(this),
-      new DocShellCapabilitiesListener(this),
-      new PrivacyListener(this),
       this.stateChangeNotifier,
       this.messageQueue,
     ];
@@ -854,7 +772,7 @@ class ContentSessionStore {
     mm.addEventListener("unload", this);
   }
 
-  receiveMessage({name, data}) {
+  receiveMessage({ name, data }) {
     // The docShell might be gone. Don't process messages,
     // that will just lead to errors anyway.
     if (!this.mm.docShell) {
@@ -874,11 +792,6 @@ class ContentSessionStore {
         this.restoreHistory(data);
         break;
       case "SessionStore:restoreTabContent":
-        if (data.isRemotenessUpdate) {
-          let histogram = Services.telemetry.getKeyedHistogramById("FX_TAB_REMOTE_NAVIGATION_DELAY_MS");
-          histogram.add("SessionStore:restoreTabContent",
-                        Services.telemetry.msSystemNow() - data.requestTime);
-        }
         this.restoreTabContent(data);
         break;
       case "SessionStore:resetRestore":
@@ -896,7 +809,7 @@ class ContentSessionStore {
     }
   }
 
-  restoreHistory({epoch, tabData, loadArguments, isRemotenessUpdate}) {
+  restoreHistory({ epoch, tabData, loadArguments, isRemotenessUpdate }) {
     this.contentRestore.restoreHistory(tabData, loadArguments, {
       // Note: The callbacks passed here will only be used when a load starts
       // that was not initiated by sessionstore itself. This can happen when
@@ -905,13 +818,17 @@ class ContentSessionStore {
 
       onLoadStarted: () => {
         // Notify the parent that the tab is no longer pending.
-        this.mm.sendAsyncMessage("SessionStore:restoreTabContentStarted", {epoch});
+        this.mm.sendAsyncMessage("SessionStore:restoreTabContentStarted", {
+          epoch,
+        });
       },
 
       onLoadFinished: () => {
         // Tell SessionStore.jsm that it may want to restore some more tabs,
         // since it restores a max of MAX_CONCURRENT_TAB_RESTORES at a time.
-        this.mm.sendAsyncMessage("SessionStore:restoreTabContentComplete", {epoch});
+        this.mm.sendAsyncMessage("SessionStore:restoreTabContentComplete", {
+          epoch,
+        });
       },
     });
 
@@ -926,35 +843,53 @@ class ContentSessionStore {
       // For remote tabs, because all nsIWebProgress notifications are sent
       // asynchronously using messages, we get the same-order guarantees of the
       // message manager, and can use an async message.
-      this.mm.sendSyncMessage("SessionStore:restoreHistoryComplete", {epoch, isRemotenessUpdate});
+      this.mm.sendSyncMessage("SessionStore:restoreHistoryComplete", {
+        epoch,
+        isRemotenessUpdate,
+      });
     } else {
-      this.mm.sendAsyncMessage("SessionStore:restoreHistoryComplete", {epoch, isRemotenessUpdate});
+      this.mm.sendAsyncMessage("SessionStore:restoreHistoryComplete", {
+        epoch,
+        isRemotenessUpdate,
+      });
     }
   }
 
-  restoreTabContent({loadArguments, isRemotenessUpdate, reason}) {
+  restoreTabContent({ loadArguments, isRemotenessUpdate, reason }) {
     let epoch = this.epoch;
 
     // We need to pass the value of didStartLoad back to SessionStore.jsm.
-    let didStartLoad = this.contentRestore.restoreTabContent(loadArguments, isRemotenessUpdate, () => {
-      // Tell SessionStore.jsm that it may want to restore some more tabs,
-      // since it restores a max of MAX_CONCURRENT_TAB_RESTORES at a time.
-      this.mm.sendAsyncMessage("SessionStore:restoreTabContentComplete", {epoch, isRemotenessUpdate});
-    });
+    let didStartLoad = this.contentRestore.restoreTabContent(
+      loadArguments,
+      isRemotenessUpdate,
+      () => {
+        // Tell SessionStore.jsm that it may want to restore some more tabs,
+        // since it restores a max of MAX_CONCURRENT_TAB_RESTORES at a time.
+        this.mm.sendAsyncMessage("SessionStore:restoreTabContentComplete", {
+          epoch,
+          isRemotenessUpdate,
+        });
+      }
+    );
 
     this.mm.sendAsyncMessage("SessionStore:restoreTabContentStarted", {
-      epoch, isRemotenessUpdate, reason,
+      epoch,
+      isRemotenessUpdate,
+      reason,
     });
 
     if (!didStartLoad) {
       // Pretend that the load succeeded so that event handlers fire correctly.
-      this.mm.sendAsyncMessage("SessionStore:restoreTabContentComplete", {epoch, isRemotenessUpdate});
+      this.mm.sendAsyncMessage("SessionStore:restoreTabContentComplete", {
+        epoch,
+        isRemotenessUpdate,
+      });
     }
   }
 
-  flush({id}) {
+  flush({ id }) {
     // Flush the message queue, send the latest updates.
-    this.messageQueue.send({flushID: id});
+    this.messageQueue.send({ flushID: id });
   }
 
   handleEvent(event) {
@@ -968,7 +903,7 @@ class ContentSessionStore {
   onUnload() {
     // Upon frameLoader destruction, send a final update message to
     // the parent and flush all data currently held in the child.
-    this.messageQueue.send({isFinal: true});
+    this.messageQueue.send({ isFinal: true });
 
     // If we're browsing from the tab crashed UI to a URI that causes the tab
     // to go remote again, we catch this in the unload event handler, because
@@ -994,7 +929,7 @@ class ContentSessionStore {
   }
 
   handleRevivedTab() {
-    let {content} = this.mm;
+    let { content } = this.mm;
 
     if (!content) {
       this.mm.removeEventListener("pagehide", this);
@@ -1002,10 +937,14 @@ class ContentSessionStore {
     }
 
     if (content.document.documentURI.startsWith("about:tabcrashed")) {
-      if (Services.appinfo.processType != Services.appinfo.PROCESS_TYPE_DEFAULT) {
+      if (
+        Services.appinfo.processType != Services.appinfo.PROCESS_TYPE_DEFAULT
+      ) {
         // Sanity check - we'd better be loading this in a non-remote browser.
-        throw new Error("We seem to be navigating away from about:tabcrashed in " +
-                        "a non-remote browser. This should really never happen.");
+        throw new Error(
+          "We seem to be navigating away from about:tabcrashed in " +
+            "a non-remote browser. This should really never happen."
+        );
       }
 
       this.mm.removeEventListener("pagehide", this);
@@ -1015,4 +954,3 @@ class ContentSessionStore {
     }
   }
 }
-

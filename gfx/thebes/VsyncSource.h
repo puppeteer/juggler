@@ -59,6 +59,7 @@ class VsyncSource {
         CompositorVsyncDispatcher* aCompositorVsyncDispatcher);
     void RemoveCompositorVsyncDispatcher(
         CompositorVsyncDispatcher* aCompositorVsyncDispatcher);
+    void MoveListenersToNewSource(VsyncSource::Display& aNewDisplay);
     void NotifyRefreshTimerVsyncStatus(bool aEnable);
     virtual TimeDuration GetVsyncRate();
 
@@ -83,12 +84,14 @@ class VsyncSource {
   void RemoveCompositorVsyncDispatcher(
       CompositorVsyncDispatcher* aCompositorVsyncDispatcher);
 
+  void MoveListenersToNewSource(VsyncSource* aNewSource);
+
   RefPtr<RefreshTimerVsyncDispatcher> GetRefreshTimerVsyncDispatcher();
   virtual Display& GetGlobalDisplay() = 0;  // Works across all displays
   void Shutdown();
 
  protected:
-  virtual ~VsyncSource() {}
+  virtual ~VsyncSource() = default;
 };
 
 }  // namespace gfx

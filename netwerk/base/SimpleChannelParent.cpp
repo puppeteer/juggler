@@ -29,7 +29,8 @@ SimpleChannelParent::SetParentListener(HttpChannelParentListener* aListener) {
 }
 
 NS_IMETHODIMP
-SimpleChannelParent::NotifyTrackingProtectionDisabled() {
+SimpleChannelParent::NotifyChannelClassifierProtectionDisabled(
+    uint32_t aAcceptedReason) {
   // Nothing to do.
   return NS_OK;
 }
@@ -41,13 +42,21 @@ SimpleChannelParent::NotifyCookieAllowed() {
 }
 
 NS_IMETHODIMP
-SimpleChannelParent::NotifyTrackingCookieBlocked(uint32_t aRejectedReason) {
+SimpleChannelParent::NotifyCookieBlocked(uint32_t aRejectedReason) {
   // Nothing to do.
   return NS_OK;
 }
 
 NS_IMETHODIMP
-SimpleChannelParent::NotifyTrackingResource(bool aIsThirdParty) {
+SimpleChannelParent::NotifyClassificationFlags(uint32_t aClassificationFlags,
+                                               bool aIsThirdParty) {
+  // Nothing to do.
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+SimpleChannelParent::NotifyFlashPluginStateChanged(
+    nsIHttpChannel::FlashPluginState aState) {
   // Nothing to do.
   return NS_OK;
 }
@@ -61,6 +70,13 @@ SimpleChannelParent::SetClassifierMatchedInfo(const nsACString& aList,
 }
 
 NS_IMETHODIMP
+SimpleChannelParent::SetClassifierMatchedTrackingInfo(
+    const nsACString& aLists, const nsACString& aFullHashes) {
+  // nothing to do
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 SimpleChannelParent::Delete() {
   // Nothing to do.
   return NS_OK;
@@ -69,8 +85,7 @@ SimpleChannelParent::Delete() {
 void SimpleChannelParent::ActorDestroy(ActorDestroyReason aWhy) {}
 
 NS_IMETHODIMP
-SimpleChannelParent::OnStartRequest(nsIRequest* aRequest,
-                                    nsISupports* aContext) {
+SimpleChannelParent::OnStartRequest(nsIRequest* aRequest) {
   // We don't have a way to prevent nsBaseChannel from calling AsyncOpen on
   // the created nsSimpleChannel. We don't have anywhere to send the data in the
   // parent, so abort the binding.
@@ -78,8 +93,7 @@ SimpleChannelParent::OnStartRequest(nsIRequest* aRequest,
 }
 
 NS_IMETHODIMP
-SimpleChannelParent::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                                   nsresult aStatusCode) {
+SimpleChannelParent::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
   // See above.
   MOZ_ASSERT(NS_FAILED(aStatusCode));
   return NS_OK;
@@ -87,7 +101,6 @@ SimpleChannelParent::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
 
 NS_IMETHODIMP
 SimpleChannelParent::OnDataAvailable(nsIRequest* aRequest,
-                                     nsISupports* aContext,
                                      nsIInputStream* aInputStream,
                                      uint64_t aOffset, uint32_t aCount) {
   // See above.

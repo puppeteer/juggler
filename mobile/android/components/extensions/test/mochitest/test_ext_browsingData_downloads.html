@@ -3,7 +3,6 @@
 <head>
   <title>BrowsingData Settings test</title>
   <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script src="chrome://mochikit/content/tests/SimpleTest/AddTask.js"></script>
   <script src="chrome://mochikit/content/tests/SimpleTest/ExtensionTestUtils.js"></script>
   <script type="text/javascript" src="head.js"></script>
   <link rel="stylesheet" href="chrome://mochikit/contents/tests/SimpleTest/test.css"/>
@@ -13,7 +12,7 @@
 <script type="text/javascript">
 "use strict";
 
-var {Downloads} = ChromeUtils.import("resource://gre/modules/Downloads.jsm", {});
+var {Downloads} = ChromeUtils.import("resource://gre/modules/Downloads.jsm");
 
 const OLD_NAMES = {[Downloads.PUBLIC]: "old-public", [Downloads.PRIVATE]: "old-private"};
 const RECENT_NAMES = {[Downloads.PUBLIC]: "recent-public", [Downloads.PRIVATE]: "recent-private"};

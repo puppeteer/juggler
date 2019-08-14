@@ -1,12 +1,13 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-const URL = "http://mochi.test:8888/browser/toolkit/components/thumbnails/" +
-            "test/background_red.html?" + Date.now();
+const URL =
+  "http://mochi.test:8888/browser/toolkit/components/thumbnails/" +
+  "test/background_red.html?" +
+  Date.now();
 
 // Test PageThumbs API function getThumbnailPath
 function* runTests() {
-
   let path = PageThumbs.getThumbnailPath(URL);
   yield testIfExists(path, false, "Thumbnail file does not exist");
 
@@ -18,7 +19,6 @@ function* runTests() {
   is(path, expectedPath, "Thumbnail file has correct path");
 
   yield testIfExists(path, true, "Thumbnail file exists");
-
 }
 
 function createThumbnail(aURL) {

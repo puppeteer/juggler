@@ -31,7 +31,7 @@ class ParentActor : public Protocol {
   // Override this rather than ActorDestroy
   virtual void Destroy() {}
 
-  virtual mozilla::ipc::IPCResult RecvDestroy() override {
+  mozilla::ipc::IPCResult RecvDestroy() final {
     DestroyIfNeeded();
     Unused << Protocol::Send__delete__(this);
     return IPC_OK();
@@ -39,7 +39,7 @@ class ParentActor : public Protocol {
 
   typedef ipc::IProtocol::ActorDestroyReason Why;
 
-  virtual void ActorDestroy(Why) override { DestroyIfNeeded(); }
+  void ActorDestroy(Why) override { DestroyIfNeeded(); }
 
  protected:
   void DestroyIfNeeded() {

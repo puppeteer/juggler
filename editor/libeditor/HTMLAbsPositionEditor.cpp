@@ -12,6 +12,7 @@
 #include "TextEditUtils.h"
 #include "mozilla/EditAction.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextEditRules.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Element.h"
@@ -30,7 +31,7 @@
 #include "nsIDOMWindow.h"
 #include "nsIHTMLObjectResizer.h"
 #include "nsINode.h"
-#include "nsIPresShell.h"
+#include "nsIPrincipal.h"
 #include "nsISupportsImpl.h"
 #include "nsISupportsUtils.h"
 #include "nsLiteralString.h"
@@ -44,11 +45,12 @@ namespace mozilla {
 
 using namespace dom;
 
-nsresult HTMLEditor::SetSelectionToAbsoluteOrStatic(bool aEnabled) {
+nsresult HTMLEditor::SetSelectionToAbsoluteOrStaticAsAction(
+    bool aEnabled, nsIPrincipal* aPrincipal) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   AutoEditActionDataSetter editActionData(
-      *this, EditAction::eSetPositionToAbsoluteOrStatic);
+      *this, EditAction::eSetPositionToAbsoluteOrStatic, aPrincipal);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return NS_ERROR_NOT_INITIALIZED;
   }
@@ -71,12 +73,12 @@ nsresult HTMLEditor::SetSelectionToAbsoluteOrStatic(bool aEnabled) {
   RefPtr<TextEditRules> rules(mRules);
   nsresult rv = rules->WillDoAction(subActionInfo, &cancel, &handled);
   if (NS_FAILED(rv) || cancel) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
 
   rv = rules->DidDoAction(subActionInfo, rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -142,11 +144,12 @@ void HTMLEditor::SetZIndex(Element& aElement, int32_t aZindex) {
   mCSSEditUtils->SetCSSProperty(aElement, *nsGkAtoms::z_index, zIndexStr);
 }
 
-nsresult HTMLEditor::AddZIndex(int32_t aChange) {
+nsresult HTMLEditor::AddZIndexAsAction(int32_t aChange,
+                                       nsIPrincipal* aPrincipal) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   AutoEditActionDataSetter editActionData(
-      *this, EditAction::eIncreaseOrDecreaseZIndex);
+      *this, EditAction::eIncreaseOrDecreaseZIndex, aPrincipal);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return NS_ERROR_NOT_INITIALIZED;
   }
@@ -167,12 +170,12 @@ nsresult HTMLEditor::AddZIndex(int32_t aChange) {
   RefPtr<TextEditRules> rules(mRules);
   nsresult rv = rules->WillDoAction(subActionInfo, &cancel, &handled);
   if (cancel || NS_FAILED(rv)) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
 
   rv = rules->DidDoAction(subActionInfo, rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -259,7 +262,7 @@ HTMLEditor::RefreshGrabber() {
 
   nsresult rv = RefreshGrabberInternal();
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+    return EditorBase::ToGenericNSResult(rv);
   }
   return NS_OK;
 }
@@ -277,8 +280,9 @@ nsresult HTMLEditor::RefreshGrabberInternal() {
     return rv;
   }
 
+  RefPtr<Element> grabber = mGrabber.get();
   SetAnonymousElementPosition(mPositionedObjectX + 12, mPositionedObjectY - 14,
-                              mGrabber);
+                              grabber);
   return NS_OK;
 }
 
@@ -301,7 +305,7 @@ void HTMLEditor::HideGrabberInternal() {
   // We allow the pres shell to be null; when it is, we presume there
   // are no document observers to notify, but we still want to
   // UnbindFromTree.
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  RefPtr<PresShell> presShell = GetPresShell();
   if (grabber) {
     DeleteRefToAnonymousNode(std::move(grabber), presShell);
   }
@@ -343,8 +347,6 @@ nsresult HTMLEditor::ShowGrabberInternal(Element& aElement) {
   // called yet.  So, mAbsolutelyPositionedObject should be non-nullptr.
   MOZ_ASSERT(mAbsolutelyPositionedObject);
 
-  mHasShownGrabber = true;
-
   // Finally, move the grabber to proper position.
   rv = RefreshGrabberInternal();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -366,18 +368,23 @@ nsresult HTMLEditor::StartMoving() {
       NS_WARN_IF(!mAbsolutelyPositionedObject)) {
     return NS_ERROR_FAILURE;
   }
+  RefPtr<Element> positioningShadow = mPositioningShadow.get();
+  RefPtr<Element> absolutelyPositionedObject = mAbsolutelyPositionedObject;
   nsresult rv =
-      SetShadowPosition(*mPositioningShadow, *mAbsolutelyPositionedObject,
+      SetShadowPosition(*positioningShadow, *absolutelyPositionedObject,
                         mPositionedObjectX, mPositionedObjectY);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   // make the shadow appear
   mPositioningShadow->UnsetAttr(kNameSpaceID_None, nsGkAtoms::_class, true);
 
   // position it
-  mCSSEditUtils->SetCSSPropertyPixels(*mPositioningShadow, *nsGkAtoms::width,
+  positioningShadow = mPositioningShadow.get();
+  mCSSEditUtils->SetCSSPropertyPixels(*positioningShadow, *nsGkAtoms::width,
                                       mPositionedObjectWidth);
-  mCSSEditUtils->SetCSSPropertyPixels(*mPositioningShadow, *nsGkAtoms::height,
+  mCSSEditUtils->SetCSSPropertyPixels(*positioningShadow, *nsGkAtoms::height,
                                       mPositionedObjectHeight);
 
   mIsMoving = true;
@@ -406,10 +413,12 @@ nsresult HTMLEditor::GrabberClicked() {
 
 nsresult HTMLEditor::EndMoving() {
   if (mPositioningShadow) {
-    nsCOMPtr<nsIPresShell> ps = GetPresShell();
-    NS_ENSURE_TRUE(ps, NS_ERROR_NOT_INITIALIZED);
+    RefPtr<PresShell> presShell = GetPresShell();
+    if (NS_WARN_IF(!presShell)) {
+      return NS_ERROR_NOT_INITIALIZED;
+    }
 
-    DeleteRefToAnonymousNode(std::move(mPositioningShadow), ps);
+    DeleteRefToAnonymousNode(std::move(mPositioningShadow), presShell);
 
     mPositioningShadow = nullptr;
   }
@@ -424,7 +433,7 @@ nsresult HTMLEditor::EndMoving() {
 
   mGrabberClicked = false;
   mIsMoving = false;
-  nsresult rv = RefereshEditingUI();
+  nsresult rv = RefreshEditingUI();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -519,7 +528,7 @@ nsresult HTMLEditor::SetPositionToAbsolute(Element& aElement) {
   nsINode* parentNode = aElement.GetParentNode();
   if (parentNode->GetChildCount() == 1) {
     RefPtr<Element> newBrElement =
-        InsertBrElementWithTransaction(EditorRawDOMPoint(parentNode, 0));
+        InsertBrElementWithTransaction(EditorDOMPoint(parentNode, 0));
     if (NS_WARN_IF(!newBrElement)) {
       return NS_ERROR_FAILURE;
     }
@@ -623,10 +632,9 @@ nsresult HTMLEditor::GetTemporaryStyleForFocusedPositionedElement(
 
   const uint8_t kBlackBgTrigger = 0xd0;
 
-  nscolor color = style->StyleColor()->mColor;
-  if (NS_GET_R(color) >= kBlackBgTrigger &&
-      NS_GET_G(color) >= kBlackBgTrigger &&
-      NS_GET_B(color) >= kBlackBgTrigger) {
+  const auto& color = style->StyleText()->mColor;
+  if (color.red >= kBlackBgTrigger && color.green >= kBlackBgTrigger &&
+      color.blue >= kBlackBgTrigger) {
     aReturn.AssignLiteral("black");
   } else {
     aReturn.AssignLiteral("white");

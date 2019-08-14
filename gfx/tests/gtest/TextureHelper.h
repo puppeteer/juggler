@@ -14,11 +14,11 @@
 #include "mozilla/layers/TextureHost.h"
 #include "mozilla/RefPtr.h"
 #ifdef XP_WIN
-#include "IMFYCbCrImage.h"
-#include "mozilla/gfx/DeviceManagerDx.h"
-#include "mozilla/layers/D3D11YCbCrImage.h"
-#include "mozilla/layers/TextureD3D11.h"
-#include "mozilla/layers/TextureDIB.h"
+#  include "IMFYCbCrImage.h"
+#  include "mozilla/gfx/DeviceManagerDx.h"
+#  include "mozilla/layers/D3D11YCbCrImage.h"
+#  include "mozilla/layers/TextureD3D11.h"
+#  include "mozilla/layers/TextureDIB.h"
 #endif
 
 using mozilla::gfx::SurfaceFormat;
@@ -108,8 +108,8 @@ static already_AddRefed<TextureClient> CreateTextureClientWithBackend(
   if (aLayersBackend == LayersBackend::LAYERS_D3D11 &&
       (moz2DBackend == BackendType::DIRECT2D ||
        moz2DBackend == BackendType::DIRECT2D1_1)) {
-    // Create DXGITextureData.
-    data = DXGITextureData::Create(size, format, allocFlags);
+    // Create D3D11TextureData.
+    data = D3D11TextureData::Create(size, format, allocFlags);
   } else if (!data && format == SurfaceFormat::B8G8R8X8 &&
              moz2DBackend == BackendType::CAIRO) {
     // Create DIBTextureData.

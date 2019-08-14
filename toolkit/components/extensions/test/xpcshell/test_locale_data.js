@@ -1,22 +1,20 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Extension.jsm");
+AddonTestUtils.init(this);
+AddonTestUtils.overrideCertDB();
+AddonTestUtils.createAppInfo(
+  "xpcshell@tests.mozilla.org",
+  "XPCShell",
+  "1",
+  "42"
+);
 
-/* globals ExtensionData */
-
-const uuidGenerator = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
+const { ExtensionData } = ChromeUtils.import(
+  "resource://gre/modules/Extension.jsm"
+);
 
 async function generateAddon(data) {
-  let id = uuidGenerator.generateUUID().number;
-
-  data = Object.assign({}, data);
-  data.manifest = Object.assign({applications: {gecko: {id}}}, data.manifest || {});
-
-  let xpi = Extension.generateXPI(data);
-  registerCleanupFunction(() => {
-    Services.obs.notifyObservers(xpi, "flush-cache-entry");
-    xpi.remove(false);
-  });
+  let xpi = AddonTestUtils.createTempWebExtensionFile(data);
 
   let fileURI = Services.io.newFileURI(xpi);
   let jarURI = NetUtil.newURI(`jar:${fileURI.spec}!/`);
@@ -29,7 +27,7 @@ async function generateAddon(data) {
 
 add_task(async function testMissingDefaultLocale() {
   let extension = await generateAddon({
-    "files": {
+    files: {
       "_locales/en_US/messages.json": {},
     },
   });
@@ -42,18 +40,19 @@ add_task(async function testMissingDefaultLocale() {
 
   info(`Got error: ${extension.errors[0]}`);
 
-  ok(extension.errors[0].includes('"default_locale" property is required'),
-     "Got missing default_locale error");
+  ok(
+    extension.errors[0].includes('"default_locale" property is required'),
+    "Got missing default_locale error"
+  );
 });
-
 
 add_task(async function testInvalidDefaultLocale() {
   let extension = await generateAddon({
-    "manifest": {
-      "default_locale": "en",
+    manifest: {
+      default_locale: "en",
     },
 
-    "files": {
+    files: {
       "_locales/en_US/messages.json": {},
     },
   });
@@ -62,8 +61,12 @@ add_task(async function testInvalidDefaultLocale() {
 
   info(`Got error: ${extension.errors[0]}`);
 
-  ok(extension.errors[0].includes("Loading locale file _locales/en/messages.json"),
-     "Got invalid default_locale error");
+  ok(
+    extension.errors[0].includes(
+      "Loading locale file _locales/en/messages.json"
+    ),
+    "Got invalid default_locale error"
+  );
 
   await extension.initAllLocales();
 
@@ -71,15 +74,16 @@ add_task(async function testInvalidDefaultLocale() {
 
   info(`Got error: ${extension.errors[1]}`);
 
-  ok(extension.errors[1].includes('"default_locale" property must correspond'),
-     "Got invalid default_locale error");
+  ok(
+    extension.errors[1].includes('"default_locale" property must correspond'),
+    "Got invalid default_locale error"
+  );
 });
-
 
 add_task(async function testUnexpectedDefaultLocale() {
   let extension = await generateAddon({
-    "manifest": {
-      "default_locale": "en_US",
+    manifest: {
+      default_locale: "en_US",
     },
   });
 
@@ -87,8 +91,12 @@ add_task(async function testUnexpectedDefaultLocale() {
 
   info(`Got error: ${extension.errors[0]}`);
 
-  ok(extension.errors[0].includes("Loading locale file _locales/en-US/messages.json"),
-     "Got invalid default_locale error");
+  ok(
+    extension.errors[0].includes(
+      "Loading locale file _locales/en-US/messages.json"
+    ),
+    "Got invalid default_locale error"
+  );
 
   await extension.initAllLocales();
 
@@ -96,19 +104,21 @@ add_task(async function testUnexpectedDefaultLocale() {
 
   info(`Got error: ${extension.errors[1]}`);
 
-  ok(extension.errors[1].includes('"default_locale" property must correspond'),
-     "Got unexpected default_locale error");
+  ok(
+    extension.errors[1].includes('"default_locale" property must correspond'),
+    "Got unexpected default_locale error"
+  );
 });
-
 
 add_task(async function testInvalidSyntax() {
   let extension = await generateAddon({
-    "manifest": {
-      "default_locale": "en_US",
+    manifest: {
+      default_locale: "en_US",
     },
 
-    "files": {
-      "_locales/en_US/messages.json": '{foo: {message: "bar", description: "baz"}}',
+    files: {
+      "_locales/en_US/messages.json":
+        '{foo: {message: "bar", description: "baz"}}',
     },
   });
 
@@ -116,8 +126,12 @@ add_task(async function testInvalidSyntax() {
 
   info(`Got error: ${extension.errors[0]}`);
 
-  ok(extension.errors[0].includes("Loading locale file _locales\/en_US\/messages\.json: SyntaxError"),
-     "Got syntax error");
+  ok(
+    extension.errors[0].includes(
+      "Loading locale file _locales/en_US/messages.json: SyntaxError"
+    ),
+    "Got syntax error"
+  );
 
   await extension.initAllLocales();
 
@@ -125,6 +139,83 @@ add_task(async function testInvalidSyntax() {
 
   info(`Got error: ${extension.errors[1]}`);
 
-  ok(extension.errors[1].includes("Loading locale file _locales\/en_US\/messages\.json: SyntaxError"),
-     "Got syntax error");
+  ok(
+    extension.errors[1].includes(
+      "Loading locale file _locales/en_US/messages.json: SyntaxError"
+    ),
+    "Got syntax error"
+  );
+});
+
+add_task(async function testExtractLocalizedManifest() {
+  let extension = await generateAddon({
+    manifest: {
+      name: "__MSG_extensionName__",
+      default_locale: "en_US",
+      icons: {
+        "16": "__MSG_extensionIcon__",
+      },
+    },
+
+    files: {
+      "_locales/en_US/messages.json": `{
+        "extensionName": {"message": "foo"},
+        "extensionIcon": {"message": "icon-en.png"}
+      }`,
+      "_locales/de_DE/messages.json": `{
+        "extensionName": {"message": "bar"},
+        "extensionIcon": {"message": "icon-de.png"}
+      }`,
+    },
+  });
+
+  await extension.loadManifest();
+  equal(extension.manifest.name, "foo", "name localized");
+  equal(extension.manifest.icons["16"], "icon-en.png", "icons localized");
+
+  let manifest = await extension.getLocalizedManifest("de-DE");
+  ok(extension.localeData.has("de-DE"), "has de_DE locale");
+  equal(manifest.name, "bar", "name localized");
+  equal(manifest.icons["16"], "icon-de.png", "icons localized");
+
+  await Assert.rejects(
+    extension.getLocalizedManifest("xx-XX"),
+    /does not contain the locale xx-XX/,
+    "xx-XX does not exist"
+  );
+});
+
+add_task(async function testRestartThenExtractLocalizedManifest() {
+  await AddonTestUtils.promiseStartupManager();
+
+  let wrapper = ExtensionTestUtils.loadExtension({
+    manifest: {
+      name: "__MSG_extensionName__",
+      default_locale: "en_US",
+    },
+    useAddonManager: "permanent",
+    files: {
+      "_locales/en_US/messages.json": '{"extensionName": {"message": "foo"}}',
+      "_locales/de_DE/messages.json": '{"extensionName": {"message": "bar"}}',
+    },
+  });
+
+  await wrapper.startup();
+
+  await AddonTestUtils.promiseRestartManager();
+  await wrapper.startupPromise;
+
+  let { extension } = wrapper;
+  let manifest = await extension.getLocalizedManifest("de-DE");
+  ok(extension.localeData.has("de-DE"), "has de_DE locale");
+  equal(manifest.name, "bar", "name localized");
+
+  await Assert.rejects(
+    extension.getLocalizedManifest("xx-XX"),
+    /does not contain the locale xx-XX/,
+    "xx-XX does not exist"
+  );
+
+  await wrapper.unload();
+  await AddonTestUtils.promiseShutdownManager();
 });

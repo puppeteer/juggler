@@ -35,23 +35,33 @@ log = logging.getLogger(__name__)
 ddstats = ThreadStats(namespace='releng.releases.partials')
 
 
+ROOT_URL = os.environ['TASKCLUSTER_ROOT_URL']
+QUEUE_PREFIX = ("https://queue.taskcluster.net/"
+                if ROOT_URL == 'https://taskcluster.net'
+                else ROOT_URL + '/api/queue/')
 ALLOWED_URL_PREFIXES = (
     "http://download.cdn.mozilla.net/pub/mozilla.org/firefox/nightly/",
     "http://download.cdn.mozilla.net/pub/firefox/nightly/",
     "https://mozilla-nightly-updates.s3.amazonaws.com",
-    "https://queue.taskcluster.net/",
     "http://ftp.mozilla.org/",
     "http://download.mozilla.org/",
     "https://archive.mozilla.org/",
     "http://archive.mozilla.org/",
-    "https://queue.taskcluster.net/v1/task/",
+    QUEUE_PREFIX,
 )
 STAGING_URL_PREFIXES = (
     "http://ftp.stage.mozaws.net/",
+    "https://ftp.stage.mozaws.net/",
 )
 
 DEFAULT_FILENAME_TEMPLATE = "{appName}-{branch}-{version}-{platform}-" \
                             "{locale}-{from_buildid}-{to_buildid}.partial.mar"
+
+BCJ_OPTIONS = {
+    'x86': ['--x86'],
+    'x86_64': ['--x86'],
+    'aarch64': [],
+}
 
 
 def write_dogrc(api_key):
@@ -81,6 +91,24 @@ def is_lzma_compressed_mar(mar):
     else:
         log.info("%s is not lzma compressed", mar)
     return result
+
+
+def validate_mar_channel_id(mar, channel_ids):
+    log.info("Checking %s for MAR_CHANNEL_ID %s", mar, channel_ids)
+    # We may get a string with a list representation, or a single entry string.
+    channel_ids = set(channel_ids.split(','))
+
+    product_info = MarReader(open(mar, 'rb')).productinfo
+    if not isinstance(product_info, tuple):
+        raise ValueError("Malformed product information in mar: {}".format(product_info))
+
+    found_channel_ids = set(product_info[1].split(','))
+
+    if not found_channel_ids.issubset(channel_ids):
+        raise ValueError("MAR_CHANNEL_ID mismatch, {} not in {}".format(
+            product_info[1], channel_ids))
+
+    log.info("%s channel %s in %s", mar, product_info[1], channel_ids)
 
 
 @redo.retriable()
@@ -146,26 +174,28 @@ async def run_command(cmd, cwd='/', env=None, label=None, silent=False):
         env = dict()
     process = await asyncio.create_subprocess_shell(cmd,
                                                     stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.STDOUT,
+                                                    stderr=asyncio.subprocess.PIPE,
                                                     cwd=cwd, env=env)
-    stdout, stderr = await process.communicate()
+    if label:
+        label = "{}: ".format(label)
+    else:
+        label = ""
 
-    await process.wait()
+    async def read_output(stream, label, printcmd):
+        while True:
+            line = await stream.readline()
+            if line == b'':
+                break
+            printcmd("%s%s", label, line.decode('utf-8').rstrip())
 
     if silent:
-        return
-
-    if not stderr:
-        stderr = ""
-    if not stdout:
-        stdout = ""
-
-    label = "{}: ".format(label)
-
-    for line in stdout.splitlines():
-        log.debug("%s%s", label, line.decode('utf-8'))
-    for line in stderr.splitlines():
-        log.warn("%s%s", label, line.decode('utf-8'))
+        await process.wait()
+    else:
+        await asyncio.gather(
+            read_output(process.stdout, label, log.info),
+            read_output(process.stderr, label, log.warn)
+            )
+        await process.wait()
 
 
 async def unpack(work_env, mar, dest_dir):
@@ -218,6 +248,7 @@ async def generate_partial(work_env, from_dir, to_dir, dest_mar, mar_data,
     cmd = " ".join([make_incremental_update, dest_mar, from_dir, to_dir])
 
     await run_command(cmd, cwd=work_env.workdir, env=env, label=dest_mar.split('/')[-1])
+    validate_mar_channel_id(dest_mar, mar_data["ACCEPTED_MAR_CHANNEL_IDS"])
 
 
 def get_hash(path, hash_type="sha512"):
@@ -228,14 +259,8 @@ def get_hash(path, hash_type="sha512"):
 
 
 class WorkEnv(object):
-
-    def __init__(self, allowed_url_prefixes, mar=None, mbsdiff=None):
-        self.workdir = tempfile.mkdtemp()
-        self.paths = {
-            'unwrap_full_update.pl': os.path.join(self.workdir, 'unwrap_full_update.pl'),
-            'mar': os.path.join(self.workdir, 'mar'),
-            'mbsdiff': os.path.join(self.workdir, 'mbsdiff')
-        }
+    def __init__(self, allowed_url_prefixes, mar=None, mbsdiff=None, arch=None):
+        self.paths = dict()
         self.urls = {
             'unwrap_full_update.pl': 'https://hg.mozilla.org/mozilla-central/raw-file/default/'
             'tools/update-packaging/unwrap_full_update.pl',
@@ -249,12 +274,14 @@ class WorkEnv(object):
             self.urls['mar'] = mar
         if mbsdiff:
             self.urls['mbsdiff'] = mbsdiff
+        self.arch = arch
 
     async def setup(self, mar=None, mbsdiff=None):
+        self.workdir = tempfile.mkdtemp()
         for filename, url in self.urls.items():
-            if filename not in self.paths:
-                log.info("Been told about %s but don't know where to download it to!", filename)
-                continue
+            if filename in self.paths:
+                os.unlink(self.paths[filename])
+            self.paths[filename] = os.path.join(self.workdir, filename)
             await retry_download(url, dest=self.paths[filename], mode=0o755)
 
     async def download_buildsystem_bits(self, repo, revision):
@@ -273,6 +300,8 @@ class WorkEnv(object):
         my_env['LC_ALL'] = 'C'
         my_env['MAR'] = self.paths['mar']
         my_env['MBSDIFF'] = self.paths['mbsdiff']
+        if self.arch:
+            my_env['BCJ_OPTIONS'] = ' '.join(BCJ_OPTIONS[self.arch])
         return my_env
 
 
@@ -283,14 +312,24 @@ def verify_allowed_url(mar, allowed_url_prefixes):
         ))
 
 
-async def manage_partial(partial_def, work_env, filename_template, artifacts_dir, signing_certs):
+async def manage_partial(partial_def, filename_template, artifacts_dir,
+                         allowed_url_prefixes, signing_certs, arch=None):
     """Manage the creation of partial mars based on payload."""
+
+    work_env = WorkEnv(
+        allowed_url_prefixes=allowed_url_prefixes,
+        mar=partial_def.get('mar_binary'),
+        mbsdiff=partial_def.get('mbsdiff_binary'),
+        arch=arch,
+    )
+    await work_env.setup()
+
     for mar in (partial_def["from_mar"], partial_def["to_mar"]):
-        verify_allowed_url(mar, work_env.allowed_url_prefixes)
+        verify_allowed_url(mar, allowed_url_prefixes)
 
     complete_mars = {}
     use_old_format = False
-
+    check_channels_in_files = list()
     for mar_type, f in (("from", partial_def["from_mar"]), ("to", partial_def["to_mar"])):
         dest = os.path.join(work_env.workdir, "{}.mar".format(mar_type))
         unpack_dir = os.path.join(work_env.workdir, mar_type)
@@ -309,6 +348,9 @@ async def manage_partial(partial_def, work_env, filename_template, artifacts_dir
 
         with ddstats.timer('mar.unpack.time'):
             await unpack(work_env, dest, unpack_dir)
+
+        if mar_type == 'to':
+            check_channels_in_files.append(dest)
 
         if mar_type == 'from':
             version = get_option(unpack_dir, filename="application.ini",
@@ -350,6 +392,10 @@ async def manage_partial(partial_def, work_env, filename_template, artifacts_dir
     # Override ACCEPTED_MAR_CHANNEL_IDS if needed
     if "ACCEPTED_MAR_CHANNEL_IDS" in os.environ:
         mar_data["ACCEPTED_MAR_CHANNEL_IDS"] = os.environ["ACCEPTED_MAR_CHANNEL_IDS"]
+
+    for filename in check_channels_in_files:
+        validate_mar_channel_id(filename, mar_data["ACCEPTED_MAR_CHANNEL_IDS"])
+
     for field in ("update_number", "previousVersion", "previousBuildNumber",
                   "toVersion", "toBuildNumber"):
         if field in partial_def:
@@ -409,12 +455,6 @@ async def async_main(args, signing_certs):
     task = json.load(args.task_definition)
     # TODO: verify task["extra"]["funsize"]["partials"] with jsonschema
     for definition in task["extra"]["funsize"]["partials"]:
-        workenv = WorkEnv(
-            allowed_url_prefixes=allowed_url_prefixes,
-            mar=definition.get('mar_binary'),
-            mbsdiff=definition.get('mbsdiff_binary')
-        )
-        await workenv.setup()
         tasks.append(asyncio.ensure_future(retry_async(
                                            manage_partial,
                                            retry_exceptions=(
@@ -425,8 +465,9 @@ async def async_main(args, signing_certs):
                                                partial_def=definition,
                                                filename_template=args.filename_template,
                                                artifacts_dir=args.artifacts_dir,
-                                               work_env=workenv,
-                                               signing_certs=signing_certs
+                                               allowed_url_prefixes=allowed_url_prefixes,
+                                               signing_certs=signing_certs,
+                                               arch=args.arch
                                            ))))
     manifest = await asyncio.gather(*tasks)
     return manifest
@@ -452,6 +493,9 @@ def main():
     parser.add_argument("-q", "--quiet", dest="log_level",
                         action="store_const", const=logging.WARNING,
                         default=logging.DEBUG)
+    parser.add_argument('--arch', type=str, required=True,
+                        choices=BCJ_OPTIONS.keys(),
+                        help='The archtecture you are building.')
     args = parser.parse_args()
 
     logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s")

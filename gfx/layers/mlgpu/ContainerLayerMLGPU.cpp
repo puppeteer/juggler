@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ContainerLayerMLGPU.h"
-#include "gfxPrefs.h"
+#include "mozilla/StaticPrefs.h"
 #include "LayersLogging.h"
 #include "LayerManagerMLGPU.h"
 #include "MLGDevice.h"
@@ -63,7 +63,7 @@ bool ContainerLayerMLGPU::OnPrepareToRender(FrameBuilder* aBuilder) {
   mSurfaceCopyNeeded = surfaceCopyNeeded;
 
   gfx::IntRect viewport(gfx::IntPoint(0, 0), mTargetSize);
-  if (!mRenderTarget || !gfxPrefs::AdvancedLayersUseInvalidation() ||
+  if (!mRenderTarget || !StaticPrefs::layers_mlgpu_enable_invalidation() ||
       mInvalidateEntireSurface) {
     // Fine-grained invalidation is disabled, invalidate everything.
     mInvalidRect = viewport;
@@ -91,7 +91,8 @@ static IntRect GetTransformedBounds(Layer* aLayer) {
   return bounds;
 }
 
-/* static */ Maybe<IntRect> ContainerLayerMLGPU::FindVisibleBounds(
+/* static */
+Maybe<IntRect> ContainerLayerMLGPU::FindVisibleBounds(
     Layer* aLayer, const Maybe<RenderTargetIntRect>& aClip) {
   AL_LOG("  visiting child %p\n", aLayer);
   AL_LOG_IF(aClip, "  parent clip: %s\n", Stringify(aClip.value()).c_str());

@@ -6,9 +6,12 @@
 // that aren't initialized outside of a XUL app environment like AddonManager
 // and the "@mozilla.org/xre/app-info;1" component.
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm");
+const { AppConstants } = ChromeUtils.import(
+  "resource://gre/modules/AppConstants.jsm"
+);
+const { Troubleshoot } = ChromeUtils.import(
+  "resource://gre/modules/Troubleshoot.jsm"
+);
 
 function test() {
   waitForExplicitFinish();
@@ -29,7 +32,6 @@ registerCleanupFunction(function() {
 });
 
 var tests = [
-
   function snapshotSchema(done) {
     Troubleshoot.snapshot(function(snapshot) {
       try {
@@ -55,15 +57,24 @@ var tests = [
     });
     Troubleshoot.snapshot(function(snapshot) {
       let p = snapshot.modifiedPreferences;
-      is(p["javascript.troubleshoot"], true,
-         "The pref should be present because it's whitelisted " +
-         "but not blacklisted.");
-      ok(!("troubleshoot.foo" in p),
-         "The pref should be absent because it's not in the whitelist.");
-      ok(!("javascript.print_to_filename" in p),
-         "The pref should be absent because it's blacklisted.");
-      ok(!("network.proxy.troubleshoot" in p),
-         "The pref should be absent because it's blacklisted.");
+      is(
+        p["javascript.troubleshoot"],
+        true,
+        "The pref should be present because it's whitelisted " +
+          "but not blacklisted."
+      );
+      ok(
+        !("troubleshoot.foo" in p),
+        "The pref should be absent because it's not in the whitelist."
+      );
+      ok(
+        !("javascript.print_to_filename" in p),
+        "The pref should be absent because it's blacklisted."
+      );
+      ok(
+        !("network.proxy.troubleshoot" in p),
+        "The pref should be absent because it's blacklisted."
+      );
       prefs.forEach(p => Services.prefs.deleteBranch(p));
       done();
     });
@@ -125,6 +136,9 @@ const SNAPSHOT_SCHEMA = {
         supportURL: {
           type: "string",
         },
+        launcherProcessState: {
+          type: "number",
+        },
         remoteAutoStart: {
           type: "boolean",
           required: true,
@@ -138,16 +152,13 @@ const SNAPSHOT_SCHEMA = {
         numRemoteWindows: {
           type: "number",
         },
-        currentContentProcesses: {
-          type: "number",
-        },
-        maxContentProcesses: {
-          type: "number",
-        },
         policiesStatus: {
           type: "number",
         },
-        keyGoogleFound: {
+        keyLocationServiceGoogleFound: {
+          type: "boolean",
+        },
+        keySafebrowsingGoogleFound: {
           type: "boolean",
         },
         keyMozillaFound: {
@@ -253,6 +264,20 @@ const SNAPSHOT_SCHEMA = {
         },
       },
     },
+    processes: {
+      required: true,
+      type: "object",
+      properties: {
+        maxWebContentProcesses: {
+          required: true,
+          type: "number",
+        },
+        remoteTypes: {
+          required: true,
+          type: "object",
+        },
+      },
+    },
     modifiedPreferences: {
       required: true,
       type: "object",
@@ -283,7 +308,17 @@ const SNAPSHOT_SCHEMA = {
           type: "boolean",
         },
         numAcceleratedWindowsMessage: {
-          type: "array",
+          type: "object",
+          properties: {
+            key: {
+              required: true,
+              type: "string",
+            },
+            args: {
+              required: false,
+              type: "object",
+            },
+          },
         },
         adapterDescription: {
           type: "string",
@@ -301,6 +336,9 @@ const SNAPSHOT_SCHEMA = {
           type: "string",
         },
         adapterDrivers: {
+          type: "string",
+        },
+        driverVendor: {
           type: "string",
         },
         driverVersion: {
@@ -325,6 +363,9 @@ const SNAPSHOT_SCHEMA = {
           type: "string",
         },
         adapterDrivers2: {
+          type: "string",
+        },
+        driverVendor2: {
           type: "string",
         },
         driverVersion2: {
@@ -394,9 +435,16 @@ const SNAPSHOT_SCHEMA = {
           type: "object",
         },
         failures: {
-          type: "array",
-          items: {
-            type: "string",
+          type: "object",
+          properties: {
+            key: {
+              required: true,
+              type: "string",
+            },
+            args: {
+              required: false,
+              type: "object",
+            },
           },
         },
         indices: {
@@ -412,7 +460,23 @@ const SNAPSHOT_SCHEMA = {
           type: "array",
         },
         direct2DEnabledMessage: {
-          type: "array",
+          type: "object",
+          properties: {
+            key: {
+              required: true,
+              type: "string",
+            },
+            args: {
+              required: false,
+              type: "object",
+            },
+          },
+        },
+        targetFrameRate: {
+          type: "number",
+        },
+        windowProtocol: {
+          type: "string",
         },
       },
     },
@@ -707,11 +771,11 @@ const SNAPSHOT_SCHEMA = {
           type: "boolean",
         },
         contentSandboxLevel: {
-          required: AppConstants.MOZ_CONTENT_SANDBOX,
+          required: AppConstants.MOZ_SANDBOX,
           type: "number",
         },
         effectiveContentSandboxLevel: {
-          required: AppConstants.MOZ_CONTENT_SANDBOX,
+          required: AppConstants.MOZ_SANDBOX,
           type: "number",
         },
         syscallLog: {
@@ -811,35 +875,48 @@ const SNAPSHOT_SCHEMA = {
  * @param schema The schema that obj should conform to.
  */
 function validateObject(obj, schema) {
-  if (obj === undefined && !schema.required)
+  if (obj === undefined && !schema.required) {
     return;
-  if (typeof(schema.type) != "string")
+  }
+  if (typeof schema.type != "string") {
     throw schemaErr("'type' must be a string", schema);
-  if (objType(obj) != schema.type)
+  }
+  if (objType(obj) != schema.type) {
     throw validationErr("Object is not of the expected type", obj, schema);
+  }
   let validatorFnName = "validateObject_" + schema.type;
-  if (!(validatorFnName in this))
+  if (!(validatorFnName in this)) {
     throw schemaErr("Validator function not defined for type", schema);
+  }
   this[validatorFnName](obj, schema);
 }
 
 function validateObject_object(obj, schema) {
-  if (typeof(schema.properties) != "object")
+  if (typeof schema.properties != "object") {
     // Don't care what obj's properties are.
     return;
+  }
   // First check that all the schema's properties match the object.
-  for (let prop in schema.properties)
+  for (let prop in schema.properties) {
     validateObject(obj[prop], schema.properties[prop]);
+  }
   // Now check that the object doesn't have any properties not in the schema.
-  for (let prop in obj)
-    if (!(prop in schema.properties))
-      throw validationErr("Object has property " + prop + " not in schema", obj, schema);
+  for (let prop in obj) {
+    if (!(prop in schema.properties)) {
+      throw validationErr(
+        "Object has property " + prop + " not in schema",
+        obj,
+        schema
+      );
+    }
+  }
 }
 
 function validateObject_array(array, schema) {
-  if (typeof(schema.items) != "object")
+  if (typeof schema.items != "object") {
     // Don't care what the array's elements are.
     return;
+  }
   array.forEach(elt => validateObject(elt, schema.items));
 }
 
@@ -848,9 +925,14 @@ function validateObject_boolean(bool, schema) {}
 function validateObject_number(num, schema) {}
 
 function validationErr(msg, obj, schema) {
-  return new Error("Validation error: " + msg +
-                   ": object=" + JSON.stringify(obj) +
-                   ", schema=" + JSON.stringify(schema));
+  return new Error(
+    "Validation error: " +
+      msg +
+      ": object=" +
+      JSON.stringify(obj) +
+      ", schema=" +
+      JSON.stringify(schema)
+  );
 }
 
 function schemaErr(msg, schema) {
@@ -858,12 +940,15 @@ function schemaErr(msg, schema) {
 }
 
 function objType(obj) {
-  let type = typeof(obj);
-  if (type != "object")
+  let type = typeof obj;
+  if (type != "object") {
     return type;
-  if (Array.isArray(obj))
+  }
+  if (Array.isArray(obj)) {
     return "array";
-  if (obj === null)
+  }
+  if (obj === null) {
     return "null";
+  }
   return type;
 }

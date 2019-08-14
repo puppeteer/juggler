@@ -1,7 +1,7 @@
 """
 Generate build dependencies for Cargo.
 
-The `build.py` script is invoked by cargo when building lib/codegen to
+The `build.py` script is invoked by cargo when building cranelift-codegen to
 generate Rust code from the instruction descriptions. Cargo needs to know when
 it is necessary to rerun the build script.
 
@@ -22,22 +22,11 @@ except ImportError:
     pass
 
 
-def source_files(top):
-    # type: (str) -> Iterable[str]
-    """
-    Recursively find all interesting source files and directories in the
-    directory tree starting at top. Yield a path to each file.
-    """
-    for (dirpath, dirnames, filenames) in os.walk(top):
-        yield dirpath
-        for f in filenames:
-            if f.endswith('.py'):
-                yield join(dirpath, f)
-
-
 def generate():
     # type: () -> None
     print("Dependencies from meta language directory:")
     meta = dirname(abspath(__file__))
-    for path in source_files(meta):
-        print("cargo:rerun-if-changed=" + path)
+    for (dirpath, _, filenames) in os.walk(meta):
+        for f in filenames:
+            if f.endswith('.py'):
+                print("cargo:rerun-if-changed=" + join(dirpath, f))

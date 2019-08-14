@@ -10,12 +10,13 @@
 #include "OmxPlatformLayer.h"
 
 #ifdef MOZ_OMX
-#include "PureOmxPlatformLayer.h"
+#  include "PureOmxPlatformLayer.h"
 #endif
 
 namespace mozilla {
 
-/* static */ bool OmxDecoderModule::Init() {
+/* static */
+bool OmxDecoderModule::Init() {
 #ifdef MOZ_OMX
   return PureOmxPlatformLayer::Init();
 #endif

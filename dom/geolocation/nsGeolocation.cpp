@@ -15,6 +15,7 @@
 #include "mozilla/dom/PositionErrorBinding.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
@@ -24,7 +25,7 @@
 #include "nsContentPermissionHelper.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsINamed.h"
 #include "nsIObserverService.h"
 #include "nsIScriptError.h"
@@ -36,20 +37,20 @@
 class nsIPrincipal;
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidLocationProvider.h"
+#  include "AndroidLocationProvider.h"
 #endif
 
 #ifdef MOZ_GPSD
-#include "GpsdLocationProvider.h"
+#  include "GpsdLocationProvider.h"
 #endif
 
 #ifdef MOZ_WIDGET_COCOA
-#include "CoreLocationLocationProvider.h"
+#  include "CoreLocationLocationProvider.h"
 #endif
 
 #ifdef XP_WIN
-#include "WindowsLocationProvider.h"
-#include "mozilla/WindowsVersion.h"
+#  include "WindowsLocationProvider.h"
+#  include "mozilla/WindowsVersion.h"
 #endif
 
 // Some limit to the number of get or watch geolocation requests
@@ -80,22 +81,27 @@ class nsGeolocationRequest final
                        UniquePtr<PositionOptions>&& aOptions,
                        uint8_t aProtocolType, nsIEventTarget* aMainThreadTarget,
                        bool aWatchPositionRequest = false,
-                       bool aIsHandlingUserInput = false, int32_t aWatchId = 0);
+                       int32_t aWatchId = 0);
 
   // nsIContentPermissionRequest
-  NS_IMETHOD Cancel(void) override;
-  NS_IMETHOD Allow(JS::HandleValue choices) override;
+  MOZ_CAN_RUN_SCRIPT NS_IMETHOD Cancel(void) override;
+  MOZ_CAN_RUN_SCRIPT NS_IMETHOD Allow(JS::HandleValue choices) override;
 
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(nsGeolocationRequest)
 
   void Shutdown();
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY is OK here because we're always called from a
+  // runnable.  Ideally nsIRunnable::Run and its overloads would just be
+  // MOZ_CAN_RUN_SCRIPT and then we could be too...
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void SendLocation(nsIDOMGeoPosition* aLocation);
   bool WantsHighAccuracy() {
     return !mShutdown && mOptions && mOptions->mEnableHighAccuracy;
   }
   void SetTimeoutTimer();
   void StopTimeoutTimer();
+  MOZ_CAN_RUN_SCRIPT
   void NotifyErrorAndShutdown(uint16_t);
   using ContentPermissionRequestBase::GetPrincipal;
   nsIPrincipal* GetPrincipal();
@@ -124,7 +130,8 @@ class nsGeolocationRequest final
     WeakPtr<nsGeolocationRequest> mRequest;
   };
 
-  void Notify();
+  // Only called from a timer, so MOZ_CAN_RUN_SCRIPT_BOUNDARY ok for now.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void Notify();
 
   bool mIsWatchPositionRequest;
 
@@ -191,9 +198,9 @@ nsGeolocationRequest::nsGeolocationRequest(
     GeoPositionErrorCallback aErrorCallback,
     UniquePtr<PositionOptions>&& aOptions, uint8_t aProtocolType,
     nsIEventTarget* aMainThreadTarget, bool aWatchPositionRequest,
-    bool aIsHandlingUserInput, int32_t aWatchId)
+    int32_t aWatchId)
     : ContentPermissionRequestBase(
-          aLocator->GetPrincipal(), aIsHandlingUserInput,
+          aLocator->GetPrincipal(),
           ConvertWeakReferenceToWindow(aLocator->GetOwner()),
           NS_LITERAL_CSTRING("geo"), NS_LITERAL_CSTRING("geolocation")),
       mIsWatchPositionRequest(aWatchPositionRequest),
@@ -270,7 +277,7 @@ nsGeolocationRequest::Allow(JS::HandleValue aChoices) {
     nsCOMPtr<nsPIDOMWindowInner> window = mLocator->GetParentObject();
 
     if (window) {
-      nsCOMPtr<nsIDocument> doc = window->GetDoc();
+      nsCOMPtr<Document> doc = window->GetDoc();
       isVisible = doc && !doc->Hidden();
     }
 
@@ -332,7 +339,8 @@ nsGeolocationRequest::Allow(JS::HandleValue aChoices) {
   }
 
   // Kick off the geo device, if it isn't already running
-  nsresult rv = gs->StartDevice(GetPrincipal());
+  nsCOMPtr<nsIPrincipal> principal = GetPrincipal();
+  nsresult rv = gs->StartDevice(principal);
 
   if (NS_FAILED(rv)) {
     // Location provider error
@@ -410,7 +418,7 @@ void nsGeolocationRequest::SendLocation(nsIDOMGeoPosition* aPosition) {
 
   nsAutoMicroTask mt;
   if (mCallback.HasWebIDLCallback()) {
-    PositionCallback* callback = mCallback.GetWebIDLCallback();
+    RefPtr<PositionCallback> callback = mCallback.GetWebIDLCallback();
 
     MOZ_ASSERT(callback);
     callback->Call(*wrapped);
@@ -495,16 +503,13 @@ NS_INTERFACE_MAP_END
 NS_IMPL_ADDREF(nsGeolocationService)
 NS_IMPL_RELEASE(nsGeolocationService)
 
-static bool sGeoEnabled = true;
 static int32_t sProviderTimeout = 6000;  // Time, in milliseconds, to wait for
                                          // the location provider to spin up.
 
 nsresult nsGeolocationService::Init() {
   Preferences::AddIntVarCache(&sProviderTimeout, "geo.timeout",
                               sProviderTimeout);
-  Preferences::AddBoolVarCache(&sGeoEnabled, "geo.enabled", sGeoEnabled);
-
-  if (!sGeoEnabled) {
+  if (!StaticPrefs::geo_enabled()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -525,11 +530,11 @@ nsresult nsGeolocationService::Init() {
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-#ifdef MOZ_GPSD
+#  ifdef MOZ_GPSD
   if (Preferences::GetBool("geo.provider.use_gpsd", false)) {
     mProvider = new GpsdLocationProvider();
   }
-#endif
+#  endif
 #endif
 
 #ifdef MOZ_WIDGET_COCOA
@@ -617,8 +622,12 @@ nsGeolocationService::Update(nsIDOMGeoPosition* aSomewhere) {
 
 NS_IMETHODIMP
 nsGeolocationService::NotifyError(uint16_t aErrorCode) {
-  for (uint32_t i = 0; i < mGeolocators.Length(); i++) {
-    mGeolocators[i]->NotifyError(aErrorCode);
+  // nsTArray doesn't have a constructors that takes a different-type TArray.
+  nsTArray<RefPtr<Geolocation>> geolocators;
+  geolocators.AppendElements(mGeolocators);
+  for (uint32_t i = 0; i < geolocators.Length(); i++) {
+    // MOZ_KnownLive because the stack array above keeps it alive.
+    MOZ_KnownLive(geolocators[i])->NotifyError(aErrorCode);
   }
   return NS_OK;
 }
@@ -633,7 +642,7 @@ CachedPositionAndAccuracy nsGeolocationService::GetCachedPosition() {
 }
 
 nsresult nsGeolocationService::StartDevice(nsIPrincipal* aPrincipal) {
-  if (!sGeoEnabled) {
+  if (!StaticPrefs::geo_enabled()) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -815,7 +824,7 @@ nsresult Geolocation::Init(nsPIDOMWindowInner* aContentDom) {
     }
 
     // Grab the principal of the document
-    nsCOMPtr<nsIDocument> doc = aContentDom->GetDoc();
+    nsCOMPtr<Document> doc = aContentDom->GetDoc();
     if (!doc) {
       return NS_ERROR_FAILURE;
     }
@@ -942,13 +951,15 @@ Geolocation::NotifyError(uint16_t aErrorCode) {
   mozilla::Telemetry::Accumulate(mozilla::Telemetry::GEOLOCATION_ERROR, true);
 
   for (uint32_t i = mPendingCallbacks.Length(); i > 0; i--) {
-    mPendingCallbacks[i - 1]->NotifyErrorAndShutdown(aErrorCode);
+    RefPtr<nsGeolocationRequest> request = mPendingCallbacks[i - 1];
+    request->NotifyErrorAndShutdown(aErrorCode);
     // NotifyErrorAndShutdown() removes the request from the array
   }
 
   // notify everyone that is watching
   for (uint32_t i = 0; i < mWatchingCallbacks.Length(); i++) {
-    mWatchingCallbacks[i]->NotifyErrorAndShutdown(aErrorCode);
+    RefPtr<nsGeolocationRequest> request = mWatchingCallbacks[i];
+    request->NotifyErrorAndShutdown(aErrorCode);
   }
 
   return NS_OK;
@@ -974,7 +985,7 @@ bool Geolocation::ShouldBlockInsecureRequests() const {
     return false;
   }
 
-  nsCOMPtr<nsIDocument> doc = win->GetDoc();
+  nsCOMPtr<Document> doc = win->GetDoc();
   if (!doc) {
     return false;
   }
@@ -996,7 +1007,7 @@ bool Geolocation::FeaturePolicyBlocked() const {
     return true;
   }
 
-  nsCOMPtr<nsIDocument> doc = win->GetExtantDoc();
+  nsCOMPtr<Document> doc = win->GetExtantDoc();
   if (!doc) {
     return false;
   }
@@ -1054,10 +1065,9 @@ nsresult Geolocation::GetCurrentPosition(GeoPositionCallback callback,
   nsIEventTarget* target = MainThreadTarget(this);
   RefPtr<nsGeolocationRequest> request = new nsGeolocationRequest(
       this, std::move(callback), std::move(errorCallback), std::move(options),
-      static_cast<uint8_t>(mProtocolType), target, false,
-      EventStateManager::IsHandlingUserInput());
+      static_cast<uint8_t>(mProtocolType), target);
 
-  if (!sGeoEnabled || ShouldBlockInsecureRequests() ||
+  if (!StaticPrefs::geo_enabled() || ShouldBlockInsecureRequests() ||
       !FeaturePolicyBlocked()) {
     request->RequestDelayedTask(target,
                                 nsGeolocationRequest::DelayedTaskType::Deny);
@@ -1128,9 +1138,9 @@ int32_t Geolocation::WatchPosition(GeoPositionCallback aCallback,
   RefPtr<nsGeolocationRequest> request = new nsGeolocationRequest(
       this, std::move(aCallback), std::move(aErrorCallback),
       std::move(aOptions), static_cast<uint8_t>(mProtocolType), target, true,
-      EventStateManager::IsHandlingUserInput(), watchId);
+      watchId);
 
-  if (!sGeoEnabled || ShouldBlockInsecureRequests() ||
+  if (!StaticPrefs::geo_enabled() || ShouldBlockInsecureRequests() ||
       !FeaturePolicyBlocked()) {
     request->RequestDelayedTask(target,
                                 nsGeolocationRequest::DelayedTaskType::Deny);

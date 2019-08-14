@@ -4,30 +4,32 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "SVGTransformableElement.h"
+
+#include "DOMSVGAnimatedTransformList.h"
 #include "gfx2DGlue.h"
 #include "mozilla/dom/MutationEventBinding.h"
-#include "mozilla/dom/SVGAnimatedTransformList.h"
 #include "mozilla/dom/SVGGraphicsElementBinding.h"
-#include "mozilla/dom/SVGTransformableElement.h"
 #include "mozilla/dom/SVGMatrix.h"
+#include "mozilla/dom/SVGRect.h"
 #include "mozilla/dom/SVGSVGElement.h"
 #include "nsContentUtils.h"
 #include "nsIFrame.h"
-#include "nsSVGDisplayableFrame.h"
-#include "mozilla/dom/SVGRect.h"
-#include "nsSVGUtils.h"
+#include "SVGTextFrame.h"
 #include "SVGContentUtils.h"
+#include "nsSVGDisplayableFrame.h"
+#include "nsSVGUtils.h"
 
 using namespace mozilla::gfx;
 
 namespace mozilla {
 namespace dom {
 
-already_AddRefed<SVGAnimatedTransformList>
+already_AddRefed<DOMSVGAnimatedTransformList>
 SVGTransformableElement::Transform() {
   // We're creating a DOM wrapper, so we must tell GetAnimatedTransformList
-  // to allocate the SVGAnimatedTransformList if it hasn't already done so:
-  return SVGAnimatedTransformList::GetDOMWrapper(
+  // to allocate the DOMSVGAnimatedTransformList if it hasn't already done so:
+  return DOMSVGAnimatedTransformList::GetDOMWrapper(
       GetAnimatedTransformList(DO_ALLOCATE), this);
 }
 
@@ -40,13 +42,13 @@ SVGTransformableElement::IsAttributeMapped(const nsAtom* name) const {
                                                     sGraphicsMap};
 
   return FindAttributeDependence(name, map) ||
-         nsSVGElement::IsAttributeMapped(name);
+         SVGElement::IsAttributeMapped(name);
 }
 
 nsChangeHint SVGTransformableElement::GetAttributeChangeHint(
     const nsAtom* aAttribute, int32_t aModType) const {
   nsChangeHint retval =
-      nsSVGElement::GetAttributeChangeHint(aAttribute, aModType);
+      SVGElement::GetAttributeChangeHint(aAttribute, aModType);
   if (aAttribute == nsGkAtoms::transform ||
       aAttribute == nsGkAtoms::mozAnimateMotionDummyAttr) {
     nsIFrame* frame =
@@ -89,7 +91,7 @@ bool SVGTransformableElement::IsEventAttributeNameInternal(nsAtom* aName) {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement overrides
+// SVGElement overrides
 
 gfxMatrix SVGTransformableElement::PrependLocalTransformsTo(
     const gfxMatrix& aMatrix, SVGTransformTypes aWhich) const {
@@ -138,23 +140,23 @@ void SVGTransformableElement::SetAnimateMotionTransform(
   }
 }
 
-nsSVGAnimatedTransformList* SVGTransformableElement::GetAnimatedTransformList(
+SVGAnimatedTransformList* SVGTransformableElement::GetAnimatedTransformList(
     uint32_t aFlags) {
   if (!mTransforms && (aFlags & DO_ALLOCATE)) {
-    mTransforms = new nsSVGAnimatedTransformList();
+    mTransforms = new SVGAnimatedTransformList();
   }
   return mTransforms;
 }
 
-nsSVGElement* SVGTransformableElement::GetNearestViewportElement() {
+SVGElement* SVGTransformableElement::GetNearestViewportElement() {
   return SVGContentUtils::GetNearestViewportElement(this);
 }
 
-nsSVGElement* SVGTransformableElement::GetFarthestViewportElement() {
+SVGElement* SVGTransformableElement::GetFarthestViewportElement() {
   return SVGContentUtils::GetOuterSVGElement(this);
 }
 
-already_AddRefed<SVGIRect> SVGTransformableElement::GetBBox(
+already_AddRefed<SVGRect> SVGTransformableElement::GetBBox(
     const SVGBoundingBoxOptions& aOptions, ErrorResult& rv) {
   nsIFrame* frame = GetPrimaryFrame(FlushType::Layout);
 
@@ -163,44 +165,76 @@ already_AddRefed<SVGIRect> SVGTransformableElement::GetBBox(
     return nullptr;
   }
   nsSVGDisplayableFrame* svgframe = do_QueryFrame(frame);
+
   if (!svgframe) {
-    rv.Throw(NS_ERROR_NOT_IMPLEMENTED);  // XXX: outer svg
-    return nullptr;
+    if (!nsSVGUtils::IsInSVGTextSubtree(frame)) {
+      rv.Throw(NS_ERROR_NOT_IMPLEMENTED);  // XXX: outer svg
+      return nullptr;
+    }
+
+    // For <tspan>, <textPath>, the frame is an nsInlineFrame or
+    // nsBlockFrame, |svgframe| will be a nullptr.
+    // We implement their getBBox directly here instead of in
+    // nsSVGUtils::GetBBox, because nsSVGUtils::GetBBox is more
+    // or less used for other purpose elsewhere. e.g. gradient
+    // code assumes GetBBox of <tspan> returns the bbox of the
+    // outer <text>.
+    // TODO: cleanup this sort of usecase of nsSVGUtils::GetBBox,
+    // then move this code nsSVGUtils::GetBBox.
+    SVGTextFrame* text =
+        static_cast<SVGTextFrame*>(nsLayoutUtils::GetClosestFrameOfType(
+            frame->GetParent(), LayoutFrameType::SVGText));
+
+    if (text->HasAnyStateBits(NS_FRAME_IS_NONDISPLAY)) {
+      rv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
+    }
+
+    gfxRect rec = text->TransformFrameRectFromTextChild(
+        frame->GetRectRelativeToSelf(), frame);
+
+    // Should also add the |x|, |y| of the SVGTextFrame itself, since
+    // the result obtained by TransformFrameRectFromTextChild doesn't
+    // include them.
+    rec.x += float(text->GetPosition().x) / AppUnitsPerCSSPixel();
+    rec.y += float(text->GetPosition().y) / AppUnitsPerCSSPixel();
+
+    return do_AddRef(new SVGRect(this, ToRect(rec)));
   }
 
   if (!NS_SVGNewGetBBoxEnabled()) {
-    return NS_NewSVGRect(
+    return do_AddRef(new SVGRect(
         this, ToRect(nsSVGUtils::GetBBox(
                   frame, nsSVGUtils::eBBoxIncludeFillGeometry |
-                             nsSVGUtils::eUseUserSpaceOfUseElement)));
-  } else {
-    uint32_t flags = 0;
-    if (aOptions.mFill) {
-      flags |= nsSVGUtils::eBBoxIncludeFill;
-    }
-    if (aOptions.mStroke) {
-      flags |= nsSVGUtils::eBBoxIncludeStroke;
-    }
-    if (aOptions.mMarkers) {
-      flags |= nsSVGUtils::eBBoxIncludeMarkers;
-    }
-    if (aOptions.mClipped) {
-      flags |= nsSVGUtils::eBBoxIncludeClipped;
-    }
-    if (flags == 0) {
-      return NS_NewSVGRect(this, 0, 0, 0, 0);
-    }
-    if (flags == nsSVGUtils::eBBoxIncludeMarkers ||
-        flags == nsSVGUtils::eBBoxIncludeClipped) {
-      flags |= nsSVGUtils::eBBoxIncludeFill;
-    }
-    flags |= nsSVGUtils::eUseUserSpaceOfUseElement;
-    return NS_NewSVGRect(this, ToRect(nsSVGUtils::GetBBox(frame, flags)));
+                             nsSVGUtils::eUseUserSpaceOfUseElement))));
   }
+  uint32_t flags = 0;
+  if (aOptions.mFill) {
+    flags |= nsSVGUtils::eBBoxIncludeFill;
+  }
+  if (aOptions.mStroke) {
+    flags |= nsSVGUtils::eBBoxIncludeStroke;
+  }
+  if (aOptions.mMarkers) {
+    flags |= nsSVGUtils::eBBoxIncludeMarkers;
+  }
+  if (aOptions.mClipped) {
+    flags |= nsSVGUtils::eBBoxIncludeClipped;
+  }
+  if (flags == 0) {
+    return do_AddRef(new SVGRect(this, gfx::Rect()));
+  }
+  if (flags == nsSVGUtils::eBBoxIncludeMarkers ||
+      flags == nsSVGUtils::eBBoxIncludeClipped) {
+    flags |= nsSVGUtils::eBBoxIncludeFill;
+  }
+  flags |= nsSVGUtils::eUseUserSpaceOfUseElement;
+  return do_AddRef(
+      new SVGRect(this, ToRect(nsSVGUtils::GetBBox(frame, flags))));
 }
 
 already_AddRefed<SVGMatrix> SVGTransformableElement::GetCTM() {
-  nsIDocument* currentDoc = GetComposedDoc();
+  Document* currentDoc = GetComposedDoc();
   if (currentDoc) {
     // Flush all pending notifications so that our frames are up to date
     currentDoc->FlushPendingNotifications(FlushType::Layout);
@@ -212,7 +246,7 @@ already_AddRefed<SVGMatrix> SVGTransformableElement::GetCTM() {
 }
 
 already_AddRefed<SVGMatrix> SVGTransformableElement::GetScreenCTM() {
-  nsIDocument* currentDoc = GetComposedDoc();
+  Document* currentDoc = GetComposedDoc();
   if (currentDoc) {
     // Flush all pending notifications so that our frames are up to date
     currentDoc->FlushPendingNotifications(FlushType::Layout);
@@ -239,9 +273,10 @@ already_AddRefed<SVGMatrix> SVGTransformableElement::GetTransformToElement(
   return mat.forget();
 }
 
-/* static */ gfxMatrix SVGTransformableElement::GetUserToParentTransform(
+/* static */
+gfxMatrix SVGTransformableElement::GetUserToParentTransform(
     const gfx::Matrix* aAnimateMotionTransform,
-    const nsSVGAnimatedTransformList* aTransforms) {
+    const SVGAnimatedTransformList* aTransforms) {
   gfxMatrix result;
 
   if (aAnimateMotionTransform) {

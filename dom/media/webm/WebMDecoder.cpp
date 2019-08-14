@@ -9,7 +9,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs.h"
 #ifdef MOZ_AV1
-#include "AOMDecoder.h"
+#  include "AOMDecoder.h"
 #endif
 #include "MediaContainerType.h"
 #include "PDMFactory.h"
@@ -17,7 +17,8 @@
 
 namespace mozilla {
 
-/* static */ nsTArray<UniquePtr<TrackInfo>> WebMDecoder::GetTracksInfo(
+/* static */
+nsTArray<UniquePtr<TrackInfo>> WebMDecoder::GetTracksInfo(
     const MediaContainerType& aType, MediaResult& aError) {
   nsTArray<UniquePtr<TrackInfo>> tracks;
   const bool isVideo = aType.Type() == MEDIAMIMETYPE("video/webm");
@@ -66,7 +67,7 @@ namespace mozilla {
       }
     }
 #ifdef MOZ_AV1
-    if (StaticPrefs::MediaAv1Enabled() && IsAV1CodecString(codec)) {
+    if (StaticPrefs::media_av1_enabled() && IsAV1CodecString(codec)) {
       tracks.AppendElement(
           CreateTrackInfoWithMIMETypeAndContainerTypeExtraParameters(
               NS_LITERAL_CSTRING("video/av1"), aType));
@@ -83,7 +84,7 @@ namespace mozilla {
 
 /* static */
 bool WebMDecoder::IsSupportedType(const MediaContainerType& aContainerType) {
-  if (!StaticPrefs::MediaWebMEnabled()) {
+  if (!StaticPrefs::media_webm_enabled()) {
     return false;
   }
 
@@ -112,7 +113,8 @@ bool WebMDecoder::IsSupportedType(const MediaContainerType& aContainerType) {
   return true;
 }
 
-/* static */ nsTArray<UniquePtr<TrackInfo>> WebMDecoder::GetTracksInfo(
+/* static */
+nsTArray<UniquePtr<TrackInfo>> WebMDecoder::GetTracksInfo(
     const MediaContainerType& aType) {
   MediaResult rv = NS_OK;
   return GetTracksInfo(aType, rv);

@@ -7,11 +7,11 @@
 
 #include "nsRegion.h"
 #include "nsView.h"
-#include "nsIPresShell.h"
 #include "nsIWidget.h"
 #include "nsIXULWindow.h"
 
 #include "mozilla/BasicEvents.h"
+#include "mozilla/PresShell.h"
 
 using namespace mozilla;
 
@@ -19,7 +19,7 @@ nsIXULWindow* nsIWidgetListener::GetXULWindow() { return nullptr; }
 
 nsView* nsIWidgetListener::GetView() { return nullptr; }
 
-nsIPresShell* nsIWidgetListener::GetPresShell() { return nullptr; }
+PresShell* nsIWidgetListener::GetPresShell() { return nullptr; }
 
 bool nsIWidgetListener::WindowMoved(nsIWidget* aWidget, int32_t aX,
                                     int32_t aY) {
@@ -69,6 +69,11 @@ void nsIWidgetListener::DidCompositeWindow(
     const TimeStamp& aCompositeStart, const TimeStamp& aCompositeEnd) {}
 
 void nsIWidgetListener::RequestRepaint() {}
+
+bool nsIWidgetListener::ShouldNotBeVisible() {
+  // Returns false to assume that nothing should happen in most cases.
+  return false;
+}
 
 nsEventStatus nsIWidgetListener::HandleEvent(WidgetGUIEvent* aEvent,
                                              bool aUseAttachedEvents) {

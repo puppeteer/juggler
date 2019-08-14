@@ -6,6 +6,7 @@
 
 // Keep in (case-insensitive) order:
 #include "gfxMatrix.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/SVGAElement.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "nsAutoPtr.h"
@@ -17,12 +18,12 @@
 using namespace mozilla;
 
 class nsSVGAFrame final : public nsSVGDisplayContainerFrame {
-  friend nsIFrame* NS_NewSVGAFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewSVGAFrame(mozilla::PresShell* aPresShell,
                                    ComputedStyle* aStyle);
 
  protected:
-  explicit nsSVGAFrame(ComputedStyle* aStyle)
-      : nsSVGDisplayContainerFrame(aStyle, kClassID) {}
+  explicit nsSVGAFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsSVGDisplayContainerFrame(aStyle, aPresContext, kClassID) {}
 
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSVGAFrame)
@@ -46,8 +47,8 @@ class nsSVGAFrame final : public nsSVGDisplayContainerFrame {
 //----------------------------------------------------------------------
 // Implementation
 
-nsIFrame* NS_NewSVGAFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGAFrame(aStyle);
+nsIFrame* NS_NewSVGAFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell) nsSVGAFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGAFrame)

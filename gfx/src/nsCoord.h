@@ -34,10 +34,10 @@
 
 #ifdef NS_COORD_IS_FLOAT
 typedef float nscoord;
-#define nscoord_MAX (mozilla::PositiveInfinity<float>())
+#  define nscoord_MAX (mozilla::PositiveInfinity<float>())
 #else
 typedef int32_t nscoord;
-#define nscoord_MAX nscoord((1 << 30) - 1)
+#  define nscoord_MAX nscoord((1 << 30) - 1)
 #endif
 
 #define nscoord_MIN (-nscoord_MAX)
@@ -72,21 +72,21 @@ inline nscoord NSCoordMulDiv(nscoord aMult1, nscoord aMult2, nscoord aDiv) {
 }
 
 inline nscoord NSToCoordRound(float aValue) {
-#if defined(XP_WIN32) && defined(_M_IX86) && !defined(__GNUC__) && \
+#if defined(XP_WIN) && defined(_M_IX86) && !defined(__GNUC__) && \
     !defined(__clang__)
   return NS_lroundup30(aValue);
 #else
   return nscoord(floorf(aValue + 0.5f));
-#endif /* XP_WIN32 && _M_IX86 && !__GNUC__ */
+#endif /* XP_WIN && _M_IX86 && !__GNUC__ */
 }
 
 inline nscoord NSToCoordRound(double aValue) {
-#if defined(XP_WIN32) && defined(_M_IX86) && !defined(__GNUC__) && \
+#if defined(XP_WIN) && defined(_M_IX86) && !defined(__GNUC__) && \
     !defined(__clang__)
   return NS_lroundup30((float)aValue);
 #else
   return nscoord(floor(aValue + 0.5f));
-#endif /* XP_WIN32 && _M_IX86 && !__GNUC__ */
+#endif /* XP_WIN && _M_IX86 && !__GNUC__ */
 }
 
 inline nscoord NSToCoordRoundWithClamp(float aValue) {

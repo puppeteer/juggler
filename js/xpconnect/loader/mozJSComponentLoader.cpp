@@ -5,21 +5,24 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 
 #include <cstdarg>
 
 #include "mozilla/Logging.h"
 #ifdef ANDROID
-#include <android/log.h>
+#  include <android/log.h>
 #endif
 #ifdef XP_WIN
-#include <windows.h>
+#  include <windows.h>
 #endif
 
 #include "jsapi.h"
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/Printf.h"
+#include "js/PropertySpec.h"
+#include "js/SourceText.h"  // JS::SourceText
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsExceptionHandler.h"
@@ -29,7 +32,6 @@
 #include "mozJSComponentLoader.h"
 #include "mozJSLoaderUtils.h"
 #include "nsIXPConnect.h"
-#include "nsIObserverService.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIFileURL.h"
 #include "nsIJARURI.h"
@@ -53,7 +55,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/ScriptPreloader.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/UniquePtrExtensions.h"
@@ -64,9 +65,6 @@ using namespace mozilla::scache;
 using namespace mozilla::loader;
 using namespace xpc;
 using namespace JS;
-
-static const char kObserverServiceContractID[] =
-    "@mozilla.org/observer-service;1";
 
 #define JS_CACHE_PREFIX(aType) "jsloader/" aType
 
@@ -84,6 +82,7 @@ static LazyLogModule gJSCLLog("JSComponentLoader");
 
 // Components.utils.import error messages
 #define ERROR_SCOPE_OBJ "%s - Second argument must be an object."
+#define ERROR_NO_TARGET_OBJECT "%s - Couldn't find target object for import."
 #define ERROR_NOT_PRESENT "%s - EXPORTED_SYMBOLS is not present."
 #define ERROR_NOT_AN_ARRAY "%s - EXPORTED_SYMBOLS is not an array."
 #define ERROR_GETTING_ARRAY_LENGTH \
@@ -93,7 +92,7 @@ static LazyLogModule gJSCLLog("JSComponentLoader");
 #define ERROR_SETTING_SYMBOL "%s - Could not set symbol '%s' on target object."
 
 static bool Dump(JSContext* cx, unsigned argc, Value* vp) {
-  if (!mozilla::dom::DOMPrefs::DumpEnabled()) {
+  if (!nsJSUtils::DumpEnabled()) {
     return true;
   }
 
@@ -240,6 +239,7 @@ class MOZ_STACK_CLASS ComponentLoaderInfo {
                          nsContentUtils::GetSystemPrincipal(),
                          nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
                          nsIContentPolicy::TYPE_SCRIPT,
+                         nullptr,  // nsICookieSettings
                          nullptr,  // aPerformanceStorage
                          nullptr,  // aLoadGroup
                          nullptr,  // aCallbacks
@@ -295,7 +295,7 @@ static nsresult ReportOnCallerUTF8(JSCLContextHelper& helper,
 mozJSComponentLoader::~mozJSComponentLoader() {
   if (mInitialized) {
     NS_ERROR(
-        "'xpcom-shutdown-loaders' was not fired before cleaning up "
+        "UnloadModules() was not explicitly called before cleaning up "
         "mozJSComponentLoader");
     UnloadModules();
   }
@@ -304,8 +304,6 @@ mozJSComponentLoader::~mozJSComponentLoader() {
 }
 
 StaticRefPtr<mozJSComponentLoader> mozJSComponentLoader::sSelf;
-
-NS_IMPL_ISUPPORTS(mozJSComponentLoader, nsIObserver)
 
 nsresult mozJSComponentLoader::ReallyInit() {
   MOZ_ASSERT(!mInitialized);
@@ -320,14 +318,6 @@ nsresult mozJSComponentLoader::ReallyInit() {
   } else {
     mShareLoaderGlobal = Preferences::GetBool("jsloader.shareGlobal");
   }
-
-  nsresult rv;
-  nsCOMPtr<nsIObserverService> obsSvc =
-      do_GetService(kObserverServiceContractID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = obsSvc->AddObserver(this, "xpcom-shutdown-loaders", false);
-  NS_ENSURE_SUCCESS(rv, rv);
 
   mInitialized = true;
 
@@ -407,6 +397,8 @@ const mozilla::Module* mozJSComponentLoader::LoadModule(FileLocation& aFile) {
     }
   }
 
+  AUTO_PROFILER_TEXT_MARKER_CAUSE("JS XPCOM", spec, JS,
+                                  profiler_get_backtrace());
   AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING("mozJSComponentLoader::LoadModule",
                                         OTHER, spec);
 
@@ -521,13 +513,25 @@ void mozJSComponentLoader::FindTargetObject(JSContext* aCx,
   // script, since it the FrameScript NSVO will have been found.
   if (!aTargetObject ||
       !IsLoaderGlobal(JS::GetNonCCWObjectGlobal(aTargetObject))) {
-    aTargetObject.set(CurrentGlobalOrNull(aCx));
+    aTargetObject.set(JS::GetScriptedCallerGlobal(aCx));
+
+    // Return nullptr if the scripted caller is in a different compartment.
+    if (js::GetObjectCompartment(aTargetObject) !=
+        js::GetContextCompartment(aCx)) {
+      aTargetObject.set(nullptr);
+    }
   }
 }
 
 void mozJSComponentLoader::InitStatics() {
   MOZ_ASSERT(!sSelf);
   sSelf = new mozJSComponentLoader();
+}
+
+void mozJSComponentLoader::Unload() {
+  if (sSelf) {
+    sSelf->UnloadModules();
+  }
 }
 
 void mozJSComponentLoader::Shutdown() {
@@ -584,8 +588,7 @@ void mozJSComponentLoader::CreateLoaderGlobal(JSContext* aCx,
   backstagePass->SetGlobalObject(global);
 
   JSAutoRealm ar(aCx, global);
-  if (!JS_DefineFunctions(aCx, global, gGlobalFun) ||
-      !JS_DefineProfilingFunctions(aCx, global)) {
+  if (!JS_DefineFunctions(aCx, global, gGlobalFun)) {
     return;
   }
 
@@ -613,6 +616,13 @@ bool mozJSComponentLoader::ReuseGlobal(nsIURI* aURI) {
   // Various tests call addDebuggerToGlobal on the result of
   // importing this JSM, which would be annoying to fix.
   if (spec.EqualsASCII("resource://gre/modules/jsdebugger.jsm")) {
+    return false;
+  }
+
+  // BrowserTestUtils.jsm calls Cu.permitCPOWsInScope(this) which sets a
+  // per-compartment flag to permit CPOWs. We don't want to set this flag for
+  // all other JSMs.
+  if (spec.EqualsASCII("resource://testing-common/BrowserTestUtils.jsm")) {
     return false;
   }
 
@@ -732,8 +742,8 @@ static mozilla::Result<nsCString, nsresult> ReadScript(
   MOZ_TRY(aInfo.EnsureScriptChannel());
 
   nsCOMPtr<nsIInputStream> scriptStream;
-  MOZ_TRY(NS_MaybeOpenChannelUsingOpen2(aInfo.ScriptChannel(),
-                                        getter_AddRefs(scriptStream)));
+  MOZ_TRY(NS_MaybeOpenChannelUsingOpen(aInfo.ScriptChannel(),
+                                       getter_AddRefs(scriptStream)));
 
   uint64_t len64;
   uint32_t bytesRead;
@@ -846,21 +856,28 @@ nsresult mozJSComponentLoader::ObjectForLocation(
       // Note: exceptions will get handled further down;
       // don't early return for them here.
       auto buf = map.get<char>();
-      if (reuseGlobal) {
-        CompileLatin1ForNonSyntacticScope(cx, options, buf.get(), map.size(),
-                                          &script);
+
+      JS::SourceText<mozilla::Utf8Unit> srcBuf;
+      if (srcBuf.init(cx, buf.get(), map.size(),
+                      JS::SourceOwnership::Borrowed)) {
+        script = reuseGlobal ? CompileForNonSyntacticScopeDontInflate(
+                                   cx, options, srcBuf)
+                             : CompileDontInflate(cx, options, srcBuf);
       } else {
-        CompileLatin1(cx, options, buf.get(), map.size(), &script);
+        MOZ_ASSERT(!script);
       }
     } else {
       nsCString str;
       MOZ_TRY_VAR(str, ReadScript(aInfo));
 
-      if (reuseGlobal) {
-        CompileLatin1ForNonSyntacticScope(cx, options, str.get(), str.Length(),
-                                          &script);
+      JS::SourceText<mozilla::Utf8Unit> srcBuf;
+      if (srcBuf.init(cx, str.get(), str.Length(),
+                      JS::SourceOwnership::Borrowed)) {
+        script = reuseGlobal ? CompileForNonSyntacticScopeDontInflate(
+                                   cx, options, srcBuf)
+                             : CompileDontInflate(cx, options, srcBuf);
       } else {
-        CompileLatin1(cx, options, str.get(), str.Length(), &script);
+        MOZ_ASSERT(!script);
       }
     }
     // Propagate the exception, if one exists. Also, don't leave the stale
@@ -940,15 +957,11 @@ void mozJSComponentLoader::UnloadModules() {
   mInitialized = false;
 
   if (mLoaderGlobal) {
-    dom::AutoJSAPI jsapi;
-    jsapi.Init();
-    JSContext* cx = jsapi.cx();
-    RootedObject global(cx, mLoaderGlobal);
-    JSAutoRealm ar(cx, global);
-    MOZ_ASSERT(JS_HasExtensibleLexicalEnvironment(global));
-    JS_SetAllNonReservedSlotsToUndefined(
-        cx, JS_ExtensibleLexicalEnvironment(global));
-    JS_SetAllNonReservedSlotsToUndefined(cx, global);
+    MOZ_ASSERT(JS_HasExtensibleLexicalEnvironment(mLoaderGlobal));
+    JS::RootedObject lexicalEnv(dom::RootingCx(),
+                                JS_ExtensibleLexicalEnvironment(mLoaderGlobal));
+    JS_SetAllNonReservedSlotsToUndefined(lexicalEnv);
+    JS_SetAllNonReservedSlotsToUndefined(mLoaderGlobal);
     mLoaderGlobal = nullptr;
   }
 
@@ -993,6 +1006,10 @@ nsresult mozJSComponentLoader::ImportInto(const nsACString& registryLocation,
     }
   } else {
     FindTargetObject(cx, &targetObject);
+    if (!targetObject) {
+      return ReportOnCallerUTF8(cx, ERROR_NO_TARGET_OBJECT,
+                                PromiseFlatCString(registryLocation).get());
+    }
   }
 
   js::AssertSameCompartment(cx, targetObject);
@@ -1257,8 +1274,9 @@ nsresult mozJSComponentLoader::Import(JSContext* aCx,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING("mozJSComponentLoader::Import", JS,
-                                        aLocation);
+  AUTO_PROFILER_TEXT_MARKER_CAUSE("ChromeUtils.import", aLocation, JS,
+                                  profiler_get_backtrace());
+
   ComponentLoaderInfo info(aLocation);
 
   rv = info.EnsureKey();
@@ -1387,18 +1405,6 @@ nsresult mozJSComponentLoader::Unload(const nsACString& aLocation) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-mozJSComponentLoader::Observe(nsISupports* subject, const char* topic,
-                              const char16_t* data) {
-  if (!strcmp(topic, "xpcom-shutdown-loaders")) {
-    UnloadModules();
-  } else {
-    NS_ERROR("Unexpected observer topic.");
-  }
-
-  return NS_OK;
-}
-
 size_t mozJSComponentLoader::ModuleEntry::SizeOfIncludingThis(
     MallocSizeOf aMallocSizeOf) const {
   size_t n = aMallocSizeOf(this);
@@ -1407,8 +1413,8 @@ size_t mozJSComponentLoader::ModuleEntry::SizeOfIncludingThis(
   return n;
 }
 
-/* static */ already_AddRefed<nsIFactory>
-mozJSComponentLoader::ModuleEntry::GetFactory(
+/* static */
+already_AddRefed<nsIFactory> mozJSComponentLoader::ModuleEntry::GetFactory(
     const mozilla::Module& module, const mozilla::Module::CIDEntry& entry) {
   const ModuleEntry& self = static_cast<const ModuleEntry&>(module);
   MOZ_ASSERT(self.getfactoryobj, "Handing out an uninitialized module?");

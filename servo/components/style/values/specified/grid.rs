@@ -8,9 +8,9 @@
 use crate::parser::{Parse, ParserContext};
 use crate::values::computed::{self, Context, ToComputedValue};
 use crate::values::generics::grid::{GridTemplateComponent, RepeatCount, TrackBreadth};
-use crate::values::generics::grid::{LineNameList, TrackKeyword, TrackRepeat, TrackSize};
+use crate::values::generics::grid::{LineNameList, TrackRepeat, TrackSize};
 use crate::values::generics::grid::{TrackList, TrackListType, TrackListValue};
-use crate::values::specified::{Integer, LengthOrPercentage};
+use crate::values::specified::{Integer, LengthPercentage};
 use crate::values::{CSSFloat, CustomIdent};
 use cssparser::{ParseError as CssParseError, Parser, Token};
 use std::mem;
@@ -22,33 +22,50 @@ pub fn parse_flex<'i, 't>(input: &mut Parser<'i, 't>) -> Result<CSSFloat, ParseE
     match *input.next()? {
         Token::Dimension {
             value, ref unit, ..
-        }
-            if unit.eq_ignore_ascii_case("fr") && value.is_sign_positive() =>
-        {
-            Ok(value)
-        },
+        } if unit.eq_ignore_ascii_case("fr") && value.is_sign_positive() => Ok(value),
         ref t => Err(location.new_unexpected_token_error(t.clone())),
     }
 }
 
-impl Parse for TrackBreadth<LengthOrPercentage> {
+impl<L> TrackBreadth<L> {
+    fn parse_keyword<'i, 't>(input: &mut Parser<'i, 't>) -> Result<Self, ParseError<'i>> {
+        #[derive(Parse)]
+        enum TrackKeyword {
+            Auto,
+            MaxContent,
+            MinContent,
+        }
+
+        Ok(match TrackKeyword::parse(input)? {
+            TrackKeyword::Auto => TrackBreadth::Auto,
+            TrackKeyword::MaxContent => TrackBreadth::MaxContent,
+            TrackKeyword::MinContent => TrackBreadth::MinContent,
+        })
+    }
+}
+
+impl Parse for TrackBreadth<LengthPercentage> {
     fn parse<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        if let Ok(lop) = input.try(|i| LengthOrPercentage::parse_non_negative(context, i)) {
-            return Ok(TrackBreadth::Breadth(lop));
+        // FIXME: This and other callers in this file should use
+        // NonNegativeLengthPercentage instead.
+        //
+        // Though it seems these cannot be animated so it's ~ok.
+        if let Ok(lp) = input.try(|i| LengthPercentage::parse_non_negative(context, i)) {
+            return Ok(TrackBreadth::Breadth(lp));
         }
 
         if let Ok(f) = input.try(parse_flex) {
             return Ok(TrackBreadth::Fr(f));
         }
 
-        TrackKeyword::parse(input).map(TrackBreadth::Keyword)
+        Self::parse_keyword(input)
     }
 }
 
-impl Parse for TrackSize<LengthOrPercentage> {
+impl Parse for TrackSize<LengthPercentage> {
     fn parse<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
@@ -60,12 +77,9 @@ impl Parse for TrackSize<LengthOrPercentage> {
         if input.try(|i| i.expect_function_matching("minmax")).is_ok() {
             return input.parse_nested_block(|input| {
                 let inflexible_breadth =
-                    match input.try(|i| LengthOrPercentage::parse_non_negative(context, i)) {
-                        Ok(lop) => TrackBreadth::Breadth(lop),
-                        Err(..) => {
-                            let keyword = TrackKeyword::parse(input)?;
-                            TrackBreadth::Keyword(keyword)
-                        },
+                    match input.try(|i| LengthPercentage::parse_non_negative(context, i)) {
+                        Ok(lp) => TrackBreadth::Breadth(lp),
+                        Err(..) => TrackBreadth::parse_keyword(input)?,
                     };
 
                 input.expect_comma()?;
@@ -77,9 +91,8 @@ impl Parse for TrackSize<LengthOrPercentage> {
         }
 
         input.expect_function_matching("fit-content")?;
-        let lop =
-            input.parse_nested_block(|i| LengthOrPercentage::parse_non_negative(context, i))?;
-        Ok(TrackSize::FitContent(lop))
+        let lp = input.parse_nested_block(|i| LengthPercentage::parse_non_negative(context, i))?;
+        Ok(TrackSize::FitContent(TrackBreadth::Breadth(lp)))
     }
 }
 
@@ -117,7 +130,7 @@ enum RepeatType {
     Fixed,
 }
 
-impl TrackRepeat<LengthOrPercentage, Integer> {
+impl TrackRepeat<LengthPercentage, Integer> {
     fn parse_with_repeat_type<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
@@ -199,7 +212,7 @@ impl TrackRepeat<LengthOrPercentage, Integer> {
     }
 }
 
-impl Parse for TrackList<LengthOrPercentage, Integer> {
+impl Parse for TrackList<LengthPercentage, Integer> {
     fn parse<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
@@ -297,8 +310,8 @@ impl Parse for TrackList<LengthOrPercentage, Integer> {
     }
 }
 
-impl ToComputedValue for TrackList<LengthOrPercentage, Integer> {
-    type ComputedValue = TrackList<computed::LengthOrPercentage, computed::Integer>;
+impl ToComputedValue for TrackList<LengthPercentage, Integer> {
+    type ComputedValue = TrackList<computed::LengthPercentage, computed::Integer>;
 
     #[inline]
     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
@@ -386,7 +399,7 @@ impl ToComputedValue for TrackList<LengthOrPercentage, Integer> {
 #[inline]
 fn allow_grid_template_subgrids() -> bool {
     use crate::gecko_bindings::structs::mozilla;
-    unsafe { mozilla::StaticPrefs_sVarCache_layout_css_grid_template_subgrid_value_enabled }
+    unsafe { mozilla::StaticPrefs::sVarCache_layout_css_grid_template_subgrid_value_enabled }
 }
 
 #[cfg(feature = "servo")]
@@ -395,7 +408,7 @@ fn allow_grid_template_subgrids() -> bool {
     false
 }
 
-impl Parse for GridTemplateComponent<LengthOrPercentage, Integer> {
+impl Parse for GridTemplateComponent<LengthPercentage, Integer> {
     // FIXME: Derive Parse (probably with None_)
     fn parse<'i, 't>(
         context: &ParserContext,
@@ -409,8 +422,8 @@ impl Parse for GridTemplateComponent<LengthOrPercentage, Integer> {
     }
 }
 
-impl GridTemplateComponent<LengthOrPercentage, Integer> {
-    /// Parses a `GridTemplateComponent<LengthOrPercentage>` except `none` keyword.
+impl GridTemplateComponent<LengthPercentage, Integer> {
+    /// Parses a `GridTemplateComponent<LengthPercentage>` except `none` keyword.
     pub fn parse_without_none<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,

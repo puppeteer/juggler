@@ -1,18 +1,19 @@
 /* -*- Mode: indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim: set sts=2 sw=2 et tw=80: */
-/* global sinon */
 
 "use strict";
-Services.scriptloader.loadSubScript("resource://testing-common/sinon-2.3.2.js");
+const { sinon } = ChromeUtils.import("resource://testing-common/Sinon.jsm");
 
-registerCleanupFunction(() => {
-  delete window.sinon;
-});
-
-ChromeUtils.defineModuleGetter(this, "ExtensionSettingsStore",
-                               "resource://gre/modules/ExtensionSettingsStore.jsm");
-ChromeUtils.defineModuleGetter(this, "ExtensionControlledPopup",
-                               "resource:///modules/ExtensionControlledPopup.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "ExtensionSettingsStore",
+  "resource://gre/modules/ExtensionSettingsStore.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "ExtensionControlledPopup",
+  "resource:///modules/ExtensionControlledPopup.jsm"
+);
 
 function createMarkup(doc) {
   let panel = doc.getElementById("extension-notification-panel");
@@ -46,7 +47,7 @@ function createMarkup(doc) {
     popupnotification.remove();
   });
 
-  return {panel, popupnotification};
+  return { panel, popupnotification };
 }
 
 /*
@@ -58,7 +59,7 @@ add_task(async function testExtensionControlledPopup() {
   let id = "ext-controlled@mochi.test";
   let extension = ExtensionTestUtils.loadExtension({
     manifest: {
-      applications: {gecko: {id}},
+      applications: { gecko: { id } },
       name: "Ext Controlled",
     },
     // We need to be able to find the extension using AddonManager.
@@ -92,7 +93,7 @@ add_task(async function testExtensionControlledPopup() {
   });
 
   let doc = Services.wm.getMostRecentWindow("navigator:browser").document;
-  let {panel, popupnotification} = createMarkup(doc);
+  let { panel, popupnotification } = createMarkup(doc);
 
   function openPopupWithEvent() {
     let popupShown = promisePopupShown(panel);
@@ -104,16 +105,14 @@ add_task(async function testExtensionControlledPopup() {
     let done;
     if (action == "ignore") {
       panel.hidePopup();
-    } else {
-      if (action == "button") {
-        done = TestUtils.waitForCondition(() => {
-          return ExtensionSettingsStore.getSetting(confirmedType, id, id).value;
-        });
-      } else if (action == "secondarybutton") {
-        done = awaitEvent("shutdown", id);
-      }
-      doc.getAnonymousElementByAttribute(
-        popupnotification, "anonid", action).click();
+    } else if (action == "button") {
+      done = TestUtils.waitForCondition(() => {
+        return ExtensionSettingsStore.getSetting(confirmedType, id, id).value;
+      });
+      popupnotification.button.click();
+    } else if (action == "secondarybutton") {
+      done = awaitEvent("shutdown", id);
+      popupnotification.secondaryButton.click();
     }
     return done;
   }
@@ -124,25 +123,35 @@ add_task(async function testExtensionControlledPopup() {
   ok(!beforeDisableAddon.called, "Settings have not been restored");
 
   // Add the setting and observer.
-  await ExtensionSettingsStore.addSetting(id, settingType, settingKey, "controlled", () => "init");
+  await ExtensionSettingsStore.addSetting(
+    id,
+    settingType,
+    settingKey,
+    "controlled",
+    () => "init"
+  );
   await popup.addObserver(id);
 
   // Ensure the panel isn't open.
   ok(onObserverAdded.called, "Observing the event");
-  onObserverAdded.reset();
+  onObserverAdded.resetHistory();
   ok(!onObserverRemoved.called, "Observing the event");
   ok(!beforeDisableAddon.called, "Settings have not been restored");
   ok(panel.getAttribute("panelopen") != "true", "The panel is closed");
   is(popupnotification.hidden, true, "The popup is hidden");
   is(addon.userDisabled, false, "The extension is enabled");
-  is(await popup.userHasConfirmed(id), false, "The user is not initially confirmed");
+  is(
+    await popup.userHasConfirmed(id),
+    false,
+    "The user is not initially confirmed"
+  );
 
   // The popup should opened based on the observer event.
   await openPopupWithEvent();
 
   ok(!onObserverAdded.called, "Only one observer has been registered");
   ok(onObserverRemoved.called, "The observer was removed");
-  onObserverRemoved.reset();
+  onObserverRemoved.resetHistory();
   ok(!beforeDisableAddon.called, "Settings have not been restored");
   is(panel.getAttribute("panelopen"), "true", "The panel is open");
   is(popupnotification.hidden, false, "The popup content is visible");
@@ -150,12 +159,17 @@ add_task(async function testExtensionControlledPopup() {
 
   // Verify the description is populated.
   let description = doc.getElementById("extension-controlled-description");
-  is(description.textContent,
-     "An extension,  Ext Controlled, changed the page you see when you open a new tab.Learn more",
-     "The extension name is in the description");
+  is(
+    description.textContent,
+    "An extension,  Ext Controlled, changed the page you see when you open a new tab.Learn more",
+    "The extension name is in the description"
+  );
   let link = description.querySelector("label");
-  is(link.href, "http://127.0.0.1:8888/support-dummy/extension-controlled",
-     "The link has the href set from learnMoreLink");
+  is(
+    link.href,
+    "http://127.0.0.1:8888/support-dummy/extension-controlled",
+    "The link has the href set from learnMoreLink"
+  );
 
   // Force close the popup, as if a user clicked away from it.
   await closePopupWithAction("ignore");
@@ -169,7 +183,7 @@ add_task(async function testExtensionControlledPopup() {
   // Force add the observer again to keep changes.
   await popup.addObserver(id);
   ok(onObserverAdded.called, "The observer was added again");
-  onObserverAdded.reset();
+  onObserverAdded.resetHistory();
   ok(!onObserverRemoved.called, "The observer is still registered");
   is(await popup.userHasConfirmed(id), false, "The user has not confirmed");
 
@@ -182,7 +196,7 @@ add_task(async function testExtensionControlledPopup() {
   // The observer is removed, but the notification is saved.
   ok(!onObserverAdded.called, "The observer wasn't added");
   ok(onObserverRemoved.called, "The observer was removed");
-  onObserverRemoved.reset();
+  onObserverRemoved.resetHistory();
   is(await popup.userHasConfirmed(id), true, "The user has confirmed");
   is(addon.userDisabled, false, "The extension is still enabled");
 
@@ -195,12 +209,16 @@ add_task(async function testExtensionControlledPopup() {
 
   // Clear that the user was notified.
   await popup.clearConfirmation(id);
-  is(await popup.userHasConfirmed(id), false, "The user confirmation has been cleared");
+  is(
+    await popup.userHasConfirmed(id),
+    false,
+    "The user confirmation has been cleared"
+  );
 
   // Force add the observer again to restore changes.
   await popup.addObserver(id);
   ok(onObserverAdded.called, "The observer was added a third time");
-  onObserverAdded.reset();
+  onObserverAdded.resetHistory();
   ok(!onObserverRemoved.called, "The observer is still active");
   ok(!beforeDisableAddon.called, "We haven't disabled the add-on yet");
   is(await popup.userHasConfirmed(id), false, "The user has not confirmed");

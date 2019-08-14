@@ -4,14 +4,16 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
 const PREF_LOGLEVEL = "browser.policies.loglevel";
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
-  let { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm", {});
+  let { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm");
   return new ConsoleAPI({
     prefix: "ProxyPolicies.jsm",
     // tip: set maxLogLevel to "debug" and use log.debug() to create detailed
@@ -31,7 +33,7 @@ var PROXY_TYPES_MAP = new Map([
   ["autoConfig", Ci.nsIProtocolProxyService.PROXYCONFIG_PAC],
 ]);
 
-var EXPORTED_SYMBOLS = [ "ProxyPolicies" ];
+var EXPORTED_SYMBOLS = ["ProxyPolicies"];
 
 var ProxyPolicies = {
   configureProxySettings(param, setPref) {
@@ -64,7 +66,10 @@ var ProxyPolicies = {
     }
 
     if (param.UseHTTPProxyForAllProtocols !== undefined) {
-      setPref("network.proxy.share_proxy_settings", param.UseHTTPProxyForAllProtocols);
+      setPref(
+        "network.proxy.share_proxy_settings",
+        param.UseHTTPProxyForAllProtocols
+      );
     }
 
     function setProxyHostAndPort(type, address) {

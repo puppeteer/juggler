@@ -31,6 +31,7 @@ def fake_short_path(path):
                         for p in mozpath.split(path))
     return path
 
+
 def ensure_exe_extension(path):
     if sys.platform.startswith('win'):
         return path + '.exe'
@@ -73,6 +74,7 @@ class ConfigureTestSandbox(ConfigureSandbox):
     This class is only meant to implement the minimal things to make
     moz.configure testing possible. As such, it takes shortcuts.
     '''
+
     def __init__(self, paths, config, environ, *args, **kwargs):
         self._search_path = environ.get('PATH', '').split(os.pathsep)
 
@@ -82,12 +84,11 @@ class ConfigureTestSandbox(ConfigureSandbox):
 
         paths = paths.keys()
 
-        environ = dict(environ)
+        environ = copy.copy(environ)
         if 'CONFIG_SHELL' not in environ:
             environ['CONFIG_SHELL'] = mozpath.abspath('/bin/sh')
             self._subprocess_paths[environ['CONFIG_SHELL']] = self.shell
             paths.append(environ['CONFIG_SHELL'])
-        self._environ = copy.copy(environ)
         self._subprocess_paths[mozpath.join(topsrcdir, 'build/win32/vswhere.exe')] = self.vswhere
 
         vfs = ConfigureTestVFS(paths)
@@ -100,10 +101,15 @@ class ConfigureTestSandbox(ConfigureSandbox):
 
         self.imported_os = ReadOnlyNamespace(path=ReadOnlyNamespace(**os_path))
 
+        self.modules = kwargs.pop('modules', {}) or {}
+
         super(ConfigureTestSandbox, self).__init__(config, environ, *args,
                                                    **kwargs)
 
     def _get_one_import(self, what):
+        if what in self.modules:
+            return self.modules[what]
+
         if what == 'which.which':
             return self.which
 
@@ -134,9 +140,6 @@ class ConfigureTestSandbox(ConfigureSandbox):
         if what == 'os.path.isfile':
             return self.imported_os.path.isfile
 
-        if what == 'os.environ':
-            return self._environ
-
         if what == 'ctypes.wintypes':
             return ReadOnlyNamespace(
                 LPCWSTR=0,
@@ -151,7 +154,6 @@ class ConfigureTestSandbox(ConfigureSandbox):
 
                 def __call__(self, *args, **kwargs):
                     return self._func(*args, **kwargs)
-
 
             return ReadOnlyNamespace(
                 create_unicode_buffer=self.create_unicode_buffer,
@@ -254,7 +256,7 @@ class BaseConfigureTest(unittest.TestCase):
         return 0, args[0], ''
 
     def get_sandbox(self, paths, config, args=[], environ={}, mozconfig='',
-                    out=None, logger=None):
+                    out=None, logger=None, modules=None):
         kwargs = {}
         if logger:
             kwargs['logger'] = logger
@@ -291,7 +293,7 @@ class BaseConfigureTest(unittest.TestCase):
 
             sandbox = ConfigureTestSandbox(paths, config, environ,
                                            ['configure'] + target + args,
-                                           **kwargs)
+                                           modules=modules, **kwargs)
             sandbox.include_file(os.path.join(topsrcdir, 'moz.configure'))
 
             return sandbox

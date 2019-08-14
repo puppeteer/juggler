@@ -1,11 +1,11 @@
 # TippyTop in Activity Stream
-TippyTop, a collection of icons from the Alexa top sites, provides high quality images for the Top Sites in Activity Stream. The TippyTop manifest is hosted on S3, and then moved to [Remote Settings](https://firefox-source-docs.mozilla.org/services/common/docs/services/RemoteSettings.html) since Firefox 63. In this document, we'll cover how we produce and manage TippyTop manifest for Activity Stream.
+TippyTop, a collection of icons from the Alexa top sites, provides high quality images for the Top Sites in Activity Stream. The TippyTop manifest is hosted on S3, and then moved to [Remote Settings](https://remote-settings.readthedocs.io/en/latest/index.html) since Firefox 63. In this document, we'll cover how we produce and manage TippyTop manifest for Activity Stream.
 
 ## TippyTop manifest production
 TippyTop manifest is produced by [tippy-top-sites](https://github.com/mozilla/tippy-top-sites).
 
 ```sh
-# set up the enviroment, only needed for the first time
+# set up the environment, only needed for the first time
 $ pip install -r requirements.txt
 $ python make_manifest.py --count 2000 > icons.json  # Alexa top 2000 sites
 ```
@@ -36,5 +36,5 @@ $ ./upload2remotesettings.py prod
 
 After uploading it to Remote Setting, you can request for review in the [dashboard](https://settings-writer.prod.mozaws.net/v1/admin/). Note that you will need to log in the Mozilla LDAP VPN for both uploading and accessing Remote Setting's dashboard. Once your request gets approved by the reviewer, the new manifest will be content signed and published to production.
 
-## TippyTop Viwer
-You can use this [viwer](https://mozilla.github.io/tippy-top-sites/manifest-viewer/) to load all the icons in the current manifest.
+## TippyTop Viewer
+You can use this [viewer](https://mozilla.github.io/tippy-top-sites/manifest-viewer/) to load all the icons in the current manifest.

@@ -11,14 +11,16 @@
 
 // Interfaces
 #include "nsCOMPtr.h"
-#include "nsIPresShell.h"
 #include "nsViewManager.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
 
 class nsIContent;
-class nsIDocument;
 class nsPresContext;
+
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
 
 // nsPrintObject Document Type
 enum PrintObjectType { eDoc = 0, eFrame = 1, eIFrame = 2, eFrameSet = 3 };
@@ -31,8 +33,12 @@ class nsPrintObject {
   nsPrintObject();
   ~nsPrintObject();  // non-virtual
 
-  // Methods
-  nsresult Init(nsIDocShell* aDocShell, nsIDocument* aDoc, bool aPrintPreview);
+  nsresult InitAsRootObject(nsIDocShell* aDocShell,
+                            mozilla::dom::Document* aDoc,
+                            bool aForPrintPreview);
+  nsresult InitAsNestedObject(nsIDocShell* aDocShell,
+                              mozilla::dom::Document* aDoc,
+                              nsPrintObject* aParent);
 
   bool IsPrintable() { return !mDontPrint; }
   void DestroyPresentation();
@@ -40,10 +46,10 @@ class nsPrintObject {
   // Data Members
   nsCOMPtr<nsIDocShell> mDocShell;
   nsCOMPtr<nsIDocShellTreeOwner> mTreeOwner;
-  nsCOMPtr<nsIDocument> mDocument;
+  RefPtr<mozilla::dom::Document> mDocument;
 
   RefPtr<nsPresContext> mPresContext;
-  nsCOMPtr<nsIPresShell> mPresShell;
+  RefPtr<mozilla::PresShell> mPresShell;
   RefPtr<nsViewManager> mViewManager;
 
   nsCOMPtr<nsIContent> mContent;
@@ -55,7 +61,6 @@ class nsPrintObject {
   bool mDontPrint;
   bool mPrintAsIs;
   bool mInvisible;  // Indicates PO is set to not visible by CSS
-  bool mPrintPreview;
   bool mDidCreateDocShell;
   float mShrinkRatio;
   float mZoomRatio;

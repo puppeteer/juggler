@@ -11,6 +11,7 @@ import org.mozilla.geckoview.BuildConfig;
 import com.google.android.exoplayer2.BaseRenderer;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.decoder.DecoderInputBuffer;
+import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.Format;
 import com.google.android.exoplayer2.FormatHolder;
 
@@ -41,9 +42,9 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
     protected boolean mInputStreamEnded = false;
     protected long mFirstSampleStartTime = Long.MIN_VALUE;
 
-    protected abstract void createInputBuffer();
+    protected abstract void createInputBuffer() throws ExoPlaybackException;
     protected abstract void handleReconfiguration(DecoderInputBuffer bufferForRead);
-    protected abstract void handleFormatRead(DecoderInputBuffer bufferForRead);
+    protected abstract void handleFormatRead(DecoderInputBuffer bufferForRead) throws ExoPlaybackException;
     protected abstract void handleEndOfStream(DecoderInputBuffer bufferForRead);
     protected abstract void handleSamplePreparation(DecoderInputBuffer bufferForRead);
     protected abstract void resetRenderer();
@@ -52,15 +53,16 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
 
     private DecoderInputBuffer mBufferForRead =
         new DecoderInputBuffer(DecoderInputBuffer.BUFFER_REPLACEMENT_MODE_NORMAL);
-    private final DecoderInputBuffer mflagsOnlyBuffer = DecoderInputBuffer.newFlagsOnlyInstance();
+    private final DecoderInputBuffer mFlagsOnlyBuffer = DecoderInputBuffer.newFlagsOnlyInstance();
 
-    protected void assertTrue(boolean condition) {
+    protected void assertTrue(final boolean condition) {
         if (DEBUG && !condition) {
             throw new AssertionError("Expected condition to be true");
         }
     }
 
-    public GeckoHlsRendererBase(int trackType, GeckoHlsPlayer.ComponentEventDispatcher eventDispatcher) {
+    public GeckoHlsRendererBase(final int trackType,
+                                final GeckoHlsPlayer.ComponentEventDispatcher eventDispatcher) {
         super(trackType);
         mPlayerEventDispatcher = eventDispatcher;
     }
@@ -84,16 +86,20 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
         return Math.abs(lastPTS - firstPTS) > QUEUED_INPUT_SAMPLE_DURATION_THRESHOLD;
     }
 
-    public Format getFormat(int index) {
+    public Format getFormat(final int index) {
         assertTrue(index >= 0);
         Format fmt = index < mFormats.size() ? mFormats.get(index) : null;
-        if (DEBUG) { Log.d(LOGTAG, "getFormat : index = " + index + ", format : " + fmt); }
+        if (DEBUG) {
+            Log.d(LOGTAG, "getFormat : index = " + index + ", format : " + fmt);
+        }
         return fmt;
     }
 
-    public synchronized long getFirstSamplePTS() { return mFirstSampleStartTime; }
+    public synchronized long getFirstSamplePTS() {
+        return mFirstSampleStartTime;
+    }
 
-    public synchronized ConcurrentLinkedQueue<GeckoHLSSample> getQueuedSamples(int number) {
+    public synchronized ConcurrentLinkedQueue<GeckoHLSSample> getQueuedSamples(final int number) {
         ConcurrentLinkedQueue<GeckoHLSSample> samples =
             new ConcurrentLinkedQueue<GeckoHLSSample>();
 
@@ -109,16 +115,20 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
 
         sample = samples.isEmpty() ? null : samples.peek();
         if (sample == null) {
-            if (DEBUG) { Log.d(LOGTAG, "getQueuedSamples isEmpty, mWaitingForData = true !"); }
+            if (DEBUG) {
+                Log.d(LOGTAG, "getQueuedSamples isEmpty, mWaitingForData = true !");
+            }
             mWaitingForData = true;
         } else if (mFirstSampleStartTime == Long.MIN_VALUE) {
             mFirstSampleStartTime = sample.info.presentationTimeUs;
-            if (DEBUG) { Log.d(LOGTAG, "mFirstSampleStartTime = " + mFirstSampleStartTime); }
+            if (DEBUG) {
+                Log.d(LOGTAG, "mFirstSampleStartTime = " + mFirstSampleStartTime);
+            }
         }
         return samples;
     }
 
-    protected void handleDrmInitChanged(Format oldFormat, Format newFormat) {
+    protected void handleDrmInitChanged(final Format oldFormat, final Format newFormat) {
         Object oldDrmInit = oldFormat == null ? null : oldFormat.drmInitData;
         Object newDrnInit = newFormat.drmInitData;
 
@@ -130,7 +140,7 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
         }
     }
 
-    protected boolean canReconfigure(Format oldFormat, Format newFormat) {
+    protected boolean canReconfigure(final Format oldFormat, final Format newFormat) {
         // Referring to ExoPlayer's MediaCodecBaseRenderer, the default is set
         // to false. Only override it in video renderer subclass.
         return false;
@@ -141,11 +151,11 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
         // renderer handles this.
     }
 
-    protected void updateCSDInfo(Format format) {
+    protected void updateCSDInfo(final Format format) {
         // do nothing.
     }
 
-    protected void onInputFormatChanged(Format newFormat) {
+    protected void onInputFormatChanged(final Format newFormat) throws ExoPlaybackException {
         Format oldFormat;
         try {
             oldFormat = mFormats.get(mFormats.size() - 1);
@@ -170,13 +180,19 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
         notifyPlayerInputFormatChanged(newFormat);
     }
 
-    protected void maybeInitRenderer() {
+    protected void maybeInitRenderer() throws ExoPlaybackException {
         if (mInitialized || mFormats.size() == 0) {
             return;
         }
-        if (DEBUG) { Log.d(LOGTAG, "Initializing ... "); }
-        createInputBuffer();
-        mInitialized = true;
+        if (DEBUG) {
+            Log.d(LOGTAG, "Initializing ... ");
+        }
+        try {
+            createInputBuffer();
+            mInitialized = true;
+        } catch (OutOfMemoryError e) {
+            throw ExoPlaybackException.createForRenderer(new RuntimeException(e), getIndex());
+        }
     }
 
     /*
@@ -189,7 +205,7 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
      * situation 1) not initialized 2) input stream is ended 3) queue is full.
      * 4) format changed. 5) exception happened.
      */
-    protected synchronized boolean feedInputBuffersQueue() {
+    protected synchronized boolean feedInputBuffersQueue() throws ExoPlaybackException {
         if (!mInitialized || mInputStreamEnded || isQueuedEnoughData()) {
             // Need to reinitialize the renderer or the input stream has ended
             // or we just reached the maximum queue size.
@@ -223,7 +239,9 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
 
         // We've read a buffer.
         if (mBufferForRead.isEndOfStream()) {
-            if (DEBUG) { Log.d(LOGTAG, "Now we're at the End Of Stream."); }
+            if (DEBUG) {
+                Log.d(LOGTAG, "Now we're at the End Of Stream.");
+            }
             handleEndOfStream(mBufferForRead);
             return false;
         }
@@ -238,22 +256,24 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
 
     private void maybeNotifyDataArrived() {
         if (mWaitingForData && isQueuedEnoughData()) {
-            if (DEBUG) { Log.d(LOGTAG, "onDataArrived"); }
+            if (DEBUG) {
+                Log.d(LOGTAG, "onDataArrived");
+            }
             mPlayerEventDispatcher.onDataArrived(getTrackType());
             mWaitingForData = false;
         }
     }
 
-    private void readFormat() {
-        mflagsOnlyBuffer.clear();
-        int result = readSource(mFormatHolder, mflagsOnlyBuffer, true);
+    private void readFormat() throws ExoPlaybackException {
+        mFlagsOnlyBuffer.clear();
+        int result = readSource(mFormatHolder, mFlagsOnlyBuffer, true);
         if (result == C.RESULT_FORMAT_READ) {
             onInputFormatChanged(mFormatHolder.format);
         }
     }
 
     @Override
-    protected void onEnabled(boolean joining) {
+    protected void onEnabled(final boolean joining) {
         // Do nothing.
     }
 
@@ -274,8 +294,10 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
     }
 
     @Override
-    protected synchronized void onPositionReset(long positionUs, boolean joining) {
-        if (DEBUG) { Log.d(LOGTAG, "onPositionReset : positionUs = " + positionUs); }
+    protected synchronized void onPositionReset(final long positionUs, final boolean joining) {
+        if (DEBUG) {
+            Log.d(LOGTAG, "onPositionReset : positionUs = " + positionUs);
+        }
         mInputStreamEnded = false;
         if (mInitialized) {
             clearInputSamplesQueue();
@@ -288,7 +310,8 @@ public abstract class GeckoHlsRendererBase extends BaseRenderer {
      * calls renderer.render by passing its wall clock time.
      */
     @Override
-    public void render(long positionUs, long elapsedRealtimeUs) {
+    public void render(final long positionUs, final long elapsedRealtimeUs)
+            throws ExoPlaybackException {
         if (BuildConfig.DEBUG_BUILD) {
             Log.d(LOGTAG, "positionUs = " + positionUs +
                           ", mInputStreamEnded = " + mInputStreamEnded);

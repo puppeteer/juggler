@@ -16,11 +16,11 @@ use crate::values::specified::border::BorderRadius;
 use crate::values::specified::image::Image;
 use crate::values::specified::position::{HorizontalPosition, Position, VerticalPosition};
 use crate::values::specified::url::SpecifiedUrl;
-use crate::values::specified::LengthOrPercentage;
 use crate::values::specified::SVGPathData;
+use crate::values::specified::{LengthPercentage, NonNegativeLengthPercentage};
+use crate::Zero;
 use cssparser::Parser;
-use std::fmt::{self, Write};
-use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
+use style_traits::{ParseError, StyleParseErrorKind};
 
 /// A specified alias for FillRule.
 pub use crate::values::generics::basic_shape::FillRule;
@@ -32,28 +32,35 @@ pub type ClippingShape = generic::ClippingShape<BasicShape, SpecifiedUrl>;
 pub type FloatAreaShape = generic::FloatAreaShape<BasicShape, Image>;
 
 /// A specified basic shape.
-pub type BasicShape = generic::BasicShape<HorizontalPosition, VerticalPosition, LengthOrPercentage>;
+pub type BasicShape = generic::BasicShape<
+    HorizontalPosition,
+    VerticalPosition,
+    LengthPercentage,
+    NonNegativeLengthPercentage,
+>;
 
 /// The specified value of `inset()`
-pub type InsetRect = generic::InsetRect<LengthOrPercentage>;
+pub type InsetRect = generic::InsetRect<LengthPercentage, NonNegativeLengthPercentage>;
 
 /// A specified circle.
-pub type Circle = generic::Circle<HorizontalPosition, VerticalPosition, LengthOrPercentage>;
+pub type Circle =
+    generic::Circle<HorizontalPosition, VerticalPosition, NonNegativeLengthPercentage>;
 
 /// A specified ellipse.
-pub type Ellipse = generic::Ellipse<HorizontalPosition, VerticalPosition, LengthOrPercentage>;
+pub type Ellipse =
+    generic::Ellipse<HorizontalPosition, VerticalPosition, NonNegativeLengthPercentage>;
 
 /// The specified value of `ShapeRadius`
-pub type ShapeRadius = generic::ShapeRadius<LengthOrPercentage>;
+pub type ShapeRadius = generic::ShapeRadius<NonNegativeLengthPercentage>;
 
 /// The specified value of `Polygon`
-pub type Polygon = generic::Polygon<LengthOrPercentage>;
+pub type Polygon = generic::GenericPolygon<LengthPercentage>;
 
 #[cfg(feature = "gecko")]
 fn is_clip_path_path_enabled(context: &ParserContext) -> bool {
     use crate::gecko_bindings::structs::mozilla;
     context.chrome_rules_enabled() ||
-        unsafe { mozilla::StaticPrefs_sVarCache_layout_css_clip_path_path_enabled }
+        unsafe { mozilla::StaticPrefs::sVarCache_layout_css_clip_path_path_enabled }
 }
 #[cfg(feature = "servo")]
 fn is_clip_path_path_enabled(_: &ParserContext) -> bool {
@@ -130,11 +137,11 @@ where
         }
 
         if let Some(shp) = shape {
-            return Ok(ShapeSource::Shape(shp, ref_box));
+            return Ok(ShapeSource::Shape(Box::new(shp), ref_box));
         }
 
         ref_box
-            .map(|v| ShapeSource::Box(v))
+            .map(ShapeSource::Box)
             .ok_or(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 }
@@ -144,7 +151,7 @@ impl Parse for GeometryBox {
         _context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        if let Ok(shape_box) = input.try(|i| ShapeBox::parse(i)) {
+        if let Ok(shape_box) = input.try(ShapeBox::parse) {
             return Ok(GeometryBox::ShapeBox(shape_box));
         }
 
@@ -193,16 +200,13 @@ impl InsetRect {
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        let rect = Rect::parse_with(context, input, LengthOrPercentage::parse)?;
+        let rect = Rect::parse_with(context, input, LengthPercentage::parse)?;
         let round = if input.try(|i| i.expect_ident_matching("round")).is_ok() {
-            Some(BorderRadius::parse(context, input)?)
+            BorderRadius::parse(context, input)?
         } else {
-            None
+            BorderRadius::zero()
         };
-        Ok(generic::InsetRect {
-            rect: rect,
-            round: round,
-        })
+        Ok(generic::InsetRect { rect, round })
     }
 }
 
@@ -231,23 +235,6 @@ impl Circle {
         };
 
         Ok(generic::Circle { radius, position })
-    }
-}
-
-impl ToCss for Circle {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        dest.write_str("circle(")?;
-        if generic::ShapeRadius::ClosestSide != self.radius {
-            self.radius.to_css(dest)?;
-            dest.write_str(" ")?;
-        }
-
-        dest.write_str("at ")?;
-        self.position.to_css(dest)?;
-        dest.write_str(")")
     }
 }
 
@@ -288,32 +275,13 @@ impl Ellipse {
     }
 }
 
-impl ToCss for Ellipse {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        dest.write_str("ellipse(")?;
-        if self.semiaxis_x != ShapeRadius::default() || self.semiaxis_y != ShapeRadius::default() {
-            self.semiaxis_x.to_css(dest)?;
-            dest.write_str(" ")?;
-            self.semiaxis_y.to_css(dest)?;
-            dest.write_str(" ")?;
-        }
-
-        dest.write_str("at ")?;
-        self.position.to_css(dest)?;
-        dest.write_str(")")
-    }
-}
-
 impl Parse for ShapeRadius {
     fn parse<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        if let Ok(lop) = input.try(|i| LengthOrPercentage::parse_non_negative(context, i)) {
-            return Ok(generic::ShapeRadius::Length(lop));
+        if let Ok(lp) = input.try(|i| NonNegativeLengthPercentage::parse(context, i)) {
+            return Ok(generic::ShapeRadius::Length(lp));
         }
 
         try_match_ident_ignore_ascii_case! { input,
@@ -347,17 +315,16 @@ impl Polygon {
             })
             .unwrap_or_default();
 
-        let buf = input.parse_comma_separated(|i| {
-            Ok(PolygonCoord(
-                LengthOrPercentage::parse(context, i)?,
-                LengthOrPercentage::parse(context, i)?,
-            ))
-        })?;
+        let coordinates = input
+            .parse_comma_separated(|i| {
+                Ok(PolygonCoord(
+                    LengthPercentage::parse(context, i)?,
+                    LengthPercentage::parse(context, i)?,
+                ))
+            })?
+            .into();
 
-        Ok(Polygon {
-            fill: fill,
-            coordinates: buf,
-        })
+        Ok(Polygon { fill, coordinates })
     }
 }
 

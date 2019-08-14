@@ -10,6 +10,7 @@
 #include <algorithm>  // For std::find()
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/CmdLineAndEnvUtils.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
 #include "nsCOMPtr.h"
@@ -35,16 +36,76 @@ static bool GetDirectoryName(const nsCOMPtr<nsIFile> aFile,
   return true;
 }
 
+ModuleLoadEvent::ModuleInfo::ModuleInfo(uintptr_t aBase)
+    : mBase(aBase), mTrustFlags(ModuleTrustFlags::None) {}
+
 ModuleLoadEvent::ModuleInfo::ModuleInfo(
     const glue::ModuleLoadEvent::ModuleInfo& aOther)
-    : mBase(aOther.mBase) {
+    : mBase(aOther.mBase),
+      mLoadDurationMS(Some(aOther.mLoadDurationMS)),
+      mTrustFlags(ModuleTrustFlags::None) {
   if (aOther.mLdrName) {
     mLdrName.Assign(aOther.mLdrName.get());
   }
+
   if (aOther.mFullPath) {
     nsDependentString tempPath(aOther.mFullPath.get());
-    Unused << NS_NewLocalFile(tempPath, false, getter_AddRefs(mFile));
+    DebugOnly<nsresult> rv =
+        NS_NewLocalFile(tempPath, false, getter_AddRefs(mFile));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
+}
+
+bool ModuleLoadEvent::ModuleInfo::PopulatePathInfo() {
+  MOZ_ASSERT(mBase && mLdrName.IsEmpty() && !mFile);
+  if (!widget::WinUtils::GetModuleFullPath(reinterpret_cast<HMODULE>(mBase),
+                                           mLdrName)) {
+    return false;
+  }
+
+  return NS_SUCCEEDED(NS_NewLocalFile(mLdrName, false, getter_AddRefs(mFile)));
+}
+
+bool ModuleLoadEvent::ModuleInfo::PrepForTelemetry() {
+  MOZ_ASSERT(!mLdrName.IsEmpty() && mFile);
+  if (mLdrName.IsEmpty() || !mFile) {
+    return false;
+  }
+
+  using PathTransformFlags = widget::WinUtils::PathTransformFlags;
+
+  if (!widget::WinUtils::PreparePathForTelemetry(
+          mLdrName,
+          PathTransformFlags::Default & ~PathTransformFlags::Canonicalize)) {
+    return false;
+  }
+
+  nsAutoString dllFullPath;
+  if (NS_FAILED(mFile->GetPath(dllFullPath))) {
+    return false;
+  }
+
+  if (!widget::WinUtils::MakeLongPath(dllFullPath)) {
+    return false;
+  }
+
+  // Replace mFile with the lengthened version
+  if (NS_FAILED(NS_NewLocalFile(dllFullPath, false, getter_AddRefs(mFile)))) {
+    return false;
+  }
+
+  nsAutoString sanitized(dllFullPath);
+
+  if (!widget::WinUtils::PreparePathForTelemetry(
+          sanitized,
+          PathTransformFlags::Default & ~(PathTransformFlags::Canonicalize |
+                                          PathTransformFlags::Lengthen))) {
+    return false;
+  }
+
+  mFilePathClean = std::move(sanitized);
+
+  return true;
 }
 
 ModuleLoadEvent::ModuleLoadEvent(const ModuleLoadEvent& aOther,
@@ -116,22 +177,44 @@ static void GetKeyboardLayoutDlls(
 ModuleEvaluator::ModuleEvaluator() {
   GetKeyboardLayoutDlls(mKeyboardLayoutDlls);
 
-  nsCOMPtr<nsIFile> sysDir;
-  if (NS_SUCCEEDED(
-          NS_GetSpecialDirectory(NS_OS_SYSTEM_DIR, getter_AddRefs(sysDir)))) {
-    sysDir->GetPath(mSysDirectory);
+  nsresult rv =
+      NS_GetSpecialDirectory(NS_OS_SYSTEM_DIR, getter_AddRefs(mSysDirectory));
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+  nsCOMPtr<nsIFile> winSxSDir;
+  rv = NS_GetSpecialDirectory(NS_WIN_WINDOWS_DIR, getter_AddRefs(winSxSDir));
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  if (NS_SUCCEEDED(rv)) {
+    rv = winSxSDir->Append(NS_LITERAL_STRING("WinSxS"));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    if (NS_SUCCEEDED(rv)) {
+      mWinSxSDirectory = std::move(winSxSDir);
+    }
   }
 
-  nsCOMPtr<nsIFile> exeDir;
-  if (NS_SUCCEEDED(
-          NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(exeDir)))) {
-    exeDir->GetPath(mExeDirectory);
+#ifdef _M_IX86
+  WCHAR sysWow64Buf[MAX_PATH + 1] = {};
+
+  UINT sysWowLen =
+      ::GetSystemWow64DirectoryW(sysWow64Buf, ArrayLength(sysWow64Buf));
+  if (sysWowLen > 0 && sysWowLen < ArrayLength(sysWow64Buf)) {
+    rv = NS_NewLocalFile(nsDependentString(sysWow64Buf, sysWowLen), false,
+                         getter_AddRefs(mSysWOW64Directory));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
+#endif  // _M_IX86
+
+  rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(mExeDirectory));
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   nsCOMPtr<nsIFile> exeFile;
-  if (NS_SUCCEEDED(XRE_GetBinaryPath(getter_AddRefs(exeFile)))) {
+  rv = XRE_GetBinaryPath(getter_AddRefs(exeFile));
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  if (NS_SUCCEEDED(rv)) {
     nsAutoString exePath;
-    if (NS_SUCCEEDED(exeFile->GetPath(exePath))) {
+    rv = exeFile->GetPath(exePath);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    if (NS_SUCCEEDED(rv)) {
       ModuleVersionInfo exeVi;
       if (exeVi.GetFromImage(exePath)) {
         mExeVersion = Some(exeVi.mFileVersion.Version64());
@@ -143,42 +226,38 @@ ModuleEvaluator::ModuleEvaluator() {
 Maybe<bool> ModuleEvaluator::IsModuleTrusted(
     ModuleLoadEvent::ModuleInfo& aDllInfo, const ModuleLoadEvent& aEvent,
     Authenticode* aSvc) const {
-  // The JIT profiling module doesn't really have any other practical way to
-  // match; hard-code it as being trusted.
-  if (aDllInfo.mLdrName.EqualsLiteral("JitPI.dll")) {
-    aDllInfo.mTrustFlags = ModuleTrustFlags::JitPI;
-    return Some(true);
-  }
-
-  aDllInfo.mTrustFlags = ModuleTrustFlags::None;
-
-  if (!aDllInfo.mFile) {
-    return Nothing();  // Every check here depends on having a valid image file.
-  }
-
-  using PathTransformFlags = widget::WinUtils::PathTransformFlags;
-
-  Unused << widget::WinUtils::PreparePathForTelemetry(
-      aDllInfo.mLdrName,
-      PathTransformFlags::Default & ~PathTransformFlags::Canonicalize);
+  MOZ_ASSERT(aDllInfo.mTrustFlags == ModuleTrustFlags::None);
+  MOZ_ASSERT(aDllInfo.mFile);
 
   nsAutoString dllFullPath;
   if (NS_FAILED(aDllInfo.mFile->GetPath(dllFullPath))) {
     return Nothing();
   }
-  widget::WinUtils::MakeLongPath(dllFullPath);
 
-  aDllInfo.mFilePathClean = dllFullPath;
-  if (!widget::WinUtils::PreparePathForTelemetry(
-          aDllInfo.mFilePathClean,
-          PathTransformFlags::Default & ~(PathTransformFlags::Canonicalize |
-                                          PathTransformFlags::Lengthen))) {
-    return Nothing();
-  }
+  // We start by checking authenticode signatures, since any result from this
+  // test will produce an immediate pass/fail.
+  if (aSvc) {
+    UniquePtr<wchar_t[]> szSignedBy = aSvc->GetBinaryOrgName(dllFullPath.get());
 
-  if (NS_FAILED(NS_NewLocalFile(dllFullPath, false,
-                                getter_AddRefs(aDllInfo.mFile)))) {
-    return Nothing();
+    if (szSignedBy) {
+      nsDependentString signedBy(szSignedBy.get());
+
+      if (signedBy.EqualsLiteral("Microsoft Windows")) {
+        aDllInfo.mTrustFlags |= ModuleTrustFlags::MicrosoftWindowsSignature;
+        return Some(true);
+      } else if (signedBy.EqualsLiteral("Microsoft Corporation")) {
+        aDllInfo.mTrustFlags |= ModuleTrustFlags::MicrosoftWindowsSignature;
+        return Some(true);
+      } else if (signedBy.EqualsLiteral("Mozilla Corporation")) {
+        aDllInfo.mTrustFlags |= ModuleTrustFlags::MozillaSignature;
+        return Some(true);
+      } else {
+        // Being signed by somebody who is neither Microsoft nor us is an
+        // automatic disqualification.
+        aDllInfo.mTrustFlags = ModuleTrustFlags::None;
+        return Some(false);
+      }
+    }
   }
 
   nsAutoString dllDirectory;
@@ -190,27 +269,67 @@ Maybe<bool> ModuleEvaluator::IsModuleTrusted(
   if (NS_FAILED(aDllInfo.mFile->GetLeafName(dllLeafLower))) {
     return Nothing();
   }
+
   ToLowerCase(dllLeafLower);  // To facilitate case-insensitive searching
 
-#if ENABLE_TESTS
-  int scoreThreshold = 100;
-  // For testing, these DLLs are hardcoded to pass through all criteria checks
-  // and still result in "untrusted" status.
-  if (dllLeafLower.EqualsLiteral("mozglue.dll") ||
-      dllLeafLower.EqualsLiteral("modules-test.dll")) {
-    scoreThreshold = 99999;
+  // The JIT profiling module doesn't really have any other practical way to
+  // match; hard-code it as being trusted.
+  if (dllLeafLower.EqualsLiteral("jitpi.dll")) {
+    aDllInfo.mTrustFlags = ModuleTrustFlags::JitPI;
+    return Some(true);
   }
-#else
-  static const int scoreThreshold = 100;
+
+  // Accumulate a trustworthiness score as the module passes through several
+  // checks. If the score ever reaches above the threshold, it's considered
+  // trusted.
+  uint32_t scoreThreshold = 100;
+
+#ifdef ENABLE_TESTS
+  // Check whether we are running as an xpcshell test.
+  if (mozilla::EnvHasValue("XPCSHELL_TEST_PROFILE_DIR")) {
+    // During xpcshell tests, these DLLs are hard-coded to pass through all
+    // criteria checks and still result in "untrusted" status, so they show up
+    // in the untrusted modules ping for the test to examine.
+    // Setting the threshold very high ensures the test will cover all criteria.
+    if (dllLeafLower.EqualsLiteral("untrusted-startup-test-dll.dll") ||
+        dllLeafLower.EqualsLiteral("modules-test.dll")) {
+      scoreThreshold = 99999;
+    }
+  }
 #endif
 
-  int score = 0;
+  nsresult rv;
+  bool contained;
 
-  // Is the DLL in the system directory?
-  if (!mSysDirectory.IsEmpty() &&
-      StringBeginsWith(dllFullPath, mSysDirectory,
-                       nsCaseInsensitiveStringComparator())) {
-    aDllInfo.mTrustFlags |= ModuleTrustFlags::SystemDirectory;
+  uint32_t score = 0;
+
+  if (score < scoreThreshold) {
+    // Is the DLL in the system directory?
+    rv = mSysDirectory->Contains(aDllInfo.mFile, &contained);
+    if (NS_SUCCEEDED(rv) && contained) {
+      aDllInfo.mTrustFlags |= ModuleTrustFlags::SystemDirectory;
+      score += 50;
+    }
+  }
+
+#ifdef _M_IX86
+  // Under WOW64, SysWOW64 is the effective system directory. Give SysWOW64 the
+  // same trustworthiness as ModuleTrustFlags::SystemDirectory.
+  if (mSysWOW64Directory) {
+    rv = mSysWOW64Directory->Contains(aDllInfo.mFile, &contained);
+    if (NS_SUCCEEDED(rv) && contained) {
+      aDllInfo.mTrustFlags |= ModuleTrustFlags::SysWOW64Directory;
+      score += 50;
+    }
+  }
+#endif  // _M_IX86
+
+  // Is the DLL in the WinSxS directory? Some Microsoft DLLs (e.g. comctl32) are
+  // loaded from here and don't have digital signatures. So while this is not a
+  // guarantee of trustworthiness, but is at least as valid as system32.
+  rv = mWinSxSDirectory->Contains(aDllInfo.mFile, &contained);
+  if (NS_SUCCEEDED(rv) && contained) {
+    aDllInfo.mTrustFlags |= ModuleTrustFlags::WinSxSDirectory;
     score += 50;
   }
 
@@ -233,11 +352,17 @@ Maybe<bool> ModuleEvaluator::IsModuleTrusted(
         score += 50;
       }
 
-      if (!mExeDirectory.IsEmpty() &&
-          StringBeginsWith(dllFullPath, mExeDirectory,
-                           nsCaseInsensitiveStringComparator())) {
+      rv = mExeDirectory->Contains(aDllInfo.mFile, &contained);
+      if (NS_SUCCEEDED(rv) && contained) {
         score += 50;
         aDllInfo.mTrustFlags |= ModuleTrustFlags::FirefoxDirectory;
+
+        if (dllLeafLower.EqualsLiteral("xul.dll")) {
+          // The caller wants to know if this DLL is xul.dll, but this flag
+          // doesn't need to affect trust score. Xul will be considered trusted
+          // by other measures.
+          aDllInfo.mTrustFlags |= ModuleTrustFlags::Xul;
+        }
 
         // If it's in the Firefox directory, does it also share the Firefox
         // version info? We only care about this inside the app directory.
@@ -245,26 +370,6 @@ Maybe<bool> ModuleEvaluator::IsModuleTrusted(
             (vi.mFileVersion.Version64() == mExeVersion.value())) {
           aDllInfo.mTrustFlags |= ModuleTrustFlags::FirefoxDirectoryAndVersion;
           score += 50;
-        }
-      }
-    }
-  }
-
-  if (score < scoreThreshold) {
-    if (aSvc) {
-      UniquePtr<wchar_t[]> szSignedBy =
-          aSvc->GetBinaryOrgName(dllFullPath.get());
-      if (szSignedBy) {
-        nsAutoString signedBy(szSignedBy.get());
-        if (signedBy.EqualsLiteral("Microsoft Windows")) {
-          aDllInfo.mTrustFlags |= ModuleTrustFlags::MicrosoftWindowsSignature;
-          score = 100;
-        } else if (signedBy.EqualsLiteral("Microsoft Corporation")) {
-          aDllInfo.mTrustFlags |= ModuleTrustFlags::MicrosoftWindowsSignature;
-          score = 100;
-        } else if (signedBy.EqualsLiteral("Mozilla Corporation")) {
-          aDllInfo.mTrustFlags |= ModuleTrustFlags::MozillaSignature;
-          score = 100;
         }
       }
     }

@@ -4,6 +4,13 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+with Files("**"):
+    BUG_COMPONENT = ("Core", "DOM: Web Storage")
+
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
+
+BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
+
 XPCSHELL_TESTS_MANIFESTS += [
     'test/unit/xpcshell.ini'
 ]
@@ -11,6 +18,8 @@ XPCSHELL_TESTS_MANIFESTS += [
 TEST_HARNESS_FILES.xpcshell.dom.localstorage.test.unit += [
     'test/unit/databaseShadowing-shared.js',
 ]
+
+TEST_DIRS += ['test/gtest']
 
 XPIDL_SOURCES += [
     'nsILocalStorageManager.idl',
@@ -29,6 +38,9 @@ EXPORTS.mozilla.dom += [
     'LSObject.h',
     'LSObserver.h',
     'LSSnapshot.h',
+    'LSValue.h',
+    'LSWriteOptimizer.h',
+    'SnappyUtils.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -40,7 +52,10 @@ UNIFIED_SOURCES += [
     'LSObject.cpp',
     'LSObserver.cpp',
     'LSSnapshot.cpp',
+    'LSValue.cpp',
+    'LSWriteOptimizer.cpp',
     'ReportInternalError.cpp',
+    'SnappyUtils.cpp',
 ]
 
 IPDL_SOURCES += [

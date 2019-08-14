@@ -20,8 +20,6 @@ interface HTMLObjectElement : HTMLElement {
   [CEReactions, Pure, SetterThrows]
            attribute DOMString type;
   [CEReactions, Pure, SetterThrows]
-           attribute boolean typeMustMatch;
-  [CEReactions, Pure, SetterThrows]
            attribute DOMString name;
   [CEReactions, Pure, SetterThrows]
            attribute DOMString useMap;
@@ -68,8 +66,8 @@ partial interface HTMLObjectElement {
   [CEReactions, Pure, SetterThrows]
            attribute DOMString codeType;
 
-  [CEReactions, TreatNullAs=EmptyString, Pure, SetterThrows]
-           attribute DOMString border;
+  [CEReactions, Pure, SetterThrows]
+           attribute [TreatNullAs=EmptyString] DOMString border;
 };
 
 partial interface HTMLObjectElement {

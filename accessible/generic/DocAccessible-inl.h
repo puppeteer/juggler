@@ -13,20 +13,20 @@
 #include "NotificationController.h"
 #include "States.h"
 #include "nsIScrollableFrame.h"
-#include "nsIDocumentInlines.h"
+#include "mozilla/dom/DocumentInlines.h"
 
 #ifdef A11Y_LOG
-#include "Logging.h"
+#  include "Logging.h"
 #endif
 
 namespace mozilla {
 namespace a11y {
 
 inline Accessible* DocAccessible::AccessibleOrTrueContainer(
-    nsINode* aNode, int aIgnoreARIAHidden) const {
+    nsINode* aNode, bool aNoContainerIfPruned) const {
   // HTML comboboxes have no-content list accessible as an intermediate
   // containing all options.
-  Accessible* container = GetAccessibleOrContainer(aNode, aIgnoreARIAHidden);
+  Accessible* container = GetAccessibleOrContainer(aNode, aNoContainerIfPruned);
   if (container && container->IsHTMLCombobox()) {
     return container->FirstChild();
   }
@@ -59,13 +59,13 @@ inline void DocAccessible::BindChildDocument(DocAccessible* aDocument) {
   mNotificationController->ScheduleChildDocBinding(aDocument);
 }
 
-template <class Class, class Arg>
+template <class Class, class... Args>
 inline void DocAccessible::HandleNotification(
-    Class* aInstance, typename TNotification<Class, Arg>::Callback aMethod,
-    Arg* aArg) {
+    Class* aInstance, typename TNotification<Class, Args...>::Callback aMethod,
+    Args*... aArgs) {
   if (mNotificationController) {
-    mNotificationController->HandleNotification<Class, Arg>(aInstance, aMethod,
-                                                            aArg);
+    mNotificationController->HandleNotification<Class, Args...>(
+        aInstance, aMethod, aArgs...);
   }
 }
 

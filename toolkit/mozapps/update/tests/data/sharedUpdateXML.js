@@ -3,53 +3,57 @@
  */
 
 /**
- * Helper functions for creating xml strings used by application update tests.
- *
- * !IMPORTANT - This file contains everything needed (along with dependencies)
- * by the updates.sjs file used by the mochitest-chrome tests. Since xpcshell
- * used by the http server is launched with -v 170 this file must not use
- * features greater than JavaScript 1.7.
+ * Shared code for xpcshell, mochitests-chrome, mochitest-browser-chrome, and
+ * SJS server-side scripts for the test http server.
  */
 
-/* eslint-disable no-undef */
+/**
+ * Helper functions for creating xml strings used by application update tests.
+ */
+
+/* import-globals-from ../browser/testConstants.js */
+
+/* global Services, UpdateUtils, gURLData */
 
 const FILE_SIMPLE_MAR = "simple.mar";
-const SIZE_SIMPLE_MAR = "1404";
+const SIZE_SIMPLE_MAR = "1419";
 
-const STATE_NONE            = "null";
-const STATE_DOWNLOADING     = "downloading";
-const STATE_PENDING         = "pending";
-const STATE_PENDING_SVC     = "pending-service";
-const STATE_APPLYING        = "applying";
-const STATE_APPLIED         = "applied";
-const STATE_APPLIED_SVC     = "applied-service";
-const STATE_SUCCEEDED       = "succeeded";
+const STATE_NONE = "null";
+const STATE_DOWNLOADING = "downloading";
+const STATE_PENDING = "pending";
+const STATE_PENDING_SVC = "pending-service";
+const STATE_PENDING_ELEVATE = "pending-elevate";
+const STATE_APPLYING = "applying";
+const STATE_APPLIED = "applied";
+const STATE_APPLIED_SVC = "applied-service";
+const STATE_SUCCEEDED = "succeeded";
 const STATE_DOWNLOAD_FAILED = "download-failed";
-const STATE_FAILED          = "failed";
+const STATE_FAILED = "failed";
 
-const LOADSOURCE_ERROR_WRONG_SIZE              = 2;
-const CRC_ERROR                                = 4;
-const READ_ERROR                               = 6;
-const WRITE_ERROR                              = 7;
-const MAR_CHANNEL_MISMATCH_ERROR               = 22;
-const VERSION_DOWNGRADE_ERROR                  = 23;
-const SERVICE_COULD_NOT_COPY_UPDATER           = 49;
+const LOADSOURCE_ERROR_WRONG_SIZE = 2;
+const CRC_ERROR = 4;
+const READ_ERROR = 6;
+const WRITE_ERROR = 7;
+const MAR_CHANNEL_MISMATCH_ERROR = 22;
+const VERSION_DOWNGRADE_ERROR = 23;
+const UPDATE_SETTINGS_FILE_CHANNEL = 38;
+const SERVICE_COULD_NOT_COPY_UPDATER = 49;
 const SERVICE_INVALID_APPLYTO_DIR_STAGED_ERROR = 52;
-const SERVICE_INVALID_APPLYTO_DIR_ERROR        = 54;
-const SERVICE_INVALID_INSTALL_DIR_PATH_ERROR   = 55;
-const SERVICE_INVALID_WORKING_DIR_PATH_ERROR   = 56;
-const INVALID_APPLYTO_DIR_STAGED_ERROR         = 72;
-const INVALID_APPLYTO_DIR_ERROR                = 74;
-const INVALID_INSTALL_DIR_PATH_ERROR           = 75;
-const INVALID_WORKING_DIR_PATH_ERROR           = 76;
-const INVALID_CALLBACK_PATH_ERROR              = 77;
-const INVALID_CALLBACK_DIR_ERROR               = 78;
+const SERVICE_INVALID_APPLYTO_DIR_ERROR = 54;
+const SERVICE_INVALID_INSTALL_DIR_PATH_ERROR = 55;
+const SERVICE_INVALID_WORKING_DIR_PATH_ERROR = 56;
+const INVALID_APPLYTO_DIR_STAGED_ERROR = 72;
+const INVALID_APPLYTO_DIR_ERROR = 74;
+const INVALID_INSTALL_DIR_PATH_ERROR = 75;
+const INVALID_WORKING_DIR_PATH_ERROR = 76;
+const INVALID_CALLBACK_PATH_ERROR = 77;
+const INVALID_CALLBACK_DIR_ERROR = 78;
 
 // Error codes 80 through 99 are reserved for nsUpdateService.js and are not
-// defined in common/errors.h
-const ERR_OLDER_VERSION_OR_SAME_BUILD      = 90;
-const ERR_UPDATE_STATE_NONE                = 91;
-const ERR_CHANNEL_CHANGE                   = 92;
+// defined in common/updatererrors.h
+const ERR_OLDER_VERSION_OR_SAME_BUILD = 90;
+const ERR_UPDATE_STATE_NONE = 91;
+const ERR_CHANNEL_CHANGE = 92;
 
 const STATE_FAILED_DELIMETER = ": ";
 
@@ -65,16 +69,24 @@ const STATE_FAILED_MAR_CHANNEL_MISMATCH_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + MAR_CHANNEL_MISMATCH_ERROR;
 const STATE_FAILED_VERSION_DOWNGRADE_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + VERSION_DOWNGRADE_ERROR;
+const STATE_FAILED_UPDATE_SETTINGS_FILE_CHANNEL =
+  STATE_FAILED + STATE_FAILED_DELIMETER + UPDATE_SETTINGS_FILE_CHANNEL;
 const STATE_FAILED_SERVICE_COULD_NOT_COPY_UPDATER =
   STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_COULD_NOT_COPY_UPDATER;
 const STATE_FAILED_SERVICE_INVALID_APPLYTO_DIR_STAGED_ERROR =
-  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_APPLYTO_DIR_STAGED_ERROR;
+  STATE_FAILED +
+  STATE_FAILED_DELIMETER +
+  SERVICE_INVALID_APPLYTO_DIR_STAGED_ERROR;
 const STATE_FAILED_SERVICE_INVALID_APPLYTO_DIR_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_APPLYTO_DIR_ERROR;
 const STATE_FAILED_SERVICE_INVALID_INSTALL_DIR_PATH_ERROR =
-  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_INSTALL_DIR_PATH_ERROR;
+  STATE_FAILED +
+  STATE_FAILED_DELIMETER +
+  SERVICE_INVALID_INSTALL_DIR_PATH_ERROR;
 const STATE_FAILED_SERVICE_INVALID_WORKING_DIR_PATH_ERROR =
-  STATE_FAILED + STATE_FAILED_DELIMETER + SERVICE_INVALID_WORKING_DIR_PATH_ERROR;
+  STATE_FAILED +
+  STATE_FAILED_DELIMETER +
+  SERVICE_INVALID_WORKING_DIR_PATH_ERROR;
 const STATE_FAILED_INVALID_APPLYTO_DIR_STAGED_ERROR =
   STATE_FAILED + STATE_FAILED_DELIMETER + INVALID_APPLYTO_DIR_STAGED_ERROR;
 const STATE_FAILED_INVALID_APPLYTO_DIR_ERROR =
@@ -98,10 +110,8 @@ const DEFAULT_UPDATE_VERSION = "999999.0";
  * @return The string representing a remote update xml file.
  */
 function getRemoteUpdatesXMLString(aUpdates) {
-  return "<?xml version=\"1.0\"?>" +
-         "<updates>" +
-         aUpdates +
-         "</updates>";
+  // eslint-disable-next-line no-useless-concat
+  return '<?xml version="1.0"?>' + "<updates>" + aUpdates + "</updates>";
 }
 
 /**
@@ -118,7 +128,6 @@ function getRemoteUpdatesXMLString(aUpdates) {
 function getRemoteUpdateString(aUpdateProps, aPatches) {
   const updateProps = {
     appVersion: DEFAULT_UPDATE_VERSION,
-    backgroundInterval: null,
     buildID: "20080811053724",
     custom1: null,
     custom2: null,
@@ -133,9 +142,9 @@ function getRemoteUpdateString(aUpdateProps, aPatches) {
     updateProps[name] = aUpdateProps[name];
   }
 
-  return getUpdateString(updateProps) + ">" +
-         aPatches +
-         "</update>";
+  // To test that text nodes are handled properly the string returned contains
+  // spaces and newlines.
+  return getUpdateString(updateProps) + ">\n " + aPatches + "\n</update>\n";
 }
 
 /**
@@ -163,6 +172,8 @@ function getRemotePatchString(aPatchProps) {
     set url(val) {
       this._url = val;
     },
+    custom1: null,
+    custom2: null,
     size: SIZE_SIMPLE_MAR,
   };
 
@@ -182,11 +193,13 @@ function getRemotePatchString(aPatchProps) {
  */
 function getLocalUpdatesXMLString(aUpdates) {
   if (!aUpdates || aUpdates == "") {
-    return "<updates xmlns=\"http://www.mozilla.org/2005/app-update\"/>";
+    return '<updates xmlns="http://www.mozilla.org/2005/app-update"/>';
   }
-  return ("<updates xmlns=\"http://www.mozilla.org/2005/app-update\">" +
-          aUpdates +
-          "</updates>");
+  return (
+    '<updates xmlns="http://www.mozilla.org/2005/app-update">' +
+    aUpdates +
+    "</updates>"
+  );
 }
 
 /**
@@ -215,9 +228,8 @@ function getLocalUpdateString(aUpdateProps, aPatches) {
     set appVersion(val) {
       this._appVersion = val;
     },
-    backgroundInterval: null,
     buildID: "20080811053724",
-    channel: gDefaultPrefBranch.getCharPref(PREF_APP_UPDATE_CHANNEL),
+    channel: UpdateUtils ? UpdateUtils.getUpdateChannel() : "default",
     custom1: null,
     custom2: null,
     detailsURL: URL_HTTP_UPDATE_SJS + "?uiURL=DETAILS",
@@ -237,29 +249,38 @@ function getLocalUpdateString(aUpdateProps, aPatches) {
     updateProps[name] = aUpdateProps[name];
   }
 
-  let channel = "channel=\"" + updateProps.channel + "\" ";
+  let checkInterval = updateProps.checkInterval
+    ? 'checkInterval="' + updateProps.checkInterval + '" '
+    : "";
+  let channel = 'channel="' + updateProps.channel + '" ';
   let isCompleteUpdate =
-    "isCompleteUpdate=\"" + updateProps.isCompleteUpdate + "\" ";
-  let foregroundDownload = updateProps.foregroundDownload ?
-    "foregroundDownload=\"" + updateProps.foregroundDownload + "\" " : "";
-  let installDate = "installDate=\"" + updateProps.installDate + "\" ";
-  let previousAppVersion = updateProps.previousAppVersion ?
-    "previousAppVersion=\"" + updateProps.previousAppVersion + "\" " : "";
-  let statusText = updateProps.statusText ?
-    "statusText=\"" + updateProps.statusText + "\" " : "";
-  let serviceURL = "serviceURL=\"" + updateProps.serviceURL + "\">";
+    'isCompleteUpdate="' + updateProps.isCompleteUpdate + '" ';
+  let foregroundDownload = updateProps.foregroundDownload
+    ? 'foregroundDownload="' + updateProps.foregroundDownload + '" '
+    : "";
+  let installDate = 'installDate="' + updateProps.installDate + '" ';
+  let previousAppVersion = updateProps.previousAppVersion
+    ? 'previousAppVersion="' + updateProps.previousAppVersion + '" '
+    : "";
+  let statusText = updateProps.statusText
+    ? 'statusText="' + updateProps.statusText + '" '
+    : "";
+  let serviceURL = 'serviceURL="' + updateProps.serviceURL + '">';
 
-  return getUpdateString(updateProps) +
-         " " +
-         channel +
-         isCompleteUpdate +
-         foregroundDownload +
-         installDate +
-         previousAppVersion +
-         statusText +
-         serviceURL +
-         aPatches +
-         "</update>";
+  return (
+    getUpdateString(updateProps) +
+    " " +
+    checkInterval +
+    channel +
+    isCompleteUpdate +
+    foregroundDownload +
+    installDate +
+    previousAppVersion +
+    statusText +
+    serviceURL +
+    aPatches +
+    "</update>"
+  );
 }
 
 /**
@@ -276,6 +297,8 @@ function getLocalPatchString(aPatchProps) {
     type: "complete",
     url: gURLData + FILE_SIMPLE_MAR,
     size: SIZE_SIMPLE_MAR,
+    custom1: null,
+    custom2: null,
     selected: "true",
     state: STATE_SUCCEEDED,
   };
@@ -284,11 +307,9 @@ function getLocalPatchString(aPatchProps) {
     patchProps[name] = aPatchProps[name];
   }
 
-  let selected = "selected=\"" + patchProps.selected + "\" ";
-  let state = "state=\"" + patchProps.state + "\"/>";
-  return getPatchString(patchProps) + " " +
-         selected +
-         state;
+  let selected = 'selected="' + patchProps.selected + '" ';
+  let state = 'state="' + patchProps.state + '"/>';
+  return getPatchString(patchProps) + " " + selected + state;
 }
 
 /**
@@ -301,31 +322,37 @@ function getLocalPatchString(aPatchProps) {
  * @return The string representing an update element for an update xml file.
  */
 function getUpdateString(aUpdateProps) {
-  let type = "type=\"" + aUpdateProps.type + "\" ";
-  let name = "name=\"" + aUpdateProps.name + "\" ";
-  let displayVersion = aUpdateProps.displayVersion ?
-    "displayVersion=\"" + aUpdateProps.displayVersion + "\" " : "";
-  let appVersion = "appVersion=\"" + aUpdateProps.appVersion + "\" ";
+  let type = 'type="' + aUpdateProps.type + '" ';
+  let name = 'name="' + aUpdateProps.name + '" ';
+  let displayVersion = aUpdateProps.displayVersion
+    ? 'displayVersion="' + aUpdateProps.displayVersion + '" '
+    : "";
+  let appVersion = 'appVersion="' + aUpdateProps.appVersion + '" ';
   // Not specifying a detailsURL will cause a leak due to bug 470244
-  let detailsURL = "detailsURL=\"" + aUpdateProps.detailsURL + "\" ";
-  let promptWaitTime = aUpdateProps.promptWaitTime ?
-    "promptWaitTime=\"" + aUpdateProps.promptWaitTime + "\" " : "";
-  let backgroundInterval = aUpdateProps.backgroundInterval ?
-    "backgroundInterval=\"" + aUpdateProps.backgroundInterval + "\" " : "";
+  let detailsURL = 'detailsURL="' + aUpdateProps.detailsURL + '" ';
+  let promptWaitTime = aUpdateProps.promptWaitTime
+    ? 'promptWaitTime="' + aUpdateProps.promptWaitTime + '" '
+    : "";
+  let disableBITS = aUpdateProps.disableBITS
+    ? 'disableBITS="' + aUpdateProps.disableBITS + '" '
+    : "";
   let custom1 = aUpdateProps.custom1 ? aUpdateProps.custom1 + " " : "";
   let custom2 = aUpdateProps.custom2 ? aUpdateProps.custom2 + " " : "";
-  let buildID = "buildID=\"" + aUpdateProps.buildID + "\"";
+  let buildID = 'buildID="' + aUpdateProps.buildID + '"';
 
-  return "<update " + type +
-                      name +
-                      displayVersion +
-                      appVersion +
-                      detailsURL +
-                      promptWaitTime +
-                      backgroundInterval +
-                      custom1 +
-                      custom2 +
-                      buildID;
+  return (
+    "<update " +
+    type +
+    name +
+    displayVersion +
+    appVersion +
+    detailsURL +
+    promptWaitTime +
+    disableBITS +
+    custom1 +
+    custom2 +
+    buildID
+  );
 }
 
 /**
@@ -337,11 +364,43 @@ function getUpdateString(aUpdateProps) {
  * @return The string representing a patch element for an update xml file.
  */
 function getPatchString(aPatchProps) {
-  let type = "type=\"" + aPatchProps.type + "\" ";
-  let url = "URL=\"" + aPatchProps.url + "\" ";
-  let size = "size=\"" + aPatchProps.size + "\"";
-  return "<patch " +
-         type +
-         url +
-         size;
+  let type = 'type="' + aPatchProps.type + '" ';
+  let url = 'URL="' + aPatchProps.url + '" ';
+  let size = 'size="' + aPatchProps.size + '"';
+  let custom1 = aPatchProps.custom1 ? aPatchProps.custom1 + " " : "";
+  let custom2 = aPatchProps.custom2 ? aPatchProps.custom2 + " " : "";
+  return "<patch " + type + url + custom1 + custom2 + size;
+}
+
+/**
+ * Reads the binary contents of a file and returns it as a string.
+ *
+ * @param  aFile
+ *         The file to read from.
+ * @return The contents of the file as a string.
+ */
+function readFileBytes(aFile) {
+  let fis = Cc["@mozilla.org/network/file-input-stream;1"].createInstance(
+    Ci.nsIFileInputStream
+  );
+  // Specifying -1 for ioFlags will open the file with the default of PR_RDONLY.
+  // Specifying -1 for perm will open the file with the default of 0.
+  fis.init(aFile, -1, -1, Ci.nsIFileInputStream.CLOSE_ON_EOF);
+  let bis = Cc["@mozilla.org/binaryinputstream;1"].createInstance(
+    Ci.nsIBinaryInputStream
+  );
+  bis.setInputStream(fis);
+  let data = [];
+  let count = fis.available();
+  while (count > 0) {
+    let bytes = bis.readByteArray(Math.min(65535, count));
+    data.push(String.fromCharCode.apply(null, bytes));
+    count -= bytes.length;
+    if (bytes.length == 0) {
+      throw new Error("Nothing read from input stream!");
+    }
+  }
+  data = data.join("");
+  fis.close();
+  return data.toString();
 }

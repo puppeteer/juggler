@@ -10,10 +10,10 @@ mod shrink;
 pub use self::memorysink::{MemoryCodeSink, NullTrapSink, RelocSink, TrapSink};
 pub use self::relaxation::relax_branches;
 pub use self::shrink::shrink_instructions;
-pub use regalloc::RegDiversions;
+pub use crate::regalloc::RegDiversions;
 
-use ir::{ExternalName, Function, Inst, JumpTable, SourceLoc, TrapCode};
-use std::fmt;
+use crate::ir::{ExternalName, Function, Inst, JumpTable, SourceLoc, TrapCode};
+use core::fmt;
 
 /// Offset in bytes from the beginning of the function.
 ///
@@ -33,6 +33,8 @@ pub enum Reloc {
     Abs8,
     /// x86 PC-relative 4-byte
     X86PCRel4,
+    /// x86 PC-relative 4-byte offset to trailing rodata
+    X86PCRelRodata4,
     /// x86 call to PC-relative 4-byte
     X86CallPCRel4,
     /// x86 call to PLT-relative 4-byte
@@ -49,17 +51,50 @@ pub enum Reloc {
 
 impl fmt::Display for Reloc {
     /// Display trait implementation drops the arch, since its used in contexts where the arch is
-    /// already unambigious, e.g. clif syntax with isa specified. In other contexts, use Debug.
+    /// already unambiguous, e.g. clif syntax with isa specified. In other contexts, use Debug.
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Reloc::Abs4 => write!(f, "Abs4"),
             Reloc::Abs8 => write!(f, "Abs8"),
             Reloc::X86PCRel4 => write!(f, "PCRel4"),
+            Reloc::X86PCRelRodata4 => write!(f, "PCRelRodata4"),
             Reloc::X86CallPCRel4 => write!(f, "CallPCRel4"),
             Reloc::X86CallPLTRel4 => write!(f, "CallPLTRel4"),
             Reloc::X86GOTPCRel4 => write!(f, "GOTPCRel4"),
             Reloc::Arm32Call | Reloc::Arm64Call | Reloc::RiscvCall => write!(f, "Call"),
         }
+    }
+}
+
+/// Container for information about a vector of compiled code and its supporting read-only data.
+///
+/// The code starts at offset 0 and is followed optionally by relocatable jump tables and copyable
+/// (raw binary) read-only data.  Any padding between sections is always part of the section that
+/// precedes the boundary between the sections.
+#[derive(PartialEq)]
+pub struct CodeInfo {
+    /// Number of bytes of machine code (the code starts at offset 0).
+    pub code_size: CodeOffset,
+
+    /// Number of bytes of jumptables.
+    pub jumptables_size: CodeOffset,
+
+    /// Number of bytes of rodata.
+    pub rodata_size: CodeOffset,
+
+    /// Number of bytes in total.
+    pub total_size: CodeOffset,
+}
+
+impl CodeInfo {
+    /// Offset of any relocatable jump tables, or equal to rodata if there are no jump tables.
+    pub fn jumptables(&self) -> CodeOffset {
+        self.code_size
+    }
+
+    /// Offset of any copyable read-only data, or equal to total_size if there are no rodata.
+    pub fn rodata(&self) -> CodeOffset {
+        self.code_size + self.jumptables_size
     }
 }
 
@@ -72,31 +107,37 @@ pub trait CodeSink {
     fn offset(&self) -> CodeOffset;
 
     /// Add 1 byte to the code section.
-    fn put1(&mut self, u8);
+    fn put1(&mut self, _: u8);
 
     /// Add 2 bytes to the code section.
-    fn put2(&mut self, u16);
+    fn put2(&mut self, _: u16);
 
     /// Add 4 bytes to the code section.
-    fn put4(&mut self, u32);
+    fn put4(&mut self, _: u32);
 
     /// Add 8 bytes to the code section.
-    fn put8(&mut self, u64);
+    fn put8(&mut self, _: u64);
 
     /// Add a relocation referencing an EBB at the current offset.
-    fn reloc_ebb(&mut self, Reloc, CodeOffset);
+    fn reloc_ebb(&mut self, _: Reloc, _: CodeOffset);
 
     /// Add a relocation referencing an external symbol plus the addend at the current offset.
-    fn reloc_external(&mut self, Reloc, &ExternalName, Addend);
+    fn reloc_external(&mut self, _: Reloc, _: &ExternalName, _: Addend);
 
     /// Add a relocation referencing a jump table.
-    fn reloc_jt(&mut self, Reloc, JumpTable);
+    fn reloc_jt(&mut self, _: Reloc, _: JumpTable);
 
     /// Add trap information for the current offset.
-    fn trap(&mut self, TrapCode, SourceLoc);
+    fn trap(&mut self, _: TrapCode, _: SourceLoc);
 
-    /// Code output is complete, read-only data may follow.
+    /// Machine code output is complete, jump table data may follow.
+    fn begin_jumptables(&mut self);
+
+    /// Jump table output is complete, raw read-only data may follow.
     fn begin_rodata(&mut self);
+
+    /// Read-only data output is complete, we're done.
+    fn end_codegen(&mut self);
 }
 
 /// Report a bad encoding error.
@@ -127,7 +168,7 @@ where
         }
     }
 
-    sink.begin_rodata();
+    sink.begin_jumptables();
 
     // output jump tables
     for (jt, jt_data) in func.jump_tables.iter() {
@@ -137,4 +178,9 @@ where
             sink.put4(rel_offset as u32)
         }
     }
+
+    sink.begin_rodata();
+    // TODO: No read-only data (constant pools) at this time.
+
+    sink.end_codegen();
 }

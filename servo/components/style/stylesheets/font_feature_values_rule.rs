@@ -30,7 +30,7 @@ use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
 /// - `SingleValue` is to keep just one unsigned integer value.
 /// - `PairValues` is to keep one or two unsigned integer values.
 /// - `VectorValues` is to keep a list of unsigned integer values.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToShmem)]
 pub struct FFVDeclaration<T> {
     /// An `<ident>` for declaration name.
     pub name: Atom,
@@ -58,7 +58,7 @@ pub trait ToGeckoFontFeatureValues {
 }
 
 /// A @font-feature-values block declaration value that keeps one value.
-#[derive(Clone, Debug, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss, ToShmem)]
 pub struct SingleValue(pub u32);
 
 impl Parse for SingleValue {
@@ -70,11 +70,7 @@ impl Parse for SingleValue {
         match *input.next()? {
             Token::Number {
                 int_value: Some(v), ..
-            }
-                if v >= 0 =>
-            {
-                Ok(SingleValue(v as u32))
-            },
+            } if v >= 0 => Ok(SingleValue(v as u32)),
             ref t => Err(location.new_unexpected_token_error(t.clone())),
         }
     }
@@ -91,7 +87,7 @@ impl ToGeckoFontFeatureValues for SingleValue {
 }
 
 /// A @font-feature-values block declaration value that keeps one or two values.
-#[derive(Clone, Debug, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss, ToShmem)]
 pub struct PairValues(pub u32, pub Option<u32>);
 
 impl Parse for PairValues {
@@ -103,22 +99,14 @@ impl Parse for PairValues {
         let first = match *input.next()? {
             Token::Number {
                 int_value: Some(a), ..
-            }
-                if a >= 0 =>
-            {
-                a as u32
-            },
+            } if a >= 0 => a as u32,
             ref t => return Err(location.new_unexpected_token_error(t.clone())),
         };
         let location = input.current_source_location();
         match input.next() {
             Ok(&Token::Number {
                 int_value: Some(b), ..
-            })
-                if b >= 0 =>
-            {
-                Ok(PairValues(first, Some(b as u32)))
-            },
+            }) if b >= 0 => Ok(PairValues(first, Some(b as u32))),
             // It can't be anything other than number.
             Ok(t) => Err(location.new_unexpected_token_error(t.clone())),
             // It can be just one value.
@@ -143,7 +131,7 @@ impl ToGeckoFontFeatureValues for PairValues {
 }
 
 /// A @font-feature-values block declaration value that keeps a list of values.
-#[derive(Clone, Debug, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss, ToShmem)]
 pub struct VectorValues(#[css(iterable)] pub Vec<u32>);
 
 impl Parse for VectorValues {
@@ -157,11 +145,9 @@ impl Parse for VectorValues {
             match input.next() {
                 Ok(&Token::Number {
                     int_value: Some(a), ..
-                })
-                    if a >= 0 =>
-                {
+                }) if a >= 0 => {
                     vec.push(a as u32);
-                }
+                },
                 // It can't be anything other than number.
                 Ok(t) => return Err(location.new_unexpected_token_error(t.clone())),
                 Err(_) => break,
@@ -239,7 +225,7 @@ macro_rules! font_feature_values_blocks {
         /// The [`@font-feature-values`][font-feature-values] at-rule.
         ///
         /// [font-feature-values]: https://drafts.csswg.org/css-fonts-3/#at-font-feature-values-rule
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Clone, Debug, PartialEq, ToShmem)]
         pub struct FontFeatureValuesRule {
             /// Font family list for @font-feature-values rule.
             /// Family names cannot contain generic families. FamilyName

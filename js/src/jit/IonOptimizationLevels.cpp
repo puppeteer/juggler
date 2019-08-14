@@ -17,11 +17,6 @@ namespace jit {
 
 const OptimizationLevelInfo IonOptimizations;
 
-// Duplicated in all.js - ensure both match.
-const uint32_t OptimizationInfo::CompilerWarmupThreshold = 1000;
-const uint32_t OptimizationInfo::CompilerSmallFunctionWarmupThreshold =
-    CompilerWarmupThreshold;
-
 void OptimizationInfo::initNormalOptimizationInfo() {
   level_ = OptimizationLevel::Normal;
 
@@ -32,27 +27,35 @@ void OptimizationInfo::initNormalOptimizationInfo() {
   inlineInterpreted_ = true;
   inlineNative_ = true;
   licm_ = true;
-  loopUnrolling_ = true;
   gvn_ = true;
   rangeAnalysis_ = true;
   reordering_ = true;
-  sincos_ = true;
+  scalarReplacement_ = true;
   sink_ = true;
 
   registerAllocator_ = RegisterAllocator_Backtracking;
 
-  inlineMaxBytecodePerCallSiteMainThread_ = 550;
-  inlineMaxBytecodePerCallSiteHelperThread_ = 1100;
+  inlineMaxBytecodePerCallSiteMainThread_ = 200;
+  inlineMaxBytecodePerCallSiteHelperThread_ = 400;
   inlineMaxCalleeInlinedBytecodeLength_ = 3550;
   inlineMaxTotalBytecodeLength_ = 85000;
   inliningMaxCallerBytecodeLength_ = 1600;
-  maxInlineDepth_ = 3;
-  scalarReplacement_ = true;
-  smallFunctionMaxInlineDepth_ = 10;
-  compilerWarmUpThreshold_ = CompilerWarmupThreshold;
-  compilerSmallFunctionWarmUpThreshold_ = CompilerSmallFunctionWarmupThreshold;
-  inliningWarmUpThresholdFactor_ = 0.125;
+  maxInlineDepth_ = 0;
+  smallFunctionMaxInlineDepth_ = 1;
+  inliningWarmUpThresholdFactor_ = 0.5;
   inliningRecompileThresholdFactor_ = 4;
+}
+
+void OptimizationInfo::initFullOptimizationInfo() {
+  initNormalOptimizationInfo();
+
+  level_ = OptimizationLevel::Full;
+
+  inlineMaxBytecodePerCallSiteMainThread_ = 550;
+  inlineMaxBytecodePerCallSiteHelperThread_ = 1100;
+  maxInlineDepth_ = 3;
+  smallFunctionMaxInlineDepth_ = 10;
+  inliningWarmUpThresholdFactor_ = 0.125;
 }
 
 void OptimizationInfo::initWasmOptimizationInfo() {
@@ -69,7 +72,6 @@ void OptimizationInfo::initWasmOptimizationInfo() {
   edgeCaseAnalysis_ = false;
   eliminateRedundantChecks_ = false;
   scalarReplacement_ = false;  // wasm has no objects.
-  sincos_ = false;
   sink_ = false;
 }
 
@@ -82,31 +84,25 @@ uint32_t OptimizationInfo::compilerWarmUpThreshold(JSScript* script,
     pc = nullptr;
   }
 
-  uint32_t warmUpThreshold = JitOptions.forcedDefaultIonWarmUpThreshold.valueOr(
-      compilerWarmUpThreshold_);
-
-  if (JitOptions.isSmallFunction(script)) {
-    warmUpThreshold =
-        JitOptions.forcedDefaultIonSmallFunctionWarmUpThreshold.valueOr(
-            compilerSmallFunctionWarmUpThreshold_);
-  }
+  uint32_t warmUpThreshold = baseCompilerWarmUpThreshold();
 
   // If the script is too large to compile on the main thread, we can still
   // compile it off thread. In these cases, increase the warm-up counter
   // threshold to improve the compilation's type information and hopefully
   // avoid later recompilation.
 
-  if (script->length() > MAX_MAIN_THREAD_SCRIPT_SIZE) {
-    warmUpThreshold *= (script->length() / double(MAX_MAIN_THREAD_SCRIPT_SIZE));
+  if (script->length() > JitOptions.ionMaxScriptSizeMainThread) {
+    warmUpThreshold *=
+        (script->length() / double(JitOptions.ionMaxScriptSizeMainThread));
   }
 
   uint32_t numLocalsAndArgs = NumLocalsAndArgs(script);
-  if (numLocalsAndArgs > MAX_MAIN_THREAD_LOCALS_AND_ARGS) {
+  if (numLocalsAndArgs > JitOptions.ionMaxLocalsAndArgsMainThread) {
     warmUpThreshold *=
-        (numLocalsAndArgs / double(MAX_MAIN_THREAD_LOCALS_AND_ARGS));
+        (numLocalsAndArgs / double(JitOptions.ionMaxLocalsAndArgsMainThread));
   }
 
-  if (!pc || JitOptions.eagerCompilation) {
+  if (!pc || JitOptions.eagerIonCompilation()) {
     return warmUpThreshold;
   }
 
@@ -115,11 +111,32 @@ uint32_t OptimizationInfo::compilerWarmUpThreshold(JSScript* script,
   // Note that the loop depth is always > 0 so we will prefer non-OSR over OSR.
   uint32_t loopDepth = LoopEntryDepthHint(pc);
   MOZ_ASSERT(loopDepth > 0);
-  return warmUpThreshold + loopDepth * 100;
+  return warmUpThreshold + loopDepth * (baseCompilerWarmUpThreshold() / 10);
+}
+
+uint32_t OptimizationInfo::recompileWarmUpThreshold(JSScript* script,
+                                                    jsbytecode* pc) const {
+  MOZ_ASSERT(pc == script->code() || *pc == JSOP_LOOPENTRY);
+
+  uint32_t threshold = compilerWarmUpThreshold(script, pc);
+  if (*pc != JSOP_LOOPENTRY || JitOptions.eagerIonCompilation()) {
+    return threshold;
+  }
+
+  // If we're stuck in a long-running loop at a low optimization level, we have
+  // to invalidate to be able to tier up. This is worse than recompiling at
+  // function entry (because in that case we can use the lazy link mechanism and
+  // avoid invalidation completely). Use a very high recompilation threshold for
+  // loop edges so that this only affects very long-running loops.
+
+  uint32_t loopDepth = LoopEntryDepthHint(pc);
+  MOZ_ASSERT(loopDepth > 0);
+  return threshold + loopDepth * (baseCompilerWarmUpThreshold() / 10);
 }
 
 OptimizationLevelInfo::OptimizationLevelInfo() {
   infos_[OptimizationLevel::Normal].initNormalOptimizationInfo();
+  infos_[OptimizationLevel::Full].initFullOptimizationInfo();
   infos_[OptimizationLevel::Wasm].initWasmOptimizationInfo();
 
 #ifdef DEBUG
@@ -139,8 +156,11 @@ OptimizationLevel OptimizationLevelInfo::nextLevel(
     case OptimizationLevel::DontCompile:
       return OptimizationLevel::Normal;
     case OptimizationLevel::Normal:
+      return OptimizationLevel::Full;
+    case OptimizationLevel::Full:
     case OptimizationLevel::Wasm:
-    case OptimizationLevel::Count:;
+    case OptimizationLevel::Count:
+      break;
   }
   MOZ_CRASH("Unknown optimization level.");
 }
@@ -150,7 +170,7 @@ OptimizationLevel OptimizationLevelInfo::firstLevel() const {
 }
 
 bool OptimizationLevelInfo::isLastLevel(OptimizationLevel level) const {
-  return level == OptimizationLevel::Normal;
+  return level == OptimizationLevel::Full;
 }
 
 OptimizationLevel OptimizationLevelInfo::levelForScript(JSScript* script,

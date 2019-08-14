@@ -13,6 +13,7 @@
 
 class nsTableCellFrame;
 namespace mozilla {
+class PresShell;
 struct TableCellReflowInput;
 }  // namespace mozilla
 
@@ -55,7 +56,7 @@ class nsTableRowFrame : public nsContainerFrame {
    *
    * @return           the frame that was created
    */
-  friend nsTableRowFrame* NS_NewTableRowFrame(nsIPresShell* aPresShell,
+  friend nsTableRowFrame* NS_NewTableRowFrame(mozilla::PresShell* aPresShell,
                                               ComputedStyle* aStyle);
 
   nsTableRowGroupFrame* GetTableRowGroupFrame() const {
@@ -75,6 +76,11 @@ class nsTableRowFrame : public nsContainerFrame {
   virtual void BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                 const nsDisplayListSet& aLists) override;
 
+  void PaintCellBackgroundsForFrame(nsIFrame* aFrame,
+                                    nsDisplayListBuilder* aBuilder,
+                                    const nsDisplayListSet& aLists,
+                                    const nsPoint& aOffset = nsPoint());
+
   // Implemented in nsTableCellFrame.h, because it needs to know about the
   // nsTableCellFrame class, but we can't include nsTableCellFrame.h here.
   inline nsTableCellFrame* GetFirstCell() const;
@@ -89,8 +95,8 @@ class nsTableRowFrame : public nsContainerFrame {
    * Cells are resized in nsTableFrame::BalanceColumnWidths and
    * nsTableFrame::ShrinkWrapChildren
    *
-   * @param aDesiredSize width set to width of the sum of the cells, height set
-   * to height of cells with rowspan=1.
+   * @param aDesiredSize width set to width of the sum of the cells,
+   *                     height set to height of cells with rowspan=1.
    *
    * @see nsIFrame::Reflow
    * @see nsTableFrame::BalanceColumnWidths
@@ -254,7 +260,8 @@ class nsTableRowFrame : public nsContainerFrame {
   /** protected constructor.
    * @see NewFrame
    */
-  explicit nsTableRowFrame(ComputedStyle* aStyle, ClassID aID = kClassID);
+  explicit nsTableRowFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                           ClassID aID = kClassID);
 
   void InitChildReflowInput(nsPresContext& aPresContext,
                             const mozilla::LogicalSize& aAvailSize,
@@ -296,8 +303,8 @@ class nsTableRowFrame : public nsContainerFrame {
   // cell if mHasFixedBSize is set
   nscoord mStyleFixedBSize;
 
-  // max-ascent and max-descent amongst all cells that have 'vertical-align:
-  // baseline'
+  // max-ascent and max-descent amongst all cells that have
+  // 'vertical-align: baseline'
   nscoord mMaxCellAscent;   // does include cells with rowspan > 1
   nscoord mMaxCellDescent;  // does *not* include cells with rowspan > 1
 

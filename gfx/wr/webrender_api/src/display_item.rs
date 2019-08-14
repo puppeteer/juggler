@@ -2,49 +2,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#[cfg(any(feature = "serialize", feature = "deserialize"))]
-use GlyphInstance;
-use euclid::{SideOffsets2D, TypedRect};
+use euclid::SideOffsets2D;
 use std::ops::Not;
-use {ColorF, FontInstanceKey, GlyphOptions, ImageKey, LayoutPixel, LayoutPoint};
-use {LayoutRect, LayoutSize, LayoutTransform, LayoutVector2D, PipelineId, PropertyBinding};
-use LayoutSideOffsets;
-use image::ColorDepth;
+// local imports
+use crate::font;
+use crate::api::{PipelineId, PropertyBinding};
+use crate::color::ColorF;
+use crate::image::{ColorDepth, ImageKey};
+use crate::units::*;
 
 // Maximum blur radius.
 // Taken from nsCSSRendering.cpp in Gecko.
 pub const MAX_BLUR_RADIUS: f32 = 300.;
 
-// NOTE: some of these structs have an "IMPLICIT" comment.
-// This indicates that the BuiltDisplayList will have serialized
-// a list of values nearby that this item consumes. The traversal
-// iterator should handle finding these.
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub struct ClipAndScrollInfo {
-    pub scroll_node_id: ClipId,
-    pub clip_node_id: Option<ClipId>,
-}
-
-impl ClipAndScrollInfo {
-    pub fn simple(node_id: ClipId) -> ClipAndScrollInfo {
-        ClipAndScrollInfo {
-            scroll_node_id: node_id,
-            clip_node_id: None,
-        }
-    }
-
-    pub fn new(scroll_node_id: ClipId, clip_node_id: ClipId) -> ClipAndScrollInfo {
-        ClipAndScrollInfo {
-            scroll_node_id,
-            clip_node_id: Some(clip_node_id),
-        }
-    }
-
-    pub fn clip_node_id(&self) -> ClipId {
-        self.clip_node_id.unwrap_or(self.scroll_node_id)
-    }
-}
+// ******************************************************************
+// * NOTE: some of these structs have an "IMPLICIT" comment.        *
+// * This indicates that the BuiltDisplayList will have serialized  *
+// * a list of values nearby that this item consumes. The traversal *
+// * iterator should handle finding these. DebugDisplayItem should  *
+// * make them explicit.                                            *
+// ******************************************************************
 
 /// A tag that can be used to identify items during hit testing. If the tag
 /// is missing then the item doesn't take part in hit testing at all. This
@@ -55,121 +32,146 @@ impl ClipAndScrollInfo {
 /// events.
 pub type ItemTag = (u64, u16);
 
-/// The DI is generic over the specifics, while allows to use
-/// the "complete" version of it for convenient serialization.
+/// A grouping of fields a lot of display items need, just to avoid
+/// repeating these over and over in this file.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct GenericDisplayItem<T> {
-    pub item: T,
-    pub clip_and_scroll: ClipAndScrollInfo,
-    pub info: LayoutPrimitiveInfo,
-}
-
-pub type DisplayItem = GenericDisplayItem<SpecificDisplayItem>;
-
-/// A modified version of DI where every field is borrowed instead of owned.
-/// It allows us to reduce copies during serialization.
-#[derive(Serialize)]
-pub struct SerializedDisplayItem<'a> {
-    pub item: &'a SpecificDisplayItem,
-    pub clip_and_scroll: &'a ClipAndScrollInfo,
-    pub info: &'a LayoutPrimitiveInfo,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct PrimitiveInfo<T> {
-    pub rect: TypedRect<f32, T>,
-    pub clip_rect: TypedRect<f32, T>,
+pub struct CommonItemProperties {
+    /// Bounds of the display item to clip to. Many items are logically
+    /// infinite, and rely on this clip_rect to define their bounds
+    /// (solid colors, background-images, gradients, etc).
+    pub clip_rect: LayoutRect,
+    /// Additional clips
+    pub clip_id: ClipId,
+    /// The coordinate-space the item is in (yes, it can be really granular)
+    pub spatial_id: SpatialId,
+    /// Opaque bits for our clients to use for hit-testing. This is the most
+    /// dubious "common" field, but because it's an Option, it usually only
+    /// wastes a single byte (for None).
+    pub hit_info: Option<ItemTag>,
+    /// The CSS backface-visibility property (yes, it can be really granular)
     pub is_backface_visible: bool,
-    pub tag: Option<ItemTag>,
 }
 
-impl LayoutPrimitiveInfo {
-    pub fn new(rect: TypedRect<f32, LayoutPixel>) -> Self {
-        Self::with_clip_rect(rect, rect)
-    }
-
-    pub fn with_clip_rect(
-        rect: TypedRect<f32, LayoutPixel>,
-        clip_rect: TypedRect<f32, LayoutPixel>,
-    ) -> Self {
-        PrimitiveInfo {
-            rect,
+impl CommonItemProperties {
+    /// Convenience for tests.
+    pub fn new(clip_rect: LayoutRect, space_and_clip: SpaceAndClipInfo) -> Self {
+        Self {
             clip_rect,
+            spatial_id: space_and_clip.spatial_id,
+            clip_id: space_and_clip.clip_id,
+            hit_info: None,
             is_backface_visible: true,
-            tag: None,
         }
     }
 }
 
-pub type LayoutPrimitiveInfo = PrimitiveInfo<LayoutPixel>;
-
-#[repr(u64)]
+/// Per-primitive information about the nodes in the clip tree and
+/// the spatial tree that the primitive belongs to.
+///
+/// Note: this is a separate struct from `PrimitiveInfo` because
+/// it needs indirectional mapping during the DL flattening phase,
+/// turning into `ScrollNodeAndClipChain`.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub enum SpecificDisplayItem {
-    Clip(ClipDisplayItem),
-    ScrollFrame(ScrollFrameDisplayItem),
-    StickyFrame(StickyFrameDisplayItem),
-    Rectangle(RectangleDisplayItem),
-    ClearRectangle,
-    Line(LineDisplayItem),
-    Text(TextDisplayItem),
-    Image(ImageDisplayItem),
-    YuvImage(YuvImageDisplayItem),
-    Border(BorderDisplayItem),
-    BoxShadow(BoxShadowDisplayItem),
-    Gradient(GradientDisplayItem),
-    RadialGradient(RadialGradientDisplayItem),
-    ClipChain(ClipChainItem),
-    Iframe(IframeDisplayItem),
-    PushStackingContext(PushStackingContextDisplayItem),
-    PopStackingContext,
-    PushReferenceFrame(PushReferenceFrameDisplayListItem),
-    PopReferenceFrame,
-    SetGradientStops,
-    PushShadow(Shadow),
-    PopAllShadows,
-    PushCacheMarker(CacheMarkerDisplayItem),
-    PopCacheMarker,
+pub struct SpaceAndClipInfo {
+    pub spatial_id: SpatialId,
+    pub clip_id: ClipId,
 }
 
-/// This is a "complete" version of the DI specifics,
-/// containing the auxiliary data within the corresponding
-/// enumeration variants, to be used for debug serialization.
+impl SpaceAndClipInfo {
+    /// Create a new space/clip info associated with the root
+    /// scroll frame.
+    pub fn root_scroll(pipeline_id: PipelineId) -> Self {
+        SpaceAndClipInfo {
+            spatial_id: SpatialId::root_scroll_node(pipeline_id),
+            clip_id: ClipId::root(pipeline_id),
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub enum DisplayItem {
+    // These are the "real content" display items
+    Rectangle(RectangleDisplayItem),
+    ClearRectangle(ClearRectangleDisplayItem),
+    HitTest(HitTestDisplayItem),
+    Text(TextDisplayItem),
+    Line(LineDisplayItem),
+    Border(BorderDisplayItem),
+    BoxShadow(BoxShadowDisplayItem),
+    PushShadow(PushShadowDisplayItem),
+    Gradient(GradientDisplayItem),
+    RadialGradient(RadialGradientDisplayItem),
+    Image(ImageDisplayItem),
+    YuvImage(YuvImageDisplayItem),
+
+    // Clips
+    Clip(ClipDisplayItem),
+    ClipChain(ClipChainItem),
+
+    // Spaces and Frames that content can be scoped under.
+    ScrollFrame(ScrollFrameDisplayItem),
+    StickyFrame(StickyFrameDisplayItem),
+    Iframe(IframeDisplayItem),
+    PushReferenceFrame(ReferenceFrameDisplayListItem),
+    PushStackingContext(PushStackingContextDisplayItem),
+
+    // These marker items indicate an array of data follows, to be used for the
+    // next non-marker item.
+    SetGradientStops,
+    SetFilterOps,
+    SetFilterData,
+
+    // These marker items terminate a scope introduced by a previous item.
+    PopReferenceFrame,
+    PopStackingContext,
+    PopAllShadows,
+}
+
+/// This is a "complete" version of the DisplayItem, with all implicit trailing
+/// arrays included, for debug serialization (captures).
 #[cfg(any(feature = "serialize", feature = "deserialize"))]
 #[cfg_attr(feature = "serialize", derive(Serialize))]
 #[cfg_attr(feature = "deserialize", derive(Deserialize))]
-pub enum CompletelySpecificDisplayItem {
-    Clip(ClipDisplayItem, Vec<ComplexClipRegion>),
-    ClipChain(ClipChainItem, Vec<ClipId>),
-    ScrollFrame(ScrollFrameDisplayItem, Vec<ComplexClipRegion>),
-    StickyFrame(StickyFrameDisplayItem),
+pub enum DebugDisplayItem {
     Rectangle(RectangleDisplayItem),
-    ClearRectangle,
+    ClearRectangle(ClearRectangleDisplayItem),
+    HitTest(HitTestDisplayItem),
+    Text(TextDisplayItem, Vec<font::GlyphInstance>),
     Line(LineDisplayItem),
-    Text(TextDisplayItem, Vec<GlyphInstance>),
-    Image(ImageDisplayItem),
-    YuvImage(YuvImageDisplayItem),
     Border(BorderDisplayItem),
     BoxShadow(BoxShadowDisplayItem),
+    PushShadow(PushShadowDisplayItem),
     Gradient(GradientDisplayItem),
     RadialGradient(RadialGradientDisplayItem),
+    Image(ImageDisplayItem),
+    YuvImage(YuvImageDisplayItem),
+
+    Clip(ClipDisplayItem, Vec<ComplexClipRegion>),
+    ClipChain(ClipChainItem, Vec<ClipId>),
+
+    ScrollFrame(ScrollFrameDisplayItem, Vec<ComplexClipRegion>),
+    StickyFrame(StickyFrameDisplayItem),
     Iframe(IframeDisplayItem),
-    PushStackingContext(PushStackingContextDisplayItem, Vec<FilterOp>),
-    PopStackingContext,
-    PushReferenceFrame(PushReferenceFrameDisplayListItem),
-    PopReferenceFrame,
+    PushReferenceFrame(ReferenceFrameDisplayListItem),
+    PushStackingContext(PushStackingContextDisplayItem),
+
     SetGradientStops(Vec<GradientStop>),
-    PushShadow(Shadow),
+    SetFilterOps(Vec<FilterOp>),
+    SetFilterData(FilterData),
+
+    PopReferenceFrame,
+    PopStackingContext,
     PopAllShadows,
-    PushCacheMarker(CacheMarkerDisplayItem),
-    PopCacheMarker,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClipDisplayItem {
     pub id: ClipId,
+    pub parent_space_and_clip: SpaceAndClipInfo,
+    pub clip_rect: LayoutRect,
     pub image_mask: Option<ImageMask>,
-}
+} // IMPLICIT: complex_clips: Vec<ComplexClipRegion>
 
 /// The minimum and maximum allowable offset for a sticky frame in a single dimension.
 #[repr(C)]
@@ -194,7 +196,9 @@ impl StickyOffsetBounds {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct StickyFrameDisplayItem {
-    pub id: ClipId,
+    pub id: SpatialId,
+    pub parent_spatial_id: SpatialId,
+    pub bounds: LayoutRect,
 
     /// The margins that should be maintained between the edge of the parent viewport and this
     /// sticky frame. A margin of None indicates that the sticky frame should not stick at all
@@ -229,35 +233,78 @@ pub enum ScrollSensitivity {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ScrollFrameDisplayItem {
+    /// The id of the clip this scroll frame creates
     pub clip_id: ClipId,
-    pub scroll_frame_id: ClipId,
+    /// The id of the space this scroll frame creates
+    pub scroll_frame_id: SpatialId,
+    /// The size of the contents this contains (so the backend knows how far it can scroll).
+    // FIXME: this can *probably* just be a size? Origin seems to just get thrown out.
+    pub content_rect: LayoutRect,
+    pub clip_rect: LayoutRect,
+    pub parent_space_and_clip: SpaceAndClipInfo,
     pub external_id: Option<ExternalScrollId>,
     pub image_mask: Option<ImageMask>,
     pub scroll_sensitivity: ScrollSensitivity,
+    /// The amount this scrollframe has already been scrolled by, in the caller.
+    /// This means that all the display items that are inside the scrollframe
+    /// will have their coordinates shifted by this amount, and this offset
+    /// should be added to those display item coordinates in order to get a
+    /// normalized value that is consistent across display lists.
+    pub external_scroll_offset: LayoutVector2D,
 }
 
+/// A solid color to draw (may not actually be a rectangle due to complex clips)
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RectangleDisplayItem {
+    pub common: CommonItemProperties,
     pub color: ColorF,
+}
+
+/// Clears all colors from the area, making it possible to cut holes in the window.
+/// (useful for things like the macos frosted-glass effect).
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ClearRectangleDisplayItem {
+    pub common: CommonItemProperties,
+}
+
+/// A minimal hit-testable item for the parent browser's convenience, and is
+/// slimmer than a RectangleDisplayItem (no color). The existence of this as a
+/// distinct item also makes it easier to inspect/debug display items.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct HitTestDisplayItem {
+    pub common: CommonItemProperties,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct LineDisplayItem {
-    pub orientation: LineOrientation, // toggles whether above values are interpreted as x/y values
+    pub common: CommonItemProperties,
+    /// We need a separate rect from common.clip_rect to encode cute
+    /// tricks that firefox does to make a series of text-decorations seamlessly
+    /// line up -- snapping the decorations to a multiple of their period, and
+    /// then clipping them to their "proper" area. This rect is that "logical"
+    /// snapped area that may be clipped to the right size by the clip_rect.
+    pub area: LayoutRect,
+    /// Whether the rect is interpretted as vertical or horizontal
+    pub orientation: LineOrientation,
+    /// This could potentially be implied from area, but we currently prefer
+    /// that this is the responsibility of the layout engine. Value irrelevant
+    /// for non-wavy lines.
+    // FIXME: this was done before we could use tagged unions in enums, but now
+    // it should just be part of LineStyle::Wavy.
     pub wavy_line_thickness: f32,
     pub color: ColorF,
     pub style: LineStyle,
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize, Eq, Hash)]
 pub enum LineOrientation {
     Vertical,
     Horizontal,
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize, Eq, Hash)]
 pub enum LineStyle {
     Solid,
     Dotted,
@@ -267,12 +314,21 @@ pub enum LineStyle {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct TextDisplayItem {
-    pub font_key: FontInstanceKey,
+    pub common: CommonItemProperties,
+    /// The area all the glyphs should be found in. Strictly speaking this isn't
+    /// necessarily needed, but layout engines should already "know" this, and we
+    /// use it cull and size things quickly before glyph layout is done. Currently
+    /// the glyphs *can* be outside these bounds, but that should imply they
+    /// can be cut off.
+    // FIXME: these are currently sometimes ignored to keep some old wrench tests
+    // working, but we should really just fix the tests!
+    pub bounds: LayoutRect,
+    pub font_key: font::FontInstanceKey,
     pub color: ColorF,
-    pub glyph_options: Option<GlyphOptions>,
-} // IMPLICIT: glyphs: Vec<GlyphInstance>
+    pub glyph_options: Option<font::GlyphOptions>,
+} // IMPLICIT: glyphs: Vec<font::GlyphInstance>
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize)]
 pub struct NormalBorder {
     pub left: BorderSide,
     pub right: BorderSide,
@@ -330,8 +386,8 @@ impl NormalBorder {
     }
 }
 
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, MallocSizeOf, PartialEq, Serialize, Deserialize, Eq, Hash)]
 pub enum RepeatMode {
     Stretch,
     Repeat,
@@ -392,6 +448,8 @@ pub enum BorderDetails {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BorderDisplayItem {
+    pub common: CommonItemProperties,
+    pub bounds: LayoutRect,
     pub widths: LayoutSideOffsets,
     pub details: BorderDetails,
 }
@@ -404,7 +462,7 @@ pub enum BorderRadiusKind {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize)]
 pub struct BorderRadius {
     pub top_left: LayoutSize,
     pub top_right: LayoutSize,
@@ -413,14 +471,14 @@ pub struct BorderRadius {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize)]
 pub struct BorderSide {
     pub color: ColorF,
     pub style: BorderStyle,
 }
 
 #[repr(u32)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, Hash, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize, Hash, Eq)]
 pub enum BorderStyle {
     None = 0,
     Solid = 1,
@@ -440,8 +498,8 @@ impl BorderStyle {
     }
 }
 
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
 pub enum BoxShadowClipMode {
     Outset = 0,
     Inset = 1,
@@ -449,6 +507,7 @@ pub enum BoxShadowClipMode {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BoxShadowDisplayItem {
+    pub common: CommonItemProperties,
     pub box_bounds: LayoutRect,
     pub offset: LayoutVector2D,
     pub color: ColorF,
@@ -456,6 +515,13 @@ pub struct BoxShadowDisplayItem {
     pub spread_radius: f32,
     pub border_radius: BorderRadius,
     pub clip_mode: BoxShadowClipMode,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct PushShadowDisplayItem {
+    pub space_and_clip: SpaceAndClipInfo,
+    pub shadow: Shadow,
+    pub should_inflate: bool,
 }
 
 #[repr(C)]
@@ -467,7 +533,7 @@ pub struct Shadow {
 }
 
 #[repr(u8)]
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
+#[derive(Debug, Copy, Clone, Hash, Eq, MallocSizeOf, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
 pub enum ExtendMode {
     Clamp,
     Repeat,
@@ -480,15 +546,24 @@ pub struct Gradient {
     pub extend_mode: ExtendMode,
 } // IMPLICIT: stops: Vec<GradientStop>
 
+/// The area
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct GradientDisplayItem {
-    pub gradient: Gradient,
+    /// NOTE: common.clip_rect is the area the gradient covers
+    pub common: CommonItemProperties,
+    /// The area to tile the gradient over (first tile starts at origin of this rect)
+    // FIXME: this should ideally just be `tile_origin` here, with the clip_rect
+    // defining the bounds of the item. Needs non-trivial backend changes.
+    pub bounds: LayoutRect,
+    /// How big a tile of the of the gradient should be (common case: bounds.size)
     pub tile_size: LayoutSize,
+    /// The space between tiles of the gradient (common case: 0)
     pub tile_spacing: LayoutSize,
+    pub gradient: Gradient,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize)]
 pub struct GradientStop {
     pub offset: f32,
     pub color: ColorF,
@@ -503,39 +578,55 @@ pub struct RadialGradient {
     pub extend_mode: ExtendMode,
 } // IMPLICIT stops: Vec<GradientStop>
 
+/// Just an abstraction for bundling up a bunch of clips into a "super clip".
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClipChainItem {
     pub id: ClipChainId,
     pub parent: Option<ClipChainId>,
-} // IMPLICIT stops: Vec<ClipId>
+} // IMPLICIT clip_ids: Vec<ClipId>
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RadialGradientDisplayItem {
+    pub common: CommonItemProperties,
+    /// The area to tile the gradient over (first tile starts at origin of this rect)
+    // FIXME: this should ideally just be `tile_origin` here, with the clip_rect
+    // defining the bounds of the item. Needs non-trivial backend changes.
+    pub bounds: LayoutRect,
     pub gradient: RadialGradient,
     pub tile_size: LayoutSize,
     pub tile_spacing: LayoutSize,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct PushReferenceFrameDisplayListItem {
+pub struct ReferenceFrameDisplayListItem {
+    pub origin: LayoutPoint,
+    pub parent_spatial_id: SpatialId,
     pub reference_frame: ReferenceFrame,
 }
 
-/// Provides a hint to WR that it should try to cache the items
-/// within a cache marker context in an off-screen surface.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct CacheMarkerDisplayItem {
+pub enum ReferenceFrameKind {
+    Transform,
+    Perspective {
+        scrolling_relative_to: Option<ExternalScrollId>,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ReferenceFrame {
-    pub transform: Option<PropertyBinding<LayoutTransform>>,
-    pub perspective: Option<LayoutTransform>,
-    pub id: ClipId,
+    pub kind: ReferenceFrameKind,
+    pub transform_style: TransformStyle,
+    /// The transform matrix, either the perspective matrix or the transform
+    /// matrix.
+    pub transform: PropertyBinding<LayoutTransform>,
+    pub id: SpatialId,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PushStackingContextDisplayItem {
+    pub origin: LayoutPoint,
+    pub spatial_id: SpatialId,
+    pub is_backface_visible: bool,
     pub stacking_context: StackingContext,
 }
 
@@ -543,12 +634,13 @@ pub struct PushStackingContextDisplayItem {
 pub struct StackingContext {
     pub transform_style: TransformStyle,
     pub mix_blend_mode: MixBlendMode,
-    pub clip_node_id: Option<ClipId>,
+    pub clip_id: Option<ClipId>,
     pub raster_space: RasterSpace,
-} // IMPLICIT: filters: Vec<FilterOp>
+    /// True if picture caching should be used on this stacking context.
+    pub cache_tiles: bool,
+} // IMPLICIT: filters: Vec<FilterOp>, filter_datas: Vec<FilterData>
 
-
-#[repr(u32)]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum TransformStyle {
     Flat = 0,
@@ -562,7 +654,7 @@ pub enum TransformStyle {
 /// important. Note that this is a performance hint only,
 /// which WR may choose to ignore.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-#[repr(u32)]
+#[repr(u8)]
 pub enum RasterSpace {
     // Rasterize in local-space, applying supplied scale to primitives.
     // Best performance, but lower quality.
@@ -584,7 +676,7 @@ impl RasterSpace {
     }
 }
 
-#[repr(u32)]
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum MixBlendMode {
     Normal = 0,
@@ -605,7 +697,8 @@ pub enum MixBlendMode {
     Luminosity = 15,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub enum FilterOp {
     /// Filter that does no transformation of the colors, needed for
     /// debug purposes only.
@@ -619,56 +712,149 @@ pub enum FilterOp {
     Opacity(PropertyBinding<f32>, f32),
     Saturate(f32),
     Sepia(f32),
-    DropShadow(LayoutVector2D, f32, ColorF),
+    DropShadow(Shadow),
     ColorMatrix([f32; 20]),
     SrgbToLinear,
     LinearToSrgb,
+    ComponentTransfer,
+    Flood(ColorF),
 }
 
-impl FilterOp {
-    /// Ensure that the parameters for a filter operation
-    /// are sensible.
-    pub fn sanitize(self) -> FilterOp {
-        match self {
-            FilterOp::Blur(radius) => {
-                let radius = radius.min(MAX_BLUR_RADIUS);
-                FilterOp::Blur(radius)
-            }
-            FilterOp::DropShadow(offset, radius, color) => {
-                let radius = radius.min(MAX_BLUR_RADIUS);
-                FilterOp::DropShadow(offset, radius, color)
-            }
-            filter => filter,
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+pub enum ComponentTransferFuncType {
+  Identity = 0,
+  Table = 1,
+  Discrete = 2,
+  Linear = 3,
+  Gamma = 4,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct FilterData {
+    pub func_r_type: ComponentTransferFuncType,
+    pub r_values: Vec<f32>,
+    pub func_g_type: ComponentTransferFuncType,
+    pub g_values: Vec<f32>,
+    pub func_b_type: ComponentTransferFuncType,
+    pub b_values: Vec<f32>,
+    pub func_a_type: ComponentTransferFuncType,
+    pub a_values: Vec<f32>,
+}
+
+fn sanitize_func_type(
+    func_type: ComponentTransferFuncType,
+    values: &[f32],
+) -> ComponentTransferFuncType {
+    if values.is_empty() {
+        return ComponentTransferFuncType::Identity;
+    }
+    if values.len() < 2 && func_type == ComponentTransferFuncType::Linear {
+        return ComponentTransferFuncType::Identity;
+    }
+    if values.len() < 3 && func_type == ComponentTransferFuncType::Gamma {
+        return ComponentTransferFuncType::Identity;
+    }
+    func_type
+}
+
+fn sanitize_values(
+    func_type: ComponentTransferFuncType,
+    values: &[f32],
+) -> bool {
+    if values.len() < 2 && func_type == ComponentTransferFuncType::Linear {
+        return false;
+    }
+    if values.len() < 3 && func_type == ComponentTransferFuncType::Gamma {
+        return false;
+    }
+    true
+}
+
+impl FilterData {
+    /// Ensure that the number of values matches up with the function type.
+    pub fn sanitize(&self) -> FilterData {
+        FilterData {
+            func_r_type: sanitize_func_type(self.func_r_type, &self.r_values),
+            r_values:
+                    if sanitize_values(self.func_r_type, &self.r_values) {
+                        self.r_values.clone()
+                    } else {
+                        Vec::new()
+                    },
+            func_g_type: sanitize_func_type(self.func_g_type, &self.g_values),
+            g_values:
+                    if sanitize_values(self.func_g_type, &self.g_values) {
+                        self.g_values.clone()
+                    } else {
+                        Vec::new()
+                    },
+
+            func_b_type: sanitize_func_type(self.func_b_type, &self.b_values),
+            b_values:
+                    if sanitize_values(self.func_b_type, &self.b_values) {
+                        self.b_values.clone()
+                    } else {
+                        Vec::new()
+                    },
+
+            func_a_type: sanitize_func_type(self.func_a_type, &self.a_values),
+            a_values:
+                    if sanitize_values(self.func_a_type, &self.a_values) {
+                        self.a_values.clone()
+                    } else {
+                        Vec::new()
+                    },
+
         }
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.func_r_type == ComponentTransferFuncType::Identity &&
+        self.func_g_type == ComponentTransferFuncType::Identity &&
+        self.func_b_type == ComponentTransferFuncType::Identity &&
+        self.func_a_type == ComponentTransferFuncType::Identity
     }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct IframeDisplayItem {
-    pub clip_id: ClipId,
+    pub bounds: LayoutRect,
+    pub clip_rect: LayoutRect,
+    pub space_and_clip: SpaceAndClipInfo,
     pub pipeline_id: PipelineId,
     pub ignore_missing_pipeline: bool,
 }
 
+/// This describes an image or, more generally, a background-image and its tiling.
+/// (A background-image repeats in a grid to fill the specified area).
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ImageDisplayItem {
-    pub image_key: ImageKey,
+    pub common: CommonItemProperties,
+    /// The area to tile the image over (first tile starts at origin of this rect)
+    // FIXME: this should ideally just be `tile_origin` here, with the clip_rect
+    // defining the bounds of the item. Needs non-trivial backend changes.
+    pub bounds: LayoutRect,
+    /// How large to make a single tile of the image (common case: bounds.size)
     pub stretch_size: LayoutSize,
+    /// The space between tiles (common case: 0)
     pub tile_spacing: LayoutSize,
+    pub image_key: ImageKey,
     pub image_rendering: ImageRendering,
     pub alpha_type: AlphaType,
+    /// A hack used by gecko to color a simple bitmap font used for tofu glyphs
     pub color: ColorF,
 }
 
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
 pub enum ImageRendering {
     Auto = 0,
     CrispEdges = 1,
     Pixelated = 2,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
 pub enum AlphaType {
     Alpha = 0,
     PremultipliedAlpha = 1,
@@ -676,27 +862,20 @@ pub enum AlphaType {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct YuvImageDisplayItem {
+    pub common: CommonItemProperties,
+    pub bounds: LayoutRect,
     pub yuv_data: YuvData,
     pub color_depth: ColorDepth,
     pub color_space: YuvColorSpace,
     pub image_rendering: ImageRendering,
 }
 
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
 pub enum YuvColorSpace {
     Rec601 = 0,
     Rec709 = 1,
-}
-pub const YUV_COLOR_SPACES: [YuvColorSpace; 2] = [YuvColorSpace::Rec601, YuvColorSpace::Rec709];
-
-impl YuvColorSpace {
-    pub fn get_feature_string(&self) -> &'static str {
-        match *self {
-            YuvColorSpace::Rec601 => "YUV_REC601",
-            YuvColorSpace::Rec709 => "YUV_REC709",
-        }
-    }
+    Rec2020 = 2,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -716,17 +895,12 @@ impl YuvData {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize)]
 pub enum YuvFormat {
     NV12 = 0,
     PlanarYCbCr = 1,
     InterleavedYCbCr = 2,
 }
-pub const YUV_FORMATS: [YuvFormat; 3] = [
-    YuvFormat::NV12,
-    YuvFormat::PlanarYCbCr,
-    YuvFormat::InterleavedYCbCr,
-];
 
 impl YuvFormat {
     pub fn get_plane_num(&self) -> usize {
@@ -734,14 +908,6 @@ impl YuvFormat {
             YuvFormat::NV12 => 2,
             YuvFormat::PlanarYCbCr => 3,
             YuvFormat::InterleavedYCbCr => 1,
-        }
-    }
-
-    pub fn get_feature_string(&self) -> &'static str {
-        match *self {
-            YuvFormat::NV12 => "YUV_NV12",
-            YuvFormat::PlanarYCbCr => "YUV_PLANAR",
-            YuvFormat::InterleavedYCbCr => "YUV_INTERLEAVED",
         }
     }
 }
@@ -766,7 +932,7 @@ impl ImageMask {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, Eq, Hash)]
+#[derive(Copy, Clone, Debug, MallocSizeOf, PartialEq, Serialize, Deserialize, Eq, Hash)]
 pub enum ClipMode {
     Clip,    // Pixels inside the region are visible.
     ClipOut, // Pixels outside the region are visible.
@@ -878,45 +1044,79 @@ impl ComplexClipRegion {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ClipChainId(pub u64, pub PipelineId);
 
+/// A reference to a clipping node defining how an item is clipped.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ClipId {
-    Spatial(usize, PipelineId),
     Clip(usize, PipelineId),
     ClipChain(ClipChainId),
 }
 
-const ROOT_REFERENCE_FRAME_CLIP_ID: usize = 0;
-const ROOT_SCROLL_NODE_CLIP_ID: usize = 1;
+const ROOT_CLIP_ID: usize = 0;
 
 impl ClipId {
-    pub fn root_scroll_node(pipeline_id: PipelineId) -> ClipId {
-        ClipId::Spatial(ROOT_SCROLL_NODE_CLIP_ID, pipeline_id)
+    /// Return the root clip ID - effectively doing no clipping.
+    pub fn root(pipeline_id: PipelineId) -> Self {
+        ClipId::Clip(ROOT_CLIP_ID, pipeline_id)
     }
 
-    pub fn root_reference_frame(pipeline_id: PipelineId) -> ClipId {
-        ClipId::Spatial(ROOT_REFERENCE_FRAME_CLIP_ID, pipeline_id)
+    /// Return an invalid clip ID - needed in places where we carry
+    /// one but need to not attempt to use it.
+    pub fn invalid() -> Self {
+        ClipId::Clip(!0, PipelineId::dummy())
     }
 
     pub fn pipeline_id(&self) -> PipelineId {
         match *self {
-            ClipId::Spatial(_, pipeline_id) |
             ClipId::Clip(_, pipeline_id) |
             ClipId::ClipChain(ClipChainId(_, pipeline_id)) => pipeline_id,
         }
     }
 
-    pub fn is_root_scroll_node(&self) -> bool {
+    pub fn is_root(&self) -> bool {
         match *self {
-            ClipId::Spatial(ROOT_SCROLL_NODE_CLIP_ID, _) => true,
-            _ => false,
+            ClipId::Clip(id, _) => id == ROOT_CLIP_ID,
+            ClipId::ClipChain(_) => false,
         }
     }
 
-    pub fn is_root_reference_frame(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         match *self {
-            ClipId::Spatial(ROOT_REFERENCE_FRAME_CLIP_ID, _) => true,
-            _ => false,
+            ClipId::Clip(id, _) => id != !0,
+            _ => true,
         }
+    }
+}
+
+/// A reference to a spatial node defining item positioning.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct SpatialId(pub usize, PipelineId);
+
+const ROOT_REFERENCE_FRAME_SPATIAL_ID: usize = 0;
+const ROOT_SCROLL_NODE_SPATIAL_ID: usize = 1;
+
+impl SpatialId {
+    pub fn new(spatial_node_index: usize, pipeline_id: PipelineId) -> Self {
+        SpatialId(spatial_node_index, pipeline_id)
+    }
+
+    pub fn root_reference_frame(pipeline_id: PipelineId) -> Self {
+        SpatialId(ROOT_REFERENCE_FRAME_SPATIAL_ID, pipeline_id)
+    }
+
+    pub fn root_scroll_node(pipeline_id: PipelineId) -> Self {
+        SpatialId(ROOT_SCROLL_NODE_SPATIAL_ID, pipeline_id)
+    }
+
+    pub fn pipeline_id(&self) -> PipelineId {
+        self.1
+    }
+
+    pub fn is_root_reference_frame(&self) -> bool {
+        self.0 == ROOT_REFERENCE_FRAME_SPATIAL_ID
+    }
+
+    pub fn is_root_scroll_node(&self) -> bool {
+        self.0 == ROOT_SCROLL_NODE_SPATIAL_ID
     }
 }
 
@@ -928,6 +1128,7 @@ impl ClipId {
 /// When setting display lists with the `preserve_frame_state` this id is used to preserve scroll
 /// offsets between different sets of ClipScrollNodes which are ScrollFrames.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[repr(C)]
 pub struct ExternalScrollId(pub u64, pub PipelineId);
 
 impl ExternalScrollId {
@@ -937,5 +1138,37 @@ impl ExternalScrollId {
 
     pub fn is_root(&self) -> bool {
         self.0 == 0
+    }
+}
+
+impl DisplayItem {
+    pub fn debug_name(&self) -> &'static str {
+        match *self {
+            DisplayItem::Border(..) => "border",
+            DisplayItem::BoxShadow(..) => "box_shadow",
+            DisplayItem::ClearRectangle(..) => "clear_rectangle",
+            DisplayItem::HitTest(..) => "hit_test",
+            DisplayItem::Clip(..) => "clip",
+            DisplayItem::ClipChain(..) => "clip_chain",
+            DisplayItem::Gradient(..) => "gradient",
+            DisplayItem::Iframe(..) => "iframe",
+            DisplayItem::Image(..) => "image",
+            DisplayItem::Line(..) => "line",
+            DisplayItem::PopAllShadows => "pop_all_shadows",
+            DisplayItem::PopReferenceFrame => "pop_reference_frame",
+            DisplayItem::PopStackingContext => "pop_stacking_context",
+            DisplayItem::PushShadow(..) => "push_shadow",
+            DisplayItem::PushReferenceFrame(..) => "push_reference_frame",
+            DisplayItem::PushStackingContext(..) => "push_stacking_context",
+            DisplayItem::SetFilterOps => "set_filter_ops",
+            DisplayItem::SetFilterData => "set_filter_data",
+            DisplayItem::RadialGradient(..) => "radial_gradient",
+            DisplayItem::Rectangle(..) => "rectangle",
+            DisplayItem::ScrollFrame(..) => "scroll_frame",
+            DisplayItem::SetGradientStops => "set_gradient_stops",
+            DisplayItem::StickyFrame(..) => "sticky_frame",
+            DisplayItem::Text(..) => "text",
+            DisplayItem::YuvImage(..) => "yuv_image",
+        }
     }
 }

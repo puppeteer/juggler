@@ -7,7 +7,6 @@
 
 #include <d3d11.h>
 #include <d3d11_1.h>
-#include "gfxPrefs.h"
 #include "GLContext.h"
 #include "WGLLibrary.h"
 #include "nsPrintfCString.h"
@@ -307,9 +306,10 @@ class DXInterop2Device : public RefCounted<DXInterop2Device> {
 ////////////////////////////////////////////////////////////////////////////////
 // Shared Surface
 
-/*static*/ UniquePtr<SharedSurface_D3D11Interop>
-SharedSurface_D3D11Interop::Create(DXInterop2Device* interop, GLContext* gl,
-                                   const gfx::IntSize& size, bool hasAlpha) {
+/*static*/
+UniquePtr<SharedSurface_D3D11Interop> SharedSurface_D3D11Interop::Create(
+    DXInterop2Device* interop, GLContext* gl, const gfx::IntSize& size,
+    bool hasAlpha) {
   const auto& d3d = interop->mD3D;
 
   // Create a texture in case we need to readback.
@@ -414,7 +414,7 @@ SharedSurface_D3D11Interop::SharedSurface_D3D11Interop(
       mLockHandle(lockHandle),
       mTexD3D(texD3D),
       mDXGIHandle(dxgiHandle),
-      mNeedsFinish(gfxPrefs::WebGLDXGLNeedsFinish()),
+      mNeedsFinish(StaticPrefs::webgl_dxgl_needs_finish()),
       mLockedForGL(false) {
   MOZ_ASSERT(bool(mProdTex) == bool(mInteropFB));
 }
@@ -465,18 +465,18 @@ bool SharedSurface_D3D11Interop::ToSurfaceDescriptor(
     layers::SurfaceDescriptor* const out_descriptor) {
   const auto format =
       (mHasAlpha ? gfx::SurfaceFormat::B8G8R8A8 : gfx::SurfaceFormat::B8G8R8X8);
-  *out_descriptor =
-      layers::SurfaceDescriptorD3D10(WindowsHandle(mDXGIHandle), format, mSize);
+  *out_descriptor = layers::SurfaceDescriptorD3D10(
+      WindowsHandle(mDXGIHandle), format, mSize, gfx::YUVColorSpace::UNKNOWN);
   return true;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
 // Factory
 
-/*static*/ UniquePtr<SurfaceFactory_D3D11Interop>
-SurfaceFactory_D3D11Interop::Create(GLContext* gl, const SurfaceCaps& caps,
-                                    layers::LayersIPCChannel* allocator,
-                                    const layers::TextureFlags& flags) {
+/*static*/
+UniquePtr<SurfaceFactory_D3D11Interop> SurfaceFactory_D3D11Interop::Create(
+    GLContext* gl, const SurfaceCaps& caps, layers::LayersIPCChannel* allocator,
+    const layers::TextureFlags& flags) {
   WGLLibrary* wgl = &sWGLLib;
   if (!wgl || !wgl->HasDXInterop2()) return nullptr;
 

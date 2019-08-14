@@ -8,21 +8,25 @@ const kSearchEngineURL = "http://example.com/?search={searchTerms}";
 
 add_task(async function setup() {
   // Add a new fake search engine.
-  Services.search.addEngineWithDetails(kSearchEngineID, "", "", "", "get",
-                                       kSearchEngineURL);
+  await Services.search.addEngineWithDetails(kSearchEngineID, {
+    method: "get",
+    template: kSearchEngineURL,
+  });
 
-  let oldDefaultEngine = Services.search.defaultEngine;
-  Services.search.defaultEngine = Services.search.getEngineByName(kSearchEngineID);
+  let oldDefaultEngine = await Services.search.getDefault();
+  await Services.search.setDefault(
+    Services.search.getEngineByName(kSearchEngineID)
+  );
 
   // Remove the fake engine when done.
-  registerCleanupFunction(() => {
+  registerCleanupFunction(async () => {
     if (oldDefaultEngine) {
-      Services.search.defaultEngine = oldDefaultEngine;
+      await Services.search.setDefault(oldDefaultEngine);
     }
 
     let engine = Services.search.getEngineByName(kSearchEngineID);
     if (engine) {
-      Services.search.removeEngine(engine);
+      await Services.search.removeEngine(engine);
     }
   });
 });
@@ -42,8 +46,11 @@ add_task(async function test() {
     // Check that we arrived at the correct URL.
     let escapedParams = encodeURIComponent(searchParams).replace("%20", "+");
     let expectedURL = kSearchEngineURL.replace("{searchTerms}", escapedParams);
-    is(gBrowser.selectedBrowser.currentURI.spec, expectedURL,
-       "New tab should have loaded with expected url.");
+    is(
+      gBrowser.selectedBrowser.currentURI.spec,
+      expectedURL,
+      "New tab should have loaded with expected url."
+    );
 
     // Cleanup.
     gBrowser.removeCurrentTab();

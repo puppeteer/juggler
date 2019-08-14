@@ -10,7 +10,9 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 
+#include "mozilla/layers/Compositor.h"
 #include "mozilla/layers/ProfilerScreenshots.h"
+#include "mozilla/layers/TextureHost.h"
 #include "mozilla/gfx/Point.h"
 #include "nsTArray.h"
 
@@ -53,7 +55,7 @@ class CompositorScreenshotGrabberImpl final {
   nsTArray<RefPtr<AsyncReadbackBuffer>> mAvailableBuffers;
   Maybe<QueueItem> mCurrentFrameQueueItem;
   nsTArray<QueueItem> mQueue;
-  UniquePtr<ProfilerScreenshots> mProfilerScreenshots;
+  RefPtr<ProfilerScreenshots> mProfilerScreenshots;
   const IntSize mBufferSize;
 };
 
@@ -87,7 +89,8 @@ void CompositorScreenshotGrabber::MaybeProcessQueue() {
 
 void CompositorScreenshotGrabber::NotifyEmptyFrame() {
 #ifdef MOZ_GECKO_PROFILER
-  profiler_add_marker("NoCompositorScreenshot because nothing changed");
+  profiler_add_marker("NoCompositorScreenshot because nothing changed",
+                      JS::ProfilingCategoryPair::GRAPHICS);
 #endif
 }
 
@@ -146,7 +149,8 @@ void CompositorScreenshotGrabberImpl::GrabScreenshot(Compositor* aCompositor) {
   if (!windowTarget) {
     PROFILER_ADD_MARKER(
         "NoCompositorScreenshot because of unsupported compositor "
-        "configuration");
+        "configuration",
+        GRAPHICS);
     return;
   }
 
@@ -162,14 +166,16 @@ void CompositorScreenshotGrabberImpl::GrabScreenshot(Compositor* aCompositor) {
 
   if (!scaledTarget) {
     PROFILER_ADD_MARKER(
-        "NoCompositorScreenshot because ScaleDownWindowTargetToSize failed");
+        "NoCompositorScreenshot because ScaleDownWindowTargetToSize failed",
+        GRAPHICS);
     return;
   }
 
   RefPtr<AsyncReadbackBuffer> buffer = TakeNextBuffer(aCompositor);
   if (!buffer) {
     PROFILER_ADD_MARKER(
-        "NoCompositorScreenshot because AsyncReadbackBuffer creation failed");
+        "NoCompositorScreenshot because AsyncReadbackBuffer creation failed",
+        GRAPHICS);
     return;
   }
 
@@ -201,7 +207,7 @@ void CompositorScreenshotGrabberImpl::ReturnBuffer(
 void CompositorScreenshotGrabberImpl::ProcessQueue() {
   if (!mQueue.IsEmpty()) {
     if (!mProfilerScreenshots) {
-      mProfilerScreenshots = MakeUnique<ProfilerScreenshots>();
+      mProfilerScreenshots = new ProfilerScreenshots();
     }
     for (const auto& item : mQueue) {
       mProfilerScreenshots->SubmitScreenshot(

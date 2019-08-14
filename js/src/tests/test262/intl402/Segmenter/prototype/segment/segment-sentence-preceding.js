@@ -1,4 +1,4 @@
-// |reftest| skip-if(!Intl.hasOwnProperty('Segmenter')) -- Intl.Segmenter is not enabled unconditionally
+// |reftest| skip -- Intl.Segmenter is not supported
 // Copyright 2018 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -34,17 +34,17 @@ for (const text of [
   let segments = [];
   iter.preceding(prev);
   assert(["sep", "term"].includes(iter.breakType), iter.breakType);
-  assert(iter.position >= 0);
-  assert(iter.position < prev);
-  segments.push(text.substring(iter.position, prev));
-  prev = iter.position;
+  assert(iter.index >= 0);
+  assert(iter.index < prev);
+  segments.push(text.substring(iter.index, prev));
+  prev = iter.index;
   while (!iter.preceding()) {
     assert(["sep", "term"].includes(iter.breakType), iter.breakType);
-    assert(iter.position >= 0);
-    assert(iter.position <= text.length);
-    assert(iter.position < prev);
-    segments.push(text.substring(iter.position, prev));
-    prev = iter.position;
+    assert(iter.index >= 0);
+    assert(iter.index <= text.length);
+    assert(iter.index < prev);
+    segments.push(text.substring(iter.index, prev));
+    prev = iter.index;
   }
   assert.sameValue(text, segments.reverse().join(""));
 }

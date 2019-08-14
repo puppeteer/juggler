@@ -5,13 +5,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsImageFrame.h"
+
+#include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
 #include "nsIFormControlFrame.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsCheckboxRadioFrame.h"
 #include "nsLayoutUtils.h"
-#include "mozilla/MouseEvents.h"
 #include "nsIContent.h"
 
 using namespace mozilla;
@@ -19,7 +21,8 @@ using namespace mozilla;
 class nsImageControlFrame final : public nsImageFrame,
                                   public nsIFormControlFrame {
  public:
-  explicit nsImageControlFrame(ComputedStyle* aStyle);
+  explicit nsImageControlFrame(ComputedStyle* aStyle,
+                               nsPresContext* aPresContext);
   ~nsImageControlFrame();
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot,
@@ -48,16 +51,17 @@ class nsImageControlFrame final : public nsImageFrame,
   }
 #endif
 
-  virtual nsresult GetCursor(const nsPoint& aPoint,
-                             nsIFrame::Cursor& aCursor) override;
+  Maybe<Cursor> GetCursor(const nsPoint&) override;
+
   // nsIFormContromFrame
   virtual void SetFocus(bool aOn, bool aRepaint) override;
   virtual nsresult SetFormProperty(nsAtom* aName,
                                    const nsAString& aValue) override;
 };
 
-nsImageControlFrame::nsImageControlFrame(ComputedStyle* aStyle)
-    : nsImageFrame(aStyle, kClassID) {}
+nsImageControlFrame::nsImageControlFrame(ComputedStyle* aStyle,
+                                         nsPresContext* aPresContext)
+    : nsImageFrame(aStyle, aPresContext, kClassID) {}
 
 nsImageControlFrame::~nsImageControlFrame() {}
 
@@ -69,9 +73,10 @@ void nsImageControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
   nsImageFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-nsIFrame* NS_NewImageControlFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewImageControlFrame(PresShell* aPresShell,
                                   ComputedStyle* aStyle) {
-  return new (aPresShell) nsImageControlFrame(aStyle);
+  return new (aPresShell)
+      nsImageControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageControlFrame)
@@ -133,7 +138,7 @@ nsresult nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
   *aEventStatus = nsEventStatus_eIgnore;
 
   if (aEvent->mMessage == eMouseUp &&
-      aEvent->AsMouseEvent()->button == WidgetMouseEvent::eLeftButton) {
+      aEvent->AsMouseEvent()->mButton == MouseButton::eLeft) {
     // Store click point for HTMLInputElement::SubmitNamesValues
     // Do this on MouseUp because the specs don't say and that's what IE does
     nsIntPoint* lastClickPoint = static_cast<nsIntPoint*>(
@@ -149,17 +154,12 @@ nsresult nsImageControlFrame::HandleEvent(nsPresContext* aPresContext,
 
 void nsImageControlFrame::SetFocus(bool aOn, bool aRepaint) {}
 
-nsresult nsImageControlFrame::GetCursor(const nsPoint& aPoint,
-                                        nsIFrame::Cursor& aCursor) {
-  // Use style defined cursor if one is provided, otherwise when
-  // the cursor style is "auto" we use the pointer cursor.
-  FillCursorInformationFromStyle(StyleUI(), aCursor);
-
-  if (NS_STYLE_CURSOR_AUTO == aCursor.mCursor) {
-    aCursor.mCursor = NS_STYLE_CURSOR_POINTER;
+Maybe<nsIFrame::Cursor> nsImageControlFrame::GetCursor(const nsPoint&) {
+  StyleCursorKind kind = StyleUI()->mCursor;
+  if (kind == StyleCursorKind::Auto) {
+    kind = StyleCursorKind::Pointer;
   }
-
-  return NS_OK;
+  return Some(Cursor{kind, AllowCustomCursorImage::Yes});
 }
 
 nsresult nsImageControlFrame::SetFormProperty(nsAtom* aName,

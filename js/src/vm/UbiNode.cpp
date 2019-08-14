@@ -9,7 +9,6 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/Range.h"
-#include "mozilla/Scoped.h"
 
 #include <algorithm>
 
@@ -23,9 +22,7 @@
 #include "js/Utility.h"
 #include "js/Vector.h"
 #include "util/Text.h"
-#ifdef ENABLE_BIGINT
 #include "vm/BigIntType.h"
-#endif
 #include "vm/Debugger.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/GlobalObject.h"
@@ -42,7 +39,7 @@
 
 using namespace js;
 
-using JS::DispatchTyped;
+using JS::ApplyGCThingTyped;
 using JS::HandleValue;
 using JS::Value;
 using JS::ZoneSet;
@@ -75,7 +72,7 @@ struct CopyToBufferMatcher {
     return i;
   }
 
-  size_t match(JSAtom* atom) {
+  size_t operator()(JSAtom* atom) {
     if (!atom) {
       return 0;
     }
@@ -89,7 +86,7 @@ struct CopyToBufferMatcher {
                                     length);
   }
 
-  size_t match(const char16_t* chars) {
+  size_t operator()(const char16_t* chars) {
     if (!chars) {
       return 0;
     }
@@ -106,9 +103,11 @@ size_t JS::ubi::AtomOrTwoByteChars::copyToBuffer(
 }
 
 struct LengthMatcher {
-  size_t match(JSAtom* atom) { return atom ? atom->length() : 0; }
+  size_t operator()(JSAtom* atom) { return atom ? atom->length() : 0; }
 
-  size_t match(const char16_t* chars) { return chars ? js_strlen(chars) : 0; }
+  size_t operator()(const char16_t* chars) {
+    return chars ? js_strlen(chars) : 0;
+  }
 };
 
 size_t JS::ubi::AtomOrTwoByteChars::length() {
@@ -153,20 +152,12 @@ Node::Size Concrete<void>::size(mozilla::MallocSizeOf mallocSizeof) const {
   MOZ_CRASH("null ubi::Node");
 }
 
-struct Node::ConstructFunctor : public js::BoolDefaultAdaptor<Value, false> {
-  template <typename T>
-  bool operator()(T* t, Node* node) {
-    node->construct(t);
-    return true;
-  }
-};
-
 Node::Node(const JS::GCCellPtr& thing) {
-  DispatchTyped(ConstructFunctor(), thing, this);
+  ApplyGCThingTyped(thing, [this](auto t) { this->construct(t); });
 }
 
 Node::Node(HandleValue value) {
-  if (!DispatchTyped(ConstructFunctor(), value, this)) {
+  if (!ApplyGCThingTyped(value, [this](auto t) { this->construct(t); })) {
     construct<void>(nullptr);
   }
 }
@@ -187,13 +178,9 @@ Value Node::exposeToJS() const {
     v.setString(as<JSString>());
   } else if (is<JS::Symbol>()) {
     v.setSymbol(as<JS::Symbol>());
-  }
-#ifdef ENABLE_BIGINT
-  else if (is<BigInt>()) {
+  } else if (is<BigInt>()) {
     v.setBigInt(as<BigInt>());
-  }
-#endif
-  else {
+  } else {
     v.setUndefined();
   }
 
@@ -204,7 +191,7 @@ Value Node::exposeToJS() const {
 
 // A JS::CallbackTracer subclass that adds a Edge to a Vector for each
 // edge on which it is invoked.
-class EdgeVectorTracer : public JS::CallbackTracer {
+class EdgeVectorTracer final : public JS::CallbackTracer {
   // The vector to which we add Edges.
   EdgeVector* vec;
 
@@ -277,9 +264,7 @@ template JS::Zone* TracerConcrete<js::ObjectGroup>::zone() const;
 template JS::Zone* TracerConcrete<js::RegExpShared>::zone() const;
 template JS::Zone* TracerConcrete<js::Scope>::zone() const;
 template JS::Zone* TracerConcrete<JS::Symbol>::zone() const;
-#ifdef ENABLE_BIGINT
 template JS::Zone* TracerConcrete<BigInt>::zone() const;
-#endif
 template JS::Zone* TracerConcrete<JSString>::zone() const;
 
 template <typename Referent>
@@ -318,10 +303,8 @@ template UniquePtr<EdgeRange> TracerConcrete<js::Scope>::edges(
     JSContext* cx, bool wantNames) const;
 template UniquePtr<EdgeRange> TracerConcrete<JS::Symbol>::edges(
     JSContext* cx, bool wantNames) const;
-#ifdef ENABLE_BIGINT
 template UniquePtr<EdgeRange> TracerConcrete<BigInt>::edges(
     JSContext* cx, bool wantNames) const;
-#endif
 template UniquePtr<EdgeRange> TracerConcrete<JSString>::edges(
     JSContext* cx, bool wantNames) const;
 
@@ -388,9 +371,7 @@ Realm* Concrete<JSObject>::realm() const {
 }
 
 const char16_t Concrete<JS::Symbol>::concreteTypeName[] = u"JS::Symbol";
-#ifdef ENABLE_BIGINT
 const char16_t Concrete<BigInt>::concreteTypeName[] = u"JS::BigInt";
-#endif
 const char16_t Concrete<JSScript>::concreteTypeName[] = u"JSScript";
 const char16_t Concrete<js::LazyScript>::concreteTypeName[] = u"js::LazyScript";
 const char16_t Concrete<js::jit::JitCode>::concreteTypeName[] =
@@ -542,6 +523,23 @@ void SetConstructUbiNodeForDOMObjectCallback(JSContext* cx,
                                                               JSObject*)) {
   cx->runtime()->constructUbiNodeForDOMObjectCallback = callback;
 }
+
+JS_PUBLIC_API const char* CoarseTypeToString(CoarseType type) {
+  switch (type) {
+    case CoarseType::Other:
+      return "Other";
+    case CoarseType::Object:
+      return "Object";
+    case CoarseType::Script:
+      return "Script";
+    case CoarseType::String:
+      return "String";
+    case CoarseType::DOMNode:
+      return "DOMNode";
+    default:
+      return "Unknown";
+  }
+};
 
 }  // namespace ubi
 }  // namespace JS

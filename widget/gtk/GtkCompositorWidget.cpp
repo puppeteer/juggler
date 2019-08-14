@@ -85,10 +85,26 @@ void GtkCompositorWidget::NotifyClientSizeChanged(
   mClientSize = aClientSize;
 }
 
+#ifdef MOZ_WAYLAND
+void GtkCompositorWidget::RequestsUpdatingEGLSurface() {
+  mWaylandRequestsUpdatingEGLSurface = true;
+}
+
+bool GtkCompositorWidget::WaylandRequestsUpdatingEGLSurface() {
+  bool ret = mWaylandRequestsUpdatingEGLSurface;
+  mWaylandRequestsUpdatingEGLSurface = false;
+  return ret;
+}
+#endif
+
 LayoutDeviceIntSize GtkCompositorWidget::GetClientSize() { return mClientSize; }
 
 uintptr_t GtkCompositorWidget::GetWidgetKey() {
   return reinterpret_cast<uintptr_t>(mWidget);
+}
+
+EGLNativeWindowType GtkCompositorWidget::GetEGLNativeWindow() {
+  return (EGLNativeWindowType)mWidget->GetNativeData(NS_NATIVE_EGL_WINDOW);
 }
 
 }  // namespace widget

@@ -22,18 +22,21 @@
 #if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
     defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
 // Push return addresses callee-side.
-#define JS_USE_LINK_REGISTER
+#  define JS_USE_LINK_REGISTER
 #endif
 
 #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM) || \
     defined(JS_CODEGEN_ARM64)
 // JS_SMALL_BRANCH means the range on a branch instruction
 // is smaller than the whole address space
-#define JS_SMALL_BRANCH
+#  define JS_SMALL_BRANCH
 #endif
 
-#if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
-#define JS_CODELABEL_LINKMODE
+#if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64) || \
+    defined(JS_CODEGEN_ARM64)
+// JS_CODELABEL_LINKMODE gives labels additional metadata
+// describing how Bind() should patch them.
+#  define JS_CODELABEL_LINKMODE
 #endif
 
 using mozilla::CheckedInt;
@@ -135,8 +138,7 @@ struct Imm64 {
 
 #ifdef DEBUG
 static inline bool IsCompilingWasm() {
-  // wasm compilation pushes a JitContext with a null Zone.
-  return GetJitContext()->zone == nullptr;
+  return GetJitContext()->isCompilingWasm();
 }
 #endif
 
@@ -691,21 +693,6 @@ struct GlobalAccess {
 
 typedef Vector<GlobalAccess, 0, SystemAllocPolicy> GlobalAccessVector;
 
-// A CallFarJump records the offset of a jump that needs to be patched to a
-// call at the end of the module when all calls have been emitted.
-
-struct CallFarJump {
-  uint32_t funcIndex;
-  jit::CodeOffset jump;
-
-  CallFarJump(uint32_t funcIndex, jit::CodeOffset jump)
-      : funcIndex(funcIndex), jump(jump) {}
-
-  void offsetBy(size_t delta) { jump.offsetBy(delta); }
-};
-
-typedef Vector<CallFarJump, 0, SystemAllocPolicy> CallFarJumpVector;
-
 }  // namespace wasm
 
 namespace jit {
@@ -715,7 +702,6 @@ class AssemblerShared {
   wasm::CallSiteVector callSites_;
   wasm::CallSiteTargetVector callSiteTargets_;
   wasm::TrapSiteVectorArray trapSites_;
-  wasm::CallFarJumpVector callFarJumps_;
   wasm::SymbolicAccessVector symbolicAccesses_;
 
  protected:
@@ -754,9 +740,6 @@ class AssemblerShared {
   void append(wasm::Trap trap, wasm::TrapSite site) {
     enoughMemory_ &= trapSites_[trap].append(site);
   }
-  void append(wasm::CallFarJump jmp) {
-    enoughMemory_ &= callFarJumps_.append(jmp);
-  }
   void append(const wasm::MemoryAccessDesc& access, uint32_t pcOffset) {
     appendOutOfBoundsTrap(access.trapOffset(), pcOffset);
   }
@@ -771,7 +754,6 @@ class AssemblerShared {
   wasm::CallSiteVector& callSites() { return callSites_; }
   wasm::CallSiteTargetVector& callSiteTargets() { return callSiteTargets_; }
   wasm::TrapSiteVectorArray& trapSites() { return trapSites_; }
-  wasm::CallFarJumpVector& callFarJumps() { return callFarJumps_; }
   wasm::SymbolicAccessVector& symbolicAccesses() { return symbolicAccesses_; }
 };
 

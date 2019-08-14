@@ -7,7 +7,7 @@
 #include "mozilla/dom/SVGTitleElement.h"
 #include "mozilla/dom/SVGTitleElementBinding.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Title)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Title)
 
 namespace mozilla {
 namespace dom {
@@ -32,8 +32,6 @@ SVGTitleElement::SVGTitleElement(
   AddMutationObserver(this);
 }
 
-SVGTitleElement::~SVGTitleElement() {}
-
 void SVGTitleElement::CharacterDataChanged(nsIContent* aContent,
                                            const CharacterDataChangeInfo&) {
   SendTitleChangeEvent(false);
@@ -52,12 +50,9 @@ void SVGTitleElement::ContentRemoved(nsIContent* aChild,
   SendTitleChangeEvent(false);
 }
 
-nsresult SVGTitleElement::BindToTree(nsIDocument* aDocument,
-                                     nsIContent* aParent,
-                                     nsIContent* aBindingParent) {
+nsresult SVGTitleElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   // Let this fall through.
-  nsresult rv =
-      SVGTitleElementBase::BindToTree(aDocument, aParent, aBindingParent);
+  nsresult rv = SVGTitleElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   SendTitleChangeEvent(true);
@@ -65,11 +60,11 @@ nsresult SVGTitleElement::BindToTree(nsIDocument* aDocument,
   return NS_OK;
 }
 
-void SVGTitleElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void SVGTitleElement::UnbindFromTree(bool aNullParent) {
   SendTitleChangeEvent(false);
 
   // Let this fall through.
-  SVGTitleElementBase::UnbindFromTree(aDeep, aNullParent);
+  SVGTitleElementBase::UnbindFromTree(aNullParent);
 }
 
 void SVGTitleElement::DoneAddingChildren(bool aHaveNotified) {
@@ -79,7 +74,7 @@ void SVGTitleElement::DoneAddingChildren(bool aHaveNotified) {
 }
 
 void SVGTitleElement::SendTitleChangeEvent(bool aBound) {
-  nsIDocument* doc = GetUncomposedDoc();
+  Document* doc = GetUncomposedDoc();
   if (doc) {
     doc->NotifyPossibleTitleChange(aBound);
   }

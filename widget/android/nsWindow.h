@@ -220,6 +220,8 @@ class nsWindow final : public nsBaseWidget {
     return nullptr;
   }
 
+  void NotifyDisablingWebRender();
+
   //
   // nsIWidget
   //
@@ -249,7 +251,7 @@ class nsWindow final : public nsBaseWidget {
   virtual void Enable(bool aState) override;
   virtual bool IsEnabled() const override;
   virtual void Invalidate(const LayoutDeviceIntRect& aRect) override;
-  virtual nsresult SetFocus(bool aRaise = false) override;
+  virtual void SetFocus(Raise) override;
   virtual LayoutDeviceIntRect GetScreenBounds() override;
   virtual LayoutDeviceIntPoint WidgetToScreenOffset() override;
   virtual nsresult DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
@@ -258,12 +260,8 @@ class nsWindow final : public nsBaseWidget {
   virtual already_AddRefed<nsIScreen> GetWidgetScreen() override;
   virtual nsresult MakeFullScreen(bool aFullScreen,
                                   nsIScreen* aTargetScreen = nullptr) override;
-
-  virtual void SetCursor(nsCursor aCursor) override {}
-  virtual nsresult SetCursor(imgIContainer* aCursor, uint32_t aHotspotX,
-                             uint32_t aHotspotY) override {
-    return NS_ERROR_NOT_IMPLEMENTED;
-  }
+  void SetCursor(nsCursor aDefaultCursor, imgIContainer* aImageCursor,
+                 uint32_t aHotspotX, uint32_t aHotspotY) override {}
   void* GetNativeData(uint32_t aDataType) override;
   void SetNativeData(uint32_t aDataType, uintptr_t aVal) override;
   virtual nsresult SetTitle(const nsAString& aTitle) override { return NS_OK; }
@@ -349,6 +347,7 @@ class nsWindow final : public nsBaseWidget {
   nsCOMPtr<nsIIdleServiceInternal> mIdleService;
 
   bool mIsFullScreen;
+  bool mIsDisablingWebRender;
 
   bool UseExternalCompositingSurface() const override { return true; }
 

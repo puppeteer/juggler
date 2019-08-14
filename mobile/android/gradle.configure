@@ -22,11 +22,15 @@ def with_gradle(value):
         return True
 
 
-@depends('--with-gradle', check_build_environment)
+@depends(host, '--with-gradle', check_build_environment)
 @imports(_from='os.path', _import='isfile')
-def gradle(value, build_env):
-    gradle = value[0] if len(value) else \
-        os.path.join(build_env.topsrcdir, 'gradlew')
+def gradle(host, value, build_env):
+    if len(value):
+        gradle = value[0]
+    else:
+        gradle = os.path.join(build_env.topsrcdir, 'gradlew')
+        if host.os == 'WINNT':
+            gradle = gradle + '.bat'
 
     # TODO: verify that $GRADLE is executable.
     if not isfile(gradle):
@@ -205,16 +209,7 @@ def gradle_android_test_tasks(build_config):
     ]
 
 
-@dependable
-def gradle_android_test_ccov_report_tasks():
-    '''Additional gradle tasks run by |mach android test-ccov|.'''
-    return [
-        'app:jacocoTestReport',
-        'geckoview:jacocoTestReport',
-    ]
-
 set_config('GRADLE_ANDROID_TEST_TASKS', gradle_android_test_tasks)
-set_config('GRADLE_ANDROID_TEST_CCOV_REPORT_TASKS', gradle_android_test_ccov_report_tasks)
 
 
 @depends(gradle_android_build_config)
@@ -236,14 +231,34 @@ def gradle_android_api_lint_tasks(build_config):
 set_config('GRADLE_ANDROID_API_LINT_TASKS', gradle_android_api_lint_tasks)
 
 
-@dependable
-def gradle_android_checkstyle_tasks():
+@depends(gradle_android_build_config)
+def gradle_android_checkstyle_tasks(build_config):
     '''Gradle tasks run by |mach android checkstyle|.'''
     return [
         'app:checkstyle',
+        'geckoview:checkstyle{geckoview.variant.name}'.format(geckoview=build_config.geckoview),
     ]
 
 set_config('GRADLE_ANDROID_CHECKSTYLE_TASKS', gradle_android_checkstyle_tasks)
+
+
+@depends(gradle_android_build_config)
+def gradle_android_checkstyle_output_files(build_config):
+    def uncapitalize(s):
+        if s:
+            return s[0].lower() + s[1:]
+        else:
+            return s
+
+    variant = uncapitalize(build_config.geckoview.variant.name)
+
+    '''Output folder for checkstyle'''
+    return [
+        'gradle/build/mobile/android/geckoview/reports/checkstyle/{}.xml'.format(variant),
+        'gradle/build/mobile/android/app/reports/checkstyle/checkstyle.xml',
+    ]
+
+set_config('GRADLE_ANDROID_CHECKSTYLE_OUTPUT_FILES', gradle_android_checkstyle_output_files)
 
 
 @depends(gradle_android_build_config)
@@ -269,6 +284,26 @@ def gradle_android_archive_geckoview_tasks(build_config):
     ]
 
 set_config('GRADLE_ANDROID_ARCHIVE_GECKOVIEW_TASKS', gradle_android_archive_geckoview_tasks)
+
+
+@depends(gradle_android_build_config)
+def gradle_android_geckoview_docs_tasks(build_config):
+    '''Gradle tasks run by |mach android geckoview-docs|.'''
+    return [
+        'geckoview:javadoc{geckoview.variant.name}'.format(geckoview=build_config.geckoview),
+    ]
+
+set_config('GRADLE_ANDROID_GECKOVIEW_DOCS_TASKS', gradle_android_geckoview_docs_tasks)
+
+
+@depends(gradle_android_build_config)
+def gradle_android_geckoview_docs_archive_tasks(build_config):
+    '''Gradle tasks run by |mach android geckoview-docs --archive| or |... --upload.'''
+    return [
+        'geckoview:javadocCopyJar{geckoview.variant.name}'.format(geckoview=build_config.geckoview),
+    ]
+
+set_config('GRADLE_ANDROID_GECKOVIEW_DOCS_ARCHIVE_TASKS', gradle_android_geckoview_docs_archive_tasks)
 
 
 @depends(gradle_android_build_config)
@@ -306,18 +341,20 @@ def gradle_android_install_geckoview_example_tasks(build_config):
 set_config('GRADLE_ANDROID_INSTALL_GECKOVIEW_EXAMPLE_TASKS', gradle_android_install_geckoview_example_tasks)
 
 
+@dependable
+def gradle_android_dependencies():
+    '''Gradle tasks that download all dependencies.'''
+    # These tasks download most dependencies from each configuration, the
+    # notable exception is dependencies added at runtime by gradle plugins
+    return [
+        'downloadDependencies',
+    ]
+
 @depends(
-    gradle_android_app_tasks,
     gradle_android_api_lint_tasks,
-    gradle_android_test_tasks,
-    gradle_android_lint_tasks,
     gradle_android_checkstyle_tasks,
     gradle_android_findbugs_tasks,
-    gradle_android_archive_geckoview_tasks,
-    gradle_android_generate_sdk_bindings_tasks,
-    gradle_android_generate_generated_jni_wrappers_tasks,
-    gradle_android_generate_fennec_jni_wrappers_tasks,
-    gradle_android_archive_coverage_artifacts_tasks,
+    gradle_android_dependencies,
 )
 @imports(_from='itertools', _import='imap')
 @imports(_from='itertools', _import='chain')

@@ -90,6 +90,14 @@
     }                                                \
   }
 
+// {74EA4101-A5BB-49BC-9984-66DA8B225A37}
+#define NS_MACFINDERPROGRESS_CID                     \
+  {                                                  \
+    0x74EA4101, 0xA5BB, 0x49BC, {                    \
+      0x99, 0x84, 0x66, 0xDA, 0x8B, 0x22, 0x5A, 0x37 \
+    }                                                \
+  }
+
 // {de59fe1a-46c8-490f-b04d-34545acb06c9}
 #define NS_MACSHARINGSERVICE_CID                     \
   {                                                  \
@@ -103,6 +111,30 @@
   {                                                  \
     0xb6e1a890, 0xb2b8, 0x4883, {                    \
       0xa6, 0x5f, 0x94, 0x76, 0xf6, 0x18, 0x53, 0x13 \
+    }                                                \
+  }
+
+// {ea109912-3acc-48de-b679-c23b6a122da5}
+#define NS_TOUCHBARHELPER_CID                        \
+  {                                                  \
+    0xea109912, 0x3acc, 0x48de, {                    \
+      0xb6, 0x79, 0xc2, 0x3b, 0x6a, 0x12, 0x2d, 0xa5 \
+    }                                                \
+  }
+
+// {38f396e2-93c9-4a77-aaf7-2d50b9962186}
+#define NS_TOUCHBARUPDATER_CID                       \
+  {                                                  \
+    0x38f396e2, 0x93c9, 0x4a77, {                    \
+      0xaa, 0xf7, 0x2d, 0x50, 0xb9, 0x96, 0x21, 0x86 \
+    }                                                \
+  }
+
+// {77441d17-f29c-49d7-982f-f20a5ab5a900}
+#define NS_TOUCHBARINPUT_CID                         \
+  {                                                  \
+    0x77441d17, 0xf29c, 0x49d7, {                    \
+      0x98, 0x2f, 0xf2, 0x0a, 0x5a, 0xb5, 0xa9, 0x00 \
     }                                                \
   }
 

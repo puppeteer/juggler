@@ -16,13 +16,14 @@
         onload="runTest();">
 
   <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
+          src="chrome://browser/content/places/places-tree.js"/>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
   <script type="application/javascript" src="head.js" />
 
   <body xmlns="http://www.w3.org/1999/xhtml" />
 
   <tree id="tree"
-        type="places"
+        is="places-tree"
         flex="1">
     <treecols>
       <treecol label="Title" id="title" anonid="title" primary="true" ordinal="1" flex="1"/>
@@ -48,7 +49,7 @@
       tree.place = `place:type=${Ci.nsINavHistoryQueryOptions.RESULTS_AS_LEFT_PANE_QUERY}&excludeItems=1&expandQueries=0`;
 
       // The query-property is set on the title column for each row.
-      let titleColumn = tree.treeBoxObject.columns.getColumnAt(0);
+      let titleColumn = tree.columns.getColumnAt(0);
 
       // Open All Bookmarks
       tree.selectItems([PlacesUtils.virtualAllBookmarksGuid]);

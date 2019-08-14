@@ -34,6 +34,14 @@ class LayerManager;
 struct nsPoint;
 struct nsSize;
 
+struct WrFiltersHolder {
+  nsTArray<mozilla::wr::FilterOp> filters;
+  nsTArray<mozilla::wr::WrFilterData> filter_datas;
+  // This exists just to own the values long enough for them to be copied into
+  // rust.
+  nsTArray<nsTArray<float>> values;
+};
+
 /**
  * Integration of SVG effects (clipPath clipping, masking and filters) into
  * regular display list based painting and hit-testing.
@@ -59,6 +67,12 @@ class nsSVGIntegrationUtils final {
    * Returns true if mask or clippath are currently applied to this frame.
    */
   static bool UsingMaskOrClipPathForFrame(const nsIFrame* aFrame);
+
+  /**
+   * Returns true if the element has a clippath that is simple enough to
+   * be represented without a mask in WebRender.
+   */
+  static bool UsingSimpleClipPathForFrame(const nsIFrame* aFrame);
 
   /**
    * Returns the size of the union of the border-box rects of all of
@@ -127,7 +141,7 @@ class nsSVGIntegrationUtils final {
    * repaint
    */
   static nsRect GetRequiredSourceForInvalidArea(nsIFrame* aFrame,
-                                                const nsRect& aDamageRect);
+                                                const nsRect& aDirtyRect);
 
   /**
    * Returns true if the given point is not clipped out by effects.
@@ -144,7 +158,7 @@ class nsSVGIntegrationUtils final {
     mozilla::layers::LayerManager* layerManager;
     bool handleOpacity;  // If true, PaintMaskAndClipPath/ PaintFilter should
                          // apply css opacity.
-    IntRect maskRect;
+    mozilla::Maybe<mozilla::gfx::Rect> maskRect;
     imgDrawingParams& imgParams;
 
     explicit PaintFramesParams(gfxContext& aCtx, nsIFrame* aFrame,
@@ -195,11 +209,9 @@ class nsSVGIntegrationUtils final {
    * Try to build WebRender filters for a frame if the filters applied to it are
    * supported.
    */
-  static bool BuildWebRenderFilters(
-      nsIFrame* aFilteredFrame,
-      const mozilla::LayoutDeviceIntRect& aPreFilterBounds,
-      nsTArray<mozilla::wr::WrFilterOp>& aWrFilters,
-      mozilla::LayoutDeviceIntRect& aPostFilterBounds);
+  static bool BuildWebRenderFilters(nsIFrame* aFilteredFrame,
+                                    WrFiltersHolder& aWrFilters,
+                                    mozilla::Maybe<nsRect>& aPostFilterClip);
 
   /**
    * @param aRenderingContext the target rendering context in which the paint

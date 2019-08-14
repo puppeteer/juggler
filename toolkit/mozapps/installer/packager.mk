@@ -19,22 +19,18 @@ endif
 
 export USE_ELF_HACK ELF_HACK_FLAGS
 
-# Override the value of OMNIJAR_NAME from config.status with the value
-# set earlier in this file.
-
 stage-package: multilocale.txt locale-manifest.in $(MOZ_PKG_MANIFEST) $(MOZ_PKG_MANIFEST_DEPS)
-	OMNIJAR_NAME=$(OMNIJAR_NAME) \
 	NO_PKG_FILES="$(NO_PKG_FILES)" \
 	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/packager.py $(DEFINES) $(ACDEFINES) \
 		--format $(MOZ_PACKAGER_FORMAT) \
 		$(addprefix --removals ,$(MOZ_PKG_REMOVALS)) \
 		$(if $(filter-out 0,$(MOZ_PKG_FATAL_WARNINGS)),,--ignore-errors) \
+		$(if $(MOZ_AUTOMATION),,--ignore-broken-symlinks) \
 		$(if $(MOZ_PACKAGER_MINIFY),--minify) \
 		$(if $(MOZ_PACKAGER_MINIFY_JS),--minify-js \
 		  $(addprefix --js-binary ,$(JS_BINARY)) \
 		) \
-		$(if $(JARLOG_DIR),$(addprefix --jarlog ,$(wildcard $(JARLOG_FILE_AB_CD)))) \
-		$(if $(OPTIMIZEJARS),--optimizejars) \
+		$(addprefix --jarlog ,$(wildcard $(JARLOG_FILE_AB_CD))) \
 		$(addprefix --compress ,$(JAR_COMPRESSION)) \
 		$(MOZ_PKG_MANIFEST) '$(DIST)' '$(DIST)'/$(MOZ_PKG_DIR)$(if $(MOZ_PKG_MANIFEST),,$(_BINPATH)) \
 		$(if $(filter omni,$(MOZ_PACKAGER_FORMAT)),$(if $(NON_OMNIJAR_FILES),--non-resource $(NON_OMNIJAR_FILES)))
@@ -53,12 +49,19 @@ ifdef MOZ_PACKAGE_JSSHELL
 	$(RM) $(PKG_JSSHELL)
 	$(MAKE_JSSHELL)
 endif # MOZ_PACKAGE_JSSHELL
+ifdef MOZ_AUTOMATION
 ifdef MOZ_ARTIFACT_BUILD_SYMBOLS
 	@echo 'Packaging existing crashreporter symbols from artifact build...'
 	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
 	cd $(DIST)/crashreporter-symbols && \
           zip -r5D '../$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' . -i '*.sym' -i '*.txt'
+ifeq ($(MOZ_ARTIFACT_BUILD_SYMBOLS),full)
+	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
+	cd $(DIST)/crashreporter-symbols && \
+          zip -r5D '../$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip' .
+endif
 endif # MOZ_ARTIFACT_BUILD_SYMBOLS
+endif # MOZ_AUTOMATION
 ifdef MOZ_CODE_COVERAGE
 	@echo 'Generating chrome-map for coverage data...'
 	$(topsrcdir)/mach build-backend -b ChromeMap
@@ -76,6 +79,12 @@ ifdef ENABLE_MOZSEARCH_PLUGIN
 	$(RM) $(MOZSEARCH_RUST_ANALYSIS_BASENAME).zip
 	cd $(topobjdir)/ && \
           find . -type d -name save-analysis | xargs zip -r5D '$(ABS_DIST)/$(PKG_PATH)$(MOZSEARCH_RUST_ANALYSIS_BASENAME).zip'
+	@echo 'Generating mozsearch rust stdlib analysis tarball ($(RUST_TARGET))...'
+	$(RM) $(MOZSEARCH_RUST_STDLIB_BASENAME).zip
+	cd $(topsrcdir)/rustc/lib && \
+          zip -r5D '$(ABS_DIST)/$(PKG_PATH)$(MOZSEARCH_RUST_STDLIB_BASENAME).zip' \
+          rustlib/$(RUST_TARGET)/analysis/ rustlib/src/
+	@echo 'Generating mozsearch distinclude map...'
 	cd $(topobjdir)/ && cp _build_manifests/install/dist_include '$(ABS_DIST)/$(PKG_PATH)$(MOZSEARCH_INCLUDEMAP_BASENAME).map'
 endif
 ifeq (Darwin, $(OS_ARCH))
@@ -112,7 +121,7 @@ GARBAGE += make-package
 
 make-sourcestamp-file::
 	$(NSINSTALL) -D $(DIST)/$(PKG_PATH)
-	@echo '$(BUILDID)' > $(MOZ_SOURCESTAMP_FILE)
+	@awk '$$2 == "MOZ_BUILDID" {print $$3}' $(DEPTH)/buildid.h > $(MOZ_SOURCESTAMP_FILE)
 ifdef MOZ_INCLUDE_SOURCE_INFO
 	@awk '$$2 == "MOZ_SOURCE_URL" {print $$3}' $(DEPTH)/source-repo.h >> $(MOZ_SOURCESTAMP_FILE)
 endif
@@ -142,7 +151,6 @@ upload:
 	@echo 'CHECKSUM FILE START'
 	@cat $(CHECKSUM_FILE)
 	@echo 'CHECKSUM FILE END'
-	$(SIGN_CHECKSUM_CMD)
 	$(PYTHON) -u $(MOZILLA_DIR)/build/upload.py --base-path $(DIST) $(CHECKSUM_FILES)
 
 # source-package creates a source tarball from the files in MOZ_PKG_SRCDIR,
@@ -151,7 +159,7 @@ source-package:
 	@echo 'Generate the sourcestamp file'
 	# Make sure to have repository information available and then generate the
 	# sourcestamp file.
-	$(MAKE) -C $(DEPTH) 'source-repo.h'
+	$(MAKE) -C $(DEPTH) 'source-repo.h' 'buildid.h'
 	$(MAKE) make-sourcestamp-file
 	@echo 'Packaging source tarball...'
 	# We want to include the sourcestamp file in the source tarball, so copy it

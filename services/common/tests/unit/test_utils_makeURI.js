@@ -2,7 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 _("Make sure uri strings are converted to nsIURIs");
-ChromeUtils.import("resource://services-common/utils.js");
 
 function run_test() {
   _test_makeURI();
@@ -38,7 +37,7 @@ function _test_makeURI() {
   Assert.equal(CommonUtils.makeURI(uris6).spec, uris6);
 
   _("Check chrome uris");
-  let uric1 = "chrome://browser/content/browser.xul";
+  let uric1 = "chrome://browser/content/browser.xhtml";
   Assert.equal(CommonUtils.makeURI(uric1).spec, uric1);
   let uric2 = "chrome://browser/skin/browser.css";
   Assert.equal(CommonUtils.makeURI(uric2).spec, uric2);

@@ -22,8 +22,6 @@
 using namespace mozilla;
 using namespace mozilla::gfx;
 
-gfxAlphaBoxBlur::gfxAlphaBoxBlur() : mData(nullptr), mAccelerated(false) {}
-
 gfxAlphaBoxBlur::~gfxAlphaBoxBlur() {}
 
 already_AddRefed<gfxContext> gfxAlphaBoxBlur::Init(gfxContext* aDestinationCtx,
@@ -88,6 +86,10 @@ already_AddRefed<DrawTarget> gfxAlphaBoxBlur::InitDrawTarget(
     mDrawTarget = aReferenceDT->CreateShadowDrawTarget(
         mBlur.GetSize(), SurfaceFormat::A8,
         AlphaBoxBlur::CalculateBlurSigma(aBlurRadius.width));
+    if (mDrawTarget) {
+      // See Bug 1526045 - this is to force DT initialization.
+      mDrawTarget->ClearRect(gfx::Rect());
+    }
   } else {
     // Make an alpha-only surface to draw on. We will play with the data after
     // everything is drawn to create a blur effect.
@@ -441,10 +443,11 @@ static IntSize ComputeMinSizeForShadowShape(const RectCornerRadii* aCornerRadii,
   return minSize;
 }
 
-void CacheBlur(DrawTarget* aDT, const IntSize& aMinSize,
-               const IntSize& aBlurRadius, const RectCornerRadii* aCornerRadii,
-               const Color& aShadowColor, const IntMargin& aBlurMargin,
-               SourceSurface* aBoxShadow) {
+static void CacheBlur(DrawTarget* aDT, const IntSize& aMinSize,
+                      const IntSize& aBlurRadius,
+                      const RectCornerRadii* aCornerRadii,
+                      const Color& aShadowColor, const IntMargin& aBlurMargin,
+                      SourceSurface* aBoxShadow) {
   BlurCacheKey key(aMinSize, aBlurRadius, aCornerRadii, aShadowColor,
                    aDT->GetBackendType());
   BlurCacheData* data =
@@ -585,11 +588,7 @@ static bool ShouldStretchSurface(DrawTarget* aDT, SourceSurface* aSurface) {
   // because if cairo is using pixman it won't render anything for large
   // stretch factors because pixman's internal fixed point precision is not
   // high enough to handle those scale factors.
-  // Calling FillRect on a D2D backend with a repeating pattern is much slower
-  // than DrawSurface, so special case the D2D backend here.
-  return (!aDT->GetTransform().IsRectilinear() &&
-          aDT->GetBackendType() != BackendType::CAIRO) ||
-         (aDT->GetBackendType() == BackendType::DIRECT2D1_1);
+  return aDT->GetBackendType() != BackendType::CAIRO;
 }
 
 static void RepeatOrStretchSurface(DrawTarget* aDT, SourceSurface* aSurface,
@@ -873,11 +872,14 @@ static void DrawMirroredMinBoxShadow(
  * the space between the corners.
  */
 
-/* static */ void gfxAlphaBoxBlur::BlurRectangle(
-    gfxContext* aDestinationCtx, const gfxRect& aRect,
-    const RectCornerRadii* aCornerRadii, const gfxPoint& aBlurStdDev,
-    const Color& aShadowColor, const gfxRect& aDirtyRect,
-    const gfxRect& aSkipRect) {
+/* static */
+void gfxAlphaBoxBlur::BlurRectangle(gfxContext* aDestinationCtx,
+                                    const gfxRect& aRect,
+                                    const RectCornerRadii* aCornerRadii,
+                                    const gfxPoint& aBlurStdDev,
+                                    const Color& aShadowColor,
+                                    const gfxRect& aDirtyRect,
+                                    const gfxRect& aSkipRect) {
   if (!RectIsInt32Safe(ToRect(aRect))) {
     return;
   }

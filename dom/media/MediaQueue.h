@@ -4,16 +4,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #if !defined(MediaQueue_h_)
-#define MediaQueue_h_
+#  define MediaQueue_h_
 
-#include "mozilla/RecursiveMutex.h"
-#include "mozilla/TaskQueue.h"
+#  include "mozilla/RecursiveMutex.h"
+#  include "mozilla/TaskQueue.h"
 
-#include "nsDeque.h"
-#include "MediaEventSource.h"
-#include "TimeUnits.h"
+#  include "nsDeque.h"
+#  include "MediaEventSource.h"
+#  include "TimeUnits.h"
 
 namespace mozilla {
+
+class AudioData;
 
 // Thread and type safe wrapper around nsDeque.
 template <class T>
@@ -40,7 +42,7 @@ class MediaQueue : private nsDeque {
 
   inline void Push(T* aItem) {
     RecursiveMutexAutoLock lock(mRecursiveMutex);
-    MOZ_ASSERT(aItem);
+    MOZ_DIAGNOSTIC_ASSERT(aItem);
     NS_ADDREF(aItem);
     MOZ_ASSERT(aItem->GetEndTime() >= aItem->mTime);
     nsDeque::Push(aItem);
@@ -153,12 +155,14 @@ class MediaQueue : private nsDeque {
     }
   }
 
-  uint32_t FrameCount() {
+  uint32_t AudioFramesCount() {
+    static_assert(mozilla::IsSame<T, AudioData>::value,
+                  "Only usable with MediaQueue<AudioData>");
     RecursiveMutexAutoLock lock(mRecursiveMutex);
     uint32_t frames = 0;
     for (size_t i = 0; i < GetSize(); ++i) {
       T* v = static_cast<T*>(ObjectAt(i));
-      frames += v->mFrames;
+      frames += v->Frames();
     }
     return frames;
   }

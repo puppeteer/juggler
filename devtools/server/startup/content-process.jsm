@@ -25,8 +25,9 @@ function setupServer(mm) {
   }
 
   // Lazy load Loader.jsm to prevent loading any devtools dependency too early.
-  const { DevToolsLoader } =
-    ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const { DevToolsLoader } = ChromeUtils.import(
+    "resource://devtools/shared/Loader.jsm"
+  );
 
   // Init a custom, invisible DebuggerServer, in order to not pollute the
   // debugger with all devtools modules, nor break the debugger itself with
@@ -45,8 +46,6 @@ function setupServer(mm) {
   mm.addMessageListener("debug:content-process-destroy", function onDestroy() {
     mm.removeMessageListener("debug:content-process-destroy", onDestroy);
 
-    Cu.unblockThreadedExecution();
-
     DebuggerServer.destroy();
     gLoader.destroy();
     gLoader = null;
@@ -59,32 +58,24 @@ function init(msg) {
   const mm = msg.target;
   const prefix = msg.data.prefix;
 
-  // Using the JS debugger causes problems when we're trying to
-  // schedule those zone groups across different threads. Calling
-  // blockThreadedExecution causes Gecko to switch to a simpler
-  // single-threaded model until unblockThreadedExecution is called
-  // later. We cannot start the debugger until the callback passed to
-  // blockThreadedExecution has run, signaling that we're running
-  // single-threaded.
-  Cu.blockThreadedExecution(() => {
-    // Setup a server if none started yet
-    const loader = setupServer(mm);
+  // Setup a server if none started yet
+  const loader = setupServer(mm);
 
-    // Connect both parent/child processes debugger servers RDP via message
-    // managers
-    const { DebuggerServer } = loader.require("devtools/server/main");
-    const conn = DebuggerServer.connectToParent(prefix, mm);
-    conn.parentMessageManager = mm;
+  // Connect both parent/child processes debugger servers RDP via message
+  // managers
+  const { DebuggerServer } = loader.require("devtools/server/main");
+  const conn = DebuggerServer.connectToParent(prefix, mm);
+  conn.parentMessageManager = mm;
 
-    const { ContentProcessTargetActor } =
-        loader.require("devtools/server/actors/targets/content-process");
-    const { ActorPool } = loader.require("devtools/server/actors/common");
-    const actor = new ContentProcessTargetActor(conn);
-    const actorPool = new ActorPool(conn);
-    actorPool.addActor(actor);
-    conn.addActorPool(actorPool);
+  const { ContentProcessTargetActor } = loader.require(
+    "devtools/server/actors/targets/content-process"
+  );
+  const { ActorPool } = loader.require("devtools/server/actors/common");
+  const actor = new ContentProcessTargetActor(conn);
+  const actorPool = new ActorPool(conn);
+  actorPool.addActor(actor);
+  conn.addActorPool(actorPool);
 
-    const response = { actor: actor.form() };
-    mm.sendAsyncMessage("debug:content-process-actor", response);
-  });
+  const response = { actor: actor.form() };
+  mm.sendAsyncMessage("debug:content-process-actor", response);
 }

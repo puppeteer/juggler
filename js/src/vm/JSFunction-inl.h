@@ -44,6 +44,9 @@ inline bool CanReuseFunctionForClone(JSContext* cx, HandleFunction fun) {
       return false;
     }
     script->setHasBeenCloned();
+    if (LazyScript* lazy = script->maybeLazyScript()) {
+      lazy->setHasBeenCloned();
+    }
   }
   return true;
 }
@@ -88,7 +91,9 @@ inline JSFunction* CloneFunctionObjectIfNotSingleton(
     return nullptr;
   }
   RootedScope enclosingScope(cx, script->enclosingScope());
-  return CloneFunctionAndScript(cx, fun, parent, enclosingScope, kind, proto);
+  Rooted<ScriptSourceObject*> sourceObject(cx, script->sourceObject());
+  return CloneFunctionAndScript(cx, fun, parent, enclosingScope, sourceObject,
+                                kind, proto);
 }
 
 } /* namespace js */
@@ -108,8 +113,7 @@ inline JSFunction* CloneFunctionObjectIfNotSingleton(
   MOZ_ASSERT(dynamicSlotsCount(shape->numFixedSlots(), shape->slotSpan(),
                                clasp) == NumDynamicSlots);
 
-  JSObject* obj =
-      js::Allocate<JSObject>(cx, kind, NumDynamicSlots, heap, clasp);
+  JSObject* obj = js::AllocateObject(cx, kind, NumDynamicSlots, heap, clasp);
   if (!obj) {
     return cx->alreadyReportedOOM();
   }
@@ -137,7 +141,7 @@ inline JSFunction* CloneFunctionObjectIfNotSingleton(
   if (kind == js::gc::AllocKind::FUNCTION_EXTENDED) {
     fun->setFlags(JSFunction::EXTENDED);
     for (js::GCPtrValue& extendedSlot : fun->toExtended()->extendedSlots) {
-      extendedSlot.unsafeSet(JS::DoubleValue(+0.0));
+      extendedSlot.unsafeSet(JS::UndefinedValue());
     }
   } else {
     fun->setFlags(0);

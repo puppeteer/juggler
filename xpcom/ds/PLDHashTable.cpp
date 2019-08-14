@@ -61,23 +61,27 @@ class AutoDestructorOp {
 
 #endif
 
-/* static */ PLDHashNumber PLDHashTable::HashStringKey(const void* aKey) {
+/* static */
+PLDHashNumber PLDHashTable::HashStringKey(const void* aKey) {
   return HashString(static_cast<const char*>(aKey));
 }
 
-/* static */ PLDHashNumber PLDHashTable::HashVoidPtrKeyStub(const void* aKey) {
+/* static */
+PLDHashNumber PLDHashTable::HashVoidPtrKeyStub(const void* aKey) {
   return nsPtrHashKey<void>::HashKey(aKey);
 }
 
-/* static */ bool PLDHashTable::MatchEntryStub(const PLDHashEntryHdr* aEntry,
-                                               const void* aKey) {
+/* static */
+bool PLDHashTable::MatchEntryStub(const PLDHashEntryHdr* aEntry,
+                                  const void* aKey) {
   const PLDHashEntryStub* stub = (const PLDHashEntryStub*)aEntry;
 
   return stub->key == aKey;
 }
 
-/* static */ bool PLDHashTable::MatchStringKey(const PLDHashEntryHdr* aEntry,
-                                               const void* aKey) {
+/* static */
+bool PLDHashTable::MatchStringKey(const PLDHashEntryHdr* aEntry,
+                                  const void* aKey) {
   const PLDHashEntryStub* stub = (const PLDHashEntryStub*)aEntry;
 
   // XXX tolerate null keys on account of sloppy Mozilla callers.
@@ -86,14 +90,16 @@ class AutoDestructorOp {
           strcmp((const char*)stub->key, (const char*)aKey) == 0);
 }
 
-/* static */ void PLDHashTable::MoveEntryStub(PLDHashTable* aTable,
-                                              const PLDHashEntryHdr* aFrom,
-                                              PLDHashEntryHdr* aTo) {
+/* static */
+void PLDHashTable::MoveEntryStub(PLDHashTable* aTable,
+                                 const PLDHashEntryHdr* aFrom,
+                                 PLDHashEntryHdr* aTo) {
   memcpy(aTo, aFrom, aTable->mEntrySize);
 }
 
-/* static */ void PLDHashTable::ClearEntryStub(PLDHashTable* aTable,
-                                               PLDHashEntryHdr* aEntry) {
+/* static */
+void PLDHashTable::ClearEntryStub(PLDHashTable* aTable,
+                                  PLDHashEntryHdr* aEntry) {
   memset(aEntry, 0, aTable->mEntrySize);
 }
 
@@ -135,6 +141,9 @@ static inline uint32_t MinLoad(uint32_t aCapacity) {
 // - capacity cannot be too small.
 static inline void BestCapacity(uint32_t aLength, uint32_t* aCapacityOut,
                                 uint32_t* aLog2CapacityOut) {
+  // Callers should ensure this is true.
+  MOZ_ASSERT(aLength <= PLDHashTable::kMaxInitialLength);
+
   // Compute the smallest capacity allowing |aLength| elements to be inserted
   // without rehashing.
   uint32_t capacity = (aLength * 4 + (3 - 1)) / 3;  // == ceil(aLength * 4 / 3)
@@ -269,8 +278,8 @@ void PLDHashTable::Hash2(PLDHashNumber aHash0, uint32_t& aHash2Out,
 // should not hurt the hash function's effectiveness much.
 
 // Match an entry's mKeyHash against an unstored one computed from a key.
-/* static */ bool PLDHashTable::MatchSlotKeyhash(Slot& aSlot,
-                                                 const PLDHashNumber aKeyHash) {
+/* static */
+bool PLDHashTable::MatchSlotKeyhash(Slot& aSlot, const PLDHashNumber aKeyHash) {
   return (aSlot.KeyHash() & ~kCollisionFlag) == aKeyHash;
 }
 
@@ -546,12 +555,12 @@ PLDHashEntryHdr* PLDHashTable::Add(const void* aKey,
   // Look for entry after possibly growing, so we don't have to add it,
   // then skip it while growing the table and re-add it after.
   PLDHashNumber keyHash = ComputeKeyHash(aKey);
-  Slot slot = SearchTable<ForAdd>(aKey, keyHash,
-                                  [&](Slot& found) -> Slot { return found; },
-                                  [&]() -> Slot {
-                                    MOZ_CRASH("Nope");
-                                    return Slot(nullptr, nullptr);
-                                  });
+  Slot slot = SearchTable<ForAdd>(
+      aKey, keyHash, [&](Slot& found) -> Slot { return found; },
+      [&]() -> Slot {
+        MOZ_CRASH("Nope");
+        return Slot(nullptr, nullptr);
+      });
   if (!slot.IsLive()) {
     // Initialize the slot, indicating that it's no longer free.
     if (slot.IsRemoved()) {
@@ -597,14 +606,15 @@ void PLDHashTable::Remove(const void* aKey) {
   }
 
   PLDHashNumber keyHash = ComputeKeyHash(aKey);
-  SearchTable<ForSearchOrRemove>(aKey, keyHash,
-                                 [&](Slot& slot) {
-                                   RawRemove(slot);
-                                   ShrinkIfAppropriate();
-                                 },
-                                 [&]() {
-                                   // Do nothing.
-                                 });
+  SearchTable<ForSearchOrRemove>(
+      aKey, keyHash,
+      [&](Slot& slot) {
+        RawRemove(slot);
+        ShrinkIfAppropriate();
+      },
+      [&]() {
+        // Do nothing.
+      });
 }
 
 void PLDHashTable::RemoveEntry(PLDHashEntryHdr* aEntry) {

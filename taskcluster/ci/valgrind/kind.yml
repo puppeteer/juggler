@@ -1,7 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
+---
 loader: taskgraph.loader.transform:loader
 
 kind-dependencies:
@@ -14,6 +14,10 @@ transforms:
     - taskgraph.transforms.job:transforms
     - taskgraph.transforms.task:transforms
 
+job-defaults:
+    attributes:
+        retrigger: true
+
 jobs:
     linux64-valgrind/opt:
         description: "Linux64 Valgrind Opt"
@@ -25,7 +29,7 @@ jobs:
             symbol: V
             kind: build
             tier: 1
-        worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+        worker-type: b-linux
         worker:
             docker-image: {in-tree: valgrind-build}
             max-run-time: 72000
@@ -48,4 +52,5 @@ jobs:
             - linux64-rust
             - linux64-cbindgen
             - linux64-sccache
+            - linux64-nasm
             - linux64-node

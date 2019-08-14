@@ -19,15 +19,17 @@
 #include <windows.h>
 #include <objbase.h>
 
+#include <d3d11.h>
 #include <dxgi.h>
+#include <dxgi1_6.h>
 
 // This header is available in the June 2010 SDK and in the Win8 SDK
 #include <d3dcommon.h>
 // Win 8.0 SDK types we'll need when building using older sdks.
 #if !defined(D3D_FEATURE_LEVEL_11_1)  // defined in the 8.0 SDK only
-#define D3D_FEATURE_LEVEL_11_1 static_cast<D3D_FEATURE_LEVEL>(0xb100)
-#define D3D_FL9_1_REQ_TEXTURE2D_U_OR_V_DIMENSION 2048
-#define D3D_FL9_3_REQ_TEXTURE2D_U_OR_V_DIMENSION 4096
+#  define D3D_FEATURE_LEVEL_11_1 static_cast<D3D_FEATURE_LEVEL>(0xb100)
+#  define D3D_FL9_1_REQ_TEXTURE2D_U_OR_V_DIMENSION 2048
+#  define D3D_FL9_3_REQ_TEXTURE2D_U_OR_V_DIMENSION 4096
 #endif
 
 struct ID3D11Device;
@@ -55,6 +57,7 @@ class DeviceManagerDx final {
 
   RefPtr<ID3D11Device> GetCompositorDevice();
   RefPtr<ID3D11Device> GetContentDevice();
+  RefPtr<ID3D11Device> GetCanvasDevice();
   RefPtr<ID3D11Device> GetImageDevice();
   RefPtr<IDCompositionDevice> GetDirectCompositionDevice();
   RefPtr<ID3D11Device> GetVRDevice();
@@ -81,9 +84,13 @@ class DeviceManagerDx final {
   // stability issues when supplying InitData to CreateTexture2D.
   bool HasCrashyInitData();
 
+  // Enumerate and return all outputs on the current adapter.
+  nsTArray<DXGI_OUTPUT_DESC1> EnumerateOutputs();
+
   bool CreateCompositorDevices();
   void CreateContentDevices();
   void CreateDirectCompositionDevice();
+  bool CreateCanvasDevice();
 
   void GetCompositorDevices(
       RefPtr<ID3D11Device>* aOutDevice,
@@ -161,6 +168,7 @@ class DeviceManagerDx final {
   RefPtr<IDXGIAdapter1> mAdapter;
   RefPtr<ID3D11Device> mCompositorDevice;
   RefPtr<ID3D11Device> mContentDevice;
+  RefPtr<ID3D11Device> mCanvasDevice;
   RefPtr<ID3D11Device> mImageDevice;
   RefPtr<ID3D11Device> mVRDevice;
   RefPtr<ID3D11Device> mDecoderDevice;

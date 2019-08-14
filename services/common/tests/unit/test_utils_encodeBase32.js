@@ -1,11 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://services-common/utils.js");
-
 function run_test() {
   // Testing byte array manipulation.
-  Assert.equal("FOOBAR", CommonUtils.byteArrayToString([70, 79, 79, 66, 65, 82]));
+  Assert.equal(
+    "FOOBAR",
+    CommonUtils.byteArrayToString([70, 79, 79, 66, 65, 82])
+  );
   Assert.equal("", CommonUtils.byteArrayToString([]));
 
   _("Testing encoding...");
@@ -18,12 +19,15 @@ function run_test() {
   Assert.equal(CommonUtils.encodeBase32("fooba"), "MZXW6YTB");
   Assert.equal(CommonUtils.encodeBase32("foobar"), "MZXW6YTBOI======");
 
-  Assert.equal(CommonUtils.encodeBase32("Bacon is a vegetable."),
-               "IJQWG33OEBUXGIDBEB3GKZ3FORQWE3DFFY======");
+  Assert.equal(
+    CommonUtils.encodeBase32("Bacon is a vegetable."),
+    "IJQWG33OEBUXGIDBEB3GKZ3FORQWE3DFFY======"
+  );
 
   _("Checking assumptions...");
-  for (let i = 0; i <= 255; ++i)
+  for (let i = 0; i <= 255; ++i) {
     Assert.equal(undefined | i, i);
+  }
 
   _("Testing decoding...");
   Assert.equal(CommonUtils.decodeBase32(""), "");

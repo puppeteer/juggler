@@ -5,26 +5,23 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 DIRS += ['input']
 
 MOCHITEST_MANIFESTS += [
     'test/forms/mochitest.ini',
-    'test/forms/xbl/mochitest.ini',
     'test/mochitest.ini',
 ]
 
 MOCHITEST_CHROME_MANIFESTS += [
     'test/chrome.ini',
     'test/forms/chrome.ini',
-    'test/forms/xbl/chrome.ini',
 ]
 
 BROWSER_CHROME_MANIFESTS += ['test/browser.ini']
 
 XPIDL_SOURCES += [
-    'nsIDateTimeInputArea.idl',
     'nsIFormSubmitObserver.idl',
     'nsIImageDocument.idl',
     'nsIMenuBuilder.idl',
@@ -40,9 +37,7 @@ EXPORTS += [
     'nsIConstraintValidation.h',
     'nsIForm.h',
     'nsIFormControl.h',
-    'nsIFormProcessor.h',
     'nsIHTMLCollection.h',
-    'nsIHTMLDocument.h',
     'nsIRadioGroupContainer.h',
     'nsIRadioVisitor.h',
     'nsITextControlElement.h',
@@ -50,8 +45,6 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
-    'AutoplayPermissionManager.h',
-    'AutoplayPermissionRequest.h',
     'TextInputListener.h',
 ]
 
@@ -228,15 +221,16 @@ UNIFIED_SOURCES += [
 ]
 
 SOURCES += [
-    'AutoplayPermissionManager.cpp',
-    'AutoplayPermissionRequest.cpp',
     # Includes npapi.h.
     'PluginDocument.cpp',
 ]
 
-EXTRA_COMPONENTS += [
-    'htmlMenuBuilder.js',
-    'htmlMenuBuilder.manifest'
+EXTRA_JS_MODULES += [
+    'HTMLMenuBuilder.jsm',
+]
+
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

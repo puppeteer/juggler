@@ -2,8 +2,8 @@
 <html>
 <head>
   <title>autocomplete with composition tests on HTML input element</title>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
   <script type="text/javascript" src="file_autocomplete_with_composition.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 </head>
@@ -31,10 +31,12 @@ function runTests() {
   var target = document.getElementById("input");
 
   // Register a word to the form history.
+  let chromeScript = SpecialPowers.loadChromeScript(function addEntry() {
+    let {FormHistory} = ChromeUtils.import("resource://gre/modules/FormHistory.jsm");
+    FormHistory.update({ op: "add", fieldname: "test", value: "Mozilla" });
+  });
+  chromeScript.destroy();
   target.focus();
-  target.value = "Mozilla";
-  synthesizeKey("KEY_Enter");
-  target.value = "";
 
   new nsDoTestsForAutoCompleteWithComposition(
     "Testing on HTML input (asynchronously search)",

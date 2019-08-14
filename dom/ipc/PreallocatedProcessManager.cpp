@@ -13,18 +13,17 @@
 #include "nsIPropertyBag2.h"
 #include "ProcessPriorityManager.h"
 #include "nsServiceManagerUtils.h"
+#include "nsIXULRuntime.h"
 
 // This number is fairly arbitrary ... the intention is to put off
 // launching another app process until the last one has finished
 // loading its content, to reduce CPU/memory/IO contention.
 #define DEFAULT_ALLOCATE_DELAY 1000
 
-using namespace mozilla;
 using namespace mozilla::hal;
 using namespace mozilla::dom;
 
 namespace mozilla {
-
 /**
  * This singleton class implements the static methods on
  * PreallocatedProcessManager.
@@ -44,6 +43,7 @@ class PreallocatedProcessManagerImpl final : public nsIObserver {
 
  private:
   static mozilla::StaticRefPtr<PreallocatedProcessManagerImpl> sSingleton;
+  static uint32_t sPrelaunchDelayMS;
 
   PreallocatedProcessManagerImpl();
   ~PreallocatedProcessManagerImpl();
@@ -72,11 +72,14 @@ class PreallocatedProcessManagerImpl final : public nsIObserver {
   bool IsEmpty() const { return !mPreallocatedProcess && !mLaunchInProgress; }
 };
 
-/* static */ StaticRefPtr<PreallocatedProcessManagerImpl>
+/* static */
+StaticRefPtr<PreallocatedProcessManagerImpl>
     PreallocatedProcessManagerImpl::sSingleton;
+/* static */
+uint32_t PreallocatedProcessManagerImpl::sPrelaunchDelayMS = 0;
 
-/* static */ PreallocatedProcessManagerImpl*
-PreallocatedProcessManagerImpl::Singleton() {
+/* static */
+PreallocatedProcessManagerImpl* PreallocatedProcessManagerImpl::Singleton() {
   MOZ_ASSERT(NS_IsMainThread());
   if (!sSingleton) {
     sSingleton = new PreallocatedProcessManagerImpl();
@@ -99,6 +102,9 @@ PreallocatedProcessManagerImpl::~PreallocatedProcessManagerImpl() {
 }
 
 void PreallocatedProcessManagerImpl::Init() {
+  Preferences::AddUintVarCache(&sPrelaunchDelayMS,
+                               "dom.ipc.processPrelaunch.delayMs",
+                               DEFAULT_ALLOCATE_DELAY);
   Preferences::AddStrongObserver(this, "dom.ipc.processPrelaunch.enabled");
   // We have to respect processCount at all time. This is especially important
   // for testing.
@@ -233,8 +239,7 @@ void PreallocatedProcessManagerImpl::AllocateAfterDelay() {
   NS_DelayedDispatchToCurrentThread(
       NewRunnableMethod("PreallocatedProcessManagerImpl::AllocateOnIdle", this,
                         &PreallocatedProcessManagerImpl::AllocateOnIdle),
-      Preferences::GetUint("dom.ipc.processPrelaunch.delayMs",
-                           DEFAULT_ALLOCATE_DELAY));
+      sPrelaunchDelayMS);
 }
 
 void PreallocatedProcessManagerImpl::AllocateOnIdle() {
@@ -242,9 +247,10 @@ void PreallocatedProcessManagerImpl::AllocateOnIdle() {
     return;
   }
 
-  NS_IdleDispatchToCurrentThread(
+  NS_DispatchToCurrentThreadQueue(
       NewRunnableMethod("PreallocatedProcessManagerImpl::AllocateNow", this,
-                        &PreallocatedProcessManagerImpl::AllocateNow));
+                        &PreallocatedProcessManagerImpl::AllocateNow),
+      EventQueuePriority::Idle);
 }
 
 void PreallocatedProcessManagerImpl::AllocateNow() {
@@ -312,22 +318,23 @@ inline PreallocatedProcessManagerImpl* GetPPMImpl() {
   return PreallocatedProcessManagerImpl::Singleton();
 }
 
-/* static */ void PreallocatedProcessManager::AddBlocker(
-    ContentParent* aParent) {
+/* static */
+void PreallocatedProcessManager::AddBlocker(ContentParent* aParent) {
   GetPPMImpl()->AddBlocker(aParent);
 }
 
-/* static */ void PreallocatedProcessManager::RemoveBlocker(
-    ContentParent* aParent) {
+/* static */
+void PreallocatedProcessManager::RemoveBlocker(ContentParent* aParent) {
   GetPPMImpl()->RemoveBlocker(aParent);
 }
 
-/* static */ already_AddRefed<ContentParent>
-PreallocatedProcessManager::Take() {
+/* static */
+already_AddRefed<ContentParent> PreallocatedProcessManager::Take() {
   return GetPPMImpl()->Take();
 }
 
-/* static */ bool PreallocatedProcessManager::Provide(ContentParent* aParent) {
+/* static */
+bool PreallocatedProcessManager::Provide(ContentParent* aParent) {
   return GetPPMImpl()->Provide(aParent);
 }
 

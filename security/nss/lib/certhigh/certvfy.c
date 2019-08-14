@@ -37,7 +37,7 @@ CERT_CertTimesValid(CERTCertificate *c)
     return (valid == secCertTimeValid) ? SECSuccess : SECFailure;
 }
 
-SECStatus
+static SECStatus
 checkKeyParams(const SECAlgorithmID *sigAlgorithm, const SECKEYPublicKey *key)
 {
     SECStatus rv;
@@ -47,6 +47,12 @@ checkKeyParams(const SECAlgorithmID *sigAlgorithm, const SECKEYPublicKey *key)
     PRInt32 minLen, len;
 
     sigAlg = SECOID_GetAlgorithmTag(sigAlgorithm);
+    rv = NSS_GetAlgorithmPolicy(sigAlg, &policyFlags);
+    if (rv == SECSuccess &&
+        !(policyFlags & NSS_USE_ALG_IN_CERT_SIGNATURE)) {
+        PORT_SetError(SEC_ERROR_CERT_SIGNATURE_ALGORITHM_DISABLED);
+        return SECFailure;
+    }
 
     switch (sigAlg) {
         case SEC_OID_ANSIX962_ECDSA_SHA1_SIGNATURE:
@@ -1395,7 +1401,6 @@ CERT_VerifyCertificate(CERTCertDBHandle *handle, CERTCertificate *cert,
 
     for (i = 1; i <= certificateUsageHighest &&
                 (SECSuccess == valid || returnedUsages || log);) {
-        PRBool typeAndEKUAllowed = PR_TRUE;
         PRBool requiredUsage = (i & requiredUsages) ? PR_TRUE : PR_FALSE;
         if (PR_FALSE == requiredUsage && PR_FALSE == checkAllUsages) {
             NEXT_USAGE();
@@ -1445,19 +1450,7 @@ CERT_VerifyCertificate(CERTCertDBHandle *handle, CERTCertificate *cert,
             LOG_ERROR(log, cert, 0, requiredKeyUsage);
             INVALID_USAGE();
         }
-        if (certUsage != certUsageIPsec) {
-            if (!(certType & requiredCertType)) {
-                typeAndEKUAllowed = PR_FALSE;
-            }
-        } else {
-            PRBool isCritical;
-            PRBool allowed = cert_EKUAllowsIPsecIKE(cert, &isCritical);
-            /* If the extension isn't critical, we allow any EKU value. */
-            if (isCritical && !allowed) {
-                typeAndEKUAllowed = PR_FALSE;
-            }
-        }
-        if (!typeAndEKUAllowed) {
+        if (!(certType & requiredCertType)) {
             if (PR_TRUE == requiredUsage) {
                 PORT_SetError(SEC_ERROR_INADEQUATE_CERT_TYPE);
             }

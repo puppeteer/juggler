@@ -4,10 +4,9 @@
 
 SimpleTest.requestCompleteLog();
 
-Services.scriptloader.loadSubScript(new URL("head_sessions.js", gTestPath).href,
-                                    this);
+loadTestSubscript("head_sessions.js");
 
-add_task(async function test_sessions_get_recently_closed_private() {
+async function run_test_extension(incognitoOverride) {
   function background() {
     browser.test.onMessage.addListener((msg, filter) => {
       if (msg == "check-sessions") {
@@ -23,14 +22,21 @@ add_task(async function test_sessions_get_recently_closed_private() {
       permissions: ["sessions", "tabs"],
     },
     background,
+    incognitoOverride,
   });
 
   // Open a private browsing window.
-  let privateWin = await BrowserTestUtils.openNewBrowserWindow({private: true});
+  let privateWin = await BrowserTestUtils.openNewBrowserWindow({
+    private: true,
+  });
 
   await extension.startup();
 
-  let {Management: {global: {windowTracker}}} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
+  let {
+    Management: {
+      global: { windowTracker },
+    },
+  } = ChromeUtils.import("resource://gre/modules/Extension.jsm", null);
   let privateWinId = windowTracker.getId(privateWin);
 
   extension.sendMessage("check-sessions");
@@ -38,24 +44,57 @@ add_task(async function test_sessions_get_recently_closed_private() {
   recordInitialTimestamps(recentlyClosed.map(item => item.lastModified));
 
   // Open and close two tabs in the private window
-  let tab = await BrowserTestUtils.openNewForegroundTab(privateWin.gBrowser, "http://example.com");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    privateWin.gBrowser,
+    "http://example.com"
+  );
   BrowserTestUtils.removeTab(tab);
 
-  tab = await BrowserTestUtils.openNewForegroundTab(privateWin.gBrowser, "http://example.com");
+  tab = await BrowserTestUtils.openNewForegroundTab(
+    privateWin.gBrowser,
+    "http://example.com"
+  );
   let sessionPromise = BrowserTestUtils.waitForSessionStoreUpdate(tab);
   BrowserTestUtils.removeTab(tab);
   await sessionPromise;
 
   extension.sendMessage("check-sessions");
   recentlyClosed = await extension.awaitMessage("recentlyClosed");
-  checkRecentlyClosed(recentlyClosed.filter(onlyNewItemsFilter), 2, privateWinId, true);
+  let expectedCount = incognitoOverride == "not_allowed" ? 0 : 2;
+  checkRecentlyClosed(
+    recentlyClosed.filter(onlyNewItemsFilter),
+    expectedCount,
+    privateWinId,
+    true
+  );
 
   // Close the private window.
   await BrowserTestUtils.closeWindow(privateWin);
 
   extension.sendMessage("check-sessions");
   recentlyClosed = await extension.awaitMessage("recentlyClosed");
-  is(recentlyClosed.filter(onlyNewItemsFilter).length, 0, "the closed private window info was not found in recently closed data");
+  is(
+    recentlyClosed.filter(onlyNewItemsFilter).length,
+    0,
+    "the closed private window info was not found in recently closed data"
+  );
 
   await extension.unload();
+}
+
+add_task(async function test_sessions_get_recently_closed_default() {
+  SpecialPowers.pushPrefEnv({
+    set: [["extensions.allowPrivateBrowsingByDefault", true]],
+  });
+
+  await run_test_extension();
+});
+
+add_task(async function test_sessions_get_recently_closed_private_incognito() {
+  SpecialPowers.pushPrefEnv({
+    set: [["extensions.allowPrivateBrowsingByDefault", false]],
+  });
+
+  await run_test_extension("spanning");
+  await run_test_extension("not_allowed");
 });

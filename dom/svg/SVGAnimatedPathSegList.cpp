@@ -6,18 +6,19 @@
 
 #include "SVGAnimatedPathSegList.h"
 
-#include "DOMSVGPathSegList.h"
 #include "mozilla/Move.h"
-#include "nsSVGElement.h"
-#include "nsSVGAttrTearoffTable.h"
-#include "nsSMILValue.h"
+#include "mozilla/SMILValue.h"
+#include "mozilla/dom/SVGElement.h"
+#include "DOMSVGPathSegList.h"
 #include "SVGPathSegListSMILType.h"
+
+using namespace mozilla::dom;
 
 // See the comments in this file's header!
 
 namespace mozilla {
 
-nsresult SVGAnimatedPathSegList::SetBaseValueString(const nsAString &aValue) {
+nsresult SVGAnimatedPathSegList::SetBaseValueString(const nsAString& aValue) {
   SVGPathData newBaseValue;
 
   // The spec says that the path data is parsed and accepted up to the first
@@ -32,13 +33,13 @@ nsresult SVGAnimatedPathSegList::SetBaseValueString(const nsAString &aValue) {
   // change them. See the comments in
   // DOMSVGPathSegList::InternalListWillChangeTo().
 
-  DOMSVGPathSegList *baseValWrapper =
+  DOMSVGPathSegList* baseValWrapper =
       DOMSVGPathSegList::GetDOMWrapperIfExists(GetBaseValKey());
   if (baseValWrapper) {
     baseValWrapper->InternalListWillChangeTo(newBaseValue);
   }
 
-  DOMSVGPathSegList *animValWrapper = nullptr;
+  DOMSVGPathSegList* animValWrapper = nullptr;
   if (!IsAnimating()) {  // DOM anim val wraps our base val too!
     animValWrapper = DOMSVGPathSegList::GetDOMWrapperIfExists(GetAnimValKey());
     if (animValWrapper) {
@@ -49,7 +50,7 @@ nsresult SVGAnimatedPathSegList::SetBaseValueString(const nsAString &aValue) {
   // Only now may we modify mBaseVal!
 
   // We don't need to call DidChange* here - we're only called by
-  // nsSVGElement::ParseAttribute under Element::SetAttr,
+  // SVGElement::ParseAttribute under Element::SetAttr,
   // which takes care of notifying.
 
   nsresult rv2 = mBaseVal.CopyFrom(newBaseValue);
@@ -70,14 +71,14 @@ nsresult SVGAnimatedPathSegList::SetBaseValueString(const nsAString &aValue) {
 void SVGAnimatedPathSegList::ClearBaseValue() {
   // We must send these notifications *before* changing mBaseVal! (See above.)
 
-  DOMSVGPathSegList *baseValWrapper =
+  DOMSVGPathSegList* baseValWrapper =
       DOMSVGPathSegList::GetDOMWrapperIfExists(GetBaseValKey());
   if (baseValWrapper) {
     baseValWrapper->InternalListWillChangeTo(SVGPathData());
   }
 
   if (!IsAnimating()) {  // DOM anim val wraps our base val too!
-    DOMSVGPathSegList *animValWrapper =
+    DOMSVGPathSegList* animValWrapper =
         DOMSVGPathSegList::GetDOMWrapperIfExists(GetAnimValKey());
     if (animValWrapper) {
       animValWrapper->InternalListWillChangeTo(SVGPathData());
@@ -88,8 +89,8 @@ void SVGAnimatedPathSegList::ClearBaseValue() {
   // Caller notifies
 }
 
-nsresult SVGAnimatedPathSegList::SetAnimValue(const SVGPathData &aNewAnimValue,
-                                              nsSVGElement *aElement) {
+nsresult SVGAnimatedPathSegList::SetAnimValue(const SVGPathData& aNewAnimValue,
+                                              SVGElement* aElement) {
   // Note that a new animation may totally change the number of items in the
   // animVal list, either replacing what was essentially a mirror of the
   // baseVal list, or else replacing and overriding an existing animation.
@@ -103,7 +104,7 @@ nsresult SVGAnimatedPathSegList::SetAnimValue(const SVGPathData &aNewAnimValue,
 
   // We must send these notifications *before* changing mAnimVal! (See above.)
 
-  DOMSVGPathSegList *domWrapper =
+  DOMSVGPathSegList* domWrapper =
       DOMSVGPathSegList::GetDOMWrapperIfExists(GetAnimValKey());
   if (domWrapper) {
     domWrapper->InternalListWillChangeTo(aNewAnimValue);
@@ -121,10 +122,10 @@ nsresult SVGAnimatedPathSegList::SetAnimValue(const SVGPathData &aNewAnimValue,
   return rv;
 }
 
-void SVGAnimatedPathSegList::ClearAnimValue(nsSVGElement *aElement) {
+void SVGAnimatedPathSegList::ClearAnimValue(SVGElement* aElement) {
   // We must send these notifications *before* changing mAnimVal! (See above.)
 
-  DOMSVGPathSegList *domWrapper =
+  DOMSVGPathSegList* domWrapper =
       DOMSVGPathSegList::GetDOMWrapperIfExists(GetAnimValKey());
   if (domWrapper) {
     // When all animation ends, animVal simply mirrors baseVal, which may have
@@ -140,16 +141,15 @@ bool SVGAnimatedPathSegList::IsRendered() const {
   return mAnimVal ? !mAnimVal->IsEmpty() : !mBaseVal.IsEmpty();
 }
 
-UniquePtr<nsISMILAttr> SVGAnimatedPathSegList::ToSMILAttr(
-    nsSVGElement *aElement) {
+UniquePtr<SMILAttr> SVGAnimatedPathSegList::ToSMILAttr(SVGElement* aElement) {
   return MakeUnique<SMILAnimatedPathSegList>(this, aElement);
 }
 
 nsresult SVGAnimatedPathSegList::SMILAnimatedPathSegList::ValueFromString(
-    const nsAString &aStr, const dom::SVGAnimationElement * /*aSrcElement*/,
-    nsSMILValue &aValue, bool &aPreventCachingOfSandwich) const {
-  nsSMILValue val(SVGPathSegListSMILType::Singleton());
-  SVGPathDataAndInfo *list = static_cast<SVGPathDataAndInfo *>(val.mU.mPtr);
+    const nsAString& aStr, const dom::SVGAnimationElement* /*aSrcElement*/,
+    SMILValue& aValue, bool& aPreventCachingOfSandwich) const {
+  SMILValue val(SVGPathSegListSMILType::Singleton());
+  SVGPathDataAndInfo* list = static_cast<SVGPathDataAndInfo*>(val.mU.mPtr);
   nsresult rv = list->SetValueFromString(aStr);
   if (NS_SUCCEEDED(rv)) {
     list->SetElement(mElement);
@@ -159,15 +159,15 @@ nsresult SVGAnimatedPathSegList::SMILAnimatedPathSegList::ValueFromString(
   return rv;
 }
 
-nsSMILValue SVGAnimatedPathSegList::SMILAnimatedPathSegList::GetBaseValue()
+SMILValue SVGAnimatedPathSegList::SMILAnimatedPathSegList::GetBaseValue()
     const {
   // To benefit from Return Value Optimization and avoid copy constructor calls
   // due to our use of return-by-value, we must return the exact same object
   // from ALL return points. This function must only return THIS variable:
-  nsSMILValue val;
+  SMILValue val;
 
-  nsSMILValue tmp(SVGPathSegListSMILType::Singleton());
-  SVGPathDataAndInfo *list = static_cast<SVGPathDataAndInfo *>(tmp.mU.mPtr);
+  SMILValue tmp(SVGPathSegListSMILType::Singleton());
+  SVGPathDataAndInfo* list = static_cast<SVGPathDataAndInfo*>(tmp.mU.mPtr);
   nsresult rv = list->CopyFrom(mVal->mBaseVal);
   if (NS_SUCCEEDED(rv)) {
     list->SetElement(mElement);
@@ -177,11 +177,11 @@ nsSMILValue SVGAnimatedPathSegList::SMILAnimatedPathSegList::GetBaseValue()
 }
 
 nsresult SVGAnimatedPathSegList::SMILAnimatedPathSegList::SetAnimValue(
-    const nsSMILValue &aValue) {
+    const SMILValue& aValue) {
   NS_ASSERTION(aValue.mType == SVGPathSegListSMILType::Singleton(),
                "Unexpected type to assign animated value");
   if (aValue.mType == SVGPathSegListSMILType::Singleton()) {
-    mVal->SetAnimValue(*static_cast<SVGPathDataAndInfo *>(aValue.mU.mPtr),
+    mVal->SetAnimValue(*static_cast<SVGPathDataAndInfo*>(aValue.mU.mPtr),
                        mElement);
   }
   return NS_OK;

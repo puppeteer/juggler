@@ -5,14 +5,14 @@ function awaitAndClosePrompt() {
   return new Promise(resolve => {
     function onDialogShown(node) {
       Services.obs.removeObserver(onDialogShown, "tabmodal-dialog-loaded");
-      let button = node.ui.button0;
+      let button = node.querySelector(".tabmodalprompt-button0");
       button.click();
       resolve();
     }
     Services.obs.addObserver(onDialogShown, "tabmodal-dialog-loaded");
   });
 }
-
+/* global messageManager */
 let lastMessageReceived = "";
 function waitForMessage(message) {
   return new Promise((resolve, reject) => {
@@ -31,18 +31,23 @@ add_task(async function() {
   // Focus on editable iframe.
   await BrowserTestUtils.synthesizeMouseAtCenter("#edit", {}, browser);
   await ContentTask.spawn(browser, null, async function() {
-    is(content.document.activeElement, content.document.getElementById("edit"),
-       "Focus should be on iframe element");
+    is(
+      content.document.activeElement,
+      content.document.getElementById("edit"),
+      "Focus should be on iframe element"
+    );
   });
 
   await ContentTask.spawn(browser, null, async function() {
-    content.document.getElementById("edit").contentDocument.addEventListener(
-      "focus", function(event) {
+    content.document
+      .getElementById("edit")
+      .contentDocument.addEventListener("focus", function(event) {
         sendAsyncMessage("Test:FocusReceived");
       });
 
-    content.document.getElementById("edit").contentDocument.addEventListener(
-      "blur", function(event) {
+    content.document
+      .getElementById("edit")
+      .contentDocument.addEventListener("blur", function(event) {
         sendAsyncMessage("Test:BlurReceived");
       });
   });
@@ -59,11 +64,17 @@ add_task(async function() {
   await dialogShown;
   await Promise.all([waitForBlur, waitForFocus]);
   await ContentTask.spawn(browser, null, async function() {
-    is(content.document.activeElement, content.document.getElementById("edit"),
-       "Focus should be back on iframe element");
+    is(
+      content.document.activeElement,
+      content.document.getElementById("edit"),
+      "Focus should be back on iframe element"
+    );
   });
-  is(lastMessageReceived, "Test:FocusReceived",
-     "Should receive blur and then focus event");
+  is(
+    lastMessageReceived,
+    "Test:FocusReceived",
+    "Should receive blur and then focus event"
+  );
 
   BrowserTestUtils.removeTab(tab);
 });

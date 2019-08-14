@@ -10,9 +10,9 @@
 #include "mozilla/Casting.h"
 
 #if defined(JS_CODEGEN_X86)
-#include "jit/x86/Assembler-x86.h"
+#  include "jit/x86/Assembler-x86.h"
 #elif defined(JS_CODEGEN_X64)
-#include "jit/x64/Assembler-x64.h"
+#  include "jit/x64/Assembler-x64.h"
 #endif
 
 namespace js {
@@ -87,6 +87,10 @@ class MacroAssemblerX86Shared : public Assembler {
 
   bool appendRawCode(const uint8_t* code, size_t numBytes) {
     return masm.appendRawCode(code, numBytes);
+  }
+
+  void addToPCRel4(uint32_t offset, int32_t bias) {
+    return masm.addToPCRel4(offset, bias);
   }
 
   // Evaluate srcDest = minmax<isMax>{Float32,Double}(srcDest, second).

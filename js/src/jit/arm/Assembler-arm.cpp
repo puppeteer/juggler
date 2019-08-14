@@ -48,6 +48,7 @@ ABIArg ABIArgGenerator::softNext(MIRType type) {
   switch (type) {
     case MIRType::Int32:
     case MIRType::Pointer:
+    case MIRType::RefOrNull:
       if (intRegIndex_ == NumIntArgRegs) {
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uint32_t);
@@ -108,6 +109,7 @@ ABIArg ABIArgGenerator::hardNext(MIRType type) {
   switch (type) {
     case MIRType::Int32:
     case MIRType::Pointer:
+    case MIRType::RefOrNull:
       if (intRegIndex_ == NumIntArgRegs) {
         current_ = ABIArg(stackOffset_);
         stackOffset_ += sizeof(uint32_t);
@@ -739,8 +741,9 @@ static void TraceOneDataRelocation(JSTracer* trc, InstructionIterator iter) {
   }
 }
 
-/* static */ void Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code,
-                                                  CompactBufferReader& reader) {
+/* static */
+void Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code,
+                                     CompactBufferReader& reader) {
   while (reader.more()) {
     size_t offset = reader.readUnsigned();
     InstructionIterator iter((Instruction*)(code->raw() + offset));
@@ -767,6 +770,7 @@ void Assembler::processCodeLabels(uint8_t* rawCode) {
 }
 
 void Assembler::writeCodePointer(CodeLabel* label) {
+  m_buffer.assertNoPoolAndNoNops();
   BufferOffset off = writeInst(-1);
   label->patchAt()->bind(off.getOffset());
 }
@@ -1071,7 +1075,8 @@ O2RegRegShift jit::asr(Register r, Register amt) {
 
 static js::jit::DoubleEncoder doubleEncoder;
 
-/* static */ const js::jit::VFPImm js::jit::VFPImm::One(0x3FF00000);
+/* static */
+const js::jit::VFPImm js::jit::VFPImm::One(0x3FF00000);
 
 js::jit::VFPImm::VFPImm(uint32_t top) {
   data_ = -1;
@@ -1114,6 +1119,10 @@ VFPRegister VFPRegister::singleOverlay(unsigned int which) const {
   MOZ_ASSERT(which == 0);
   return VFPRegister(code_, Single);
 }
+
+static_assert(
+    FloatRegisters::TotalDouble <= 16,
+    "We assume that every Double register also has an Integer personality");
 
 VFPRegister VFPRegister::sintOverlay(unsigned int which) const {
   MOZ_ASSERT(!_isInvalid);
@@ -1180,8 +1189,8 @@ void Assembler::WriteInstStatic(uint32_t x, uint32_t* dest) {
 }
 
 void Assembler::haltingAlign(int alignment) {
-  // TODO: Implement a proper halting align.
-  nopAlign(alignment);
+  // HLT with payload 0xBAAD
+  m_buffer.align(alignment, 0xE1000070 | (0xBAA << 8) | 0xD);
 }
 
 void Assembler::nopAlign(int alignment) { m_buffer.align(alignment); }
@@ -1205,14 +1214,15 @@ BufferOffset Assembler::as_mov(Register dest, Operand2 op2, SBit s,
   return as_alu(dest, InvalidReg, op2, OpMov, s, c);
 }
 
-/* static */ void Assembler::as_alu_patch(Register dest, Register src1,
-                                          Operand2 op2, ALUOp op, SBit s,
-                                          Condition c, uint32_t* pos) {
+/* static */
+void Assembler::as_alu_patch(Register dest, Register src1, Operand2 op2,
+                             ALUOp op, SBit s, Condition c, uint32_t* pos) {
   WriteInstStatic(EncodeAlu(dest, src1, op2, op, s, c), pos);
 }
 
-/* static */ void Assembler::as_mov_patch(Register dest, Operand2 op2, SBit s,
-                                          Condition c, uint32_t* pos) {
+/* static */
+void Assembler::as_mov_patch(Register dest, Operand2 op2, SBit s, Condition c,
+                             uint32_t* pos) {
   as_alu_patch(dest, InvalidReg, op2, OpMov, s, c, pos);
 }
 
@@ -1329,8 +1339,9 @@ BufferOffset Assembler::as_movw(Register dest, Imm16 imm, Condition c) {
   return writeInst(EncodeMovW(dest, imm, c));
 }
 
-/* static */ void Assembler::as_movw_patch(Register dest, Imm16 imm,
-                                           Condition c, Instruction* pos) {
+/* static */
+void Assembler::as_movw_patch(Register dest, Imm16 imm, Condition c,
+                              Instruction* pos) {
   WriteInstStatic(EncodeMovW(dest, imm, c), (uint32_t*)pos);
 }
 
@@ -1338,8 +1349,9 @@ BufferOffset Assembler::as_movt(Register dest, Imm16 imm, Condition c) {
   return writeInst(EncodeMovT(dest, imm, c));
 }
 
-/* static */ void Assembler::as_movt_patch(Register dest, Imm16 imm,
-                                           Condition c, Instruction* pos) {
+/* static */
+void Assembler::as_movt_patch(Register dest, Imm16 imm, Condition c,
+                              Instruction* pos) {
   WriteInstStatic(EncodeMovT(dest, imm, c), (uint32_t*)pos);
 }
 
@@ -1422,9 +1434,9 @@ BufferOffset Assembler::as_dtr(LoadStore ls, int size, Index mode, Register rt,
   return writeInst(EncodeDtr(ls, size, mode, rt, addr, c));
 }
 
-/* static */ void Assembler::as_dtr_patch(LoadStore ls, int size, Index mode,
-                                          Register rt, DTRAddr addr,
-                                          Condition c, uint32_t* dest) {
+/* static */
+void Assembler::as_dtr_patch(LoadStore ls, int size, Index mode, Register rt,
+                             DTRAddr addr, Condition c, uint32_t* dest) {
   WriteInstStatic(EncodeDtr(ls, size, mode, rt, addr, c), dest);
 }
 
@@ -1588,8 +1600,8 @@ BufferOffset Assembler::as_Imm32Pool(Register dest, uint32_t value,
   return offs;
 }
 
-/* static */ void Assembler::WritePoolEntry(Instruction* addr, Condition c,
-                                            uint32_t data) {
+/* static */
+void Assembler::WritePoolEntry(Instruction* addr, Condition c, uint32_t data) {
   MOZ_ASSERT(addr->is<InstLDR>());
   *addr->as<InstLDR>()->dest() = data;
   MOZ_ASSERT(addr->extractCond() == c);
@@ -1608,10 +1620,8 @@ BufferOffset Assembler::as_BranchPool(uint32_t value, RepatchLabel* label,
   if (label->bound()) {
     BufferOffset dest(label);
     BOffImm offset = dest.diffB<BOffImm>(ret);
-    if (offset.isInvalid()) {
-      m_buffer.fail_bail();
-      return ret;
-    }
+    MOZ_RELEASE_ASSERT(!offset.isInvalid(),
+                       "Buffer size limit should prevent this");
     as_b(offset, c, ret);
   } else if (!oom()) {
     label->use(ret.getOffset());
@@ -1816,7 +1826,10 @@ BufferOffset Assembler::as_b(Label* l, Condition c) {
       return BufferOffset();
     }
 
-    as_b(BufferOffset(l).diffB<BOffImm>(ret), c, ret);
+    BOffImm offset = BufferOffset(l).diffB<BOffImm>(ret);
+    MOZ_RELEASE_ASSERT(!offset.isInvalid(),
+                       "Buffer size limit should prevent this");
+    as_b(offset, c, ret);
 #ifdef JS_DISASM_ARM
     spewBranch(m_buffer.getInstOrNull(ret), refLabel(l));
 #endif
@@ -1830,12 +1843,8 @@ BufferOffset Assembler::as_b(Label* l, Condition c) {
   BufferOffset ret;
   if (l->used()) {
     int32_t old = l->offset();
-    // This will currently throw an assertion if we couldn't actually
-    // encode the offset of the branch.
-    if (!BOffImm::IsInRange(old)) {
-      m_buffer.fail_bail();
-      return ret;
-    }
+    MOZ_RELEASE_ASSERT(BOffImm::IsInRange(old),
+                       "Buffer size limit should prevent this");
     ret = as_b(BOffImm(old), c, l);
   } else {
     BOffImm inv;
@@ -1883,10 +1892,8 @@ BufferOffset Assembler::as_bl(Label* l, Condition c) {
     }
 
     BOffImm offset = BufferOffset(l).diffB<BOffImm>(ret);
-    if (offset.isInvalid()) {
-      m_buffer.fail_bail();
-      return BufferOffset();
-    }
+    MOZ_RELEASE_ASSERT(!offset.isInvalid(),
+                       "Buffer size limit should prevent this");
 
     as_bl(offset, c, ret);
 #ifdef JS_DISASM_ARM
@@ -1902,13 +1909,9 @@ BufferOffset Assembler::as_bl(Label* l, Condition c) {
   BufferOffset ret;
   // See if the list was empty.
   if (l->used()) {
-    // This will currently throw an assertion if we couldn't actually encode
-    // the offset of the branch.
     int32_t old = l->offset();
-    if (!BOffImm::IsInRange(old)) {
-      m_buffer.fail_bail();
-      return ret;
-    }
+    MOZ_RELEASE_ASSERT(BOffImm::IsInRange(old),
+                       "Buffer size limit should prevent this");
     ret = as_bl(BOffImm(old), c, l);
   } else {
     BOffImm inv;
@@ -1948,8 +1951,8 @@ BufferOffset Assembler::writeVFPInst(vfp_size sz, uint32_t blob) {
   return writeInst(VfpTag | sz | blob);
 }
 
-/* static */ void Assembler::WriteVFPInstStatic(vfp_size sz, uint32_t blob,
-                                                uint32_t* dest) {
+/* static */
+void Assembler::WriteVFPInstStatic(vfp_size sz, uint32_t blob, uint32_t* dest) {
   MOZ_ASSERT((sz & blob) == 0);
   MOZ_ASSERT((VfpTag & blob) == 0);
   WriteInstStatic(VfpTag | sz | blob, dest);
@@ -2140,9 +2143,9 @@ BufferOffset Assembler::as_vdtr(
   return writeVFPInst(sz, EncodeVdtr(ls, vd, addr, c));
 }
 
-/* static */ void Assembler::as_vdtr_patch(LoadStore ls, VFPRegister vd,
-                                           VFPAddr addr, Condition c,
-                                           uint32_t* dest) {
+/* static */
+void Assembler::as_vdtr_patch(LoadStore ls, VFPRegister vd, VFPAddr addr,
+                              Condition c, uint32_t* dest) {
   vfp_size sz = vd.isDouble() ? IsDouble : IsSingle;
   WriteVFPInstStatic(sz, EncodeVdtr(ls, vd, addr, c), dest);
 }
@@ -2217,10 +2220,8 @@ void Assembler::bind(Label* label, BufferOffset boff) {
       Instruction branch = *editSrc(b);
       Condition c = branch.extractCond();
       BOffImm offset = dest.diffB<BOffImm>(b);
-      if (offset.isInvalid()) {
-        m_buffer.fail_bail();
-        return;
-      }
+      MOZ_RELEASE_ASSERT(!offset.isInvalid(),
+                         "Buffer size limit should prevent this");
       if (branch.is<InstBImm>()) {
         as_b(offset, c, b);
       } else if (branch.is<InstBLImm>()) {
@@ -2257,10 +2258,8 @@ void Assembler::bind(RepatchLabel* label) {
     }
 
     BOffImm offset = dest.diffB<BOffImm>(branchOff);
-    if (offset.isInvalid()) {
-      m_buffer.fail_bail();
-      return;
-    }
+    MOZ_RELEASE_ASSERT(!offset.isInvalid(),
+                       "Buffer size limit should prevent this");
     as_b(offset, cond, branchOff);
   }
   label->bind(dest.getOffset());
@@ -2788,8 +2787,9 @@ SecondScratchRegisterScope::SecondScratchRegisterScope(MacroAssembler& masm)
 
 #ifdef JS_DISASM_ARM
 
-/* static */ void Assembler::disassembleInstruction(const Instruction* i,
-                                                    DisasmBuffer& buffer) {
+/* static */
+void Assembler::disassembleInstruction(const Instruction* i,
+                                       DisasmBuffer& buffer) {
   disasm::NameConverter converter;
   disasm::Disassembler dasm(converter);
   uint8_t* loc = reinterpret_cast<uint8_t*>(const_cast<uint32_t*>(i->raw()));

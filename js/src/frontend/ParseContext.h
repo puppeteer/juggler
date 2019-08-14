@@ -137,6 +137,16 @@ class UsedNameTracker {
   MOZ_MUST_USE bool noteUse(JSContext* cx, JSAtom* name, uint32_t scriptId,
                             uint32_t scopeId);
 
+  MOZ_MUST_USE bool markAsAlwaysClosedOver(JSContext* cx, JSAtom* name,
+                                           uint32_t scriptId,
+                                           uint32_t scopeId) {
+    // This marks a variable as always closed over:
+    // UsedNameInfo::noteBoundInScope only checks if scriptId and scopeId are
+    // greater than the current scriptId/scopeId, so do a simple increment to
+    // make that so.
+    return noteUse(cx, name, scriptId + 1, scopeId + 1);
+  }
+
   struct RewindToken {
    private:
     friend class UsedNameTracker;
@@ -209,8 +219,7 @@ class ParseContext : public Nestable<ParseContext> {
 
    public:
     LabelStatement(ParseContext* pc, JSAtom* label)
-        : Statement(pc, StatementKind::Label),
-          label_(pc->sc_->context, label) {}
+        : Statement(pc, StatementKind::Label), label_(pc->sc_->cx_, label) {}
 
     HandleAtom label() const { return label_; }
   };
@@ -246,7 +255,7 @@ class ParseContext : public Nestable<ParseContext> {
 
     bool maybeReportOOM(ParseContext* pc, bool result) {
       if (!result) {
-        ReportOutOfMemory(pc->sc()->context);
+        ReportOutOfMemory(pc->sc()->cx_);
       }
       return result;
     }
@@ -267,11 +276,11 @@ class ParseContext : public Nestable<ParseContext> {
 
     MOZ_MUST_USE bool init(ParseContext* pc) {
       if (id_ == UINT32_MAX) {
-        pc->errorReporter_.reportErrorNoOffset(JSMSG_NEED_DIET, js_script_str);
+        pc->errorReporter_.errorNoOffset(JSMSG_NEED_DIET, js_script_str);
         return false;
       }
 
-      return declared_.acquire(pc->sc()->context);
+      return declared_.acquire(pc->sc()->cx_);
     }
 
     bool isEmpty() const { return declared_->all().empty(); }
@@ -489,7 +498,7 @@ class ParseContext : public Nestable<ParseContext> {
   }
 
   Scope& namedLambdaScope() {
-    MOZ_ASSERT(functionBox()->function()->isNamedLambda());
+    MOZ_ASSERT(functionBox()->isNamedLambda());
     return *namedLambdaScope_;
   }
 
@@ -563,6 +572,12 @@ class ParseContext : public Nestable<ParseContext> {
   // True if we are at the topmost level of a module only.
   bool atModuleLevel() { return atBodyLevel() && sc_->isModuleContext(); }
 
+  // True if we are at the topmost level of an entire script or module.  For
+  // example, in the comment on |atBodyLevel()| above, we would encounter |f1|
+  // and the outermost |if (cond)| at top level, and everything else would not
+  // be at top level.
+  bool atTopLevel() { return atBodyLevel() && sc_->isTopLevelContext(); }
+
   void setIsStandaloneFunctionBody() { isStandaloneFunctionBody_ = true; }
 
   bool isStandaloneFunctionBody() const { return isStandaloneFunctionBody_; }
@@ -600,17 +615,16 @@ class ParseContext : public Nestable<ParseContext> {
   }
 
   bool isArrowFunction() const {
-    return sc_->isFunctionBox() && sc_->asFunctionBox()->function()->isArrow();
+    return sc_->isFunctionBox() && sc_->asFunctionBox()->isArrow();
   }
 
   bool isMethod() const {
-    return sc_->isFunctionBox() && sc_->asFunctionBox()->function()->isMethod();
+    return sc_->isFunctionBox() && sc_->asFunctionBox()->isMethod();
   }
 
   bool isGetterOrSetter() const {
-    return sc_->isFunctionBox() &&
-           (sc_->asFunctionBox()->function()->isGetter() ||
-            sc_->asFunctionBox()->function()->isSetter());
+    return sc_->isFunctionBox() && (sc_->asFunctionBox()->isGetter() ||
+                                    sc_->asFunctionBox()->isSetter());
   }
 
   uint32_t scriptId() const { return scriptId_; }
@@ -621,6 +635,16 @@ class ParseContext : public Nestable<ParseContext> {
                      uint32_t beginPos,
                      mozilla::Maybe<DeclarationKind>* redeclaredKind,
                      uint32_t* prevPos);
+
+  bool hasUsedName(const UsedNameTracker& usedNames, HandlePropertyName name);
+  bool hasUsedFunctionSpecialName(const UsedNameTracker& usedNames,
+                                  HandlePropertyName name);
+
+  bool declareFunctionThis(const UsedNameTracker& usedNames,
+                           bool canSkipLazyClosedOverBindings);
+  bool declareFunctionArgumentsObject(const UsedNameTracker& usedNames,
+                                      bool canSkipLazyClosedOverBindings);
+  bool declareDotGeneratorName();
 
  private:
   mozilla::Maybe<DeclarationKind> isVarRedeclaredInInnermostScope(

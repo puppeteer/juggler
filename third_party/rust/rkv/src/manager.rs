@@ -1,4 +1,4 @@
-// Copyright 2018 Mozilla
+// Copyright 2018-2019 Mozilla
 //
 // Licensed under the Apache License, Version 2.0 (the "License"); you may not use
 // this file except in compliance with the License. You may obtain a copy of the
@@ -8,6 +8,7 @@
 // CONDITIONS OF ANY KIND, either express or implied. See the License for the
 // specific language governing permissions and limitations under the License.
 
+use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 
 use std::io::{
@@ -32,13 +33,13 @@ use std::sync::{
 
 use url::Url;
 
-use error::StoreError;
+use crate::error::StoreError;
 
-use Rkv;
+use crate::Rkv;
 
-/// A process is only permitted to have one open handle to each Rkv environment.
-/// This manager exists to enforce that constraint: don't open environments directly.
 lazy_static! {
+    /// A process is only permitted to have one open handle to each Rkv environment.
+    /// This manager exists to enforce that constraint: don't open environments directly.
     static ref MANAGER: RwLock<Manager> = RwLock::new(Manager::new());
 }
 
@@ -56,6 +57,8 @@ where
     Ok(canonical)
 }
 
+/// A process is only permitted to have one open handle to each Rkv environment.
+/// This manager exists to enforce that constraint: don't open environments directly.
 pub struct Manager {
     environments: BTreeMap<PathBuf, Arc<RwLock<Rkv>>>,
 }
@@ -121,10 +124,8 @@ impl Manager {
 
 #[cfg(test)]
 mod tests {
-    extern crate tempfile;
-
-    use self::tempfile::Builder;
     use std::fs;
+    use tempfile::Builder;
 
     use super::*;
 

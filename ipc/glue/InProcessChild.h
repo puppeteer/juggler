@@ -14,7 +14,7 @@ namespace mozilla {
 namespace dom {
 class PWindowGlobalParent;
 class PWindowGlobalChild;
-} // namespace dom
+}  // namespace dom
 
 namespace ipc {
 
@@ -28,10 +28,10 @@ class InProcessParent;
  * for async actors which want to communicate uniformly between Content->Chrome
  * and Chrome->Chrome situations.
  */
-class InProcessChild : public PInProcessChild
-{
-public:
+class InProcessChild : public PInProcessChild {
+ public:
   friend class InProcessParent;
+  friend class PInProcessChild;
 
   NS_INLINE_DECL_REFCOUNTING(InProcessChild)
 
@@ -43,24 +43,23 @@ public:
   // |nullptr|.
   static IProtocol* ParentActorFor(IProtocol* aActor);
 
-protected:
-  virtual mozilla::dom::PWindowGlobalChild*
-  AllocPWindowGlobalChild(const WindowGlobalInit& aInit) override;
+ protected:
+  mozilla::dom::PWindowGlobalChild* AllocPWindowGlobalChild(
+      const WindowGlobalInit& aInit);
 
-  virtual bool
-  DeallocPWindowGlobalChild(mozilla::dom::PWindowGlobalChild* aActor) override;
+  bool DeallocPWindowGlobalChild(mozilla::dom::PWindowGlobalChild* aActor);
 
-private:
+ private:
   // NOTE: PInProcess lifecycle management is declared as staic methods and
   // state on InProcessParent, and implemented in InProcessImpl.cpp.
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
-  virtual void DeallocPInProcessChild() override;
+  virtual void ActorDealloc() override;
   ~InProcessChild() = default;
 
   static StaticRefPtr<InProcessChild> sSingleton;
 };
 
-} // namespace ipc
-} // namespace mozilla
+}  // namespace ipc
+}  // namespace mozilla
 
-#endif // defined(mozilla_ipc_InProcessChild_h)
+#endif  // defined(mozilla_ipc_InProcessChild_h)

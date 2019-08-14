@@ -2,26 +2,37 @@
 Marionette
 ==========
 
-Marionette is the remote protocol that lets out-of-process programs
+Marionette is a remote protocol that lets out-of-process programs
 communicate with, instrument, and control Gecko-based browsers.
 
-It provides interfaces for interacting with both the internal
-JavaScript runtime and UI elements of Gecko-based browsers, such
-as Firefox and Fennec.  It can control both the chrome- and content
-documents, giving a high level of control and ability to replicate,
-or emulate, user interaction.
+It provides interfaces for interacting with both the internal JavaScript
+runtime and UI elements of Gecko-based browsers, such as Firefox
+and Fennec.  It can control both the chrome- and content documents,
+giving a high level of control and ability to emulate user interaction.
 
-Marionette can be activated by passing the `-marionette` flag. To
-start Firefox with the remote protocol turned on::
+Within the central tree, Marionette is used in most TaskCluster
+test jobs to instrument Gecko.  It can additionally be used to
+write different kinds of functional tests:
 
-	% firefox -marionette
-	…
-	1491228343089   Marionette  INFO    Listening on port 2828
+  * The `Marionette Python client`_ is used in the `Mn` job, which
+    is generally what you want to use for interacting with web documents
 
-This binds to a TCP socket, over which clients can communicate with
-Marionette using the `protocol`_.
+  * `Firefox Puppeteer`_ is a convenience library for Firefox
+    frontend UI automation based on the `Marionette Python client`_
+
+Outside the tree, Marionette is used by `geckodriver`_ to implement
+`WebDriver`_.
+
+Marionette supports to various degrees all the Gecko based applications,
+including Firefox, Thunderbird, Fennec, and Fenix.
 
 .. _protocol: Protocol.html
+.. _Marionette Python client: /python/marionette_driver.html
+.. _Firefox Puppeteer: http://firefox-puppeteer.readthedocs.io
+.. _geckodriver: /testing/geckodriver/
+.. _WebDriver: https://w3c.github.io/webdriver/
+
+Some further documentation can be found here:
 
 .. toctree::
    :maxdepth: 1
@@ -39,16 +50,6 @@ Marionette using the `protocol`_.
    Prefs.md
    internals/index
 
-See also:
-
-* Documentation for `Marionette Python client`_, which is used
-  in-tree to write many kinds of Marionette-based tests.
-* Documentation for `Firefox Puppeteer`_, which is used to in-tree
-  to write Firefox UI tests.
-
-.. _Marionette Python client: http://marionette-client.readthedocs.io
-.. _Firefox Puppeteer: http://firefox-puppeteer.readthedocs.io
-
 
 Bugs
 ====
@@ -62,7 +63,7 @@ Communication
 The mailing list for Marionette discussion is
 tools-marionette@lists.mozilla.org (`subscribe`_, `archive`_).
 
-If you prefer real-time chat, there is often someone in the #ateam IRC
+If you prefer real-time chat, there is often someone in the #interop IRC
 channel on irc.mozilla.org.  Don’t ask if you may ask a question; just go ahead
 and ask, and please wait for an answer as we might not be in your timezone.
 

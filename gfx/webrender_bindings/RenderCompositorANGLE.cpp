@@ -29,8 +29,15 @@
 namespace mozilla {
 namespace wr {
 
-/* static */ UniquePtr<RenderCompositor> RenderCompositorANGLE::Create(
+/* static */
+UniquePtr<RenderCompositor> RenderCompositorANGLE::Create(
     RefPtr<widget::CompositorWidget>&& aWidget) {
+  const auto& gl = RenderThread::Get()->SharedGL();
+  if (!gl) {
+    gfxCriticalNote << "Failed to get shared GL context";
+    return nullptr;
+  }
+
   UniquePtr<RenderCompositorANGLE> compositor =
       MakeUnique<RenderCompositorANGLE>(std::move(aWidget));
   if (!compositor->Initialize()) {
@@ -108,7 +115,8 @@ bool RenderCompositorANGLE::Initialize() {
   if (!SutdownEGLLibraryIfNecessary()) {
     return false;
   }
-  if (!RenderThread::Get()->SharedGL()) {
+  const auto gl = RenderThread::Get()->SharedGL();
+  if (!gl) {
     gfxCriticalNote << "[WR] failed to get shared GL context.";
     return false;
   }
@@ -158,7 +166,10 @@ bool RenderCompositorANGLE::Initialize() {
     desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     desc.SampleDesc.Count = 1;
     desc.SampleDesc.Quality = 0;
-    desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    // DXGI_USAGE_SHADER_INPUT is set for improving performanc of copying from
+    // framebuffer to texture on intel gpu.
+    desc.BufferUsage =
+        DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
     // Do not use DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, since it makes HWND
     // unreusable.
     // desc.BufferCount = 2;
@@ -186,7 +197,10 @@ bool RenderCompositorANGLE::Initialize() {
     swapDesc.BufferDesc.RefreshRate.Denominator = 1;
     swapDesc.SampleDesc.Count = 1;
     swapDesc.SampleDesc.Quality = 0;
-    swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    // DXGI_USAGE_SHADER_INPUT is set for improving performanc of copying from
+    // framebuffer to texture on intel gpu.
+    swapDesc.BufferUsage =
+        DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
     swapDesc.BufferCount = 1;
     swapDesc.OutputWindow = hwnd;
     swapDesc.Windowed = TRUE;
@@ -213,7 +227,9 @@ bool RenderCompositorANGLE::Initialize() {
 
   // Force enable alpha channel to make sure ANGLE use correct framebuffer
   // formart
-  if (!gl::CreateConfig(&mEGLConfig, /* bpp */ 32,
+  const auto& gle = gl::GLContextEGL::Cast(gl);
+  const auto& egl = gle->mEgl;
+  if (!gl::CreateConfig(egl, &mEGLConfig, /* bpp */ 32,
                         /* enableDepthBuffer */ true)) {
     gfxCriticalNote << "Failed to create EGLConfig for WebRender";
   }
@@ -281,7 +297,9 @@ void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
   desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
   desc.SampleDesc.Count = 1;
   desc.SampleDesc.Quality = 0;
-  desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+  // DXGI_USAGE_SHADER_INPUT is set for improving performanc of copying from
+  // framebuffer to texture on intel gpu.
+  desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT;
   if (useTripleBuffering) {
     desc.BufferCount = 3;
   } else {
@@ -411,8 +429,6 @@ bool RenderCompositorANGLE::ResizeBufferIfNeeded() {
     }
   }
 
-  auto* egl = gl::GLLibraryEGL::Get();
-
   const EGLint pbuffer_attribs[]{
       LOCAL_EGL_WIDTH,
       size.width,
@@ -424,6 +440,9 @@ bool RenderCompositorANGLE::ResizeBufferIfNeeded() {
 
   const auto buffer = reinterpret_cast<EGLClientBuffer>(backBuf.get());
 
+  const auto gl = RenderThread::Get()->SharedGL();
+  const auto& gle = gl::GLContextEGL::Cast(gl);
+  const auto& egl = gle->mEgl;
   const EGLSurface surface = egl->fCreatePbufferFromClientBuffer(
       egl->Display(), LOCAL_EGL_D3D_TEXTURE_ANGLE, buffer, mEGLConfig,
       pbuffer_attribs);
@@ -442,11 +461,11 @@ bool RenderCompositorANGLE::ResizeBufferIfNeeded() {
 }
 
 void RenderCompositorANGLE::DestroyEGLSurface() {
-  auto* egl = gl::GLLibraryEGL::Get();
-
   // Release EGLSurface of back buffer before calling ResizeBuffers().
   if (mEGLSurface) {
-    gl::GLContextEGL::Cast(gl())->SetEGLSurfaceOverride(EGL_NO_SURFACE);
+    const auto& gle = gl::GLContextEGL::Cast(gl());
+    const auto& egl = gle->mEgl;
+    gle->SetEGLSurfaceOverride(EGL_NO_SURFACE);
     egl->fDestroySurface(egl->Display(), mEGLSurface);
     mEGLSurface = nullptr;
   }
@@ -503,7 +522,7 @@ void RenderCompositorANGLE::WaitForPreviousPresentQuery() {
   while (mWaitForPresentQueries.size() >= waitLatency) {
     RefPtr<ID3D11Query>& query = mWaitForPresentQueries.front();
     BOOL result;
-    layers::WaitForGPUQuery(mDevice, mCtx, query, &result);
+    layers::WaitForFrameGPUQuery(mDevice, mCtx, query, &result);
 
     // Recycle query for later use.
     mRecycledQuery = query;

@@ -24,20 +24,21 @@
 #include "nsContentUtils.h"
 #include "nsIScriptSecurityManager.h"
 
-#include "gfxPrefs.h"
+#include "mozilla/StaticPrefs.h"
 
 namespace mozilla {
 namespace image {
 
-/*static*/ void ImageFactory::Initialize() {}
+/*static*/
+void ImageFactory::Initialize() {}
 
 static uint32_t ComputeImageFlags(nsIURI* uri, const nsCString& aMimeType,
                                   bool isMultiPart) {
   nsresult rv;
 
   // We default to the static globals.
-  bool isDiscardable = gfxPrefs::ImageMemDiscardable();
-  bool doDecodeImmediately = gfxPrefs::ImageDecodeImmediatelyEnabled();
+  bool isDiscardable = StaticPrefs::image_mem_discardable();
+  bool doDecodeImmediately = StaticPrefs::image_decode_immediately_enabled();
 
   // We want UI to be as snappy as possible and not to flicker. Disable
   // discarding for chrome URLS.
@@ -104,13 +105,11 @@ static void NotifyImageLoading(nsIURI* aURI) {
 }
 #endif
 
-/* static */ already_AddRefed<Image> ImageFactory::CreateImage(
+/* static */
+already_AddRefed<Image> ImageFactory::CreateImage(
     nsIRequest* aRequest, ProgressTracker* aProgressTracker,
     const nsCString& aMimeType, nsIURI* aURI, bool aIsMultiPart,
     uint32_t aInnerWindowId) {
-  MOZ_ASSERT(gfxPrefs::SingletonExists(),
-             "Pref observers should have been initialized already");
-
   // Compute the image's initialization flags.
   uint32_t imageFlags = ComputeImageFlags(aURI, aMimeType, aIsMultiPart);
 
@@ -141,7 +140,8 @@ static already_AddRefed<Image> BadImage(const char* aMessage,
   return aImage.forget();
 }
 
-/* static */ already_AddRefed<Image> ImageFactory::CreateAnonymousImage(
+/* static */
+already_AddRefed<Image> ImageFactory::CreateAnonymousImage(
     const nsCString& aMimeType, uint32_t aSizeHint /* = 0 */) {
   nsresult rv;
 
@@ -164,9 +164,9 @@ static already_AddRefed<Image> BadImage(const char* aMessage,
   return newImage.forget();
 }
 
-/* static */ already_AddRefed<MultipartImage>
-ImageFactory::CreateMultipartImage(Image* aFirstPart,
-                                   ProgressTracker* aProgressTracker) {
+/* static */
+already_AddRefed<MultipartImage> ImageFactory::CreateMultipartImage(
+    Image* aFirstPart, ProgressTracker* aProgressTracker) {
   MOZ_ASSERT(aFirstPart);
   MOZ_ASSERT(aProgressTracker);
 
@@ -218,7 +218,8 @@ uint32_t GetContentSize(nsIRequest* aRequest) {
   return 0;
 }
 
-/* static */ already_AddRefed<Image> ImageFactory::CreateRasterImage(
+/* static */
+already_AddRefed<Image> ImageFactory::CreateRasterImage(
     nsIRequest* aRequest, ProgressTracker* aProgressTracker,
     const nsCString& aMimeType, nsIURI* aURI, uint32_t aImageFlags,
     uint32_t aInnerWindowId) {
@@ -245,7 +246,8 @@ uint32_t GetContentSize(nsIRequest* aRequest) {
   return newImage.forget();
 }
 
-/* static */ already_AddRefed<Image> ImageFactory::CreateVectorImage(
+/* static */
+already_AddRefed<Image> ImageFactory::CreateVectorImage(
     nsIRequest* aRequest, ProgressTracker* aProgressTracker,
     const nsCString& aMimeType, nsIURI* aURI, uint32_t aImageFlags,
     uint32_t aInnerWindowId) {
@@ -264,7 +266,7 @@ uint32_t GetContentSize(nsIRequest* aRequest) {
 
   newImage->SetInnerWindowID(aInnerWindowId);
 
-  rv = newImage->OnStartRequest(aRequest, nullptr);
+  rv = newImage->OnStartRequest(aRequest);
   if (NS_FAILED(rv)) {
     return BadImage("VectorImage::OnStartRequest failed", newImage);
   }

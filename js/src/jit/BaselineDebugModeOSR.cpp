@@ -168,11 +168,19 @@ static bool CollectJitStackScripts(JSContext* cx,
 
         BaselineFrame* baselineFrame = frame.baselineFrame();
 
-        if (BaselineDebugModeOSRInfo* info =
-                baselineFrame->getDebugModeOSRInfo()) {
+        if (baselineFrame->runningInInterpreter()) {
+          // Baseline Interpreter frames for scripts that have a BaselineScript
+          // or IonScript don't need to be patched but they do need to be
+          // invalidated and recompiled. See also CollectInterpreterStackScripts
+          // for C++ interpreter frames.
+          if (!entries.append(DebugModeOSREntry(script))) {
+            return false;
+          }
+        } else if (BaselineDebugModeOSRInfo* info =
+                       baselineFrame->getDebugModeOSRInfo()) {
           // If patching a previously patched yet unpopped frame, we can
           // use the BaselineDebugModeOSRInfo on the frame directly to
-          // patch. Indeed, we cannot use frame.returnAddressToFp(), as
+          // patch. Indeed, we cannot use frame.resumePCinCurrentFrame(), as
           // it points into the debug mode OSR handler and cannot be
           // used to look up a corresponding RetAddrEntry.
           //
@@ -190,7 +198,7 @@ static bool CollectJitStackScripts(JSContext* cx,
           }
         } else {
           // The frame must be settled on a pc with a RetAddrEntry.
-          uint8_t* retAddr = frame.returnAddressToFp();
+          uint8_t* retAddr = frame.resumePCinCurrentFrame();
           RetAddrEntry& retAddrEntry =
               script->baselineScript()->retAddrEntryFromReturnAddress(retAddr);
           if (!entries.append(DebugModeOSREntry(script, retAddrEntry))) {
@@ -266,8 +274,8 @@ static const char* RetAddrEntryKindToString(RetAddrEntry::Kind kind) {
   switch (kind) {
     case RetAddrEntry::Kind::IC:
       return "IC";
-    case RetAddrEntry::Kind::NonOpIC:
-      return "non-op IC";
+    case RetAddrEntry::Kind::PrologueIC:
+      return "prologue IC";
     case RetAddrEntry::Kind::CallVM:
       return "callVM";
     case RetAddrEntry::Kind::WarmupCounter:
@@ -334,7 +342,7 @@ static void PatchBaselineFramesForDebugMode(
   //  D. From the debug prologue.
   //  E. From the debug epilogue.
   //  G. From GeneratorThrowOrReturn
-  //  K. From a JSOP_DEBUGAFTERYIELD instruction.
+  //  K. From a JSOP_AFTERYIELD instruction.
   //
   // Cycles (On to Off to On)+ or (Off to On to Off)+:
   //  F. Undo cases B, C, D, E, I or J above on previously patched yet unpopped
@@ -361,6 +369,14 @@ static void PatchBaselineFramesForDebugMode(
         DebugModeOSREntry& entry = entries[entryIndex];
 
         if (!entry.recompiled()) {
+          entryIndex++;
+          break;
+        }
+
+        BaselineFrame* baselineFrame = frame.baselineFrame();
+        if (baselineFrame->runningInInterpreter()) {
+          // We recompiled the script's BaselineScript but Baseline Interpreter
+          // frames don't need to be patched.
           entryIndex++;
           break;
         }
@@ -510,10 +526,9 @@ static void PatchBaselineFramesForDebugMode(
             // Case K above.
             //
             // Resume at the next instruction.
-            MOZ_ASSERT(*pc == JSOP_DEBUGAFTERYIELD);
-            recompInfo->resumeAddr =
-                bl->nativeCodeForPC(script, pc + JSOP_DEBUGAFTERYIELD_LENGTH,
-                                    &recompInfo->slotInfo);
+            MOZ_ASSERT(*pc == JSOP_AFTERYIELD);
+            recompInfo->resumeAddr = bl->nativeCodeForPC(
+                script, pc + JSOP_AFTERYIELD_LENGTH, &recompInfo->slotInfo);
             popFrameReg = true;
             break;
 
@@ -600,7 +615,7 @@ static bool RecompileBaselineScriptForDebugMode(
           script->filename(), script->lineno(), script->column(),
           observing ? "DEBUGGING" : "NORMAL EXECUTION");
 
-  AutoKeepTypeScripts keepTypes(cx);
+  AutoKeepJitScripts keepJitScripts(cx);
   script->setBaselineScript(cx->runtime(), nullptr);
 
   MethodStatus status =
@@ -1007,8 +1022,7 @@ JitCode* JitRuntime::generateBaselineDebugModeOSRHandler(
                                       /* returnFromCallVM = */ true);
   masm.bind(&end);
 
-  Linker linker(masm);
-  AutoFlushICache afc("BaselineDebugModeOSRHandler");
+  Linker linker(masm, "BaselineDebugModeOSRHandler");
   JitCode* code = linker.newCode(cx, CodeKind::Other);
   if (!code) {
     return nullptr;
@@ -1023,8 +1037,10 @@ JitCode* JitRuntime::generateBaselineDebugModeOSRHandler(
   return code;
 }
 
-/* static */ void DebugModeOSRVolatileJitFrameIter::forwardLiveIterators(
-    JSContext* cx, uint8_t* oldAddr, uint8_t* newAddr) {
+/* static */
+void DebugModeOSRVolatileJitFrameIter::forwardLiveIterators(JSContext* cx,
+                                                            uint8_t* oldAddr,
+                                                            uint8_t* newAddr) {
   DebugModeOSRVolatileJitFrameIter* iter;
   for (iter = cx->liveVolatileJitFrameIter_; iter; iter = iter->prev) {
     if (iter->isWasm()) {

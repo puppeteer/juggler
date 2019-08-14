@@ -99,6 +99,8 @@ class FileSystemParams;
  *   (8) Call [HandlerCallback] to send the task result to the content page.
  */
 class FileSystemTaskChildBase : public PFileSystemRequestChild {
+  friend class PFileSystemRequestChild;
+
  public:
   NS_INLINE_DECL_REFCOUNTING(FileSystemTaskChildBase)
 
@@ -154,7 +156,7 @@ class FileSystemTaskChildBase : public PFileSystemRequestChild {
 
   // Overrides PFileSystemRequestChild
   virtual mozilla::ipc::IPCResult Recv__delete__(
-      const FileSystemResponseValue& value) override;
+      const FileSystemResponseValue& value) final;
 
   nsresult mErrorValue;
   RefPtr<FileSystemBase> mFileSystem;

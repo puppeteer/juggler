@@ -17,6 +17,7 @@
 #include "nsIURI.h"
 #include "nsXBLSerialize.h"
 #include "nsXBLPrototypeBinding.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -140,7 +141,10 @@ static bool InstallXBLField(JSContext* cx, JS::Handle<JSObject*> callee,
   // But there are some cases where we must accept |thisObj| but not install a
   // property on it, or otherwise touch it.  Hence this split of |this|-vetting
   // duties.
-  nsCOMPtr<nsISupports> native = xpc::UnwrapReflectorToISupports(thisObj);
+  //
+  // OK to use ReflectorToISupportsStatic, because we only care about nodes
+  // here.
+  nsCOMPtr<nsISupports> native = xpc::ReflectorToISupportsStatic(thisObj);
   if (!native) {
     // Looks like whatever |thisObj| is it's not our nsIContent.  It might well
     // be the proto our binding installed, however, where the private is the
@@ -405,18 +409,17 @@ nsresult nsXBLProtoImplField::InstallField(
   JS::Rooted<JS::Value> result(cx);
   JS::CompileOptions options(cx);
   options.setFileAndLine(uriSpec.get(), mLineNumber);
-  JS::AutoObjectVector scopeChain(cx);
+  JS::RootedVector<JSObject*> scopeChain(cx);
   if (!nsJSUtils::GetScopeChainForXBL(cx, boundElement, aProtoBinding,
-                                      scopeChain)) {
+                                      &scopeChain)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   rv = NS_OK;
   {
     nsJSUtils::ExecutionContext exec(cx, scopeObject);
     exec.SetScopeChain(scopeChain);
-    exec.CompileAndExec(options,
-                        nsDependentString(mFieldText, mFieldTextLength));
-    rv = exec.ExtractReturnValue(&result);
+    exec.Compile(options, nsDependentString(mFieldText, mFieldTextLength));
+    rv = exec.ExecScript(&result);
   }
 
   if (NS_FAILED(rv)) {

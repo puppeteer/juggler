@@ -31,8 +31,10 @@ class TempWebExt {
     this.sourceDir = this.tmpDir.clone();
     this.sourceDir.append(this.addonId);
     if (!this.sourceDir.exists()) {
-      this.sourceDir.create(Ci.nsIFile.DIRECTORY_TYPE,
-                           FileUtils.PERMS_DIRECTORY);
+      this.sourceDir.create(
+        Ci.nsIFile.DIRECTORY_TYPE,
+        FileUtils.PERMS_DIRECTORY
+      );
     }
   }
 
@@ -42,12 +44,15 @@ class TempWebExt {
     if (manifest.exists()) {
       manifest.remove(true);
     }
-    const fos = Cc["@mozilla.org/network/file-output-stream;1"]
-                              .createInstance(Ci.nsIFileOutputStream);
-    fos.init(manifest,
-             FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE |
-             FileUtils.MODE_TRUNCATE,
-             FileUtils.PERMS_FILE, 0);
+    const fos = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(
+      Ci.nsIFileOutputStream
+    );
+    fos.init(
+      manifest,
+      FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | FileUtils.MODE_TRUNCATE,
+      FileUtils.PERMS_FILE,
+      0
+    );
 
     const manifestString = JSON.stringify(manifestData);
     fos.write(manifestString, manifestString.length);
@@ -59,8 +64,6 @@ class TempWebExt {
   }
 }
 
-// Remove in Bug 1497264
-/*
 add_task(async function reloadButtonReloadsAddon() {
   const ADDON_NAME = "test-devtools";
   const { tab, document, window } = await openAboutDebugging("addons");
@@ -88,13 +91,15 @@ add_task(async function reloadButtonReloadsAddon() {
   await onListUpdated;
 
   const [reloadedAddon] = await onInstalled;
-  is(reloadedAddon.name, ADDON_NAME,
-     "Add-on was reloaded: " + reloadedAddon.name);
+  is(
+    reloadedAddon.name,
+    ADDON_NAME,
+    "Add-on was reloaded: " + reloadedAddon.name
+  );
 
   await tearDownAddon(AboutDebugging, reloadedAddon);
   await closeAboutDebugging(tab);
 });
-*/
 
 add_task(async function reloadButtonRefreshesMetadata() {
   const { tab, document, window } = await openAboutDebugging("addons");
@@ -102,12 +107,12 @@ add_task(async function reloadButtonRefreshesMetadata() {
   await waitForInitialAddonList(document);
 
   const manifestBase = {
-    "manifest_version": 2,
-    "name": "Temporary web extension",
-    "version": "1.0",
-    "applications": {
-      "gecko": {
-        "id": ADDON_ID,
+    manifest_version: 2,
+    name: "Temporary web extension",
+    version: "1.0",
+    applications: {
+      gecko: {
+        id: ADDON_ID,
       },
     },
   };
@@ -130,7 +135,7 @@ add_task(async function reloadButtonRefreshesMetadata() {
   await waitUntilAddonContainer("Temporary web extension", document);
 
   const newName = "Temporary web extension (updated)";
-  tempExt.writeManifest(Object.assign({}, manifestBase, {name: newName}));
+  tempExt.writeManifest(Object.assign({}, manifestBase, { name: newName }));
 
   // List updated twice:
   // - AddonManager's onInstalled event

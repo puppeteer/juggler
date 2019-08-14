@@ -12,7 +12,8 @@ namespace dom {
 
 NS_IMPL_ISUPPORTS_INHERITED(StringBlobImpl, BlobImpl, nsIMemoryReporter)
 
-/* static */ already_AddRefed<StringBlobImpl> StringBlobImpl::Create(
+/* static */
+already_AddRefed<StringBlobImpl> StringBlobImpl::Create(
     const nsACString& aData, const nsAString& aContentType) {
   RefPtr<StringBlobImpl> blobImpl = new StringBlobImpl(aData, aContentType);
   RegisterWeakMemoryReporter(blobImpl);
@@ -21,7 +22,9 @@ NS_IMPL_ISUPPORTS_INHERITED(StringBlobImpl, BlobImpl, nsIMemoryReporter)
 
 StringBlobImpl::StringBlobImpl(const nsACString& aData,
                                const nsAString& aContentType)
-    : BaseBlobImpl(aContentType, aData.Length()), mData(aData) {}
+    : BaseBlobImpl(NS_LITERAL_STRING("StringBlobImpl"), aContentType,
+                   aData.Length()),
+      mData(aData) {}
 
 StringBlobImpl::~StringBlobImpl() { UnregisterWeakMemoryReporter(this); }
 

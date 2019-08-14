@@ -9,15 +9,15 @@
 
 #include "AudioDeviceInfo.h"
 #include "MediaInfo.h"
-#include "mozilla/RefPtr.h"
 #include "mozilla/MozPromise.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/dom/MediaDebugInfoBinding.h"
 #include "nsISupportsImpl.h"
 
 namespace mozilla {
 
 class TimeStamp;
-
-namespace media {
+class VideoFrameContainer;
 
 /**
  * A consumer of audio/video data which plays audio and video tracks and
@@ -56,15 +56,19 @@ class MediaSink {
   // Can be called in any state.
   virtual void SetPlaybackParams(const PlaybackParams& aParams) = 0;
 
+  // EndedPromise needs to be a non-exclusive promise as it is shared between
+  // both the AudioSink and VideoSink.
+  typedef MozPromise<bool, nsresult, /* IsExclusive = */ false> EndedPromise;
+
   // Return a promise which is resolved when the track finishes
   // or null if no such track.
   // Must be called after playback starts.
-  virtual RefPtr<GenericPromise> OnEnded(TrackType aType) = 0;
+  virtual RefPtr<EndedPromise> OnEnded(TrackType aType) = 0;
 
   // Return the end time of the audio/video data that has been consumed
   // or 0 if no such track.
   // Must be called after playback starts.
-  virtual TimeUnit GetEndTime(TrackType aType) const = 0;
+  virtual media::TimeUnit GetEndTime(TrackType aType) const = 0;
 
   // Return playback position of the media.
   // Since A/V sync is always maintained by this sink, there is no need to
@@ -72,7 +76,8 @@ class MediaSink {
   // aTimeStamp returns the timeStamp corresponding to the returned position
   // which is used by the compositor to derive the render time of video frames.
   // Must be called after playback starts.
-  virtual TimeUnit GetPosition(TimeStamp* aTimeStamp = nullptr) const = 0;
+  virtual media::TimeUnit GetPosition(
+      TimeStamp* aTimeStamp = nullptr) const = 0;
 
   // Return true if there are data consumed but not played yet.
   // Can be called in any state.
@@ -102,7 +107,7 @@ class MediaSink {
 
   // Begin a playback session with the provided start time and media info.
   // Must be called when playback is stopped.
-  virtual nsresult Start(const TimeUnit& aStartTime,
+  virtual nsresult Start(const media::TimeUnit& aStartTime,
                          const MediaInfo& aInfo) = 0;
 
   // Finish a playback session.
@@ -122,15 +127,15 @@ class MediaSink {
   // Must be called after playback stopped.
   virtual void Shutdown() {}
 
-  // Return a string containing debugging information.
-  // Can be called in any phase.
-  virtual nsCString GetDebugInfo() { return nsCString(); }
+  virtual void SetSecondaryVideoContainer(VideoFrameContainer* aSecondary) {}
+  virtual void ClearSecondaryVideoContainer() {}
+
+  virtual void GetDebugInfo(dom::MediaSinkDebugInfo& aInfo) {}
 
  protected:
-  virtual ~MediaSink() {}
+  virtual ~MediaSink() = default;
 };
 
-}  // namespace media
 }  // namespace mozilla
 
 #endif  // MediaSink_h_

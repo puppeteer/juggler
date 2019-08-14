@@ -323,7 +323,7 @@ nsSynthVoiceRegistry::RemoveVoice(nsISpeechService* aService,
   mUriVoiceMap.Remove(aUri);
 
   if (retval->mIsQueued &&
-      !StaticPrefs::MediaWebspeechSynthForceGlobalQueue()) {
+      !StaticPrefs::media_webspeech_synth_force_global_queue()) {
     // Check if this is the last queued voice, and disable the global queue if
     // it is.
     bool queued = false;
@@ -621,7 +621,7 @@ already_AddRefed<nsSpeechTask> nsSynthVoiceRegistry::SpeakUtterance(
   }
 
   nsCOMPtr<nsPIDOMWindowInner> window = aUtterance.GetOwner();
-  nsCOMPtr<nsIDocument> doc = window ? window->GetDoc() : nullptr;
+  nsCOMPtr<Document> doc = window ? window->GetDoc() : nullptr;
 
   bool isChrome = nsContentUtils::IsChromeDoc(doc);
 
@@ -663,7 +663,8 @@ void nsSynthVoiceRegistry::Speak(const nsAString& aText, const nsAString& aLang,
 
   aTask->SetChosenVoiceURI(voice->mUri);
 
-  if (mUseGlobalQueue || StaticPrefs::MediaWebspeechSynthForceGlobalQueue()) {
+  if (mUseGlobalQueue ||
+      StaticPrefs::media_webspeech_synth_force_global_queue()) {
     LOG(LogLevel::Debug,
         ("nsSynthVoiceRegistry::Speak queueing text='%s' lang='%s' uri='%s' "
          "rate=%f pitch=%f",
@@ -733,8 +734,8 @@ void nsSynthVoiceRegistry::SetIsSpeaking(bool aIsSpeaking) {
 
   // Only set to 'true' if global queue is enabled.
   mIsSpeaking =
-      aIsSpeaking &&
-      (mUseGlobalQueue || StaticPrefs::MediaWebspeechSynthForceGlobalQueue());
+      aIsSpeaking && (mUseGlobalQueue ||
+                      StaticPrefs::media_webspeech_synth_force_global_queue());
 
   nsTArray<SpeechSynthesisParent*> ssplist;
   GetAllSpeechSynthActors(ssplist);

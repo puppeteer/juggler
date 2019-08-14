@@ -53,9 +53,9 @@
 #include <unistd.h>     // sysconf
 #include <semaphore.h>
 #ifdef __GLIBC__
-#include <execinfo.h>  // backtrace, backtrace_symbols
-#endif                 // def __GLIBC__
-#include <strings.h>   // index
+#  include <execinfo.h>  // backtrace, backtrace_symbols
+#endif                   // def __GLIBC__
+#include <strings.h>     // index
 #include <errno.h>
 #include <stdarg.h>
 
@@ -69,7 +69,16 @@
 
 using namespace mozilla;
 
-/* static */ int Thread::GetCurrentId() { return gettid(); }
+int profiler_current_process_id() { return getpid(); }
+
+int profiler_current_thread_id() {
+  // glibc doesn't provide a wrapper for gettid().
+#if defined(__linux__) || !defined(__BIONIC__)
+  return static_cast<int>(static_cast<pid_t>(syscall(SYS_gettid)));
+#else
+  return static_cast<int>(gettid());
+#endif
+}
 
 void* GetStackTop(void* aGuess) { return aGuess; }
 
@@ -104,12 +113,12 @@ static void PopulateRegsFromContext(Registers& aRegs, ucontext_t* aContext) {
   aRegs.mFP = reinterpret_cast<Address>(mcontext.gregs[30]);
 
 #else
-#error "bad platform"
+#  error "bad platform"
 #endif
 }
 
 #if defined(GP_OS_android)
-#define SYS_tgkill __NR_tgkill
+#  define SYS_tgkill __NR_tgkill
 #endif
 
 int tgkill(pid_t tgid, pid_t tid, int signalno) {
@@ -236,7 +245,7 @@ static void SigprofHandler(int aSignal, siginfo_t* aInfo, void* aContext) {
 }
 
 Sampler::Sampler(PSLockRef aLock)
-    : mMyPid(getpid())
+    : mMyPid(profiler_current_process_id())
       // We don't know what the sampler thread's ID will be until it runs, so
       // set mSamplerTid to a dummy value and fill it in for real in
       // SuspendAndSampleAndResumeThread().
@@ -276,7 +285,7 @@ void Sampler::SuspendAndSampleAndResumeThread(
   MOZ_ASSERT(!sSigHandlerCoordinator);
 
   if (mSamplerTid == -1) {
-    mSamplerTid = gettid();
+    mSamplerTid = profiler_current_thread_id();
   }
   int sampleeTid = aRegisteredThread.Info()->ThreadId();
   MOZ_RELEASE_ASSERT(sampleeTid != mSamplerTid);

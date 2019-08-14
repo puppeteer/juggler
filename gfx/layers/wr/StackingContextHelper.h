@@ -12,6 +12,7 @@
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "Units.h"
+#include "nsSVGIntegrationUtils.h"  // for WrFiltersHolder
 
 class nsDisplayTransform;
 
@@ -27,20 +28,14 @@ namespace layers {
  */
 class MOZ_RAII StackingContextHelper {
  public:
-  StackingContextHelper(
-      const StackingContextHelper& aParentSC, const ActiveScrolledRoot* aAsr,
-      wr::DisplayListBuilder& aBuilder,
-      const nsTArray<wr::WrFilterOp>& aFilters = nsTArray<wr::WrFilterOp>(),
-      const LayoutDeviceRect& aBounds = LayoutDeviceRect(),
-      const gfx::Matrix4x4* aBoundTransform = nullptr,
-      const wr::WrAnimationProperty* aAnimation = nullptr,
-      const float* aOpacityPtr = nullptr,
-      const gfx::Matrix4x4* aTransformPtr = nullptr,
-      const gfx::Matrix4x4* aPerspectivePtr = nullptr,
-      const gfx::CompositionOp& aMixBlendMode = gfx::CompositionOp::OP_OVER,
-      bool aBackfaceVisible = true, bool aIsPreserve3D = false,
-      const Maybe<nsDisplayTransform*>& aDeferredTransformItem = Nothing(),
-      const wr::WrClipId* aClipNodeId = nullptr, bool aAnimated = false);
+  StackingContextHelper(const StackingContextHelper& aParentSC,
+                        const ActiveScrolledRoot* aAsr,
+                        nsIFrame* aContainerFrame,
+                        nsDisplayItem* aContainerItem,
+                        wr::DisplayListBuilder& aBuilder,
+                        const wr::StackingContextParams& aParams,
+                        const LayoutDeviceRect& aBounds = LayoutDeviceRect());
+
   // This version of the constructor should only be used at the root level
   // of the tree, so that we have a StackingContextHelper to pass down into
   // the RenderLayer traversal, but don't actually want it to push a stacking
@@ -65,12 +60,15 @@ class MOZ_RAII StackingContextHelper {
   Maybe<gfx::Matrix4x4> GetDeferredTransformMatrix() const;
 
   bool AffectsClipPositioning() const { return mAffectsClipPositioning; }
-  Maybe<wr::WrClipId> ReferenceFrameId() const { return mReferenceFrameId; }
+  Maybe<wr::WrSpatialId> ReferenceFrameId() const { return mReferenceFrameId; }
+
+  const LayoutDevicePoint& GetOrigin() const { return mOrigin; }
 
  private:
   wr::DisplayListBuilder* mBuilder;
   gfx::Size mScale;
   gfx::Matrix mInheritedTransform;
+  LayoutDevicePoint mOrigin;
 
   // The "snapping surface" defines the space that we want to snap in.
   // You can think of it as the nearest physical surface.
@@ -80,7 +78,8 @@ class MOZ_RAII StackingContextHelper {
   // existence of a non-animated identity transform does not affect snapping.
   gfx::Matrix mSnappingSurfaceTransform;
   bool mAffectsClipPositioning;
-  Maybe<wr::WrClipId> mReferenceFrameId;
+  Maybe<wr::WrSpatialId> mReferenceFrameId;
+  Maybe<wr::SpaceAndClipChainHelper> mSpaceAndClipChainHelper;
 
   // The deferred transform item is used when building the WebRenderScrollData
   // structure. The backstory is that APZ needs to know about transforms that

@@ -31,15 +31,10 @@ typedef Handle<ModuleObject*> HandleModuleObject;
 extern Shape* EnvironmentCoordinateToEnvironmentShape(JSScript* script,
                                                       jsbytecode* pc);
 
-// Return the name being accessed by the given ALIASEDVAR op.
-extern PropertyName* EnvironmentCoordinateName(
-    EnvironmentCoordinateNameCache& cache, JSScript* script, jsbytecode* pc);
-
-// Return the function script accessed by the given ALIASEDVAR op, or nullptr.
-extern JSScript* EnvironmentCoordinateFunctionScript(JSScript* script,
-                                                     jsbytecode* pc);
-
-/*** Environment objects ****************************************************/
+// Return the name being accessed by the given ALIASEDVAR op. This function is
+// relatively slow so it should not be used on hot paths.
+extern PropertyName* EnvironmentCoordinateNameSlow(JSScript* script,
+                                                   jsbytecode* pc);
 
 /*** Environment objects ****************************************************/
 
@@ -168,9 +163,8 @@ extern JSScript* EnvironmentCoordinateFunctionScript(JSScript* script,
  *
  *    Each non-syntactic object used as a qualified variables object needs to
  *    enclose a non-syntactic LexicalEnvironmentObject to hold 'let' and
- *    'const' bindings. There is a bijection per compartment between the
- *    non-syntactic variables objects and their non-syntactic
- *    LexicalEnvironmentObjects.
+ *    'const' bindings. There is a bijection per realm between the non-syntactic
+ *    variables objects and their non-syntactic LexicalEnvironmentObjects.
  *
  *    Does not hold 'var' bindings.
  *
@@ -264,8 +258,7 @@ class EnvironmentObject : public NativeObject {
   // GlobalObject, or a non-syntactic environment object.
   static const uint32_t ENCLOSING_ENV_SLOT = 0;
 
-  inline void setAliasedBinding(JSContext* cx, uint32_t slot,
-                                PropertyName* name, const Value& v);
+  inline void setAliasedBinding(JSContext* cx, uint32_t slot, const Value& v);
 
   void setEnclosingEnvironment(JSObject* enclosing) {
     setReservedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
@@ -284,10 +277,18 @@ class EnvironmentObject : public NativeObject {
     initReservedSlot(ENCLOSING_ENV_SLOT, ObjectOrNullValue(enclosing));
   }
 
-  // Get or set a name contained in this environment.
-  const Value& aliasedBinding(EnvironmentCoordinate ec) {
-    return getSlot(ec.slot());
+  static bool nonExtensibleIsFixedSlot(EnvironmentCoordinate ec) {
+    // For non-extensible environment objects isFixedSlot(slot) is equivalent to
+    // slot < MAX_FIXED_SLOTS.
+    return ec.slot() < MAX_FIXED_SLOTS;
   }
+  static size_t nonExtensibleDynamicSlotIndex(EnvironmentCoordinate ec) {
+    MOZ_ASSERT(!nonExtensibleIsFixedSlot(ec));
+    return ec.slot() - MAX_FIXED_SLOTS;
+  }
+
+  // Get or set a name contained in this environment.
+  inline const Value& aliasedBinding(EnvironmentCoordinate ec);
 
   const Value& aliasedBinding(const BindingIter& bi) {
     MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
@@ -295,7 +296,7 @@ class EnvironmentObject : public NativeObject {
   }
 
   inline void setAliasedBinding(JSContext* cx, EnvironmentCoordinate ec,
-                                PropertyName* name, const Value& v);
+                                const Value& v);
 
   inline void setAliasedBinding(JSContext* cx, const BindingIter& bi,
                                 const Value& v);
@@ -322,17 +323,11 @@ class CallObject : public EnvironmentObject {
   /* These functions are internal and are exposed only for JITs. */
 
   /*
-   * Construct a bare-bones call object given a shape and a non-singleton
-   * group.  The call object must be further initialized to be usable.
+   * Construct a bare-bones call object given a shape and a group.
+   * The call object must be further initialized to be usable.
    */
   static CallObject* create(JSContext* cx, HandleShape shape,
                             HandleObjectGroup group);
-
-  /*
-   * Construct a bare-bones call object given a shape and make it into
-   * a singleton.  The call object must be initialized to be usable.
-   */
-  static CallObject* createSingleton(JSContext* cx, HandleShape shape);
 
   static CallObject* createTemplateObject(JSContext* cx, HandleScript script,
                                           HandleObject enclosing,
@@ -413,8 +408,8 @@ class ModuleEnvironmentObject : public EnvironmentObject {
 
   static ModuleEnvironmentObject* create(JSContext* cx,
                                          HandleModuleObject module);
-  ModuleObject& module();
-  IndirectBindingMap& importBindings();
+  ModuleObject& module() const;
+  IndirectBindingMap& importBindings() const;
 
   bool createImportBinding(JSContext* cx, HandleAtom importName,
                            HandleModuleObject module, HandleAtom exportName);
@@ -424,7 +419,7 @@ class ModuleEnvironmentObject : public EnvironmentObject {
   bool lookupImport(jsid name, ModuleEnvironmentObject** envOut,
                     Shape** shapeOut);
 
-  void fixEnclosingEnvironmentAfterCompartmentMerge(GlobalObject& global);
+  void fixEnclosingEnvironmentAfterRealmMerge(GlobalObject& global);
 
  private:
   static bool lookupProperty(JSContext* cx, HandleObject obj, HandleId id,
@@ -443,7 +438,8 @@ class ModuleEnvironmentObject : public EnvironmentObject {
   static bool deleteProperty(JSContext* cx, HandleObject obj, HandleId id,
                              ObjectOpResult& result);
   static bool newEnumerate(JSContext* cx, HandleObject obj,
-                           AutoIdVector& properties, bool enumerableOnly);
+                           MutableHandleIdVector properties,
+                           bool enumerableOnly);
 };
 
 typedef Rooted<ModuleEnvironmentObject*> RootedModuleEnvironmentObject;
@@ -531,9 +527,9 @@ class LexicalEnvironmentObject : public EnvironmentObject {
                                           Handle<LexicalScope*> scope,
                                           HandleObject enclosing,
                                           gc::InitialHeap heap);
-  static LexicalEnvironmentObject* create(JSContext* cx,
-                                          Handle<LexicalScope*> scope,
-                                          AbstractFramePtr frame);
+  static LexicalEnvironmentObject* createForFrame(JSContext* cx,
+                                                  Handle<LexicalScope*> scope,
+                                                  AbstractFramePtr frame);
   static LexicalEnvironmentObject* createGlobal(JSContext* cx,
                                                 Handle<GlobalObject*> global);
   static LexicalEnvironmentObject* createNonSyntactic(JSContext* cx,
@@ -567,6 +563,8 @@ class LexicalEnvironmentObject : public EnvironmentObject {
     return enclosingEnvironment().as<GlobalObject>();
   }
 
+  void setWindowProxyThisValue(JSObject* obj);
+
   // Global and non-syntactic lexical scopes are extensible. All other
   // lexical scopes are not.
   bool isExtensible() const;
@@ -578,6 +576,10 @@ class LexicalEnvironmentObject : public EnvironmentObject {
   // For extensible lexical environments, the 'this' value for its
   // scope. Otherwise asserts.
   Value thisValue() const;
+
+  static constexpr size_t offsetOfThisValueOrScopeSlot() {
+    return getFixedSlotOffset(THIS_VALUE_OR_SCOPE_SLOT);
+  }
 };
 
 class NamedLambdaObject : public LexicalEnvironmentObject {
@@ -592,8 +594,6 @@ class NamedLambdaObject : public LexicalEnvironmentObject {
                                                  gc::InitialHeap heap);
 
   static NamedLambdaObject* create(JSContext* cx, AbstractFramePtr frame);
-  static NamedLambdaObject* create(JSContext* cx, AbstractFramePtr frame,
-                                   HandleFunction replacement);
 
   // For JITs.
   static size_t lambdaSlot();
@@ -617,7 +617,7 @@ class NonSyntacticVariablesObject : public EnvironmentObject {
 };
 
 extern bool CreateNonSyntacticEnvironmentChain(JSContext* cx,
-                                               JS::AutoObjectVector& envChain,
+                                               JS::HandleObjectVector envChain,
                                                MutableHandleObject env,
                                                MutableHandleScope scope);
 
@@ -950,7 +950,7 @@ class DebugEnvironments {
    * The map from live frames which have optimized-away environments to the
    * corresponding debug environments.
    */
-  typedef HashMap<MissingEnvironmentKey, ReadBarrieredDebugEnvironmentProxy,
+  typedef HashMap<MissingEnvironmentKey, WeakHeapPtrDebugEnvironmentProxy,
                   MissingEnvironmentKey, ZoneAllocPolicy>
       MissingEnvironmentMap;
   MissingEnvironmentMap missingEnvs;
@@ -963,9 +963,8 @@ class DebugEnvironments {
    * debugger lazy updates of liveEnvs need only fill in the new
    * environments.
    */
-  typedef GCHashMap<ReadBarriered<JSObject*>, LiveEnvironmentVal,
-                    MovableCellHasher<ReadBarriered<JSObject*>>,
-                    ZoneAllocPolicy>
+  typedef GCHashMap<WeakHeapPtr<JSObject*>, LiveEnvironmentVal,
+                    MovableCellHasher<WeakHeapPtr<JSObject*>>, ZoneAllocPolicy>
       LiveEnvironmentMap;
   LiveEnvironmentMap liveEnvs;
 
@@ -1141,13 +1140,11 @@ inline bool IsFrameInitialEnvironment(AbstractFramePtr frame,
 }
 
 extern bool CreateObjectsForEnvironmentChain(JSContext* cx,
-                                             AutoObjectVector& chain,
+                                             HandleObjectVector chain,
                                              HandleObject terminatingEnv,
                                              MutableHandleObject envObj);
 
 ModuleObject* GetModuleObjectForScript(JSScript* script);
-
-Value FindScriptOrModulePrivateForScript(JSScript* script);
 
 ModuleEnvironmentObject* GetModuleEnvironmentForScript(JSScript* script);
 
@@ -1172,10 +1169,9 @@ MOZ_MUST_USE bool CheckGlobalDeclarationConflicts(
     JSContext* cx, HandleScript script,
     Handle<LexicalEnvironmentObject*> lexicalEnv, HandleObject varObj);
 
-MOZ_MUST_USE bool CheckEvalDeclarationConflicts(JSContext* cx,
-                                                HandleScript script,
-                                                HandleObject envChain,
-                                                HandleObject varObj);
+MOZ_MUST_USE bool CheckGlobalOrEvalDeclarationConflicts(JSContext* cx,
+                                                        HandleObject envChain,
+                                                        HandleScript script);
 
 MOZ_MUST_USE bool InitFunctionEnvironmentObjects(JSContext* cx,
                                                  AbstractFramePtr frame);

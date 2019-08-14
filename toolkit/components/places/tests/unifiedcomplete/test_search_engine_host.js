@@ -3,10 +3,12 @@
 
 add_task(async function test_searchEngine_autoFill() {
   Services.prefs.setBoolPref("browser.urlbar.autoFill.searchEngines", true);
-  Services.search.addEngineWithDetails("MySearchEngine", "", "", "",
-                                       "GET", "http://my.search.com/");
+  await Services.search.addEngineWithDetails("MySearchEngine", {
+    method: "GET",
+    template: "http://my.search.com/",
+  });
   let engine = Services.search.getEngineByName("MySearchEngine");
-  registerCleanupFunction(() => Services.search.removeEngine(engine));
+  registerCleanupFunction(async () => Services.search.removeEngine(engine));
 
   // Add an uri that matches the search string with high frecency.
   let uri = NetUtil.newURI("http://www.example.com/my/");
@@ -17,9 +19,14 @@ add_task(async function test_searchEngine_autoFill() {
   await PlacesTestUtils.addVisits(visits);
   await addBookmark({ uri, title: "Example bookmark" });
   await PlacesTestUtils.promiseAsyncUpdates();
-  ok(frecencyForUrl(uri) > 10000, "Added URI should have expected high frecency");
+  ok(
+    frecencyForUrl(uri) > 10000,
+    "Added URI should have expected high frecency"
+  );
 
-  info("Check search domain is autoFilled even if there's an higher frecency match");
+  info(
+    "Check search domain is autoFilled even if there's an higher frecency match"
+  );
   await check_autocomplete({
     search: "my",
     autofilled: "my.search.com/",
@@ -45,4 +52,3 @@ add_task(async function test_searchEngine_noautoFill() {
 
   await cleanup();
 });
-

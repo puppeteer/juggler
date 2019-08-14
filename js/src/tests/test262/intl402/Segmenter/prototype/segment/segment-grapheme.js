@@ -1,4 +1,4 @@
-// |reftest| skip-if(!Intl.hasOwnProperty('Segmenter')) -- Intl.Segmenter is not enabled unconditionally
+// |reftest| skip -- Intl.Segmenter is not supported
 // Copyright 2018 the V8 project authors. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -31,7 +31,7 @@ for (const text of [
     ]) {
   const iter = seg.segment(text);
   assert.sameValue(undefined, iter.breakType);
-  assert.sameValue(0, iter.position);
+  assert.sameValue(0, iter.index);
 }
 
 reportCompare(0, 0);

@@ -56,19 +56,19 @@ interface nsIChannel : nsIRequest
      * mobile code loaded from this channel.
      *
      * NOTE: this is a strong reference to the owner, so if the owner is also
-     * holding a strong reference to the channel, care must be taken to 
+     * holding a strong reference to the channel, care must be taken to
      * explicitly drop its reference to the channel.
      */
     attribute nsISupports owner;
 
     /**
      * The notification callbacks for the channel.  This is set by clients, who
-     * wish to provide a means to receive progress, status and protocol-specific 
+     * wish to provide a means to receive progress, status and protocol-specific
      * notifications.  If this value is NULL, the channel implementation may use
      * the notification callbacks from its load group.  The channel may also
      * query the notification callbacks from its load group if its notification
      * callbacks do not supply the requested interface.
-     * 
+     *
      * Interfaces commonly requested include: nsIProgressEventSink, nsIPrompt,
      * and nsIAuthPrompt/nsIAuthPrompt2.
      *
@@ -88,17 +88,16 @@ interface nsIChannel : nsIRequest
      *
      * NOTE: In some circumstances TLS information is propagated onto
      * non-nsIHttpChannel objects to indicate that their contents were likely
-     * delivered over TLS all the same.  For example, document.open() may
-     * create an nsWyciwygChannel to store the data that will be written to the
-     * document.  In that case, if the caller has TLS information, we propagate
-     * that info onto the nsWyciwygChannel given that it is likely that the
-     * caller will be writing data that was delivered over TLS to the document.
+     * delivered over TLS all the same.
+     *
+     * FIXME(bz, bug 1528449) is that still true now that
+     * document.open() doesn't do this?
      */
     readonly attribute nsISupports securityInfo;
 
     /**
-     * The MIME type of the channel's content if available. 
-     * 
+     * The MIME type of the channel's content if available.
+     *
      * NOTE: the content type can often be wrongly specified (e.g., wrong file
      * extension, wrong MIME type, wrong document type stored on a server, etc.),
      * and the caller most likely wants to verify with the actual data.
@@ -156,11 +155,6 @@ interface nsIChannel : nsIRequest
     nsIInputStream open();
 
     /**
-     * Performs content security check and calls open()
-     */
-    nsIInputStream open2();
-
-    /**
      * Asynchronously open this channel.  Data is fed to the specified stream
      * listener as it becomes available.  The stream listener's methods are
      * called on the thread that calls asyncOpen and are not called until
@@ -186,17 +180,13 @@ interface nsIChannel : nsIRequest
      *
      * NOTE: Implementations should throw NS_ERROR_ALREADY_OPENED if the
      * channel is reopened.
+     * NOTE: Implementations should throw an error if the channel has been
+     * cancelled prior asyncOpen being called.
      *
      * @param aListener the nsIStreamListener implementation
-     * @param aContext an opaque parameter forwarded to aListener's methods
      * @see nsIChannelEventSink for onChannelRedirect
      */
-    void asyncOpen(in nsIStreamListener aListener, in nsISupports aContext);
-
-    /**
-     * Performs content security check and calls asyncOpen().
-     */
-    void asyncOpen2(in nsIStreamListener aListener);
+    void asyncOpen(in nsIStreamListener aListener);
 
     /**************************************************************************
      * Channel specific load flags:
@@ -214,8 +204,8 @@ interface nsIChannel : nsIRequest
      */
     const unsigned long LOAD_DOCUMENT_URI = 1 << 16;
 
-    /** 
-     * If the end consumer for this load has been retargeted after discovering 
+    /**
+     * If the end consumer for this load has been retargeted after discovering
      * its content, this flag will be set:
      */
     const unsigned long LOAD_RETARGETED_DOCUMENT_URI = 1 << 17;
@@ -261,10 +251,10 @@ interface nsIChannel : nsIRequest
     const unsigned long LOAD_CALL_CONTENT_SNIFFERS = 1 << 21;
 
     /**
-     * This flag tells the channel to use URI classifier service to check
-     * the URI when opening the channel.
+     * This flag tells the channel to bypass URL classifier service check
+     * when opening the channel.
      */
-    const unsigned long LOAD_CLASSIFY_URI = 1 << 22;
+    const unsigned long LOAD_BYPASS_URL_CLASSIFIER = 1 << 22;
 
     /**
      * If this flag is set, the media-type content sniffer will be allowed
@@ -367,11 +357,11 @@ interface nsIChannel : nsIRequest
     return false;
   }
 
-  inline already_AddRefed<nsILoadInfo> GetLoadInfo()
+  inline already_AddRefed<nsILoadInfo> LoadInfo()
   {
     nsCOMPtr<nsILoadInfo> result;
     mozilla::DebugOnly<nsresult> rv = GetLoadInfo(getter_AddRefs(result));
-    MOZ_ASSERT(NS_SUCCEEDED(rv) || !result);
+    MOZ_ASSERT(NS_SUCCEEDED(rv) && result);
     return result.forget();
   }
 %}

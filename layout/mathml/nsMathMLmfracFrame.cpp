@@ -8,6 +8,7 @@
 
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/RefPtr.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
@@ -33,9 +34,9 @@ using namespace mozilla::gfx;
 #define THICK_FRACTION_LINE 2.0f
 #define THICK_FRACTION_LINE_MINIMUM_PIXELS 2  // minimum of 2 pixels
 
-nsIFrame* NS_NewMathMLmfracFrame(nsIPresShell* aPresShell,
-                                 ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmfracFrame(aStyle);
+nsIFrame* NS_NewMathMLmfracFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell)
+      nsMathMLmfracFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmfracFrame)
@@ -159,8 +160,9 @@ nsresult nsMathMLmfracFrame::AttributeChanged(int32_t aNameSpaceID,
                                                   aModType);
 }
 
-/* virtual */ nsresult nsMathMLmfracFrame::MeasureForWidth(
-    DrawTarget* aDrawTarget, ReflowOutput& aDesiredSize) {
+/* virtual */
+nsresult nsMathMLmfracFrame::MeasureForWidth(DrawTarget* aDrawTarget,
+                                             ReflowOutput& aDesiredSize) {
   return PlaceInternal(aDrawTarget, false, aDesiredSize, true);
 }
 
@@ -172,9 +174,9 @@ nscoord nsMathMLmfracFrame::FixInterFrameSpacing(ReflowOutput& aDesiredSize) {
   return gap;
 }
 
-/* virtual */ nsresult nsMathMLmfracFrame::Place(DrawTarget* aDrawTarget,
-                                                 bool aPlaceOrigin,
-                                                 ReflowOutput& aDesiredSize) {
+/* virtual */
+nsresult nsMathMLmfracFrame::Place(DrawTarget* aDrawTarget, bool aPlaceOrigin,
+                                   ReflowOutput& aDesiredSize) {
   return PlaceInternal(aDrawTarget, aPlaceOrigin, aDesiredSize, false);
 }
 
@@ -567,11 +569,11 @@ nsresult nsMathMLmfracFrame::PlaceInternal(DrawTarget* aDrawTarget,
   return NS_OK;
 }
 
-class nsDisplayMathMLSlash : public nsDisplayItem {
+class nsDisplayMathMLSlash : public nsPaintedDisplayItem {
  public:
   nsDisplayMathMLSlash(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                        const nsRect& aRect, nscoord aThickness, bool aRTL)
-      : nsDisplayItem(aBuilder, aFrame),
+      : nsPaintedDisplayItem(aBuilder, aFrame),
         mRect(aRect),
         mThickness(aThickness),
         mRTL(aRTL) {
@@ -626,6 +628,6 @@ void nsMathMLmfracFrame::DisplaySlash(nsDisplayListBuilder* aBuilder,
                                       const nsDisplayListSet& aLists) {
   if (!aFrame->StyleVisibility()->IsVisible() || aRect.IsEmpty()) return;
 
-  aLists.Content()->AppendToTop(MakeDisplayItem<nsDisplayMathMLSlash>(
-      aBuilder, aFrame, aRect, aThickness, StyleVisibility()->mDirection));
+  aLists.Content()->AppendNewToTop<nsDisplayMathMLSlash>(
+      aBuilder, aFrame, aRect, aThickness, StyleVisibility()->mDirection);
 }

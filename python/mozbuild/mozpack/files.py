@@ -2,19 +2,25 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, unicode_literals
 
 import errno
+import inspect
 import os
 import platform
 import shutil
+import six
 import stat
 import subprocess
 import uuid
 import mozbuild.makeutil as makeutil
 from itertools import chain
 from mozbuild.preprocessor import Preprocessor
-from mozbuild.util import FileAvoidWrite
+from mozbuild.util import (
+    FileAvoidWrite,
+    ensure_bytes,
+    ensure_unicode,
+)
 from mozpack.executables import (
     is_executable,
     may_strip,
@@ -62,12 +68,13 @@ else:
 
     def _copyfile(src, dest):
         # False indicates `dest` should be overwritten if it exists already.
-        if isinstance(src, unicode) and isinstance(dest, unicode):
+        if isinstance(src, six.text_type) and isinstance(dest, six.text_type):
             _CopyFileW(src, dest, False)
         elif isinstance(src, str) and isinstance(dest, str):
             _CopyFileA(src, dest, False)
         else:
             raise TypeError('mismatched path types!')
+
 
 class Dest(object):
     '''
@@ -79,8 +86,9 @@ class Dest(object):
     - a call to write() after a read() will re-open the underlying file,
       emptying it, and write to it.
     '''
+
     def __init__(self, path):
-        self.path = path
+        self.path = ensure_unicode(path)
         self.mode = None
 
     @property
@@ -125,7 +133,7 @@ class BaseFile(object):
         # shutil.copystat only copies milliseconds, and seconds is not
         # enough precision.
         return int(os.path.getmtime(first) * 1000) \
-                <= int(os.path.getmtime(second) * 1000)
+            <= int(os.path.getmtime(second) * 1000)
 
     @staticmethod
     def any_newer(dest, inputs):
@@ -154,7 +162,7 @@ class BaseFile(object):
             ret |= 0o0444
         if mode & 0o0100:
             ret |= 0o0111
-         # - keep user write permissions
+        # - keep user write permissions
         if mode & 0o0200:
             ret |= 0o0200
         # - leave away sticky bit, setuid, setgid
@@ -169,7 +177,7 @@ class BaseFile(object):
         disabled when skip_if_older is False.
         Returns whether a copy was actually performed (True) or not (False).
         '''
-        if isinstance(dest, basestring):
+        if isinstance(dest, six.string_types):
             dest = Dest(dest)
         else:
             assert isinstance(dest, Dest)
@@ -190,12 +198,12 @@ class BaseFile(object):
             else:
                 # Ensure the file is always created
                 if not dest.exists():
-                    dest.write('')
+                    dest.write(b'')
                 shutil.copyfileobj(self.open(), dest)
             return True
 
         src = self.open()
-        copy_content = ''
+        copy_content = b''
         while True:
             dest_content = dest.read(32768)
             src_content = src.read(32768)
@@ -250,8 +258,9 @@ class File(BaseFile):
     '''
     File class for plain files.
     '''
+
     def __init__(self, path):
-        self.path = path
+        self.path = ensure_unicode(path)
 
     @property
     def mode(self):
@@ -281,17 +290,18 @@ class ExecutableFile(File):
     File class for executable and library files on OS/2, OS/X and ELF systems.
     (see mozpack.executables.is_executable documentation).
     '''
+
     def __init__(self, path, xz_compress=False):
         File.__init__(self, path)
         self.xz_compress = xz_compress
 
     def copy(self, dest, skip_if_older=True):
         real_dest = dest
-        if not isinstance(dest, basestring):
+        if not isinstance(dest, six.string_types):
             fd, dest = mkstemp()
             os.close(fd)
             os.remove(dest)
-        assert isinstance(dest, basestring)
+        assert isinstance(dest, six.string_types)
         # If File.copy didn't actually copy because dest is newer, check the
         # file sizes. If dest is smaller, it means it is already stripped and
         # elfhacked and xz_compressed, so we can skip.
@@ -330,7 +340,7 @@ class AbsoluteSymlinkFile(File):
         File.__init__(self, path)
 
     def copy(self, dest, skip_if_older=True):
-        assert isinstance(dest, basestring)
+        assert isinstance(dest, six.string_types)
 
         # The logic in this function is complicated by the fact that symlinks
         # aren't universally supported. So, where symlinks aren't supported, we
@@ -421,7 +431,7 @@ class HardlinkFile(File):
     '''
 
     def copy(self, dest, skip_if_older=True):
-        assert isinstance(dest, basestring)
+        assert isinstance(dest, six.string_types)
 
         if not hasattr(os, 'link'):
             return super(HardlinkFile, self).copy(
@@ -478,11 +488,12 @@ class ExistingFile(BaseFile):
     existing file is required, it must exist during copy() or an error is
     raised.
     '''
+
     def __init__(self, required):
         self.required = required
 
     def copy(self, dest, skip_if_older=True):
-        if isinstance(dest, basestring):
+        if isinstance(dest, six.string_types):
             dest = Dest(dest)
         else:
             assert isinstance(dest, Dest)
@@ -492,7 +503,7 @@ class ExistingFile(BaseFile):
 
         if not dest.exists():
             errors.fatal("Required existing file doesn't exist: %s" %
-                dest.path)
+                         dest.path)
 
     def inputs(self):
         return ()
@@ -503,10 +514,11 @@ class PreprocessedFile(BaseFile):
     File class for a file that is preprocessed. PreprocessedFile.copy() runs
     the preprocessor on the file to create the output.
     '''
+
     def __init__(self, path, depfile_path, marker, defines, extra_depends=None,
                  silence_missing_directive_warnings=False):
-        self.path = path
-        self.depfile = depfile_path
+        self.path = ensure_unicode(path)
+        self.depfile = ensure_unicode(depfile_path)
         self.marker = marker
         self.defines = defines
         self.extra_depends = list(extra_depends or [])
@@ -528,7 +540,7 @@ class PreprocessedFile(BaseFile):
         '''
         Invokes the preprocessor to create the destination file.
         '''
-        if isinstance(dest, basestring):
+        if isinstance(dest, six.string_types):
             dest = Dest(dest)
         else:
             assert isinstance(dest, Dest)
@@ -587,8 +599,19 @@ class GeneratedFile(BaseFile):
     '''
     File class for content with no previous existence on the filesystem.
     '''
+
     def __init__(self, content):
-        self.content = content
+        self._content = content
+
+    @property
+    def content(self):
+        if inspect.isfunction(self._content):
+            self._content = self._content()
+        return self._content
+
+    @content.setter
+    def content(self, content):
+        self._content = content
 
     def open(self):
         return BytesIO(self.content)
@@ -608,6 +631,7 @@ class DeflatedFile(BaseFile):
     File class for members of a jar archive. DeflatedFile.copy() effectively
     extracts the file from the jar archive.
     '''
+
     def __init__(self, file):
         from mozpack.mozjar import JarFileReader
         assert isinstance(file, JarFileReader)
@@ -617,11 +641,13 @@ class DeflatedFile(BaseFile):
         self.file.seek(0)
         return self.file
 
+
 class ExtractedTarFile(GeneratedFile):
     '''
     File class for members of a tar archive. Contents of the underlying file
     are extracted immediately and stored in memory.
     '''
+
     def __init__(self, tar, info):
         assert isinstance(info, TarInfo)
         assert isinstance(tar, TarFile)
@@ -634,6 +660,7 @@ class ExtractedTarFile(GeneratedFile):
 
     def read(self):
         return self.content
+
 
 class ManifestFile(BaseFile):
     '''
@@ -650,6 +677,7 @@ class ManifestFile(BaseFile):
         time, e.g. to jar:foobar/omni.ja!/chrome.manifest, which we don't do
         currently but could in the future.
     '''
+
     def __init__(self, base, entries=None):
         self._base = base
         self._entries = []
@@ -683,9 +711,12 @@ class ManifestFile(BaseFile):
         Return a file-like object allowing to read() the serialized content of
         the manifest.
         '''
-        return BytesIO(''.join('%s\n' % e.rebase(self._base)
-                               for e in chain(self._entries,
-                                              self._interfaces)))
+        return BytesIO(
+            ensure_bytes(
+                ''.join(
+                    '%s\n' % e.rebase(self._base)
+                    for e in chain(self._entries, self._interfaces)
+                )))
 
     def __iter__(self):
         '''
@@ -705,6 +736,7 @@ class MinifiedProperties(BaseFile):
     File class for minified properties. This wraps around a BaseFile instance,
     and removes lines starting with a # from its content.
     '''
+
     def __init__(self, file):
         assert isinstance(file, BaseFile)
         self._file = file
@@ -714,14 +746,15 @@ class MinifiedProperties(BaseFile):
         Return a file-like object allowing to read() the minified content of
         the properties file.
         '''
-        return BytesIO(''.join(l for l in self._file.open().readlines()
-                               if not l.startswith('#')))
+        return BytesIO(b''.join(l for l in self._file.open().readlines()
+                                if not l.startswith(b'#')))
 
 
 class MinifiedJavaScript(BaseFile):
     '''
     File class for minifying JavaScript files.
     '''
+
     def __init__(self, file, verify_command=None):
         assert isinstance(file, BaseFile)
         self._file = file
@@ -751,7 +784,7 @@ class MinifiedJavaScript(BaseFile):
                 subprocess.check_output(args, stderr=subprocess.STDOUT)
             except subprocess.CalledProcessError as e:
                 errors.warn('JS minification verification failed for %s:' %
-                    (getattr(self._file, 'path', '<unknown>')))
+                            (getattr(self._file, 'path', '<unknown>')))
                 # Prefix each line with "Warning:" so mozharness doesn't
                 # think these error messages are real errors.
                 for line in e.output.splitlines():
@@ -764,7 +797,7 @@ class MinifiedJavaScript(BaseFile):
 
 class BaseFinder(object):
     def __init__(self, base, minify=False, minify_js=False,
-        minify_js_verify_command=None):
+                 minify_js_verify_command=None):
         '''
         Initializes the instance with a reference base directory.
 
@@ -884,8 +917,9 @@ class FileFinder(BaseFinder):
     '''
     Helper to get appropriate BaseFile instances from the file system.
     '''
+
     def __init__(self, base, find_executables=False, ignore=(),
-                 find_dotfiles=False, **kargs):
+                 ignore_broken_symlinks=False, find_dotfiles=False, **kargs):
         '''
         Create a FileFinder for files under the given base directory.
 
@@ -898,11 +932,15 @@ class FileFinder(BaseFinder):
         ``mozpath.match()``. This means if an entry corresponds
         to a directory, all files under that directory will be ignored. If
         an entry corresponds to a file, that particular file will be ignored.
+        ``ignore_broken_symlinks`` is passed by the packager to work around an
+        issue with the build system not cleaning up stale files in some common
+        cases. See bug 1297381.
         '''
         BaseFinder.__init__(self, base, **kargs)
         self.find_dotfiles = find_dotfiles
         self.find_executables = find_executables
         self.ignore = ignore
+        self.ignore_broken_symlinks = ignore_broken_symlinks
 
     def _find(self, pattern):
         '''
@@ -945,6 +983,9 @@ class FileFinder(BaseFinder):
     def get(self, path):
         srcpath = os.path.join(self.base, path)
         if not os.path.lexists(srcpath):
+            return None
+
+        if self.ignore_broken_symlinks and not os.path.exists(srcpath):
             return None
 
         for p in self.ignore:
@@ -999,6 +1040,7 @@ class JarFinder(BaseFinder):
     '''
     Helper to get appropriate DeflatedFile instances from a JarReader.
     '''
+
     def __init__(self, base, reader, **kargs):
         '''
         Create a JarFinder for files in the given JarReader. The base argument
@@ -1021,6 +1063,7 @@ class TarFinder(BaseFinder):
     '''
     Helper to get files from a TarFile.
     '''
+
     def __init__(self, base, tar, **kargs):
         '''
         Create a TarFinder for files in the given TarFile. The base argument
@@ -1051,13 +1094,14 @@ class ComposedFinder(BaseFinder):
     Note this could be optimized to be smarter than getting all the files
     in advance.
     '''
+
     def __init__(self, finders):
         # Can't import globally, because of the dependency of mozpack.copier
         # on this module.
         from mozpack.copier import FileRegistry
         self.files = FileRegistry()
 
-        for base, finder in sorted(finders.iteritems()):
+        for base, finder in sorted(six.iteritems(finders)):
             if self.files.contains(base):
                 self.files.remove(base)
             for p, f in finder.find(''):
@@ -1070,6 +1114,7 @@ class ComposedFinder(BaseFinder):
 
 class MercurialFile(BaseFile):
     """File class for holding data from Mercurial."""
+
     def __init__(self, client, rev, path):
         self._content = client.cat([path], rev=rev)
 

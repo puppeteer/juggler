@@ -8,6 +8,7 @@
 #include "mozilla/TypeTraits.h"
 #include "mozilla/UniquePtr.h"
 
+#include "js/ArrayBuffer.h"  // JS::NewArrayBuffer
 #include "js/RootingAPI.h"
 #include "jsapi-tests/tests.h"
 #include "vm/Runtime.h"
@@ -131,7 +132,7 @@ bool TestHeapPostBarrierUpdate() {
     ptr = testStruct.release();
   }
 
-  cx->minorGC(JS::gcreason::API);
+  cx->minorGC(JS::GCReason::API);
 
   W& wrapper = ptr->wrapper;
   CHECK(uintptr_t(wrapper.get()) != initialObjAsInt);
@@ -140,7 +141,7 @@ bool TestHeapPostBarrierUpdate() {
 
   JS::DeletePolicy<TestStruct<W>>()(ptr);
 
-  cx->minorGC(JS::gcreason::API);
+  cx->minorGC(JS::GCReason::API);
 
   return true;
 }
@@ -166,7 +167,7 @@ bool TestHeapPostBarrierInitFailure() {
     // testStruct deleted here, as if we left this block due to an error.
   }
 
-  cx->minorGC(JS::gcreason::API);
+  cx->minorGC(JS::GCReason::API);
 
   return true;
 }
@@ -178,10 +179,10 @@ BEGIN_TEST(testUnbarrieredEquality) {
   AutoLeaveZeal nozeal(cx);
 #endif /* JS_GC_ZEAL */
 
-  // Use ArrayBuffers because they have finalizers, which allows using them
-  // in ObjectPtr without awkward conversations about nursery allocatability.
-  JS::RootedObject robj(cx, JS_NewArrayBuffer(cx, 20));
-  JS::RootedObject robj2(cx, JS_NewArrayBuffer(cx, 30));
+  // Use ArrayBuffers because they have finalizers, which allows using them in
+  // TenuredHeap<> without awkward conversations about nursery allocatability.
+  JS::RootedObject robj(cx, JS::NewArrayBuffer(cx, 20));
+  JS::RootedObject robj2(cx, JS::NewArrayBuffer(cx, 30));
   cx->runtime()->gc.evictNursery();  // Need tenured objects
 
   // Need some bare pointers to compare against.
@@ -212,15 +213,6 @@ BEGIN_TEST(testUnbarrieredEquality) {
     JS::TenuredHeap<JSObject*> heap2(obj2);
     CHECK(TestWrapper(obj, obj2, heap, heap2));
     CHECK(TestWrapper(constobj, constobj2, heap, heap2));
-  }
-
-  {
-    JS::ObjectPtr objptr(obj);
-    JS::ObjectPtr objptr2(obj2);
-    CHECK(TestWrapper(obj, obj2, objptr, objptr2));
-    CHECK(TestWrapper(constobj, constobj2, objptr, objptr2));
-    objptr.finalize(cx);
-    objptr2.finalize(cx);
   }
 
   // Sanity check that the barriers normally mark things black.

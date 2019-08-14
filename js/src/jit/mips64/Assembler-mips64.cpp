@@ -20,7 +20,8 @@ ABIArg ABIArgGenerator::next(MIRType type) {
   switch (type) {
     case MIRType::Int32:
     case MIRType::Int64:
-    case MIRType::Pointer: {
+    case MIRType::Pointer:
+    case MIRType::RefOrNull: {
       Register destReg;
       if (GetIntArgReg(usedArgSlots_, &destReg)) {
         current_ = ABIArg(destReg);
@@ -115,14 +116,18 @@ static void TraceOneDataRelocation(JSTracer* trc, Instruction* inst) {
   void* ptr = (void*)Assembler::ExtractLoad64Value(inst);
   void* prior = ptr;
 
-  // All pointers on MIPS64 will have the top bits cleared. If those bits
-  // are not cleared, this must be a Value.
+  // Data relocations can be for Values or for raw pointers. If a Value is
+  // zero-tagged, we can trace it as if it were a raw pointer. If a Value
+  // is not zero-tagged, we have to interpret it as a Value to ensure that the
+  // tag bits are masked off to recover the actual pointer.
   uintptr_t word = reinterpret_cast<uintptr_t>(ptr);
   if (word >> JSVAL_TAG_SHIFT) {
+    // This relocation is a Value with a non-zero tag.
     Value v = Value::fromRawBits(word);
     TraceManuallyBarrieredEdge(trc, &v, "ion-masm-value");
     ptr = (void*)v.bitsAsPunboxPointer();
   } else {
+    // This relocation is a raw pointer or a Value with a zero tag.
     // No barrier needed since these are constants.
     TraceManuallyBarrieredGenericPointerEdge(
         trc, reinterpret_cast<gc::Cell**>(&ptr), "ion-masm-ptr");
@@ -134,8 +139,9 @@ static void TraceOneDataRelocation(JSTracer* trc, Instruction* inst) {
   }
 }
 
-/* static */ void Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code,
-                                                  CompactBufferReader& reader) {
+/* static */
+void Assembler::TraceDataRelocations(JSTracer* trc, JitCode* code,
+                                     CompactBufferReader& reader) {
   while (reader.more()) {
     size_t offset = reader.readUnsigned();
     Instruction* inst = (Instruction*)(code->raw() + offset);

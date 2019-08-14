@@ -10,13 +10,53 @@ from mach.decorators import (
     CommandArgument,
     CommandProvider,
     Command,
+    SubCommand,
 )
 
 from mozbuild.base import MachCommandBase, MozbuildObject
 
 
 @CommandProvider
+class BustedProvider(object):
+    @Command('busted', category='misc',
+             description='Query known bugs in our tooling, and file new ones.')
+    def busted_default(self):
+        import requests
+        payload = {'include_fields': 'id,summary,last_change_time',
+                   'blocks': 1543241,
+                   'resolution': '---'}
+        response = requests.get('https://bugzilla.mozilla.org/rest/bug', payload)
+        response.raise_for_status()
+        json_response = response.json()
+        if 'bugs' in json_response and len(json_response['bugs']) > 0:
+            # Display most recently modifed bugs first.
+            bugs = sorted(json_response['bugs'], key=lambda item: item['last_change_time'],
+                          reverse=True)
+            for bug in bugs:
+                print("Bug %s - %s" % (bug['id'], bug['summary']))
+        else:
+            print("No known tooling issues found.")
+
+    @SubCommand('busted',
+                'file',
+                description='File a bug for busted tooling.')
+    def busted_file(self):
+        import webbrowser
+        uri = ('https://bugzilla.mozilla.org/enter_bug.cgi?'
+               'product=Firefox%20Build%20System&component=General&blocked=1543241')
+        webbrowser.open_new_tab(uri)
+
+
+@CommandProvider
 class SearchProvider(object):
+    @Command('searchfox', category='misc',
+             description='Search for something in Searchfox.')
+    @CommandArgument('term', nargs='+', help='Term(s) to search for.')
+    def searchfox(self, term):
+        import webbrowser
+        term = ' '.join(term)
+        uri = 'https://searchfox.org/mozilla-central/search?q=%s' % term
+        webbrowser.open_new_tab(uri)
     @Command('dxr', category='misc',
              description='Search for something in DXR.')
     @CommandArgument('term', nargs='+', help='Term(s) to search for.')
@@ -46,13 +86,14 @@ class SearchProvider(object):
 
     @Command('search', category='misc',
              description='Search for something on the Internets. '
-             'This will open 3 new browser tabs and search for the term on Google, '
-             'MDN, and DXR.')
+             'This will open 4 new browser tabs and search for the term on Google, '
+             'MDN, DXR, and Searchfox.')
     @CommandArgument('term', nargs='+', help='Term(s) to search for.')
     def search(self, term):
         self.google(term)
         self.mdn(term)
         self.dxr(term)
+        self.searchfox(term)
 
 
 @CommandProvider
@@ -75,97 +116,19 @@ class UUIDProvider(object):
             print(('  { ' + '0x%s, ' * 7 + '0x%s } }') % pairs)
 
 
+def REMOVED(cls):
+    """Command no longer exists!
+
+    This functionality is no longer supported in mach.
+    """
+    return False
+
+
 @CommandProvider
 class PastebinProvider(object):
-    @Command('pastebin', category='misc',
-             description='Command line interface to pastebin.mozilla.org.')
-    @CommandArgument('--language', default=None,
-                     help='Language to use for syntax highlighting')
-    @CommandArgument('--poster', default='',
-                     help='Specify your name for use with pastebin.mozilla.org')
-    @CommandArgument('--duration', default='day',
-                     choices=['d', 'day', 'm', 'month', 'f', 'forever'],
-                     help='Keep for specified duration (default: %(default)s)')
-    @CommandArgument('file', nargs='?', default=None,
-                     help='Specify the file to upload to pastebin.mozilla.org')
-    def pastebin(self, language, poster, duration, file):
-        import urllib
-        import urllib2
-
-        URL = 'https://pastebin.mozilla.org/'
-
-        FILE_TYPES = [{'value': 'text', 'name': 'None', 'extension': 'txt'},
-                      {'value': 'bash', 'name': 'Bash', 'extension': 'sh'},
-                      {'value': 'c', 'name': 'C', 'extension': 'c'},
-                      {'value': 'cpp', 'name': 'C++', 'extension': 'cpp'},
-                      {'value': 'html4strict', 'name': 'HTML', 'extension': 'html'},
-                      {'value': 'javascript', 'name': 'Javascript', 'extension': 'js'},
-                      {'value': 'javascript', 'name': 'Javascript', 'extension': 'jsm'},
-                      {'value': 'lua', 'name': 'Lua', 'extension': 'lua'},
-                      {'value': 'perl', 'name': 'Perl', 'extension': 'pl'},
-                      {'value': 'php', 'name': 'PHP', 'extension': 'php'},
-                      {'value': 'python', 'name': 'Python', 'extension': 'py'},
-                      {'value': 'ruby', 'name': 'Ruby', 'extension': 'rb'},
-                      {'value': 'css', 'name': 'CSS', 'extension': 'css'},
-                      {'value': 'diff', 'name': 'Diff', 'extension': 'diff'},
-                      {'value': 'ini', 'name': 'INI file', 'extension': 'ini'},
-                      {'value': 'java', 'name': 'Java', 'extension': 'java'},
-                      {'value': 'xml', 'name': 'XML', 'extension': 'xml'},
-                      {'value': 'xml', 'name': 'XML', 'extension': 'xul'}]
-
-        lang = ''
-
-        if file:
-            try:
-                with open(file, 'r') as f:
-                    content = f.read()
-                # TODO: Use mime-types instead of extensions; suprocess('file <f_name>')
-                # Guess File-type based on file extension
-                extension = file.split('.')[-1]
-                for l in FILE_TYPES:
-                    if extension == l['extension']:
-                        print('Identified file as %s' % l['name'])
-                        lang = l['value']
-            except IOError:
-                print('ERROR. No such file')
-                return 1
-        else:
-            content = sys.stdin.read()
-        duration = duration[0]
-
-        if language:
-            lang = language
-
-        params = [
-            ('parent_pid', ''),
-            ('format', lang),
-            ('code2', content),
-            ('poster', poster),
-            ('expiry', duration),
-            ('paste', 'Send')]
-
-        data = urllib.urlencode(params)
-        print('Uploading ...')
-        try:
-            req = urllib2.Request(URL, data)
-            response = urllib2.urlopen(req)
-            http_response_code = response.getcode()
-            if http_response_code == 200:
-                pasteurl = response.geturl()
-                if pasteurl == URL:
-                    if "Query failure: Data too long for column" in response.readline():
-                        print('ERROR. Request too large. Limit is 64KB.')
-                    else:
-                        print('ERROR. Unknown error')
-                else:
-                    print(pasteurl)
-            else:
-                print('Could not upload the file, '
-                      'HTTP Response Code %s' % (http_response_code))
-        except urllib2.URLError:
-            print('ERROR. Could not connect to pastebin.mozilla.org.')
-            return 1
-        return 0
+    @Command('pastebin', category='misc', conditions=[REMOVED])
+    def pastebin(self):
+        pass
 
 
 def mozregression_import():

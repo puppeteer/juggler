@@ -4,15 +4,21 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createFactory,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const FluentReact = require("devtools/client/shared/vendor/fluent-react");
 const Localized = createFactory(FluentReact.Localized);
 
+const DetailsLog = createFactory(require("../shared/DetailsLog"));
 const FieldPair = createFactory(require("./FieldPair"));
+const Message = createFactory(require("../shared/Message"));
 
+const { MESSAGE_LEVEL } = require("../../constants");
 const Types = require("../../types/index");
 
 /**
@@ -21,91 +27,139 @@ const Types = require("../../types/index");
 class ExtensionDetail extends PureComponent {
   static get propTypes() {
     return {
+      children: PropTypes.node,
       // Provided by wrapping the component with FluentReact.withLocalization.
       getString: PropTypes.func.isRequired,
       target: Types.debugTarget.isRequired,
     };
   }
 
-  renderUUID() {
-    const { target } = this.props;
-    const { manifestURL, uuid } = target.details;
+  renderWarnings() {
+    const { warnings } = this.props.target.details;
 
-    const value = [
-      uuid,
-      Localized(
-        {
-          id: "about-debugging-extension-manifest-link",
-          key: "manifest",
-        },
-        dom.a(
+    if (!warnings.length) {
+      return null;
+    }
+
+    return dom.section(
+      {
+        className: "debug-target-item__messages",
+      },
+      warnings.map((warning, index) => {
+        return Message(
           {
-            className: "extension-detail__manifest",
-            href: manifestURL,
-            target: "_blank",
+            level: MESSAGE_LEVEL.WARNING,
+            isCloseable: true,
+            key: `warning-${index}`,
           },
-          "Manifest URL",
-        )
-      ),
-    ];
+          DetailsLog(
+            {
+              type: MESSAGE_LEVEL.WARNING,
+            },
+            dom.p(
+              {
+                className: "technical-text",
+              },
+              warning
+            )
+          )
+        );
+      })
+    );
+  }
+
+  renderUUID() {
+    const { uuid } = this.props.target.details;
+    if (!uuid) {
+      return null;
+    }
 
     return Localized(
       {
         id: "about-debugging-extension-uuid",
         attrs: { label: true },
       },
-      FieldPair(
-        {
-          slug: "uuid",
-          label: "Internal UUID",
-          value,
-        }
-      )
+      FieldPair({
+        label: "Internal UUID",
+        value: uuid,
+      })
+    );
+  }
+
+  renderExtensionId() {
+    const { id } = this.props.target;
+
+    return Localized(
+      {
+        id: "about-debugging-extension-id",
+        attrs: { label: true },
+      },
+      FieldPair({
+        label: "Extension ID",
+        value: id,
+      })
     );
   }
 
   renderLocation() {
     const { location } = this.props.target.details;
+    if (!location) {
+      return null;
+    }
 
     return Localized(
       {
         id: "about-debugging-extension-location",
         attrs: { label: true },
       },
-      FieldPair(
-        {
-          slug: "location",
-          label: "Location",
-          value: location,
-        }
-      )
+      FieldPair({
+        label: "Location",
+        value: location,
+      })
+    );
+  }
+
+  renderManifest() {
+    const { manifestURL } = this.props.target.details;
+    if (!manifestURL) {
+      return null;
+    }
+
+    const link = dom.a(
+      {
+        className: "qa-manifest-url",
+        href: manifestURL,
+        target: "_blank",
+      },
+      manifestURL
+    );
+
+    return Localized(
+      {
+        id: "about-debugging-extension-manifest-url",
+        attrs: { label: true },
+      },
+      FieldPair({
+        label: "Manifest URL",
+        value: link,
+      })
     );
   }
 
   render() {
-    const { target } = this.props;
-    const { id, details } = target;
-    const { location, uuid } = details;
-
-    return dom.dl(
+    return dom.section(
       {
-        className: "extension-detail",
+        className: "debug-target-item__detail",
       },
-      location ? this.renderLocation() : null,
-      Localized(
-        {
-          id: "about-debugging-extension-id",
-          attrs: { label: true },
-        },
-        FieldPair(
-          {
-            slug: "extension",
-            label: "Extension ID",
-            value: id,
-          }
-        )
-      ),
-      uuid ? this.renderUUID() : null,
+      this.renderWarnings(),
+      dom.dl(
+        {},
+        this.renderLocation(),
+        this.renderExtensionId(),
+        this.renderUUID(),
+        this.renderManifest(),
+        this.props.children
+      )
     );
   }
 }

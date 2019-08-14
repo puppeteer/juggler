@@ -20,13 +20,12 @@
 #include "mozilla/dom/KeyframeEffect.h"
 
 #include "nsPresContext.h"
+#include "nsPresContextInlines.h"
 #include "nsStyleChangeList.h"
 #include "nsLayoutUtils.h"
 #include "nsIFrame.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsDOMMutationObserver.h"
-#include "nsIPresShell.h"
-#include "nsIPresShellInlines.h"
 #include "nsRFPService.h"
 #include <algorithm>  // std::stable_sort
 #include <math.h>
@@ -529,7 +528,7 @@ static nsAnimationManager::OwningCSSAnimationPtrArray BuildAnimations(
 }
 
 void nsAnimationManager::UpdateAnimations(dom::Element* aElement,
-                                          CSSPseudoElementType aPseudoType,
+                                          PseudoStyleType aPseudoType,
                                           const ComputedStyle* aComputedStyle) {
   MOZ_ASSERT(mPresContext->IsDynamic(),
              "Should not update animations for print or print preview");
@@ -538,8 +537,7 @@ void nsAnimationManager::UpdateAnimations(dom::Element* aElement,
              "document tree");
 
   const nsStyleDisplay* disp =
-      aComputedStyle ? aComputedStyle->ComputedData()->GetStyleDisplay()
-                     : nullptr;
+      aComputedStyle ? aComputedStyle->StyleDisplay() : nullptr;
 
   if (!disp || disp->mDisplay == StyleDisplay::None) {
     // If we are in a display:none subtree we will have no computed values.
@@ -608,6 +606,6 @@ void nsAnimationManager::DoUpdateAnimations(
   // Cancel removed animations
   for (size_t newAnimIdx = newAnimations.Length(); newAnimIdx-- != 0;) {
     aBuilder.NotifyNewOrRemovedAnimation(*newAnimations[newAnimIdx]);
-    newAnimations[newAnimIdx]->CancelFromStyle();
+    newAnimations[newAnimIdx]->CancelFromStyle(PostRestyleMode::IfNeeded);
   }
 }

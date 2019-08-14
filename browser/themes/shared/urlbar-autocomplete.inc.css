@@ -5,14 +5,13 @@
 %endif
 
 %filter substitution
-%define urlbarViewPadding 5px
-%define urlbarViewIconMarginEnd .6em
-%define urlbarViewFaviconOffset (@urlbarViewPadding@ + 16px /* action icon width */ + @urlbarViewIconMarginEnd@)
+%define urlbarViewPadding 4px
+%define urlbarViewIconMarginEnd 8px
+%define urlbarViewFaviconOffset (@urlbarViewPadding@ + 16px /* type icon width */ + @urlbarViewIconMarginEnd@)
 
 :root {
-  --autocomplete-popup-background: -moz-field;
-  --autocomplete-popup-color: -moz-fieldtext;
-  --autocomplete-popup-border-color: ThreeDShadow;
+  --autocomplete-popup-background: var(--arrowpanel-background);
+  --autocomplete-popup-color: var(--arrowpanel-color);
   --autocomplete-popup-highlight-background: Highlight;
   --autocomplete-popup-highlight-color: HighlightText;
 }
@@ -31,32 +30,55 @@
   -moz-appearance: none;
   background: var(--autocomplete-popup-background);
   color: var(--autocomplete-popup-color);
-  border: 1px solid var(--autocomplete-popup-border-color);
+  border: 1px solid var(--chrome-content-separator-color);
+  border-left-style: none;
+  border-right-style: none;
 }
 
 .urlbarView-body-inner {
   box-sizing: border-box;
 }
 
-.urlbarView-results {
+#urlbarView-results {
+  box-sizing: border-box;
   padding: @urlbarViewPadding@;
   white-space: nowrap;
 }
 
 .urlbarView-row {
   border-radius: 2px;
-  padding: 7px;
-  padding-inline-start: calc(var(--item-padding-start, calc(7px + @urlbarViewFaviconOffset@)) - @urlbarViewFaviconOffset@);
-  padding-inline-end: var(--item-padding-end, 7px);
+  fill: currentColor;
+  fill-opacity: .6;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  padding-inline-start: calc(var(--item-padding-start, calc(5px + @urlbarViewFaviconOffset@)) - @urlbarViewFaviconOffset@);
+  padding-inline-end: var(--item-padding-end, 5px);
+}
+
+:root[uidensity=touch] .urlbarView-row {
+  padding-top: 11px;
+  padding-bottom: 11px;
 }
 
 .urlbarView-row-inner {
-  overflow: hidden;
-  display: block;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: end;
+  justify-content: start;
 }
 
-.urlbarView-row-inner[overflow] {
+.urlbarView-title[overflow],
+.urlbarView-url[overflow] {
   mask-image: linear-gradient(to left, transparent, black 2em);
+}
+
+.urlbarView-title[overflow]:not([isurl]):-moz-locale-dir(rtl) {
+  mask-image: linear-gradient(to right, transparent, black 2em);
+}
+
+.urlbarView-title[isurl]:-moz-locale-dir(rtl),
+.urlbarView-url:-moz-locale-dir(rtl) {
+  direction: ltr !important;
 }
 
 .urlbarView-row:hover {
@@ -66,52 +88,110 @@
 .urlbarView-row[selected] {
   background: var(--autocomplete-popup-highlight-background);
   color: var(--autocomplete-popup-highlight-color);
+  fill-opacity: 1;
 }
 
 .urlbarView-type-icon,
 .urlbarView-favicon {
-  display: inline-block;
-  vertical-align: middle;
-  width: 16px;
+  min-width: 16px;
   height: 16px;
   margin-inline-end: @urlbarViewIconMarginEnd@;
   background-repeat: no-repeat;
   background-size: contain;
   -moz-context-properties: fill, fill-opacity;
-  fill: currentColor;
-  fill-opacity: 0.6;
+}
+
+@media (min-resolution: 2dppx) {
+  .urlbarView-type-icon,
+  .urlbarView-favicon {
+    transform: translateY(-1.5px);
+  }
 }
 
 .urlbarView-row[type=bookmark] > .urlbarView-row-inner > .urlbarView-type-icon {
   background-image: url(chrome://browser/skin/bookmark.svg);
 }
 
-.urlbarView-row[type=switchtab] > .urlbarView-row-inner > .urlbarView-type-icon {
+.urlbarView-row[type=remotetab] > .urlbarView-row-inner > .urlbarView-type-icon,
+#urlbar-results:not([actionoverride]) .urlbarView-row[type=switchtab] > .urlbarView-row-inner > .urlbarView-type-icon {
   background-image: url(chrome://browser/skin/tab.svg);
 }
 
 .urlbarView-title {
-  font-size: 1.05em;
+  overflow: hidden;
+  white-space: nowrap;
+  /* We prioritize the title over the url, so it can grow freely, but it should
+     never crop the url completely */
+  flex-shrink: 0;
+  max-width: calc(70% - 2 * (16px + @urlbarViewIconMarginEnd@));
 }
 
-.urlbarView-title::after {
+.urlbarView-title-separator::before {
   content: "\2014";
   color: var(--panel-disabled-color);
   margin: 0 .4em;
 }
 
-.urlbarView-secondary {
+.urlbarView-title:empty + .urlbarView-tags:empty + .urlbarView-title-separator {
+  display: none;
+}
+
+.urlbarView-tags,
+.urlbarView-title:not(:empty) ~ .urlbarView-secondary {
+  font-size: .85em;
+}
+
+.urlbarView-title > strong,
+.urlbarView-url > strong,
+.urlbarView-tag > strong {
+  font-weight: 600;
+}
+
+.urlbarView-title:not(:empty) ~ .urlbarView-secondary {
   color: var(--urlbar-popup-action-color);
-  font-size: 0.9em;
 }
 
 .urlbarView-url {
+  overflow: hidden;
+}
+
+.urlbarView-title:not(:empty) ~ .urlbarView-url {
   color: var(--urlbar-popup-url-color);
 }
 
-.urlbarView-row[selected] > .urlbarView-row-inner > .urlbarView-title::after,
+.urlbarView-row[selected] > .urlbarView-row-inner > .urlbarView-title-separator::before,
 .urlbarView-row[selected] > .urlbarView-row-inner > .urlbarView-secondary {
   color: inherit;
+}
+
+.urlbarView-row[type=remotetab][selected] > .urlbarView-row-inner > .urlbarView-action,
+.urlbarView-row[type=remotetab]:hover > .urlbarView-row-inner > .urlbarView-action,
+.urlbarView-row[type=remotetab]:not([selected]):not(:hover) > .urlbarView-row-inner > .urlbarView-url,
+.urlbarView-row[type=search]:not([selected]):not(:hover) > .urlbarView-row-inner > .urlbarView-action,
+.urlbarView-row[type=search]:not([selected]):not(:hover) > .urlbarView-row-inner > .urlbarView-title-separator,
+#urlbar-results[actionoverride] .urlbarView-row[type=switchtab] > .urlbarView-row-inner > .urlbarView-action,
+#urlbar-results:not([actionoverride]) .urlbarView-row[type=switchtab] > .urlbarView-row-inner > .urlbarView-url {
+  /* Use visibility:collapse instead of display:none since the latter can
+     confuse the overflow state of title and url elements when their content
+     changes while they're hidden. */
+  visibility: collapse;
+}
+
+.urlbarView-tags {
+  overflow: hidden;
+}
+
+.urlbarView-tag {
+  background-color: var(--arrowpanel-dimmed);
+  border-radius: 2px;
+  border: 1px solid var(--panel-separator-color);
+  padding: 0 1px;
+  margin-inline-start: .4em;
+}
+
+.urlbarView-row[selected] > .urlbarView-row-inner > .urlbarView-tags > .urlbarView-tag {
+  background-color: var(--autocomplete-popup-highlight-color);
+  color: var(--autocomplete-popup-highlight-background);
 }
 
 /* legacy URL bar styles below */
@@ -120,7 +200,7 @@
 #PopupSearchAutoComplete {
   background: var(--autocomplete-popup-background);
   color: var(--autocomplete-popup-color);
-  border-color: var(--autocomplete-popup-border-color);
+  border-color: var(--arrowpanel-border-color);
 }
 
 #PopupAutoCompleteRichResult .autocomplete-richlistbox {

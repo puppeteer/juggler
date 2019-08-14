@@ -5,6 +5,7 @@
 
 package org.mozilla.geckoview.test.rule;
 
+import org.mozilla.geckoview.ContentBlocking;
 import org.mozilla.geckoview.GeckoDisplay;
 import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoResult.OnValueListener;
@@ -35,6 +36,7 @@ import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
 import android.app.Instrumentation;
+import android.graphics.Color;
 import android.graphics.Point;
 import android.graphics.SurfaceTexture;
 import android.net.LocalSocketAddress;
@@ -98,7 +100,7 @@ public class GeckoSessionTestRule implements TestRule {
             sOnNewSession = GeckoSession.NavigationDelegate.class.getMethod(
                     "onNewSession", GeckoSession.class, String.class);
             sOnCrash = GeckoSession.ContentDelegate.class.getMethod(
-                    "onCrash", GeckoSession.class);
+                    "onKill", GeckoSession.class);
         } catch (final NoSuchMethodException e) {
             throw new RuntimeException(e);
         }
@@ -200,7 +202,8 @@ public class GeckoSessionTestRule implements TestRule {
             Key() {
                 final Field field;
                 try {
-                    field = GeckoSessionSettings.class.getField(name());
+                    field = GeckoSessionSettings.class.getDeclaredField(name());
+                    field.setAccessible(true);
                     mKey = (GeckoSessionSettings.Key<?>) field.get(null);
                 } catch (final NoSuchFieldException | IllegalAccessException e) {
                     throw new RuntimeException(e);
@@ -212,24 +215,45 @@ public class GeckoSessionTestRule implements TestRule {
 
             @SuppressWarnings("unchecked")
             public void set(final GeckoSessionSettings settings, final String value) {
-                if (boolean.class.equals(mType) || Boolean.class.equals(mType)) {
-                    settings.setBoolean((GeckoSessionSettings.Key<Boolean>) mKey,
-                            Boolean.valueOf(value));
-                } else if (int.class.equals(mType) || Integer.class.equals(mType)) {
-                    try {
-                        settings.setInt((GeckoSessionSettings.Key<Integer>) mKey,
-                                (Integer) GeckoSessionSettings.class.getField(value)
-                                        .get(null));
-                    } catch (final NoSuchFieldException | IllegalAccessException |
-                            ClassCastException e) {
-                        settings.setInt((GeckoSessionSettings.Key<Integer>) mKey,
-                                        Integer.valueOf(value));
+                try {
+                    if (boolean.class.equals(mType) || Boolean.class.equals(mType)) {
+                        Method method = GeckoSessionSettings.class
+                                .getDeclaredMethod("setBoolean",
+                                        GeckoSessionSettings.Key.class,
+                                        boolean.class);
+                        method.setAccessible(true);
+                        method.invoke(settings, mKey, Boolean.valueOf(value));
+                    } else if (int.class.equals(mType) || Integer.class.equals(mType)) {
+                        Method method = GeckoSessionSettings.class
+                                .getDeclaredMethod("setInt",
+                                        GeckoSessionSettings.Key.class,
+                                        int.class);
+                        method.setAccessible(true);
+                        try {
+                            method.invoke(settings, mKey,
+                                    (Integer)GeckoSessionSettings.class.getField(value)
+                                            .get(null));
+                        }
+                        catch (final NoSuchFieldException | IllegalAccessException |
+                                ClassCastException e) {
+                            method.invoke(settings, mKey,
+                                    Integer.valueOf(value));
+                        }
+                    } else if (String.class.equals(mType)) {
+                        Method method = GeckoSessionSettings.class
+                                .getDeclaredMethod("setString",
+                                        GeckoSessionSettings.Key.class,
+                                        String.class);
+                        method.setAccessible(true);
+                        method.invoke(settings, mKey, value);
+                    } else {
+                        throw new IllegalArgumentException("Unsupported type: " +
+                                mType.getSimpleName());
                     }
-                } else if (String.class.equals(mType)) {
-                    settings.setString((GeckoSessionSettings.Key<String>) mKey, value);
-                } else {
-                    throw new IllegalArgumentException("Unsupported type: " +
-                            mType.getSimpleName());
+                } catch (NoSuchMethodException
+                        | IllegalAccessException
+                        | InvocationTargetException e) {
+                    throw new RuntimeException(e);
                 }
             }
         }
@@ -837,8 +861,9 @@ public class GeckoSessionTestRule implements TestRule {
     protected boolean mIgnoreCrash;
 
     public GeckoSessionTestRule() {
-        mDefaultSettings = new GeckoSessionSettings();
-        mDefaultSettings.setBoolean(GeckoSessionSettings.USE_MULTIPROCESS, env.isMultiprocess());
+        mDefaultSettings = new GeckoSessionSettings.Builder()
+                .useMultiprocess(env.isMultiprocess())
+                .build();
     }
 
     /**
@@ -934,16 +959,24 @@ public class GeckoSessionTestRule implements TestRule {
         return RuntimeCreator.getRuntime();
     }
 
+    public @Nullable GeckoDisplay getDisplay() {
+        return mDisplay;
+    }
+
     protected static Object setDelegate(final @NonNull Class<?> cls,
                                         final @NonNull GeckoSession session,
                                         final @Nullable Object delegate)
             throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
         if (cls == GeckoSession.TextInputDelegate.class) {
-            return SessionTextInput.class.getMethod("setDelegate",
-                                                    cls).invoke(session.getTextInput(), delegate);
+            return SessionTextInput.class.getMethod("setDelegate", cls)
+                   .invoke(session.getTextInput(), delegate);
         }
-        return GeckoSession.class.getMethod("set" + cls.getSimpleName(),
-                                            cls).invoke(session, delegate);
+        if (cls == ContentBlocking.Delegate.class) {
+            return GeckoSession.class.getMethod("setContentBlockingDelegate", cls)
+                   .invoke(session, delegate);
+        }
+        return GeckoSession.class.getMethod("set" + cls.getSimpleName(), cls)
+               .invoke(session, delegate);
     }
 
     protected static Object getDelegate(final @NonNull Class<?> cls,
@@ -953,7 +986,12 @@ public class GeckoSessionTestRule implements TestRule {
             return SessionTextInput.class.getMethod("getDelegate")
                                          .invoke(session.getTextInput());
         }
-        return GeckoSession.class.getMethod("get" + cls.getSimpleName()).invoke(session);
+        if (cls == ContentBlocking.Delegate.class) {
+            return GeckoSession.class.getMethod("getContentBlockingDelegate")
+                   .invoke(session);
+        }
+        return GeckoSession.class.getMethod("get" + cls.getSimpleName())
+               .invoke(session);
     }
 
     @NonNull
@@ -1178,9 +1216,10 @@ public class GeckoSessionTestRule implements TestRule {
         prepareSession(mMainSession);
 
         if (mDisplaySize != null) {
-            mDisplayTexture = new SurfaceTexture(0);
-            mDisplaySurface = new Surface(mDisplayTexture);
             mDisplay = mMainSession.acquireDisplay();
+            mDisplayTexture = new SurfaceTexture(0);
+            mDisplayTexture.setDefaultBufferSize(mDisplaySize.x, mDisplaySize.y);
+            mDisplaySurface = new Surface(mDisplayTexture);
             mDisplay.surfaceChanged(mDisplaySurface, mDisplaySize.x, mDisplaySize.y);
         }
 
@@ -1255,7 +1294,6 @@ public class GeckoSessionTestRule implements TestRule {
             // We cannot detect initial page load without progress delegate.
             assertThat("ProgressDelegate cannot be null-delegate when opening session",
                        GeckoSession.ProgressDelegate.class, not(isIn(mNullDelegates)));
-
             mCallRecordHandler = new CallRecordHandler() {
                 private boolean mIsAboutBlank = !lookForAboutBlank;
 
@@ -1634,11 +1672,23 @@ public class GeckoSessionTestRule implements TestRule {
 
         boolean calledAny = false;
         int index = mLastWaitEnd;
+        long startTime = SystemClock.uptimeMillis();
+
         beforeWait();
 
         while (!calledAny || !methodCalls.isEmpty()) {
             while (index >= mCallRecords.size()) {
                 UiThreadUtils.loopUntilIdle(mTimeoutMillis);
+                // We could loop forever here if the UI thread keeps receiving
+                // messages that don't result in any methods being called.
+                // Check whether we've exceeded our allotted time and bail out.
+                if (SystemClock.uptimeMillis() - startTime > mTimeoutMillis) {
+                    break;
+                }
+            }
+
+            if (SystemClock.uptimeMillis() - startTime > mTimeoutMillis) {
+                throw new UiThreadUtils.TimeoutException("Timed out after " + mTimeoutMillis + "ms");
             }
 
             final MethodCall recorded = mCallRecords.get(index).methodCall;

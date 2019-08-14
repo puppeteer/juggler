@@ -9,7 +9,7 @@
 const TEST_URL = URL_ROOT + "doc_inspector_highlighter_dom.html";
 
 add_task(async function() {
-  const {inspector, toolbox, testActor} = await openInspectorForURL(TEST_URL);
+  const { toolbox, testActor } = await openInspectorForURL(TEST_URL);
 
   await startPicker(toolbox);
 
@@ -19,33 +19,43 @@ add_task(async function() {
   info("Selecting the ahoy paragraph DIV");
   await moveMouseOver("#ahoy");
 
-  await doKeyHover({key: "VK_LEFT", options: {}});
-  ok((await testActor.assertHighlightedNode("#simple-div2")),
-     "The highlighter shows #simple-div2. OK.");
+  await doKeyHover({ key: "VK_LEFT", options: {} });
+  ok(
+    await testActor.assertHighlightedNode("#simple-div2"),
+    "The highlighter shows #simple-div2. OK."
+  );
 
-  await doKeyHover({key: "VK_RIGHT", options: {}});
-  ok((await testActor.assertHighlightedNode("#ahoy")),
-     "The highlighter shows #ahoy. OK.");
+  await doKeyHover({ key: "VK_RIGHT", options: {} });
+  ok(
+    await testActor.assertHighlightedNode("#ahoy"),
+    "The highlighter shows #ahoy. OK."
+  );
 
   info("Going back up to the complex-div DIV");
-  await doKeyHover({key: "VK_LEFT", options: {}});
-  await doKeyHover({key: "VK_LEFT", options: {}});
-  ok((await testActor.assertHighlightedNode("#complex-div")),
-     "The highlighter shows #complex-div. OK.");
+  await doKeyHover({ key: "VK_LEFT", options: {} });
+  await doKeyHover({ key: "VK_LEFT", options: {} });
+  ok(
+    await testActor.assertHighlightedNode("#complex-div"),
+    "The highlighter shows #complex-div. OK."
+  );
 
-  await doKeyHover({key: "VK_RIGHT", options: {}});
-  ok((await testActor.assertHighlightedNode("#simple-div2")),
-     "The highlighter shows #simple-div2. OK.");
+  await doKeyHover({ key: "VK_RIGHT", options: {} });
+  ok(
+    await testActor.assertHighlightedNode("#simple-div2"),
+    "The highlighter shows #simple-div2. OK."
+  );
 
   info("Previously chosen child is remembered. Passed.");
 
   info("Stopping the picker");
-  await toolbox.highlighterUtils.stopPicker();
+  await toolbox.inspector.nodePicker.stop();
 
   function doKeyHover(args) {
     info("Key pressed. Waiting for element to be highlighted/hovered");
     const onHighlighterReady = toolbox.once("highlighter-ready");
-    const onPickerNodeHovered = inspector.toolbox.once("picker-node-hovered");
+    const onPickerNodeHovered = toolbox.inspector.nodePicker.once(
+      "picker-node-hovered"
+    );
     testActor.synthesizeKey(args);
     return promise.all([onHighlighterReady, onPickerNodeHovered]);
   }
@@ -53,9 +63,11 @@ add_task(async function() {
   function moveMouseOver(selector) {
     info("Waiting for element " + selector + " to be highlighted");
     const onHighlighterReady = toolbox.once("highlighter-ready");
-    const onPickerNodeHovered = inspector.toolbox.once("picker-node-hovered");
+    const onPickerNodeHovered = toolbox.inspector.nodePicker.once(
+      "picker-node-hovered"
+    );
     testActor.synthesizeMouse({
-      options: {type: "mousemove"},
+      options: { type: "mousemove" },
       center: true,
       selector: selector,
     });

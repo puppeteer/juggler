@@ -53,11 +53,10 @@ class CFGBlock : public TempObject {
   jsbytecode* start;
   jsbytecode* stop;
   CFGControlInstruction* end;
-  bool inWorkList;
 
  public:
   explicit CFGBlock(jsbytecode* start)
-      : id_(-1), start(start), stop(nullptr), end(nullptr), inWorkList(false) {}
+      : id_(-1), start(start), stop(nullptr), end(nullptr) {}
 
   static CFGBlock* New(TempAllocator& alloc, jsbytecode* start) {
     return new (alloc) CFGBlock(start);
@@ -77,15 +76,6 @@ class CFGBlock : public TempObject {
     return end;
   }
   void setStopIns(CFGControlInstruction* stopIns) { end = stopIns; }
-  bool isInWorkList() const { return inWorkList; }
-  void setInWorklist() {
-    MOZ_ASSERT(!inWorkList);
-    inWorkList = true;
-  }
-  void clearInWorkList() {
-    MOZ_ASSERT(inWorkList);
-    inWorkList = false;
-  }
   size_t id() const { return id_; }
   void setId(size_t id) { id_ = id; }
 };
@@ -451,6 +441,7 @@ class CFGBackEdge : public CFGUnaryControlInstruction {
 class CFGLoopEntry : public CFGUnaryControlInstruction {
   bool canOsr_;
   bool isForIn_;
+  bool isBrokenLoop_;
   size_t stackPhiCount_;
   jsbytecode* loopStopPc_;
 
@@ -458,14 +449,16 @@ class CFGLoopEntry : public CFGUnaryControlInstruction {
       : CFGUnaryControlInstruction(block),
         canOsr_(false),
         isForIn_(false),
+        isBrokenLoop_(false),
         stackPhiCount_(stackPhiCount),
         loopStopPc_(nullptr) {}
 
-  CFGLoopEntry(CFGBlock* block, bool canOsr, bool isForIn, size_t stackPhiCount,
-               jsbytecode* loopStopPc)
+  CFGLoopEntry(CFGBlock* block, bool canOsr, bool isForIn, bool isBrokenLoop,
+               size_t stackPhiCount, jsbytecode* loopStopPc)
       : CFGUnaryControlInstruction(block),
         canOsr_(canOsr),
         isForIn_(isForIn),
+        isBrokenLoop_(isBrokenLoop),
         stackPhiCount_(stackPhiCount),
         loopStopPc_(loopStopPc) {}
 
@@ -477,10 +470,14 @@ class CFGLoopEntry : public CFGUnaryControlInstruction {
                                           CFGLoopEntry* old,
                                           CFGBlock* loopEntry) {
     return new (alloc) CFGLoopEntry(loopEntry, old->canOsr(), old->isForIn(),
-                                    old->stackPhiCount(), old->loopStopPc());
+                                    old->isBrokenLoop(), old->stackPhiCount(),
+                                    old->maybeLoopStopPc());
   }
 
   void setCanOsr() { canOsr_ = true; }
+
+  bool isBrokenLoop() const { return isBrokenLoop_; }
+  void setIsBrokenLoop() { isBrokenLoop_ = true; }
 
   bool canOsr() const { return canOsr_; }
 
@@ -488,6 +485,8 @@ class CFGLoopEntry : public CFGUnaryControlInstruction {
   bool isForIn() const { return isForIn_; }
 
   size_t stackPhiCount() const { return stackPhiCount_; }
+
+  jsbytecode* maybeLoopStopPc() const { return loopStopPc_; }
 
   jsbytecode* loopStopPc() const {
     MOZ_ASSERT(loopStopPc_);

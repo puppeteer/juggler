@@ -11,25 +11,35 @@ const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 class CSSDeclaration extends PureComponent {
   static get propTypes() {
     return {
+      className: PropTypes.string,
+      marker: PropTypes.object,
       property: PropTypes.string.isRequired,
       value: PropTypes.string.isRequired,
-      className: PropTypes.string,
     };
   }
 
   static get defaultProps() {
     return {
       className: "",
+      marker: null,
     };
   }
 
   render() {
-    const { property, value, className } = this.props;
+    const { className, marker, property, value } = this.props;
 
-    return dom.div({ className: `declaration ${className}` },
-      dom.span({ className: "declaration-name theme-fg-color5"}, property),
-      ":",
-      dom.span({ className: "declaration-value theme-fg-color1"}, value),
+    return dom.div(
+      { className: `changes__declaration ${className}` },
+      marker,
+      dom.span(
+        { className: "changes__declaration-name theme-fg-color3" },
+        property
+      ),
+      ": ",
+      dom.span(
+        { className: "changes__declaration-value theme-fg-color1" },
+        value
+      ),
       ";"
     );
   }

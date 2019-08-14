@@ -77,7 +77,6 @@ def _make_default_strategies():
         'skip-unless-changed': SkipUnlessChanged(),
         'skip-unless-schedules': SkipUnlessSchedules(),
         'skip-unless-schedules-or-seta': Either(SkipUnlessSchedules(), SETA()),
-        'only-if-dependencies-run': OnlyIfDependenciesRun(),
     }
 
 
@@ -215,6 +214,15 @@ def get_subgraph(target_task_graph, removed_tasks, replaced_tasks, label_to_task
         named_task_dependencies = {
             name: label_to_taskid[label]
             for name, label in named_links_dict.get(label, {}).iteritems()}
+
+        # Add remaining soft dependencies
+        if task.soft_dependencies:
+            named_task_dependencies.update({
+                label: label_to_taskid[label]
+                for label in task.soft_dependencies
+                if label in label_to_taskid and label not in omit
+            })
+
         task.task = resolve_task_references(task.label, task.task, named_task_dependencies)
         deps = task.task.setdefault('dependencies', [])
         deps.extend(sorted(named_task_dependencies.itervalues()))
@@ -280,18 +288,6 @@ class Either(OptimizationStrategy):
         return self._for_substrategies(
             arg,
             lambda sub, arg: sub.should_replace_task(task, params, arg))
-
-
-class OnlyIfDependenciesRun(OptimizationStrategy):
-    """Run this taks only if its dependencies run."""
-
-    # This takes advantage of the behavior of the second phase of optimization:
-    # a task can only be replaced if it has no un-optimized dependencies. So if
-    # should_replace_task is called, then a task has no un-optimized
-    # dependencies and can be removed (indicated by returning True)
-
-    def should_replace_task(self, task, params, arg):
-        return True
 
 
 class IndexSearch(OptimizationStrategy):

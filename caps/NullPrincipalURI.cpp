@@ -13,7 +13,8 @@
 
 #include "nsEscape.h"
 #include "nsCRT.h"
-#include "nsIUUIDGenerator.h"
+
+#include "mozilla/GkRustUtils.h"
 
 using namespace mozilla;
 
@@ -27,18 +28,7 @@ NullPrincipalURI::NullPrincipalURI(const NullPrincipalURI& aOther) {
 }
 
 nsresult NullPrincipalURI::Init() {
-  // FIXME: bug 327161 -- make sure the uuid generator is reseeding-resistant.
-  nsCOMPtr<nsIUUIDGenerator> uuidgen = services::GetUUIDGenerator();
-  NS_ENSURE_TRUE(uuidgen, NS_ERROR_NOT_AVAILABLE);
-
-  nsID id;
-  nsresult rv = uuidgen->GenerateUUIDInPlace(&id);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  mPath.SetLength(NSID_LENGTH - 1);  // -1 because NSID_LENGTH counts the '\0'
-  id.ToProvidedString(
-      *reinterpret_cast<char(*)[NSID_LENGTH]>(mPath.BeginWriting()));
-
+  GkRustUtils::GenerateUUID(mPath);
   MOZ_ASSERT(mPath.Length() == NSID_LENGTH - 1);
   MOZ_ASSERT(strlen(mPath.get()) == NSID_LENGTH - 1);
 
@@ -66,7 +56,6 @@ NS_INTERFACE_MAP_BEGIN(NullPrincipalURI)
   else
     NS_INTERFACE_MAP_ENTRY(nsIURI)
   NS_INTERFACE_MAP_ENTRY(nsISizeOf)
-  NS_INTERFACE_MAP_ENTRY(nsIIPCSerializableURI)
 NS_INTERFACE_MAP_END
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -300,9 +289,6 @@ NS_IMETHODIMP
 NullPrincipalURI::GetDisplayPrePath(nsACString& aPrePath) {
   return GetPrePath(aPrePath);
 }
-
-////////////////////////////////////////////////////////////////////////////////
-//// nsIIPCSerializableURI
 
 void NullPrincipalURI::Serialize(mozilla::ipc::URIParams& aParams) {
   aParams = mozilla::ipc::NullPrincipalURIParams();

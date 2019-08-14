@@ -29,7 +29,7 @@ using namespace mozilla::dom::SVGUnitTypes_Binding;
 using namespace mozilla::gfx;
 
 nsSVGFilterInstance::nsSVGFilterInstance(
-    const nsStyleFilter& aFilter, nsIFrame* aTargetFrame,
+    const StyleFilter& aFilter, nsIFrame* aTargetFrame,
     nsIContent* aTargetContent, const UserSpaceMetrics& aMetrics,
     const gfxRect& aTargetBBox, const gfxSize& aUserSpaceToFilterSpaceScale)
     : mFilter(aFilter),
@@ -74,7 +74,7 @@ bool nsSVGFilterInstance::ComputeBounds() {
   // units). So really only percentage values should be used in this case.
 
   // Set the user space bounds (i.e. the filter region in user space).
-  nsSVGLength2 XYWH[4];
+  SVGAnimatedLength XYWH[4];
   static_assert(sizeof(mFilterElement->mLengthAttributes) == sizeof(XYWH),
                 "XYWH size incorrect");
   memcpy(XYWH, mFilterElement->mLengthAttributes,
@@ -109,7 +109,7 @@ bool nsSVGFilterInstance::ComputeBounds() {
 }
 
 nsSVGFilterFrame* nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame) {
-  if (mFilter.GetType() != NS_STYLE_FILTER_URL) {
+  if (!mFilter.IsUrl()) {
     // The filter is not an SVG reference filter.
     return nullptr;
   }
@@ -126,14 +126,20 @@ nsSVGFilterFrame* nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame) {
   if (aTargetFrame) {
     RefPtr<URLAndReferrerInfo> urlExtraReferrer =
         SVGObserverUtils::GetFilterURI(aTargetFrame, mFilter);
+
+    // urlExtraReferrer might be null when mFilter has an invalid url
+    if (!urlExtraReferrer) {
+      return nullptr;
+    }
+
     url = urlExtraReferrer->GetURI();
   } else {
-    url = mFilter.GetURL()->ResolveLocalRef(mTargetContent);
+    url = mFilter.AsUrl().ResolveLocalRef(mTargetContent);
   }
 
   if (!url) {
     MOZ_ASSERT_UNREACHABLE(
-        "an nsStyleFilter of type URL should have a non-null URL");
+        "an StyleFilter of type URL should have a non-null URL");
     return nullptr;
   }
 
@@ -141,8 +147,8 @@ nsSVGFilterFrame* nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame) {
   IDTracker idTracker;
   bool watch = false;
   idTracker.ResetToURIFragmentID(
-      mTargetContent, url, mFilter.GetURL()->ExtraData()->GetReferrer(),
-      mFilter.GetURL()->ExtraData()->GetReferrerPolicy(), watch);
+      mTargetContent, url, mFilter.AsUrl().ExtraData().GetReferrer(),
+      mFilter.AsUrl().ExtraData().GetReferrerPolicy(), watch);
   Element* element = idTracker.get();
   if (!element) {
     // The URL points to no element.
@@ -162,7 +168,7 @@ nsSVGFilterFrame* nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame) {
 
 float nsSVGFilterInstance::GetPrimitiveNumber(uint8_t aCtxType,
                                               float aValue) const {
-  nsSVGLength2 val;
+  SVGAnimatedLength val;
   val.Init(aCtxType, 0xff, aValue, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
 
   float value;
@@ -186,7 +192,7 @@ float nsSVGFilterInstance::GetPrimitiveNumber(uint8_t aCtxType,
 }
 
 Point3D nsSVGFilterInstance::ConvertLocation(const Point3D& aPoint) const {
-  nsSVGLength2 val[4];
+  SVGAnimatedLength val[4];
   val[0].Init(SVGContentUtils::X, 0xff, aPoint.x,
               SVGLength_Binding::SVG_LENGTHTYPE_NUMBER);
   val[1].Init(SVGContentUtils::Y, 0xff, aPoint.y,
@@ -212,10 +218,10 @@ gfxRect nsSVGFilterInstance::UserSpaceToFilterSpace(
 }
 
 IntRect nsSVGFilterInstance::ComputeFilterPrimitiveSubregion(
-    nsSVGFE* aFilterElement,
+    SVGFE* aFilterElement,
     const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
     const nsTArray<int32_t>& aInputIndices) {
-  nsSVGFE* fE = aFilterElement;
+  SVGFE* fE = aFilterElement;
 
   IntRect defaultFilterSubregion(0, 0, 0, 0);
   if (fE->SubregionIsUnionOfRegions()) {
@@ -234,17 +240,17 @@ IntRect nsSVGFilterInstance::ComputeFilterPrimitiveSubregion(
   }
 
   gfxRect feArea = nsSVGUtils::GetRelativeRect(
-      mPrimitiveUnits, &fE->mLengthAttributes[nsSVGFE::ATTR_X], mTargetBBox,
+      mPrimitiveUnits, &fE->mLengthAttributes[SVGFE::ATTR_X], mTargetBBox,
       mMetrics);
   Rect region = ToRect(UserSpaceToFilterSpace(feArea));
 
-  if (!fE->mLengthAttributes[nsSVGFE::ATTR_X].IsExplicitlySet())
+  if (!fE->mLengthAttributes[SVGFE::ATTR_X].IsExplicitlySet())
     region.x = defaultFilterSubregion.X();
-  if (!fE->mLengthAttributes[nsSVGFE::ATTR_Y].IsExplicitlySet())
+  if (!fE->mLengthAttributes[SVGFE::ATTR_Y].IsExplicitlySet())
     region.y = defaultFilterSubregion.Y();
-  if (!fE->mLengthAttributes[nsSVGFE::ATTR_WIDTH].IsExplicitlySet())
+  if (!fE->mLengthAttributes[SVGFE::ATTR_WIDTH].IsExplicitlySet())
     region.width = defaultFilterSubregion.Width();
-  if (!fE->mLengthAttributes[nsSVGFE::ATTR_HEIGHT].IsExplicitlySet())
+  if (!fE->mLengthAttributes[SVGFE::ATTR_HEIGHT].IsExplicitlySet())
     region.height = defaultFilterSubregion.Height();
 
   // We currently require filter primitive subregions to be pixel-aligned.
@@ -281,7 +287,9 @@ int32_t nsSVGFilterInstance::GetOrCreateSourceAlphaIndex(
     nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs) {
   // If the SourceAlpha index has already been determined or created for this
   // SVG filter, just return it.
-  if (mSourceAlphaAvailable) return mSourceAlphaIndex;
+  if (mSourceAlphaAvailable) {
+    return mSourceAlphaIndex;
+  }
 
   // If this is the first filter in the chain, we can just use the
   // kPrimitiveIndexSourceAlpha keyword to refer to the SourceAlpha of the
@@ -313,11 +321,11 @@ int32_t nsSVGFilterInstance::GetOrCreateSourceAlphaIndex(
 }
 
 nsresult nsSVGFilterInstance::GetSourceIndices(
-    nsSVGFE* aPrimitiveElement,
+    SVGFE* aPrimitiveElement,
     nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
     const nsDataHashtable<nsStringHashKey, int32_t>& aImageTable,
     nsTArray<int32_t>& aSourceIndices) {
-  AutoTArray<nsSVGStringInfo, 2> sources;
+  AutoTArray<SVGStringInfo, 2> sources;
   aPrimitiveElement->GetSourceImageNames(sources);
 
   for (uint32_t j = 0; j < sources.Length(); j++) {
@@ -364,11 +372,11 @@ nsresult nsSVGFilterInstance::BuildPrimitives(
   }
 
   // Get the filter primitive elements.
-  nsTArray<RefPtr<nsSVGFE>> primitives;
+  nsTArray<RefPtr<SVGFE>> primitives;
   for (nsIContent* child = mFilterElement->nsINode::GetFirstChild(); child;
        child = child->GetNextSibling()) {
-    RefPtr<nsSVGFE> primitive;
-    CallQueryInterface(child, (nsSVGFE**)getter_AddRefs(primitive));
+    RefPtr<SVGFE> primitive;
+    CallQueryInterface(child, (SVGFE**)getter_AddRefs(primitive));
     if (primitive) {
       primitives.AppendElement(primitive);
     }
@@ -382,7 +390,7 @@ nsresult nsSVGFilterInstance::BuildPrimitives(
 
   for (uint32_t primitiveElementIndex = 0;
        primitiveElementIndex < primitives.Length(); ++primitiveElementIndex) {
-    nsSVGFE* filter = primitives[primitiveElementIndex];
+    SVGFE* filter = primitives[primitiveElementIndex];
 
     AutoTArray<int32_t, 2> sourceIndices;
     nsresult rv =

@@ -4,23 +4,23 @@
 "use strict";
 
 const getRecordingState = state => state.recordingState;
-const getRecordingUnexpectedlyStopped = state => state.recordingUnexpectedlyStopped;
+const getRecordingUnexpectedlyStopped = state =>
+  state.recordingUnexpectedlyStopped;
 const getIsSupportedPlatform = state => state.isSupportedPlatform;
 const getInterval = state => state.interval;
 const getEntries = state => state.entries;
-const getDuration = state => state.duration;
 const getFeatures = state => state.features;
 const getThreads = state => state.threads;
 const getThreadsString = state => getThreads(state).join(",");
-const getActorVersion = state => state.actorVersion;
+const getObjdirs = state => state.objdirs;
 
 const getRecordingSettings = state => {
   return {
     entries: getEntries(state),
-    duration: getDuration(state),
     interval: getInterval(state),
     features: getFeatures(state),
     threads: getThreads(state),
+    objdirs: getObjdirs(state),
   };
 };
 
@@ -34,8 +34,8 @@ const getInitializedValues = state => {
 
 const getPerfFront = state => getInitializedValues(state).perfFront;
 const getReceiveProfileFn = state => getInitializedValues(state).receiveProfile;
-const getSetRecordingPreferencesFn =
-  state => getInitializedValues(state).setRecordingPreferences;
+const getSetRecordingPreferencesFn = state =>
+  getInitializedValues(state).setRecordingPreferences;
 
 module.exports = {
   getRecordingState,
@@ -43,14 +43,13 @@ module.exports = {
   getIsSupportedPlatform,
   getInterval,
   getEntries,
-  getDuration,
   getFeatures,
   getThreads,
   getThreadsString,
+  getObjdirs,
   getRecordingSettings,
   getInitializedValues,
   getPerfFront,
   getReceiveProfileFn,
   getSetRecordingPreferencesFn,
-  getActorVersion,
 };

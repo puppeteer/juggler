@@ -6,21 +6,24 @@
 
 "use strict";
 
+const { prepareMessage } = require("devtools/client/webconsole/utils/messages");
 const {
-  prepareMessage,
-} = require("devtools/client/webconsole/utils/messages");
-const { IdGenerator } = require("devtools/client/webconsole/utils/id-generator");
-const { batchActions } = require("devtools/client/shared/redux/middleware/debounce");
+  IdGenerator,
+} = require("devtools/client/webconsole/utils/id-generator");
+const {
+  batchActions,
+} = require("devtools/client/shared/redux/middleware/debounce");
 
 const {
   MESSAGES_ADD,
   NETWORK_MESSAGE_UPDATE,
   NETWORK_UPDATE_REQUEST,
   MESSAGES_CLEAR,
+  MESSAGES_CLEAR_LOGPOINT,
   MESSAGE_OPEN,
   MESSAGE_CLOSE,
   MESSAGE_TYPE,
-  MESSAGE_TABLE_RECEIVE,
+  MESSAGE_UPDATE_PAYLOAD,
   PAUSED_EXCECUTION_POINT,
   PRIVATE_MESSAGES_CLEAR,
 } = require("../constants");
@@ -58,6 +61,13 @@ function messagesClear() {
   };
 }
 
+function messagesClearLogpoint(logpointId) {
+  return {
+    type: MESSAGES_CLEAR_LOGPOINT,
+    logpointId,
+  };
+}
+
 function setPauseExecutionPoint(executionPoint) {
   return {
     type: PAUSED_EXCECUTION_POINT,
@@ -85,30 +95,66 @@ function messageClose(id) {
   };
 }
 
-function messageTableDataGet(id, client, dataType) {
-  return ({dispatch}) => {
+/**
+ * Make a query on the server to get a list of DOM elements matching the given
+ * CSS selectors and set the result as a message's additional data payload.
+ *
+ * @param {String} id
+ *        Message ID
+ * @param {String} cssSelectors
+ *        CSS selectors string to use in the querySelectorAll() call
+ * @return {[type]} [description]
+ */
+function messageGetMatchingElements(id, cssSelectors) {
+  return ({ dispatch, services }) => {
+    services
+      .requestEvaluation(`document.querySelectorAll('${cssSelectors}')`)
+      .then(response => {
+        dispatch(messageUpdatePayload(id, response.result));
+      })
+      .catch(err => {
+        console.error(err);
+      });
+  };
+}
+
+function messageGetTableData(id, client, dataType) {
+  return ({ dispatch }) => {
     let fetchObjectActorData;
     if (["Map", "WeakMap", "Set", "WeakSet"].includes(dataType)) {
-      fetchObjectActorData = (cb) => client.enumEntries(cb);
+      fetchObjectActorData = cb => client.enumEntries(cb);
     } else {
-      fetchObjectActorData = (cb) => client.enumProperties({
-        ignoreNonIndexedProperties: dataType === "Array",
-      }, cb);
+      fetchObjectActorData = cb =>
+        client.enumProperties(
+          {
+            ignoreNonIndexedProperties: dataType === "Array",
+          },
+          cb
+        );
     }
 
     fetchObjectActorData(enumResponse => {
-      const {iterator} = enumResponse;
+      const { iterator } = enumResponse;
+      // eslint-disable-next-line mozilla/use-returnValue
       iterator.slice(0, iterator.count, sliceResponse => {
-        const {ownProperties} = sliceResponse;
-        dispatch(messageTableDataReceive(id, ownProperties));
+        const { ownProperties } = sliceResponse;
+        dispatch(messageUpdatePayload(id, ownProperties));
       });
     });
   };
 }
 
-function messageTableDataReceive(id, data) {
+/**
+ * Associate additional data with a message without mutating the original message object.
+ *
+ * @param {String} id
+ *        Message ID
+ * @param {Object} data
+ *        Object with arbitrary data.
+ */
+function messageUpdatePayload(id, data) {
   return {
-    type: MESSAGE_TABLE_RECEIVE,
+    type: MESSAGE_UPDATE_PAYLOAD,
     id,
     data,
   };
@@ -139,13 +185,15 @@ function networkUpdateRequest(id, data) {
 module.exports = {
   messagesAdd,
   messagesClear,
+  messagesClearLogpoint,
   messageOpen,
   messageClose,
-  messageTableDataGet,
+  messageGetMatchingElements,
+  messageGetTableData,
+  messageUpdatePayload,
   networkMessageUpdate,
   networkUpdateRequest,
   privateMessagesClear,
   // for test purpose only.
-  messageTableDataReceive,
   setPauseExecutionPoint,
 };

@@ -6,35 +6,36 @@
 
 #include "nsNumberControlFrame.h"
 
+#include "mozilla/BasicEvents.h"
+#include "mozilla/EventStates.h"
+#include "mozilla/FloatingPoint.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/dom/MutationEventBinding.h"
 #include "HTMLInputElement.h"
 #include "ICUUtils.h"
 #include "nsIFocusManager.h"
-#include "nsIPresShell.h"
 #include "nsFocusManager.h"
 #include "nsFontMetrics.h"
 #include "nsCheckboxRadioFrame.h"
 #include "nsGkAtoms.h"
 #include "nsNameSpaceManager.h"
 #include "nsStyleConsts.h"
-#include "mozilla/BasicEvents.h"
-#include "mozilla/EventStates.h"
 #include "nsContentUtils.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsCSSPseudoElements.h"
 #include "nsThreadUtils.h"
-#include "mozilla/FloatingPoint.h"
-#include "mozilla/dom/MutationEventBinding.h"
 
 #ifdef ACCESSIBILITY
-#include "mozilla/a11y/AccTypes.h"
+#  include "mozilla/a11y/AccTypes.h"
 #endif
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsIFrame* NS_NewNumberControlFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewNumberControlFrame(PresShell* aPresShell,
                                    ComputedStyle* aStyle) {
-  return new (aPresShell) nsNumberControlFrame(aStyle);
+  return new (aPresShell)
+      nsNumberControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsNumberControlFrame)
@@ -45,8 +46,10 @@ NS_QUERYFRAME_HEAD(nsNumberControlFrame)
   NS_QUERYFRAME_ENTRY(nsIFormControlFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
-nsNumberControlFrame::nsNumberControlFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID), mHandlingInputEvent(false) {}
+nsNumberControlFrame::nsNumberControlFrame(ComputedStyle* aStyle,
+                                           nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID),
+      mHandlingInputEvent(false) {}
 
 void nsNumberControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
                                        PostDestroyData& aPostDestroyData) {
@@ -126,7 +129,7 @@ void nsNumberControlFrame::Reflow(nsPresContext* aPresContext,
       aReflowInput.ComputedLogicalBorderPadding().IStartEnd(myWM);
 
   nscoord borderBoxBSize;
-  if (contentBoxBSize != NS_INTRINSICSIZE) {
+  if (contentBoxBSize != NS_UNCONSTRAINEDSIZE) {
     borderBoxBSize =
         contentBoxBSize +
         aReflowInput.ComputedLogicalBorderPadding().BStartEnd(myWM);
@@ -135,7 +138,7 @@ void nsNumberControlFrame::Reflow(nsPresContext* aPresContext,
   nsIFrame* outerWrapperFrame = mOuterWrapper->GetPrimaryFrame();
 
   if (!outerWrapperFrame) {  // display:none?
-    if (contentBoxBSize == NS_INTRINSICSIZE) {
+    if (contentBoxBSize == NS_UNCONSTRAINEDSIZE) {
       contentBoxBSize = 0;
       borderBoxBSize =
           aReflowInput.ComputedLogicalBorderPadding().BStartEnd(myWM);
@@ -178,7 +181,7 @@ void nsNumberControlFrame::Reflow(nsPresContext* aPresContext,
     nscoord wrappersMarginBoxBSize =
         wrappersDesiredSize.BSize(myWM) + wrapperMargin.BStartEnd(myWM);
 
-    if (contentBoxBSize == NS_INTRINSICSIZE) {
+    if (contentBoxBSize == NS_UNCONSTRAINEDSIZE) {
       // We are intrinsically sized -- we should shrinkwrap the outer wrapper's
       // block-size:
       contentBoxBSize = wrappersMarginBoxBSize;
@@ -210,12 +213,15 @@ void nsNumberControlFrame::Reflow(nsPresContext* aPresContext,
                       &wrapperReflowInput, myWM, wrapperOffset, borderBoxSize,
                       0);
 
-    nsSize contentBoxSize = LogicalSize(myWM, contentBoxISize, contentBoxBSize)
-                                .GetPhysicalSize(myWM);
-    aDesiredSize.SetBlockStartAscent(
-        wrappersDesiredSize.BlockStartAscent() +
-        outerWrapperFrame->BStart(aReflowInput.GetWritingMode(),
-                                  contentBoxSize));
+    if (!aReflowInput.mStyleDisplay->IsContainLayout()) {
+      nsSize contentBoxSize =
+          LogicalSize(myWM, contentBoxISize, contentBoxBSize)
+              .GetPhysicalSize(myWM);
+      aDesiredSize.SetBlockStartAscent(
+          wrappersDesiredSize.BlockStartAscent() +
+          outerWrapperFrame->BStart(aReflowInput.GetWritingMode(),
+                                    contentBoxSize));
+    }  // else: we're layout-contained, and so we have no baseline.
   }
 
   LogicalSize logicalDesiredSize(myWM, borderBoxISize, borderBoxBSize);
@@ -286,7 +292,10 @@ class FocusTextField : public Runnable {
 
   NS_IMETHOD Run() override {
     if (mNumber->AsElement()->State().HasState(NS_EVENT_STATE_FOCUS)) {
-      HTMLInputElement::FromNode(mTextField)->Focus(IgnoreErrors());
+      // This job shouldn't be triggered by a WebIDL interface, hence the
+      // default options can be used.
+      FocusOptions options;
+      HTMLInputElement::FromNode(mTextField)->Focus(options, IgnoreErrors());
     }
 
     return NS_OK;
@@ -298,14 +307,14 @@ class FocusTextField : public Runnable {
 };
 
 already_AddRefed<Element> nsNumberControlFrame::MakeAnonymousElement(
-    Element* aParent, nsAtom* aTagName, CSSPseudoElementType aPseudoType) {
+    Element* aParent, nsAtom* aTagName, PseudoStyleType aPseudoType) {
   // Get the NodeInfoManager and tag necessary to create the anonymous divs.
-  nsIDocument* doc = mContent->GetComposedDoc();
+  Document* doc = mContent->GetComposedDoc();
   RefPtr<Element> resultElement = doc->CreateHTMLElement(aTagName);
   resultElement->SetPseudoElementType(aPseudoType);
 
-  if (aPseudoType == CSSPseudoElementType::mozNumberSpinDown ||
-      aPseudoType == CSSPseudoElementType::mozNumberSpinUp) {
+  if (aPseudoType == PseudoStyleType::mozNumberSpinDown ||
+      aPseudoType == PseudoStyleType::mozNumberSpinUp) {
     resultElement->SetAttr(kNameSpaceID_None, nsGkAtoms::role,
                            NS_LITERAL_STRING("button"), false);
   }
@@ -334,13 +343,13 @@ nsresult nsNumberControlFrame::CreateAnonymousContent(
 
   // Create the anonymous outer wrapper:
   mOuterWrapper = MakeAnonymousElement(nullptr, nsGkAtoms::div,
-                                       CSSPseudoElementType::mozNumberWrapper);
+                                       PseudoStyleType::mozNumberWrapper);
 
   aElements.AppendElement(mOuterWrapper);
 
   // Create the ::-moz-number-text pseudo-element:
   mTextField = MakeAnonymousElement(mOuterWrapper, nsGkAtoms::input,
-                                    CSSPseudoElementType::mozNumberText);
+                                    PseudoStyleType::mozNumberText);
 
   mTextField->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
                       NS_LITERAL_STRING("text"), false);
@@ -388,15 +397,15 @@ nsresult nsNumberControlFrame::CreateAnonymousContent(
 
   // Create the ::-moz-number-spin-box pseudo-element:
   mSpinBox = MakeAnonymousElement(mOuterWrapper, nsGkAtoms::div,
-                                  CSSPseudoElementType::mozNumberSpinBox);
+                                  PseudoStyleType::mozNumberSpinBox);
 
   // Create the ::-moz-number-spin-up pseudo-element:
   mSpinUp = MakeAnonymousElement(mSpinBox, nsGkAtoms::div,
-                                 CSSPseudoElementType::mozNumberSpinUp);
+                                 PseudoStyleType::mozNumberSpinUp);
 
   // Create the ::-moz-number-spin-down pseudo-element:
   mSpinDown = MakeAnonymousElement(mSpinBox, nsGkAtoms::div,
-                                   CSSPseudoElementType::mozNumberSpinDown);
+                                   PseudoStyleType::mozNumberSpinDown);
 
   return NS_OK;
 }
@@ -414,8 +423,9 @@ HTMLInputElement* nsNumberControlFrame::GetAnonTextControl() {
   return HTMLInputElement::FromNode(mTextField);
 }
 
-/* static */ nsNumberControlFrame*
-nsNumberControlFrame::GetNumberControlFrameForTextField(nsIFrame* aFrame) {
+/* static */
+nsNumberControlFrame* nsNumberControlFrame::GetNumberControlFrameForTextField(
+    nsIFrame* aFrame) {
   // If aFrame is the anon text field for an <input type=number> then we expect
   // the frame of its mContent's grandparent to be that input's frame. We
   // have to check for this via the content tree because we don't know whether
@@ -435,8 +445,9 @@ nsNumberControlFrame::GetNumberControlFrameForTextField(nsIFrame* aFrame) {
   return nullptr;
 }
 
-/* static */ nsNumberControlFrame*
-nsNumberControlFrame::GetNumberControlFrameForSpinButton(nsIFrame* aFrame) {
+/* static */
+nsNumberControlFrame* nsNumberControlFrame::GetNumberControlFrameForSpinButton(
+    nsIFrame* aFrame) {
   // If aFrame is a spin button for an <input type=number> then we expect the
   // frame of its mContent's great-grandparent to be that input's frame. We
   // have to check for this via the content tree because we don't know whether
@@ -527,7 +538,11 @@ void nsNumberControlFrame::HandleFocusEvent(WidgetEvent* aEvent) {
   if (aEvent->mOriginalTarget != mTextField) {
     // Move focus to our text field
     RefPtr<HTMLInputElement> textField = HTMLInputElement::FromNode(mTextField);
-    textField->Focus(IgnoreErrors());
+
+    // Use default FocusOptions, because this method isn't supposed to be called
+    // from a WebIDL interface.
+    FocusOptions options;
+    textField->Focus(options, IgnoreErrors());
   }
 }
 

@@ -15,6 +15,7 @@
 
 #include "mozilla/Assertions.h"
 #include "nsAString.h"
+#include "mozilla/Tuple.h"
 
 #include "nsTArrayForwardDeclare.h"
 
@@ -51,6 +52,10 @@ void encoding_mem_convert_latin1_to_utf16(const char* src, size_t src_len,
 
 size_t encoding_mem_convert_utf16_to_utf8(const char16_t* src, size_t src_len,
                                           char* dst, size_t dst_len);
+
+void encoding_mem_convert_utf16_to_utf8_partial(const char16_t* src,
+                                                size_t* src_len, char* dst,
+                                                size_t* dst_len);
 
 size_t encoding_mem_convert_utf8_to_utf16(const char* src, size_t src_len,
                                           char16_t* dst, size_t dst_len);
@@ -129,8 +134,7 @@ inline void ConvertLatin1toUTF16(mozilla::Span<const char> aSource,
 /**
  * Lone surrogates are replaced with the REPLACEMENT CHARACTER.
  *
- * The length of aDest must be at least the length of aSource times three
- * _plus one_.
+ * The length of aDest must be at least the length of aSource times three.
  *
  * Returns the number of code units written.
  */
@@ -138,6 +142,27 @@ inline size_t ConvertUTF16toUTF8(mozilla::Span<const char16_t> aSource,
                                  mozilla::Span<char> aDest) {
   return encoding_mem_convert_utf16_to_utf8(
       aSource.Elements(), aSource.Length(), aDest.Elements(), aDest.Length());
+}
+
+/**
+ * Lone surrogates are replaced with the REPLACEMENT CHARACTER.
+ *
+ * The conversion is guaranteed to be complete if the length of aDest is
+ * at least the length of aSource times three.
+ *
+ * The output is always valid UTF-8 ending on scalar value boundary
+ * even in the case of partial conversion.
+ *
+ * Returns the number of code units read and the number of code
+ * units written.
+ */
+inline mozilla::Tuple<size_t, size_t> ConvertUTF16toUTF8Partial(
+    mozilla::Span<const char16_t> aSource, mozilla::Span<char> aDest) {
+  size_t srcLen = aSource.Length();
+  size_t dstLen = aDest.Length();
+  encoding_mem_convert_utf16_to_utf8_partial(aSource.Elements(), &srcLen,
+                                             aDest.Elements(), &dstLen);
+  return mozilla::MakeTuple(srcLen, dstLen);
 }
 
 /**
@@ -293,6 +318,75 @@ inline void LossyAppendUTF16toASCII(mozilla::Span<const char16_t> aSource,
                                     nsACString& aDest) {
   if (MOZ_UNLIKELY(
           !LossyAppendUTF16toASCII(aSource, aDest, mozilla::fallible))) {
+    aDest.AllocFailed(aDest.Length() + aSource.Length());
+  }
+}
+
+// Latin1 to UTF-8
+// Interpret each incoming unsigned byte value as a Unicode scalar value (not
+// windows-1252!).
+// If the input is ASCII, the heap-allocated nsStringBuffer is shared if
+// possible.
+
+inline MOZ_MUST_USE bool CopyLatin1toUTF8(const nsACString& aSource,
+                                          nsACString& aDest,
+                                          const mozilla::fallible_t&) {
+  return nscstring_fallible_append_latin1_to_utf8_check(&aDest, &aSource, 0);
+}
+
+inline void CopyLatin1toUTF8(const nsACString& aSource, nsACString& aDest) {
+  if (MOZ_UNLIKELY(!CopyLatin1toUTF8(aSource, aDest, mozilla::fallible))) {
+    aDest.AllocFailed(aSource.Length());
+  }
+}
+
+inline MOZ_MUST_USE bool AppendLatin1toUTF8(const nsACString& aSource,
+                                            nsACString& aDest,
+                                            const mozilla::fallible_t&) {
+  return nscstring_fallible_append_latin1_to_utf8_check(&aDest, &aSource,
+                                                        aDest.Length());
+}
+
+inline void AppendLatin1toUTF8(const nsACString& aSource, nsACString& aDest) {
+  if (MOZ_UNLIKELY(!AppendLatin1toUTF8(aSource, aDest, mozilla::fallible))) {
+    aDest.AllocFailed(aDest.Length() + aSource.Length());
+  }
+}
+
+// UTF-8 to Latin1
+// If all code points in the input are below U+0100, represents each scalar
+// value as an unsigned byte. (This is not windows-1252!) If there are code
+// points above U+00FF, memory-safely produces garbage in release builds and
+// asserts in debug builds. The nature of the garbage may differ
+// based on CPU architecture and must not be relied upon.
+// If the input is ASCII, the heap-allocated nsStringBuffer is shared if
+// possible.
+
+inline MOZ_MUST_USE bool LossyCopyUTF8toLatin1(const nsACString& aSource,
+                                               nsACString& aDest,
+                                               const mozilla::fallible_t&) {
+  return nscstring_fallible_append_utf8_to_latin1_lossy_check(&aDest, &aSource,
+                                                              0);
+}
+
+inline void LossyCopyUTF8toLatin1(const nsACString& aSource,
+                                  nsACString& aDest) {
+  if (MOZ_UNLIKELY(!LossyCopyUTF8toLatin1(aSource, aDest, mozilla::fallible))) {
+    aDest.AllocFailed(aSource.Length());
+  }
+}
+
+inline MOZ_MUST_USE bool LossyAppendUTF8toLatin1(const nsACString& aSource,
+                                                 nsACString& aDest,
+                                                 const mozilla::fallible_t&) {
+  return nscstring_fallible_append_utf8_to_latin1_lossy_check(&aDest, &aSource,
+                                                              aDest.Length());
+}
+
+inline void LossyAppendUTF8toLatin1(const nsACString& aSource,
+                                    nsACString& aDest) {
+  if (MOZ_UNLIKELY(
+          !LossyAppendUTF8toLatin1(aSource, aDest, mozilla::fallible))) {
     aDest.AllocFailed(aDest.Length() + aSource.Length());
   }
 }

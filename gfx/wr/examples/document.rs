@@ -11,9 +11,10 @@ extern crate winit;
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
-use boilerplate::Example;
+use crate::boilerplate::Example;
 use euclid::TypedScale;
 use webrender::api::*;
+use webrender::api::units::*;
 
 // This example creates multiple documents overlapping each other with
 // specified layer indices.
@@ -33,31 +34,30 @@ impl App {
     fn init(
         &mut self,
         api: &RenderApi,
-        framebuffer_size: DeviceIntSize,
         device_pixel_ratio: f32,
     ) {
         let init_data = vec![
             (
                 PipelineId(1, 0),
-                -1,
+                -2,
                 ColorF::new(0.0, 1.0, 0.0, 1.0),
                 DeviceIntPoint::new(0, 0),
             ),
             (
                 PipelineId(2, 0),
-                -2,
+                -1,
                 ColorF::new(1.0, 1.0, 0.0, 1.0),
                 DeviceIntPoint::new(200, 0),
             ),
             (
                 PipelineId(3, 0),
-                -3,
+                0,
                 ColorF::new(1.0, 0.0, 0.0, 1.0),
                 DeviceIntPoint::new(200, 200),
             ),
             (
                 PipelineId(4, 0),
-                -4,
+                1,
                 ColorF::new(1.0, 0.0, 1.0, 1.0),
                 DeviceIntPoint::new(0, 200),
             ),
@@ -69,14 +69,17 @@ impl App {
 
             let document_id = api.add_document(size, layer);
             let mut txn = Transaction::new();
-            txn.set_window_parameters(framebuffer_size, bounds, device_pixel_ratio);
+            txn.set_document_view(bounds, device_pixel_ratio);
             txn.set_root_pipeline(pipeline_id);
             api.send_transaction(document_id, txn);
 
             self.documents.push(Document {
                 id: document_id,
                 pipeline_id,
-                content_rect: bounds.to_f32() / TypedScale::new(device_pixel_ratio),
+                content_rect: LayoutRect::new(
+                    LayoutPoint::origin(),
+                    bounds.size.to_f32() / TypedScale::new(device_pixel_ratio),
+                ),
                 color,
             });
         }
@@ -89,19 +92,20 @@ impl Example for App {
         api: &RenderApi,
         base_builder: &mut DisplayListBuilder,
         _txn: &mut Transaction,
-        framebuffer_size: DeviceIntSize,
-        _: PipelineId,
+        device_size: DeviceIntSize,
+        _pipeline_id: PipelineId,
         _: DocumentId,
     ) {
         if self.documents.is_empty() {
-            let device_pixel_ratio = framebuffer_size.width as f32 /
+            let device_pixel_ratio = device_size.width as f32 /
                 base_builder.content_size().width;
             // this is the first run, hack around the boilerplate,
             // which assumes an example only needs one document
-            self.init(api, framebuffer_size, device_pixel_ratio);
+            self.init(api,  device_pixel_ratio);
         }
 
         for doc in &self.documents {
+            let space_and_clip = SpaceAndClipInfo::root_scroll(doc.pipeline_id);
             let mut builder = DisplayListBuilder::new(
                 doc.pipeline_id,
                 doc.content_rect.size,
@@ -111,16 +115,13 @@ impl Example for App {
                 doc.content_rect.size,
             );
 
-            builder.push_stacking_context(
-                &LayoutPrimitiveInfo::new(doc.content_rect),
-                None,
-                TransformStyle::Flat,
-                MixBlendMode::Normal,
-                &[],
-                RasterSpace::Screen,
+            builder.push_simple_stacking_context(
+                doc.content_rect.origin,
+                space_and_clip.spatial_id,
+                true,
             );
             builder.push_rect(
-                &LayoutPrimitiveInfo::new(local_rect),
+                &CommonItemProperties::new(local_rect, space_and_clip),
                 doc.color,
             );
             builder.pop_stacking_context();

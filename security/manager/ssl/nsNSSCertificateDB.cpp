@@ -46,7 +46,7 @@
 #include "ssl.h"
 
 #ifdef XP_WIN
-#include <winsock.h>  // for ntohl
+#  include <winsock.h>  // for ntohl
 #endif
 
 using namespace mozilla;
@@ -257,7 +257,7 @@ nsresult nsNSSCertificateDB::handleCACertDownload(NotNull<nsIArray*> x509Certs,
   uint32_t numCerts;
 
   x509Certs->GetLength(&numCerts);
-  MOZ_ASSERT(numCerts > 0, "Didn't get any certs to import.");
+
   if (numCerts == 0) return NS_OK;  // Nothing to import, so nothing to do.
 
   nsCOMPtr<nsIX509Cert> certToShow;
@@ -831,10 +831,9 @@ nsNSSCertificateDB::ImportPKCS12File(nsIFile* aFile, const nsAString& aPassword,
 }
 
 NS_IMETHODIMP
-nsNSSCertificateDB::ExportPKCS12File(nsIFile* aFile, uint32_t aCount,
-                                     nsIX509Cert** aCerts,
-                                     const nsAString& aPassword,
-                                     uint32_t* aError) {
+nsNSSCertificateDB::ExportPKCS12File(
+    nsIFile* aFile, const nsTArray<RefPtr<nsIX509Cert>>& aCerts,
+    const nsAString& aPassword, uint32_t* aError) {
   if (!NS_IsMainThread()) {
     return NS_ERROR_NOT_SAME_THREAD;
   }
@@ -844,11 +843,11 @@ nsNSSCertificateDB::ExportPKCS12File(nsIFile* aFile, uint32_t aCount,
   }
 
   NS_ENSURE_ARG(aFile);
-  if (aCount == 0) {
+  if (aCerts.IsEmpty()) {
     return NS_OK;
   }
   nsPKCS12Blob blob;
-  return blob.ExportToFile(aFile, aCerts, aCount, aPassword, *aError);
+  return blob.ExportToFile(aFile, aCerts, aPassword, *aError);
 }
 
 NS_IMETHODIMP
@@ -1105,26 +1104,6 @@ nsNSSCertificateDB::GetCerts(nsIX509CertList** _retval) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsNSSCertificateDB::GetEnterpriseRoots(nsIX509CertList** enterpriseRoots) {
-  MOZ_ASSERT(NS_IsMainThread());
-  if (!NS_IsMainThread()) {
-    return NS_ERROR_NOT_SAME_THREAD;
-  }
-
-  NS_ENSURE_ARG_POINTER(enterpriseRoots);
-
-#ifdef XP_WIN
-  nsCOMPtr<nsINSSComponent> psm(do_GetService(PSM_COMPONENT_CONTRACTID));
-  if (!psm) {
-    return NS_ERROR_FAILURE;
-  }
-  return psm->GetEnterpriseRoots(enterpriseRoots);
-#else
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
-}
-
 nsresult VerifyCertAtTime(nsIX509Cert* aCert,
                           int64_t /*SECCertificateUsage*/ aUsage,
                           uint32_t aFlags, const nsACString& aHostname,
@@ -1243,7 +1222,7 @@ nsNSSCertificateDB::AsyncVerifyCertAtTime(
     nsICertVerificationCallback* aCallback) {
   RefPtr<VerifyCertAtTimeTask> task(new VerifyCertAtTimeTask(
       aCert, aUsage, aFlags, aHostname, aTime, aCallback));
-  return task->Dispatch("VerifyCert");
+  return task->Dispatch();
 }
 
 NS_IMETHODIMP

@@ -23,9 +23,8 @@ bool OpaqueCrossCompartmentWrapper::defineProperty(
   return result.succeed();
 }
 
-bool OpaqueCrossCompartmentWrapper::ownPropertyKeys(JSContext* cx,
-                                                    HandleObject wrapper,
-                                                    AutoIdVector& props) const {
+bool OpaqueCrossCompartmentWrapper::ownPropertyKeys(
+    JSContext* cx, HandleObject wrapper, MutableHandleIdVector props) const {
   return true;
 }
 
@@ -35,9 +34,9 @@ bool OpaqueCrossCompartmentWrapper::delete_(JSContext* cx, HandleObject wrapper,
   return result.succeed();
 }
 
-JSObject* OpaqueCrossCompartmentWrapper::enumerate(JSContext* cx,
-                                                   HandleObject wrapper) const {
-  return BaseProxyHandler::enumerate(cx, wrapper);
+bool OpaqueCrossCompartmentWrapper::enumerate(
+    JSContext* cx, HandleObject proxy, MutableHandleIdVector props) const {
+  return BaseProxyHandler::enumerate(cx, proxy, props);
 }
 
 bool OpaqueCrossCompartmentWrapper::getPrototype(
@@ -111,19 +110,13 @@ bool OpaqueCrossCompartmentWrapper::construct(JSContext* cx,
   return false;
 }
 
-bool OpaqueCrossCompartmentWrapper::getPropertyDescriptor(
-    JSContext* cx, HandleObject wrapper, HandleId id,
-    MutableHandle<PropertyDescriptor> desc) const {
-  return BaseProxyHandler::getPropertyDescriptor(cx, wrapper, id, desc);
-}
-
 bool OpaqueCrossCompartmentWrapper::hasOwn(JSContext* cx, HandleObject wrapper,
                                            HandleId id, bool* bp) const {
   return BaseProxyHandler::hasOwn(cx, wrapper, id, bp);
 }
 
 bool OpaqueCrossCompartmentWrapper::getOwnEnumerablePropertyKeys(
-    JSContext* cx, HandleObject wrapper, AutoIdVector& props) const {
+    JSContext* cx, HandleObject wrapper, MutableHandleIdVector props) const {
   return BaseProxyHandler::getOwnEnumerablePropertyKeys(cx, wrapper, props);
 }
 

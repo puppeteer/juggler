@@ -33,14 +33,10 @@ namespace jit {
   _(AliasSummaries)                        \
   /* Information during GVN */             \
   _(GVN)                                   \
-  /* Information during sincos */          \
-  _(Sincos)                                \
   /* Information during sinking */         \
   _(Sink)                                  \
   /* Information during Range analysis */  \
   _(Range)                                 \
-  /* Information during loop unrolling */  \
-  _(Unrolling)                             \
   /* Information during LICM */            \
   _(LICM)                                  \
   /* Info about fold linear constants */   \
@@ -68,6 +64,8 @@ namespace jit {
   _(MIRExpressions)                        \
   /* Print control flow graph */           \
   _(CFG)                                   \
+  /* Spew Tracelogger summary stats */     \
+  _(ScriptStats)                           \
                                            \
   /* BASELINE COMPILER SPEW */             \
                                            \
@@ -137,6 +135,7 @@ class GraphSpewer {
   bool isSpewing() const { return graph_; }
   void init(MIRGraph* graph, JSScript* function);
   void beginFunction(JSScript* function);
+  void beginWasmFunction(unsigned funcIndex);
   void spewPass(const char* pass);
   void spewPass(const char* pass, BacktrackingAllocator* ra);
   void endFunction();
@@ -145,6 +144,8 @@ class GraphSpewer {
 };
 
 void SpewBeginFunction(MIRGenerator* mir, JSScript* function);
+void SpewBeginWasmFunction(MIRGenerator* mir, unsigned funcIndex);
+
 class AutoSpewEndFunction {
  private:
   MIRGenerator* mir_;
@@ -204,6 +205,8 @@ class GraphSpewer {
 };
 
 static inline void SpewBeginFunction(MIRGenerator* mir, JSScript* function) {}
+static inline void SpewBeginWasmFunction(MIRGenerator* mir,
+                                         unsigned funcIndex) {}
 
 class AutoSpewEndFunction {
  public:
@@ -228,13 +231,13 @@ class JitSpewIndent {
 static inline void JitSpewCheckArguments(JitSpewChannel channel,
                                          const char* fmt) {}
 
-#define JitSpewCheckExpandedArgs(channel, fmt, ...) \
-  JitSpewCheckArguments(channel, fmt)
-#define JitSpewCheckExpandedArgs_(ArgList) \
-  JitSpewCheckExpandedArgs ArgList /* Fix MSVC issue */
-#define JitSpew(...) JitSpewCheckExpandedArgs_((__VA_ARGS__))
-#define JitSpewStart(...) JitSpewCheckExpandedArgs_((__VA_ARGS__))
-#define JitSpewCont(...) JitSpewCheckExpandedArgs_((__VA_ARGS__))
+#  define JitSpewCheckExpandedArgs(channel, fmt, ...) \
+    JitSpewCheckArguments(channel, fmt)
+#  define JitSpewCheckExpandedArgs_(ArgList) \
+    JitSpewCheckExpandedArgs ArgList /* Fix MSVC issue */
+#  define JitSpew(...) JitSpewCheckExpandedArgs_((__VA_ARGS__))
+#  define JitSpewStart(...) JitSpewCheckExpandedArgs_((__VA_ARGS__))
+#  define JitSpewCont(...) JitSpewCheckExpandedArgs_((__VA_ARGS__))
 
 static inline void JitSpewFin(JitSpewChannel channel) {}
 

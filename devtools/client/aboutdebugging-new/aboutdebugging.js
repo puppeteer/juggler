@@ -8,10 +8,16 @@ const Services = require("Services");
 
 const { bindActionCreators } = require("devtools/client/shared/vendor/redux");
 const { createFactory } = require("devtools/client/shared/vendor/react");
-const { render, unmountComponentAtNode } =
-  require("devtools/client/shared/vendor/react-dom");
-const Provider =
-  createFactory(require("devtools/client/shared/vendor/react-redux").Provider);
+const {
+  render,
+  unmountComponentAtNode,
+} = require("devtools/client/shared/vendor/react-dom");
+const Provider = createFactory(
+  require("devtools/client/shared/vendor/react-redux").Provider
+);
+
+const FluentReact = require("devtools/client/shared/vendor/fluent-react");
+const LocalizationProvider = createFactory(FluentReact.LocalizationProvider);
 
 const actions = require("./src/actions/index");
 const { configureStore } = require("./src/create-store");
@@ -32,9 +38,23 @@ const {
   removeUSBRuntimesObserver,
 } = require("./src/modules/usb-runtimes");
 
-loader.lazyRequireGetter(this, "adbAddon", "devtools/shared/adb/adb-addon", true);
+loader.lazyRequireGetter(this, "adb", "devtools/shared/adb/adb", true);
+loader.lazyRequireGetter(
+  this,
+  "adbAddon",
+  "devtools/shared/adb/adb-addon",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "adbProcess",
+  "devtools/shared/adb/adb-process",
+  true
+);
 
-const Router = createFactory(require("devtools/client/shared/vendor/react-router-dom").HashRouter);
+const Router = createFactory(
+  require("devtools/client/shared/vendor/react-router-dom").HashRouter
+);
 const App = createFactory(require("./src/components/App"));
 
 const AboutDebugging = {
@@ -46,41 +66,55 @@ const AboutDebugging = {
     }
 
     this.onAdbAddonUpdated = this.onAdbAddonUpdated.bind(this);
+    this.onAdbProcessReady = this.onAdbProcessReady.bind(this);
     this.onNetworkLocationsUpdated = this.onNetworkLocationsUpdated.bind(this);
     this.onUSBRuntimesUpdated = this.onUSBRuntimesUpdated.bind(this);
 
     this.store = configureStore();
     this.actions = bindActionCreators(actions, this.store.dispatch);
 
-    await l10n.init();
+    const width = this.getRoundedViewportWidth();
+    this.actions.recordTelemetryEvent("open_adbg", { width });
+
+    await l10n.init(["branding/brand.ftl", "devtools/aboutdebugging.ftl"]);
+
+    this.actions.createThisFirefoxRuntime();
+
+    // Listen to Network locations updates and retrieve the initial list of locations.
+    addNetworkLocationsObserver(this.onNetworkLocationsUpdated);
+    await this.onNetworkLocationsUpdated();
+
+    // Listen to USB runtime updates and retrieve the initial list of runtimes.
+
+    // If ADB is already started, wait for the initial runtime list to be able to restore
+    // already connected runtimes.
+    const isProcessStarted = await adb.isProcessStarted();
+    const onAdbRuntimesReady = isProcessStarted
+      ? adb.once("runtime-list-ready")
+      : null;
+    addUSBRuntimesObserver(this.onUSBRuntimesUpdated);
+    await onAdbRuntimesReady;
+
+    await this.onUSBRuntimesUpdated();
 
     render(
       Provider(
         {
           store: this.store,
         },
-        Router(
-          {},
-          App(
-            {
-              fluentBundles: l10n.getBundles(),
-            }
-          )
+        LocalizationProvider(
+          { messages: l10n.getBundles() },
+          Router({}, App({}))
         )
       ),
       this.mount
     );
 
-    this.actions.updateNetworkLocations(getNetworkLocations());
-
-    addNetworkLocationsObserver(this.onNetworkLocationsUpdated);
-
-    // Listen to USB runtime updates and retrieve the initial list of runtimes.
-    addUSBRuntimesObserver(this.onUSBRuntimesUpdated);
-    getUSBRuntimes();
-
     adbAddon.on("update", this.onAdbAddonUpdated);
     this.onAdbAddonUpdated();
+    adbProcess.on("adb-ready", this.onAdbProcessReady);
+    // get the initial status of adb process, in case it's already started
+    this.onAdbProcessReady();
 
     // Remove deprecated remote debugging extensions.
     await adbAddon.uninstallUnsupportedExtensions();
@@ -90,19 +124,24 @@ const AboutDebugging = {
     this.actions.updateAdbAddonStatus(adbAddon.status);
   },
 
-  onNetworkLocationsUpdated() {
-    this.actions.updateNetworkLocations(getNetworkLocations());
+  onAdbProcessReady() {
+    this.actions.updateAdbReady(adbProcess.ready);
   },
 
-  onUSBRuntimesUpdated() {
-    this.actions.updateUSBRuntimes(getUSBRuntimes());
+  onNetworkLocationsUpdated() {
+    return this.actions.updateNetworkLocations(getNetworkLocations());
+  },
+
+  async onUSBRuntimesUpdated() {
+    const runtimes = await getUSBRuntimes();
+    return this.actions.updateUSBRuntimes(runtimes);
   },
 
   async destroy() {
+    const width = this.getRoundedViewportWidth();
+    this.actions.recordTelemetryEvent("close_adbg", { width });
+
     const state = this.store.getState();
-
-    l10n.destroy();
-
     const currentRuntimeId = state.runtimes.selectedRuntimeId;
     if (currentRuntimeId) {
       await this.actions.unwatchRuntime(currentRuntimeId);
@@ -114,6 +153,7 @@ const AboutDebugging = {
     removeNetworkLocationsObserver(this.onNetworkLocationsUpdated);
     removeUSBRuntimesObserver(this.onUSBRuntimesUpdated);
     adbAddon.off("update", this.onAdbAddonUpdated);
+    adbProcess.off("adb-ready", this.onAdbProcessReady);
     setDebugTargetCollapsibilities(state.ui.debugTargetCollapsibilities);
     unmountComponentAtNode(this.mount);
   },
@@ -121,15 +161,30 @@ const AboutDebugging = {
   get mount() {
     return document.getElementById("mount");
   },
+
+  /**
+   * Computed viewport width, rounded at 50px. Used for telemetry events.
+   */
+  getRoundedViewportWidth() {
+    return Math.ceil(window.outerWidth / 50) * 50;
+  },
 };
 
-window.addEventListener("DOMContentLoaded", () => {
-  AboutDebugging.init();
-}, { once: true });
+window.addEventListener(
+  "DOMContentLoaded",
+  () => {
+    AboutDebugging.init();
+  },
+  { once: true }
+);
 
-window.addEventListener("unload", () => {
-  AboutDebugging.destroy();
-}, {once: true});
+window.addEventListener(
+  "unload",
+  () => {
+    AboutDebugging.destroy();
+  },
+  { once: true }
+);
 
 // Expose AboutDebugging to tests so that they can access to the store.
 window.AboutDebugging = AboutDebugging;

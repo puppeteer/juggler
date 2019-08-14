@@ -6,7 +6,8 @@
 // Test that the highlighter element picker still works through iframe
 // navigations.
 
-const TEST_URI = "data:text/html;charset=utf-8," +
+const TEST_URI =
+  "data:text/html;charset=utf-8," +
   "<p>bug 699308 - test iframe navigation</p>" +
   "<iframe src='data:text/html;charset=utf-8,hello world'></iframe>";
 
@@ -20,7 +21,7 @@ add_task(async function() {
   const highlighterShowing = toolbox.once("highlighter-ready");
   testActor.synthesizeMouse({
     selector: "body",
-    options: {type: "mousemove"},
+    options: { type: "mousemove" },
     x: 1,
     y: 1,
   });
@@ -39,5 +40,5 @@ add_task(async function() {
   ok(isVisible, "Inspector is highlighting after iframe nav.");
 
   info("Stopping element picker.");
-  await toolbox.highlighterUtils.stopPicker();
+  await toolbox.inspector.nodePicker.stop();
 });

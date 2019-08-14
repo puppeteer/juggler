@@ -11,12 +11,9 @@
 
 #include "gc/Barrier.h"
 #include "gc/DeletePolicy.h"
-#include "gc/Zone.h"
+#include "gc/Tracer.h"
+#include "gc/ZoneAllocator.h"
 #include "js/HashTable.h"
-
-namespace JS {
-class Zone;
-}  // namespace JS
 
 namespace js {
 
@@ -25,7 +22,14 @@ class WeakMapBase;
 struct WeakMapTracer;
 
 namespace gc {
+
 struct WeakMarkable;
+
+#if defined(JS_GC_ZEAL) || defined(DEBUG)
+// Check whether a weak map entry is marked correctly.
+bool CheckWeakMapEntryMarking(const WeakMapBase* map, Cell* key, Cell* value);
+#endif
+
 }  // namespace gc
 
 // A subclass template of js::HashMap whose keys and values may be
@@ -62,7 +66,7 @@ class WeakMapBase : public mozilla::LinkedListElement<WeakMapBase> {
   // Unmark all weak maps in a zone.
   static void unmarkZone(JS::Zone* zone);
 
-  // Mark all the weakmaps in a zone.
+  // Trace all the weakmaps in a zone.
   static void traceZone(JS::Zone* zone, JSTracer* tracer);
 
   // Check all weak maps in a zone that have been marked as live in this garbage
@@ -73,13 +77,13 @@ class WeakMapBase : public mozilla::LinkedListElement<WeakMapBase> {
   static bool markZoneIteratively(JS::Zone* zone, GCMarker* marker);
 
   // Add zone edges for weakmaps with key delegates in a different zone.
-  static bool findInterZoneEdges(JS::Zone* zone);
+  static MOZ_MUST_USE bool findSweepGroupEdges(JS::Zone* zone);
 
   // Sweep the weak maps in a zone, removing dead weak maps and removing
   // entries of live weak maps whose keys are dead.
   static void sweepZone(JS::Zone* zone);
 
-  // Trace all delayed weak map bindings. Used by the cycle collector.
+  // Trace all weak map bindings. Used by the cycle collector.
   static void traceAllMappings(WeakMapTracer* tracer);
 
   // Save information about which weak maps are marked for a zone.
@@ -88,6 +92,14 @@ class WeakMapBase : public mozilla::LinkedListElement<WeakMapBase> {
 
   // Restore information about which weak maps are marked for many zones.
   static void restoreMarkedWeakMaps(WeakMapSet& markedWeakMaps);
+
+#if defined(JS_GC_ZEAL) || defined(DEBUG)
+  static bool checkMarkingForZone(JS::Zone* zone);
+#endif
+
+  static JSObject* getDelegate(JSObject* key);
+  static JSObject* getDelegate(JSScript* script);
+  static JSObject* getDelegate(LazyScript* script);
 
  protected:
   // Instance member functions called by the above. Instantiations of WeakMap
@@ -101,39 +113,58 @@ class WeakMapBase : public mozilla::LinkedListElement<WeakMapBase> {
   // Any weakmap key types that want to participate in the non-iterative
   // ephemeron marking must override this method.
   virtual void markEntry(GCMarker* marker, gc::Cell* markedCell,
-                         JS::GCCellPtr l) = 0;
+                         gc::Cell* l) = 0;
 
-  virtual bool markIteratively(GCMarker* marker) = 0;
+  virtual bool markEntries(GCMarker* marker) = 0;
 
- protected:
+#ifdef JS_GC_ZEAL
+  virtual bool checkMarking() const = 0;
+  virtual bool allowKeysInOtherZones() const { return false; }
+  friend bool gc::CheckWeakMapEntryMarking(const WeakMapBase*, gc::Cell*,
+                                           gc::Cell*);
+#endif
+
   // Object that this weak map is part of, if any.
   GCPtrObject memberOf;
 
   // Zone containing this weak map.
   JS::Zone* zone_;
 
-  // Whether this object has been traced during garbage collection.
+  // Whether this object has been marked during garbage collection and which
+  // color it was marked.
   bool marked;
+  gc::MarkColor markColor;
 };
 
 template <class Key, class Value>
 class WeakMap
-    : public HashMap<Key, Value, MovableCellHasher<Key>, ZoneAllocPolicy>,
+    : private HashMap<Key, Value, MovableCellHasher<Key>, ZoneAllocPolicy>,
       public WeakMapBase {
  public:
-  typedef HashMap<Key, Value, MovableCellHasher<Key>, ZoneAllocPolicy> Base;
-  typedef typename Base::Enum Enum;
-  typedef typename Base::Lookup Lookup;
-  typedef typename Base::Entry Entry;
-  typedef typename Base::Range Range;
-  typedef typename Base::Ptr Ptr;
-  typedef typename Base::AddPtr AddPtr;
+  using Base = HashMap<Key, Value, MovableCellHasher<Key>, ZoneAllocPolicy>;
+
+  using Lookup = typename Base::Lookup;
+  using Entry = typename Base::Entry;
+  using Range = typename Base::Range;
+  using Ptr = typename Base::Ptr;
+  using AddPtr = typename Base::AddPtr;
+
+  struct Enum : public Base::Enum {
+    explicit Enum(WeakMap& map) : Base::Enum(static_cast<Base&>(map)) {}
+  };
+
+  using Base::all;
+  using Base::clear;
+  using Base::has;
+  using Base::shallowSizeOfExcludingThis;
+
+  // Resolve ambiguity with LinkedListElement<>::remove.
+  using Base::remove;
 
   explicit WeakMap(JSContext* cx, JSObject* memOf = nullptr);
 
-  // Overwritten to add a read barrier to prevent an incorrectly gray value
-  // from escaping the weak map. See the UnmarkGrayTracer::onChild comment in
-  // gc/Marking.cpp.
+  // Add a read barrier to prevent an incorrectly gray value from escaping the
+  // weak map. See the UnmarkGrayTracer::onChild comment in gc/Marking.cpp.
   Ptr lookup(const Lookup& l) const {
     Ptr p = Base::lookup(l);
     if (p) {
@@ -150,24 +181,51 @@ class WeakMap
     return p;
   }
 
-  // Resolve ambiguity with LinkedListElement<>::remove.
-  using Base::remove;
+  template <typename KeyInput, typename ValueInput>
+  MOZ_MUST_USE bool put(KeyInput&& key, ValueInput&& value) {
+    MOZ_ASSERT(key);
+    return Base::put(std::forward<KeyInput>(key),
+                     std::forward<ValueInput>(value));
+  }
+
+  template <typename KeyInput, typename ValueInput>
+  MOZ_MUST_USE bool putNew(KeyInput&& key, ValueInput&& value) {
+    MOZ_ASSERT(key);
+    return Base::putNew(std::forward<KeyInput>(key),
+                        std::forward<ValueInput>(value));
+  }
+
+  template <typename KeyInput, typename ValueInput>
+  MOZ_MUST_USE bool relookupOrAdd(AddPtr& ptr, KeyInput&& key,
+                                  ValueInput&& value) {
+    MOZ_ASSERT(key);
+    return Base::relookupOrAdd(ptr, std::forward<KeyInput>(key),
+                               std::forward<ValueInput>(value));
+  }
 
   void markEntry(GCMarker* marker, gc::Cell* markedCell,
-                 JS::GCCellPtr origKey) override;
+                 gc::Cell* origKey) override;
 
   void trace(JSTracer* trc) override;
 
  protected:
-  static void addWeakEntry(GCMarker* marker, JS::GCCellPtr key,
+  // We have a key that, if it or its delegate is marked, may lead to a WeakMap
+  // value getting marked. Insert it or its delegate (if any) into the
+  // appropriate zone's gcWeakKeys or gcNurseryWeakKeys.
+  static void addWeakEntry(GCMarker* marker, gc::Cell* key,
                            const gc::WeakMarkable& markable);
 
-  bool markIteratively(GCMarker* marker) override;
+  bool markEntries(GCMarker* marker) override;
 
-  JSObject* getDelegate(JSObject* key) const;
-  JSObject* getDelegate(JSScript* script) const;
-  JSObject* getDelegate(LazyScript* script) const;
-
+  /**
+   * If a wrapper is used as a key in a weakmap, the garbage collector should
+   * keep that object around longer than it otherwise would. We want to avoid
+   * collecting the wrapper (and removing the weakmap entry) as long as the
+   * wrapped object is alive (because the object can be rewrapped and looked up
+   * again). As long as the wrapper is used as a weakmap key, it will not be
+   * collected (and remain in the weakmap) until the wrapped object is
+   * collected.
+   */
  private:
   void exposeGCThingToActiveJS(const JS::Value& v) const {
     JS::ExposeValueToActiveJS(v);
@@ -176,9 +234,9 @@ class WeakMap
     JS::ExposeObjectToActiveJS(obj);
   }
 
-  bool keyNeedsMark(JSObject* key) const;
-  bool keyNeedsMark(JSScript* script) const;
-  bool keyNeedsMark(LazyScript* script) const;
+  bool keyNeedsMark(GCMarker* marker, JSObject* key) const;
+  bool keyNeedsMark(GCMarker* marker, JSScript* script) const;
+  bool keyNeedsMark(GCMarker* marker, LazyScript* script) const;
 
   bool findZoneEdges() override {
     // This is overridden by ObjectValueMap.
@@ -200,6 +258,10 @@ class WeakMap
 #if DEBUG
   void assertEntriesNotAboutToBeFinalized();
 #endif
+
+#ifdef JS_GC_ZEAL
+  bool checkMarking() const override;
+#endif
 };
 
 class ObjectValueMap : public WeakMap<HeapPtr<JSObject*>, HeapPtr<Value>> {
@@ -207,6 +269,8 @@ class ObjectValueMap : public WeakMap<HeapPtr<JSObject*>, HeapPtr<Value>> {
   ObjectValueMap(JSContext* cx, JSObject* obj) : WeakMap(cx, obj) {}
 
   bool findZoneEdges() override;
+
+  size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 };
 
 // Generic weak map for mapping objects to other objects.

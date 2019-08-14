@@ -31,10 +31,6 @@ class UTF8Chars;
 class WTF8Chars;
 class UTF8CharsZ;
 
-using AutoValueVector = AutoVector<Value>;
-using AutoIdVector = AutoVector<jsid>;
-using AutoObjectVector = AutoVector<JSObject*>;
-
 using ValueVector = JS::GCVector<JS::Value>;
 using IdVector = JS::GCVector<jsid>;
 using ScriptVector = JS::GCVector<JSScript*>;
@@ -69,6 +65,7 @@ using JS::PrivateValue;
 using JS::StringValue;
 using JS::UndefinedValue;
 using JS::Value;
+using JS::ValueType;
 
 using JS::ConstTwoByteChars;
 using JS::Latin1Char;
@@ -86,9 +83,15 @@ using JS::Ok;
 using JS::OOM;
 using JS::Result;
 
-using JS::AutoIdVector;
-using JS::AutoObjectVector;
-using JS::AutoValueVector;
+using JS::HandleIdVector;
+using JS::HandleObjectVector;
+using JS::HandleValueVector;
+using JS::MutableHandleIdVector;
+using JS::MutableHandleObjectVector;
+using JS::MutableHandleValueVector;
+using JS::RootedIdVector;
+using JS::RootedObjectVector;
+using JS::RootedValueVector;
 
 using JS::IdVector;
 using JS::ScriptVector;
@@ -104,51 +107,43 @@ using JS::IsAcceptableThis;
 using JS::NativeImpl;
 
 using JS::Rooted;
+using JS::RootedBigInt;
 using JS::RootedFunction;
 using JS::RootedId;
 using JS::RootedObject;
 using JS::RootedScript;
 using JS::RootedString;
 using JS::RootedSymbol;
-#ifdef ENABLE_BIGINT
-using JS::RootedBigInt;
-#endif
 using JS::RootedValue;
 
 using JS::PersistentRooted;
+using JS::PersistentRootedBigInt;
 using JS::PersistentRootedFunction;
 using JS::PersistentRootedId;
 using JS::PersistentRootedObject;
 using JS::PersistentRootedScript;
 using JS::PersistentRootedString;
 using JS::PersistentRootedSymbol;
-#ifdef ENABLE_BIGINT
-using JS::PersistentRootedBigInt;
-#endif
 using JS::PersistentRootedValue;
 
 using JS::Handle;
+using JS::HandleBigInt;
 using JS::HandleFunction;
 using JS::HandleId;
 using JS::HandleObject;
 using JS::HandleScript;
 using JS::HandleString;
 using JS::HandleSymbol;
-#ifdef ENABLE_BIGINT
-using JS::HandleBigInt;
-#endif
 using JS::HandleValue;
 
 using JS::MutableHandle;
+using JS::MutableHandleBigInt;
 using JS::MutableHandleFunction;
 using JS::MutableHandleId;
 using JS::MutableHandleObject;
 using JS::MutableHandleScript;
 using JS::MutableHandleString;
 using JS::MutableHandleSymbol;
-#ifdef ENABLE_BIGINT
-using JS::MutableHandleBigInt;
-#endif
 using JS::MutableHandleValue;
 
 using JS::FalseHandleValue;
@@ -168,9 +163,7 @@ using JS::Zone;
 using JS::Symbol;
 using JS::SymbolCode;
 
-#ifdef ENABLE_BIGINT
 using JS::BigInt;
-#endif
 
 } /* namespace js */
 

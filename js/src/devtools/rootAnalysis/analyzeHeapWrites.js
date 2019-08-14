@@ -28,7 +28,6 @@ function checkExternalFunction(entry)
         "atof",
         /memchr/,
         "strlen",
-        "Servo_ComputedValues_EqualCustomProperties",
         /Servo_DeclarationBlock_GetCssText/,
         "Servo_GetArcStringData",
         "Servo_IsWorkerThread",
@@ -201,9 +200,6 @@ function treatAsSafeArgument(entry, varName, csuName)
         ["Gecko_SetStyleCoordCalcValue", null, null],
         ["Gecko_StyleClipPath_SetURLValue", "aClip", null],
         ["Gecko_nsStyleFilter_SetURLValue", "aEffects", null],
-        ["Gecko_nsStyleSVGPaint_CopyFrom", "aDest", null],
-        ["Gecko_nsStyleSVGPaint_SetURLValue", "aPaint", null],
-        ["Gecko_nsStyleSVGPaint_Reset", "aPaint", null],
         ["Gecko_nsStyleSVG_SetDashArrayLength", "aSvg", null],
         ["Gecko_nsStyleSVG_CopyDashArray", "aDst", null],
         ["Gecko_nsStyleFont_SetLang", "aFont", null],
@@ -346,12 +342,12 @@ function ignoreCallEdge(entry, callee)
         return true;
     }
 
-    // nsIDocument::PropertyTable calls GetExtraPropertyTable (which has side
+    // Document::PropertyTable calls GetExtraPropertyTable (which has side
     // effects) if the input category is non-zero. If a literal zero was passed
     // in for the category then we treat it as a safe argument, per
     // isEdgeSafeArgument, so just watch for that.
-    if (/nsIDocument::GetExtraPropertyTable/.test(callee) &&
-        /nsIDocument::PropertyTable/.test(name) &&
+    if (/Document::GetExtraPropertyTable/.test(callee) &&
+        /Document::PropertyTable/.test(name) &&
         entry.isSafeArgument(1))
     {
         return true;
@@ -424,8 +420,8 @@ function ignoreContents(entry)
         "abort",
         /MOZ_ReportAssertionFailure/,
         /MOZ_ReportCrash/,
+        /MOZ_Crash/,
         /MOZ_CrashPrintf/,
-        /MOZ_CrashOOL/,
         /AnnotateMozCrashReason/,
         /InvalidArrayIndex_CRASH/,
         /NS_ABORT_OOM/,
@@ -1070,7 +1066,7 @@ function maybeProcessMissingFunction(entry, addCallee)
     // This is a bug in the sixgill GCC plugin I think, since sixgill is
     // supposed to follow any typedefs itself.
     if (/mozilla::dom::Element/.test(name)) {
-        var callee = name.replace("mozilla::dom::Element", "nsIDocument::Element");
+        var callee = name.replace("mozilla::dom::Element", "Document::Element");
         addCallee(new CallSite(name, entry.safeArguments, entry.stack[0].location, entry.parameterNames));
         return true;
     }

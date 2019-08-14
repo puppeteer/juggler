@@ -9,23 +9,25 @@
 "use strict";
 
 let fakeController;
-let generalListener;
-let input;
-let inputOptions;
 
 /**
  * Asserts that the query context has the expected values.
  *
- * @param {QueryContext} context
- * @param {object} expectedValues The expected values for the QueryContext.
+ * @param {UrlbarQueryContext} context
+ * @param {object} expectedValues The expected values for the UrlbarQueryContext.
  */
 function assertContextMatches(context, expectedValues) {
-  Assert.ok(context instanceof QueryContext,
-    "Should be a QueryContext");
+  Assert.ok(
+    context instanceof UrlbarQueryContext,
+    "Should be a UrlbarQueryContext"
+  );
 
   for (let [key, value] of Object.entries(expectedValues)) {
-    Assert.equal(context[key], value,
-      `Should have the expected value for ${key} in the QueryContext`);
+    Assert.equal(
+      context[key],
+      value,
+      `Should have the expected value for ${key} in the UrlbarQueryContext`
+    );
   }
 }
 
@@ -33,31 +35,101 @@ function assertContextMatches(context, expectedValues) {
  * Checks the result of a startQuery call on the controller.
  *
  * @param {object} stub The sinon stub that should have been called with the
- *                      QueryContext.
+ *                      UrlbarQueryContext.
  * @param {object} expectedQueryContextProps
  *                   An object consisting of name/value pairs to check against the
- *                   QueryContext properties.
+ *                   UrlbarQueryContext properties.
+ * @param {number} callIndex The expected zero-based index of the call.  Useful
+ *                           when startQuery is called multiple times.
  */
-function checkStartQueryCall(stub, expectedQueryContextProps) {
-  Assert.equal(stub.callCount, 1,
-    "Should have called startQuery on the controller");
+function checkStartQueryCall(stub, expectedQueryContextProps, callIndex = 0) {
+  Assert.equal(
+    stub.callCount,
+    callIndex + 1,
+    "Should have called startQuery on the controller"
+  );
 
-  let args = stub.args[0];
-  Assert.equal(args.length, 1,
-    "Should have called startQuery with one argument");
+  let args = stub.args[callIndex];
+  Assert.equal(
+    args.length,
+    1,
+    "Should have called startQuery with one argument"
+  );
 
   let queryContext = args[0];
-  Assert.ok(queryContext instanceof QueryContext,
-    "Should have been passed a QueryContext");
+  Assert.ok(
+    queryContext instanceof UrlbarQueryContext,
+    "Should have been passed a UrlbarQueryContext"
+  );
 
   for (let [name, value] of Object.entries(expectedQueryContextProps)) {
-    Assert.deepEqual(queryContext[name],
-     value, `Should have the correct value for queryContext.${name}`);
+    Assert.deepEqual(
+      queryContext[name],
+      value,
+      `Should have the correct value for queryContext.${name}`
+    );
   }
 }
 
+/**
+ * Opens a new empty chrome window and clones the textbox and panel into it.
+ *
+ * @param {function} callback Called after the window is opened and loaded.
+ *                   It's passed a new UrlbarInput object.
+ */
+async function withNewWindow(callback) {
+  // Open a new window, so we don't affect other tests by adding extra
+  // UrbarInput wrappers around the urlbar.
+  let gTestRoot = getRootDirectory(gTestPath);
+
+  let win = window.openDialog(gTestRoot + "empty.xul", "", "chrome");
+  await BrowserTestUtils.waitForEvent(win, "load");
+
+  win.gBrowser = {
+    selectedBrowser: {
+      getAttribute() {
+        return undefined;
+      },
+    },
+  };
+
+  // Clone the elements into the new window, so we get exact copies without having
+  // to replicate the xul.
+  let doc = win.document;
+  let textbox = doc.importNode(document.getElementById("urlbar"), true);
+  doc.documentElement.appendChild(textbox);
+  let popupset = doc.importNode(document.getElementById("mainPopupSet"), true);
+  doc.documentElement.appendChild(popupset);
+
+  let inputOptions = {
+    textbox,
+    controller: fakeController,
+  };
+
+  let input = new UrlbarInput(inputOptions);
+
+  // Flush pending styles explicitely to make sure the added textbox and
+  // popupset are styled before proceeding test.  See bug 1488871 comment 26.
+  doc.documentElement.getBoundingClientRect();
+
+  await callback(input);
+
+  await BrowserTestUtils.closeWindow(win);
+
+  // Clean up a bunch of things so we don't leak `win`.
+  input.textbox = null;
+  input.panel = null;
+  input.window = null;
+  input.document = null;
+  input.view = null;
+
+  Assert.ok(fakeController.view);
+  fakeController.removeQueryListener(fakeController.view);
+  fakeController.view = null;
+}
+
 add_task(async function setup() {
-  sandbox = sinon.sandbox.create();
+  sandbox = sinon.createSandbox();
 
   fakeController = new UrlbarController({
     browserWindow: window,
@@ -66,73 +138,44 @@ add_task(async function setup() {
   sandbox.stub(fakeController, "startQuery");
   sandbox.stub(PrivateBrowsingUtils, "isWindowPrivate").returns(false);
 
-  // Open a new window, so we don't affect other tests by adding extra
-  // UrbarInput wrappers around the urlbar.
-  let gTestRoot = getRootDirectory(gTestPath);
-
-  let win = window.openDialog(gTestRoot + "empty.xul",
-                    "", "chrome");
-  await BrowserTestUtils.waitForEvent(win, "load");
-
-  win.gBrowser = {};
-
   registerCleanupFunction(async () => {
-    await BrowserTestUtils.closeWindow(win);
     sandbox.restore();
   });
-
-  // Clone the elements into the new window, so we get exact copies without having
-  // to replicate the xul.
-  let doc = win.document;
-  let textbox = doc.importNode(document.getElementById("urlbar"), true);
-  doc.documentElement.appendChild(textbox);
-  let panel = doc.importNode(document.getElementById("urlbar-results"), true);
-  doc.documentElement.appendChild(panel);
-
-  inputOptions = {
-    textbox,
-    panel,
-    controller: fakeController,
-  };
-
-  input = new UrlbarInput(inputOptions);
 });
 
-add_task(function test_input_starts_query() {
-  input.handleEvent({
-    target: {
-      value: "search",
-    },
-    type: "input",
-  });
+add_task(async function test_input_starts_query() {
+  await withNewWindow(input => {
+    input.inputField.value = "search";
+    input.handleEvent({
+      target: input.inputField,
+      type: "input",
+    });
 
-  checkStartQueryCall(fakeController.startQuery, {
-    searchString: "search",
-    isPrivate: false,
-    maxResults: UrlbarPrefs.get("maxRichResults"),
-  });
+    checkStartQueryCall(fakeController.startQuery, {
+      searchString: "search",
+      isPrivate: false,
+      maxResults: UrlbarPrefs.get("maxRichResults"),
+    });
 
-  sandbox.resetHistory();
+    sandbox.resetHistory();
+  });
 });
 
-add_task(function test_input_with_private_browsing() {
+add_task(async function test_input_with_private_browsing() {
   PrivateBrowsingUtils.isWindowPrivate.returns(true);
 
-  // Rather than using the global input here, we create a new instance which
-  // will use the updated return value of the private browsing stub.
-  let privateInput = new UrlbarInput(inputOptions);
+  await withNewWindow(privateInput => {
+    privateInput.inputField.value = "search";
+    privateInput.handleEvent({
+      target: privateInput.inputField,
+      type: "input",
+    });
 
-  privateInput.handleEvent({
-    target: {
-      value: "search",
-    },
-    type: "input",
+    checkStartQueryCall(fakeController.startQuery, {
+      searchString: "search",
+      isPrivate: true,
+    });
+
+    sandbox.resetHistory();
   });
-
-  checkStartQueryCall(fakeController.startQuery, {
-    searchString: "search",
-    isPrivate: true,
-  });
-
-  sandbox.resetHistory();
 });

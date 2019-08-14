@@ -3,21 +3,29 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://services-common/hawkrequest.js");
-ChromeUtils.import("resource://services-common/async.js");
+const {
+  HAWKAuthenticatedRESTRequest,
+  deriveHawkCredentials,
+} = ChromeUtils.import("resource://services-common/hawkrequest.js");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Async } = ChromeUtils.import("resource://services-common/async.js");
 
 // https://github.com/mozilla/fxa-auth-server/wiki/onepw-protocol#wiki-use-session-certificatesign-etc
 var SESSION_KEYS = {
-  sessionToken: h("a0a1a2a3a4a5a6a7 a8a9aaabacadaeaf" +
-                  "b0b1b2b3b4b5b6b7 b8b9babbbcbdbebf"),
+  sessionToken: h(
+    // eslint-disable-next-line no-useless-concat
+    "a0a1a2a3a4a5a6a7 a8a9aaabacadaeaf" + "b0b1b2b3b4b5b6b7 b8b9babbbcbdbebf"
+  ),
 
-  tokenID:      h("c0a29dcf46174973 da1378696e4c82ae" +
-                  "10f723cf4f4d9f75 e39f4ae3851595ab"),
+  tokenID: h(
+    // eslint-disable-next-line no-useless-concat
+    "c0a29dcf46174973 da1378696e4c82ae" + "10f723cf4f4d9f75 e39f4ae3851595ab"
+  ),
 
-  reqHMACkey:   h("9d8f22998ee7f579 8b887042466b72d5" +
-                  "3e56ab0c094388bf 65831f702d2febc0"),
+  reqHMACkey: h(
+    // eslint-disable-next-line no-useless-concat
+    "9d8f22998ee7f579 8b887042466b72d5" + "3e56ab0c094388bf 65831f702d2febc0"
+  ),
 };
 
 function do_register_cleanup() {
@@ -36,12 +44,11 @@ function run_test() {
   run_next_test();
 }
 
-
 add_test(function test_intl_accept_language() {
   let testCount = 0;
   let languages = [
-    "zu-NP;vo",     // Nepalese dialect of Zulu, defaulting to Volapük
-    "fa-CG;ik",     // Congolese dialect of Farsei, defaulting to Inupiaq
+    "zu-NP;vo", // Nepalese dialect of Zulu, defaulting to Volapük
+    "fa-CG;ik", // Congolese dialect of Farsei, defaulting to Inupiaq
   ];
 
   function setLanguagePref(lang) {
@@ -68,7 +75,11 @@ add_test(function test_intl_accept_language() {
       }
 
       // We've checked all the entries in languages[]. Cleanup and move on.
-      info("Checked " + testCount + " languages. Removing checkLanguagePref as pref observer.");
+      info(
+        "Checked " +
+          testCount +
+          " languages. Removing checkLanguagePref as pref observer."
+      );
       Services.prefs.removeObserver("intl.accept_languages", checkLanguagePref);
       run_next_test();
     });
@@ -76,7 +87,7 @@ add_test(function test_intl_accept_language() {
 });
 
 add_task(async function test_hawk_authenticated_request() {
-  let postData = {your: "data"};
+  let postData = { your: "data" };
 
   // An arbitrary date - Feb 2, 1971.  It ends in a bunch of zeroes to make our
   // computation with the hawk timestamp easier, since hawk throws away the
@@ -139,7 +150,9 @@ add_task(async function test_hawk_authenticated_request() {
 
   Services.prefs.resetUserPrefs();
   let pref = Services.prefs.getComplexValue(
-    "intl.accept_languages", Ci.nsIPrefLocalizedString);
+    "intl.accept_languages",
+    Ci.nsIPrefLocalizedString
+  );
   Assert.notEqual(acceptLanguage, pref.data);
 
   await promiseStopServer(server);
@@ -147,8 +160,8 @@ add_task(async function test_hawk_authenticated_request() {
 
 add_task(async function test_hawk_language_pref_changed() {
   let languages = [
-    "zu-NP",        // Nepalese dialect of Zulu
-    "fa-CG",        // Congolese dialect of Farsi
+    "zu-NP", // Nepalese dialect of Zulu
+    "fa-CG", // Congolese dialect of Farsi
   ];
 
   let credentials = {
@@ -185,7 +198,6 @@ add_task(async function test_hawk_language_pref_changed() {
   // Change the language pref ...
   setLanguage(languages[1]);
 
-
   await Async.promiseYield();
 
   request = new HAWKAuthenticatedRESTRequest(url, credentials);
@@ -197,13 +209,16 @@ add_task(async function test_hawk_language_pref_changed() {
   await promiseStopServer(server);
 });
 
-add_task(function test_deriveHawkCredentials() {
-  let credentials = deriveHawkCredentials(
-    SESSION_KEYS.sessionToken, "sessionToken");
-
-  Assert.equal(credentials.algorithm, "sha256");
+add_task(async function test_deriveHawkCredentials() {
+  let credentials = await deriveHawkCredentials(
+    SESSION_KEYS.sessionToken,
+    "sessionToken"
+  );
   Assert.equal(credentials.id, SESSION_KEYS.tokenID);
-  Assert.equal(CommonUtils.bytesAsHex(credentials.key), SESSION_KEYS.reqHMACkey);
+  Assert.equal(
+    CommonUtils.bytesAsHex(credentials.key),
+    SESSION_KEYS.reqHMACkey
+  );
 });
 
 // turn formatted test vectors into normal hex strings

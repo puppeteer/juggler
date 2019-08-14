@@ -4,14 +4,27 @@
 
 add_task(async function test_tab_options_privileges() {
   function backgroundScript() {
-    browser.runtime.onMessage.addListener(({msgName, tabId}) => {
-      if (msgName == "removeTabId") {
-        browser.tabs.remove(tabId).then(() => {
+    browser.runtime.onMessage.addListener(async ({ msgName, tab }) => {
+      if (msgName == "removeTab") {
+        try {
+          const [activeTab] = await browser.tabs.query({ active: true });
+          browser.test.assertEq(
+            tab.id,
+            activeTab.id,
+            "tabs.getCurrent has got the expected tabId"
+          );
+          browser.test.assertEq(
+            tab.windowId,
+            activeTab.windowId,
+            "tabs.getCurrent has got the expected windowId"
+          );
+          await browser.tabs.remove(tab.id);
+
           browser.test.notifyPass("options-ui-privileges");
-        }).catch(error => {
+        } catch (error) {
           browser.test.log(`Error: ${error} :: ${error.stack}`);
           browser.test.notifyFail("options-ui-privileges");
-        });
+        }
       }
     });
     browser.runtime.openOptionsPage();
@@ -19,11 +32,15 @@ add_task(async function test_tab_options_privileges() {
 
   async function optionsScript() {
     try {
-      let [tab] = await browser.tabs.query({url: "http://example.com/"});
-      browser.test.assertEq("http://example.com/", tab.url, "Got the expect tab");
+      let [tab] = await browser.tabs.query({ url: "http://example.com/" });
+      browser.test.assertEq(
+        "http://example.com/",
+        tab.url,
+        "Got the expect tab"
+      );
 
       tab = await browser.tabs.getCurrent();
-      browser.runtime.sendMessage({msgName: "removeTabId", tabId: tab.id});
+      browser.runtime.sendMessage({ msgName: "removeTab", tab });
     } catch (error) {
       browser.test.log(`Error: ${error} :: ${error.stack}`);
       browser.test.notifyFail("options-ui-privileges");
@@ -35,10 +52,10 @@ add_task(async function test_tab_options_privileges() {
     useAddonManager: "temporary",
 
     manifest: {
-      applications: {gecko: {id: ID}},
-      "permissions": ["tabs"],
-      "options_ui": {
-        "page": "options.html",
+      applications: { gecko: { id: ID } },
+      permissions: ["tabs"],
+      options_ui: {
+        page: "options.html",
       },
     },
     files: {
@@ -54,7 +71,10 @@ add_task(async function test_tab_options_privileges() {
     background: backgroundScript,
   });
 
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://example.com/");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "http://example.com/"
+  );
 
   await extension.startup();
 

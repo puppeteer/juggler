@@ -1,5 +1,6 @@
-_("Make sure various combinations of deferGetSet arguments correctly defer getting/setting properties to another object");
-ChromeUtils.import("resource://services-sync/util.js");
+_(
+  "Make sure various combinations of deferGetSet arguments correctly defer getting/setting properties to another object"
+);
 
 function run_test() {
   let base = function() {};

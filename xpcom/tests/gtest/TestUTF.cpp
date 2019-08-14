@@ -121,12 +121,11 @@ TEST(UTF, Hash16)
  * This tests the handling of a non-ascii character at various locations in a
  * UTF-16 string that is being converted to UTF-8.
  */
-void NonASCII16_helper(const size_t aStrSize)
-{
+static void NonASCII16_helper(const size_t aStrSize) {
   const size_t kTestSize = aStrSize;
   const size_t kMaxASCII = 0x80;
   const char16_t kUTF16Char = 0xC9;
-  const char kUTF8Surrogates[] = { char(0xC3), char(0x89) };
+  const char kUTF8Surrogates[] = {char(0xC3), char(0x89)};
 
   // Generate a string containing only ASCII characters.
   nsString asciiString;
@@ -160,7 +159,7 @@ void NonASCII16_helper(const size_t aStrSize)
     // First add the leading ASCII chars.
     expected.Append(asciiCString.BeginReading(), i);
 
-    // Now append the UTF-8 surrogate pair we expect the UTF-16 unicode char to
+    // Now append the UTF-8 pair we expect the UTF-16 unicode char to
     // be converted to.
     for (auto& c : kUTF8Surrogates) {
       expected.Append(c);
@@ -173,9 +172,22 @@ void NonASCII16_helper(const size_t aStrSize)
   }
 }
 
+TEST(UTF, NonASCII16)
+{
+  // Test with various string sizes to catch any special casing.
+  NonASCII16_helper(1);
+  NonASCII16_helper(8);
+  NonASCII16_helper(16);
+  NonASCII16_helper(32);
+  NonASCII16_helper(512);
+}
+
 TEST(UTF, UTF8CharEnumerator)
 {
-  const char* p = "\x61\xC0\xC2\xC2\x80\xE0\x80\x80\xE0\xA0\x80\xE1\x80\x80\xED\xBF\xBF\xED\x9F\xBF\xEE\x80\x80\xEE\x80\xFF\xF0\x90\x80\x80\xF0\x80\x80\x80\xF1\x80\x80\x80\xF4\x8F\xBF\xF4\x8F\xBF\xBF\xF4\xBF\xBF\xBF";
+  const char* p =
+      "\x61\xC0\xC2\xC2\x80\xE0\x80\x80\xE0\xA0\x80\xE1\x80\x80\xED\xBF\xBF\xED"
+      "\x9F\xBF\xEE\x80\x80\xEE\x80\xFF\xF0\x90\x80\x80\xF0\x80\x80\x80\xF1\x80"
+      "\x80\x80\xF4\x8F\xBF\xF4\x8F\xBF\xBF\xF4\xBF\xBF\xBF";
   const char* end = p + 49;
   EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0x0061U);
   EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0xFFFDU);
@@ -206,15 +218,19 @@ TEST(UTF, UTF8CharEnumerator)
   EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0xFFFDU);
   EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0xFFFDU);
   EXPECT_EQ(p, end);
-  p = "\xC2";
+  p = "\xC2\xB6";
   end = p + 1;
   EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0xFFFDU);
   EXPECT_EQ(p, end);
-  p = "\xE1\x80";
+  p = "\xE2\x98\x83";
   end = p + 2;
   EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0xFFFDU);
   EXPECT_EQ(p, end);
-  p = "\xF1\x80\x80";
+  p = "\xF0\x9F\x92\xA9";
+  end = p + 2;
+  EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0xFFFDU);
+  EXPECT_EQ(p, end);
+  p = "\xF0\x9F\x92\xA9";
   end = p + 3;
   EXPECT_EQ(UTF8CharEnumerator::NextChar(&p, end), 0xFFFDU);
   EXPECT_EQ(p, end);
@@ -237,7 +253,7 @@ TEST(UTF, UTF16CharEnumerator)
   end = p + 1;
   EXPECT_EQ(UTF16CharEnumerator::NextChar(&p, end), 0xFFFDU);
   EXPECT_EQ(p, end);
-  const char16_t loneHighStr[] = { 0xD83D, 0x0061 };
+  const char16_t loneHighStr[] = {0xD83D, 0x0061};
   p = loneHighStr;
   end = p + 2;
   EXPECT_EQ(UTF16CharEnumerator::NextChar(&p, end), 0xFFFDU);
@@ -245,4 +261,4 @@ TEST(UTF, UTF16CharEnumerator)
   EXPECT_EQ(p, end);
 }
 
-} // namespace TestUTF
+}  // namespace TestUTF

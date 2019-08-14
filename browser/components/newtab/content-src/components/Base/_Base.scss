@@ -5,10 +5,6 @@
   min-height: 100vh;
   padding: ($section-spacing + $section-vertical-padding) $base-gutter $base-gutter;
 
-  &.fixed-to-top {
-    display: block;
-  }
-
   &.only-search {
     display: block;
     padding-top: 134px;
@@ -47,6 +43,29 @@ main {
     visibility: hidden;
   }
 
+}
+
+.ds-outer-wrapper-search-alignment {
+  main {
+    // This override is to ensure while Discovery Stream loads,
+    // the search bar does not jump around. (it sticks to the top)
+    margin: 0 auto;
+  }
+}
+
+.ds-outer-wrapper-breakpoint-override {
+  main {
+    // Override Activity Stream breakpoints for Discovery Stream.
+    // Right now Discovery Stream doesn't have any breakpoints,
+    // and Activity Stream breakpoints do some wonky things.
+    width: 1042px;
+  }
+
+  &:not(.fixed-search) {
+    .search-wrapper .search-inner-wrapper {
+      width: $searchbar-width-large;
+    }
+  }
 }
 
 .base-content-fallback {

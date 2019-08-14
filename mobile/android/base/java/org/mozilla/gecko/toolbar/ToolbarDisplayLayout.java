@@ -60,8 +60,6 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
 
     private static final int MIN_DOMAIN_SCROLL_MARGIN_DP = 10;
 
-    private boolean mTrackingProtectionEnabled;
-
     // To be used with updateFromTab() to allow the caller
     // to give enough context for the requested state change.
     enum UpdateFlags {
@@ -306,7 +304,7 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
             return;
         }
 
-        final String baseDomain = tab.getBaseDomain();
+        final String baseDomain = tab.getHighlightDomain();
 
         String strippedURL = stripAboutReaderURL(url);
 
@@ -334,8 +332,14 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
             return;
         }
 
-        int index = url.indexOf(baseDomain);
-        if (index == -1 || url.startsWith("javascript:")) {
+        // Check if the URL contains something that looks like a path segment -
+        // we only want to find highlighting targets within the domain segment.
+        int domainEnd = StringUtils.pathStartIndex(url);
+        if (domainEnd == -1) {
+            domainEnd = url.length();
+        }
+        int index = url.lastIndexOf(baseDomain, domainEnd);
+        if (index == -1) {
             setTitle(url);
             return;
         }
@@ -363,7 +367,6 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
         final int imageLevel = type.getImageLevel();
 
         mSiteIdentityPopup.setSiteIdentity(siteIdentity);
-        mTrackingProtectionEnabled = SecurityModeUtil.isTrackingProtectionEnabled(siteIdentity);
 
         if (mSecurityImageLevel != imageLevel) {
             mSecurityImageLevel = imageLevel;
@@ -423,10 +426,6 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
         final boolean shouldShowThrobber = tab.getState() == Tab.STATE_LOADING;
 
         updateUiMode(shouldShowThrobber ? UIMode.PROGRESS : UIMode.DISPLAY);
-
-        if (Tab.STATE_SUCCESS == tab.getState() && mTrackingProtectionEnabled) {
-            mActivity.showTrackingProtectionPromptIfApplicable();
-        }
     }
 
     private void updateUiMode(UIMode uiMode) {

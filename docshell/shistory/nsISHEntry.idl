@@ -11,6 +11,7 @@
 
 #include "nsISupports.idl"
 
+interface nsIContentSecurityPolicy;
 interface nsIMutableArray;
 interface nsILayoutHistoryState;
 interface nsIContentViewer;
@@ -21,6 +22,7 @@ interface nsIStructuredCloneContainer;
 interface nsIBFCacheEntry;
 interface nsIPrincipal;
 interface nsISHistory;
+interface nsIReferrerInfo;
 
 %{C++
 #include "nsRect.h"
@@ -70,14 +72,8 @@ interface nsISHEntry : nsISupports
      */
     [infallible] attribute boolean isSubFrame;
 
-    /** Referrer URI */
-    [infallible] attribute nsIURI referrerURI;
-
-    /**
-     * Referrer policy, holding one of the values (REFERRER_POLICY_*) defined
-     * in nsIHttpChannel.
-     */
-    [infallible] attribute unsigned long referrerPolicy;
+    /** Referrer Info*/
+    [infallible] attribute nsIReferrerInfo referrerInfo;
 
     /** Content viewer, for fast restoration of presentation */
     [infallible] attribute nsIContentViewer contentViewer;
@@ -154,6 +150,19 @@ interface nsISHEntry : nsISupports
     [infallible] attribute nsIPrincipal principalToInherit;
 
     /**
+     * Get the storage principal, if any, that is used when the inherit flag is
+     * set.
+     */
+    [infallible] attribute nsIPrincipal storagePrincipalToInherit;
+
+    /**
+     * Get the csp, if any, that was used for this document load. That
+     * is not the CSP that was applied to subresource loads within the
+     * document, but the CSP that was applied to this document load.
+     */
+    [infallible] attribute nsIContentSecurityPolicy csp;
+
+    /**
      * Get/set data associated with this history state via a pushState() call,
      * serialized using structured clone.
      **/
@@ -226,7 +235,10 @@ interface nsISHEntry : nsISupports
      */
     [infallible] attribute boolean persist;
 
-    /** Set/Get scrollers' position in anchored pages */
+    /**
+     * Set/Get the visual viewport scroll position if session history is
+     * changed through anchor navigation or pushState.
+     */
     void setScrollPosition(in long x, in long y);
     void getScrollPosition(out long x, out long y);
 
@@ -279,15 +291,12 @@ interface nsISHEntry : nsISupports
                            in unsigned long cacheKey, in ACString contentType,
                            in nsIPrincipal triggeringPrincipal,
                            in nsIPrincipal principalToInherit,
+                           in nsIPrincipal storagePrincipalToInherit,
+                           in nsIContentSecurityPolicy aCsp,
                            in nsIDRef docshellID,
                            in boolean dynamicCreation);
 
     nsISHEntry clone();
-
-    /** Return any content viewer present in or below this node in the
-        nsSHEntry tree.  This will differ from contentViewer in the case
-        where a child nsSHEntry has the content viewer for this tree. */
-    [noscript] nsIContentViewer getAnyContentViewer(out nsISHEntry ownerEntry);
 
     /**
      * Gets the owning pointer to the editor data assosicated with
@@ -393,13 +402,4 @@ interface nsISHEntry : nsISupports
      */
     [noscript] void ReplaceChild(in nsISHEntry aNewChild);
 };
-
-%{ C++
-// {BFD1A791-AD9F-11d3-BDC7-0050040A9B44}
-#define NS_SHENTRY_CID \
-{0xbfd1a791, 0xad9f, 0x11d3, {0xbd, 0xc7, 0x0, 0x50, 0x4, 0xa, 0x9b, 0x44}}
-
-#define NS_SHENTRY_CONTRACTID \
-    "@mozilla.org/browser/session-history-entry;1"
-%}
 

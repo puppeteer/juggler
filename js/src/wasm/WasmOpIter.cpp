@@ -22,31 +22,24 @@ using namespace js;
 using namespace js::jit;
 using namespace js::wasm;
 
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
-// Actually we depend only on the reftypes proposal; this guard will change once
-// reftypes and GC are pried apart properly.
-#ifndef ENABLE_WASM_GC
-#error "Generalized tables require the GC feature"
-#endif
+#ifdef ENABLE_WASM_GC
+#  ifndef ENABLE_WASM_REFTYPES
+#    error "GC types require the reftypes feature"
+#  endif
 #endif
 
 #ifdef DEBUG
 
-#ifdef ENABLE_WASM_GC
-#define WASM_GC_OP(code) return code
-#else
-#define WASM_GC_OP(code) break
-#endif
-#ifdef ENABLE_WASM_BULKMEM_OPS
-#define WASM_BULK_OP(code) return code
-#else
-#define WASM_BULK_OP(code) break
-#endif
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
-#define WASM_TABLE_OP(code) return code
-#else
-#define WASM_TABLE_OP(code) break
-#endif
+#  ifdef ENABLE_WASM_REFTYPES
+#    define WASM_REF_OP(code) return code
+#  else
+#    define WASM_REF_OP(code) break
+#  endif
+#  ifdef ENABLE_WASM_GC
+#    define WASM_GC_OP(code) return code
+#  else
+#    define WASM_GC_OP(code) break
+#  endif
 
 OpKind wasm::Classify(OpBytes op) {
   switch (Op(op.b0)) {
@@ -172,7 +165,6 @@ OpKind wasm::Classify(OpBytes op) {
     case Op::F64Le:
     case Op::F64Gt:
     case Op::F64Ge:
-    case Op::RefEq:
       return OpKind::Comparison;
     case Op::I32Eqz:
     case Op::I32WrapI64:
@@ -201,7 +193,6 @@ OpKind wasm::Classify(OpBytes op) {
     case Op::F64ConvertUI64:
     case Op::F64ReinterpretI64:
     case Op::F64PromoteF32:
-    case Op::RefIsNull:
     case Op::I32Extend8S:
     case Op::I32Extend16S:
     case Op::I64Extend8S:
@@ -245,6 +236,10 @@ OpKind wasm::Classify(OpBytes op) {
       return OpKind::GetGlobal;
     case Op::SetGlobal:
       return OpKind::SetGlobal;
+    case Op::TableGet:
+      WASM_REF_OP(OpKind::TableGet);
+    case Op::TableSet:
+      WASM_REF_OP(OpKind::TableSet);
     case Op::Call:
       return OpKind::Call;
     case Op::CallIndirect:
@@ -259,12 +254,18 @@ OpKind wasm::Classify(OpBytes op) {
       return OpKind::Else;
     case Op::End:
       return OpKind::End;
-    case Op::CurrentMemory:
-      return OpKind::CurrentMemory;
-    case Op::GrowMemory:
-      return OpKind::GrowMemory;
+    case Op::MemorySize:
+      return OpKind::MemorySize;
+    case Op::MemoryGrow:
+      return OpKind::MemoryGrow;
     case Op::RefNull:
-      WASM_GC_OP(OpKind::RefNull);
+      WASM_REF_OP(OpKind::RefNull);
+    case Op::RefIsNull:
+      WASM_REF_OP(OpKind::Conversion);
+    case Op::RefFunc:
+      WASM_REF_OP(OpKind::RefFunc);
+    case Op::RefEq:
+      WASM_GC_OP(OpKind::Comparison);
     case Op::MiscPrefix: {
       switch (MiscOp(op.b1)) {
         case MiscOp::Limit:
@@ -281,23 +282,21 @@ OpKind wasm::Classify(OpBytes op) {
           return OpKind::Conversion;
         case MiscOp::MemCopy:
         case MiscOp::TableCopy:
-          WASM_BULK_OP(OpKind::MemOrTableCopy);
-        case MiscOp::MemDrop:
-        case MiscOp::TableDrop:
-          WASM_BULK_OP(OpKind::MemOrTableDrop);
+          return OpKind::MemOrTableCopy;
+        case MiscOp::DataDrop:
+        case MiscOp::ElemDrop:
+          return OpKind::DataOrElemDrop;
         case MiscOp::MemFill:
-          WASM_BULK_OP(OpKind::MemFill);
+          return OpKind::MemFill;
         case MiscOp::MemInit:
         case MiscOp::TableInit:
-          WASM_BULK_OP(OpKind::MemOrTableInit);
-        case MiscOp::TableGet:
-          WASM_TABLE_OP(OpKind::TableGet);
+          return OpKind::MemOrTableInit;
+        case MiscOp::TableFill:
+          WASM_REF_OP(OpKind::TableFill);
         case MiscOp::TableGrow:
-          WASM_TABLE_OP(OpKind::TableGrow);
-        case MiscOp::TableSet:
-          WASM_TABLE_OP(OpKind::TableSet);
+          WASM_REF_OP(OpKind::TableGrow);
         case MiscOp::TableSize:
-          WASM_TABLE_OP(OpKind::TableSize);
+          WASM_REF_OP(OpKind::TableSize);
         case MiscOp::StructNew:
           WASM_GC_OP(OpKind::StructNew);
         case MiscOp::StructGet:
@@ -440,8 +439,7 @@ OpKind wasm::Classify(OpBytes op) {
   MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("unimplemented opcode");
 }
 
-#undef WASM_GC_OP
-#undef WASM_BULK_OP
-#undef WASM_TABLE_OP
+#  undef WASM_GC_OP
+#  undef WASM_REF_OP
 
 #endif

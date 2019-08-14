@@ -1,18 +1,11 @@
-// Copyright 2018 Syn Developers
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! A punctuated sequence of syntax tree nodes separated by punctuation.
 //!
 //! Lots of things in Rust are punctuated sequences.
 //!
 //! - The fields of a struct are `Punctuated<Field, Token![,]>`.
 //! - The segments of a path are `Punctuated<PathSegment, Token![::]>`.
-//! - The bounds on a generic parameter are `Punctuated<TypeParamBound, Token![+]>`.
+//! - The bounds on a generic parameter are `Punctuated<TypeParamBound,
+//!   Token![+]>`.
 //! - The arguments to a function call are `Punctuated<Expr, Token![,]>`.
 //!
 //! This module provides a common representation for these punctuated sequences
@@ -112,7 +105,7 @@ impl<T, P> Punctuated<T, P> {
         Iter {
             inner: Box::new(PrivateIter {
                 inner: self.inner.iter(),
-                last: self.last.as_ref().map(|t| t.as_ref()).into_iter(),
+                last: self.last.as_ref().map(Box::as_ref).into_iter(),
             }),
         }
     }
@@ -123,7 +116,7 @@ impl<T, P> Punctuated<T, P> {
         IterMut {
             inner: Box::new(PrivateIterMut {
                 inner: self.inner.iter_mut(),
-                last: self.last.as_mut().map(|t| t.as_mut()).into_iter(),
+                last: self.last.as_mut().map(Box::as_mut).into_iter(),
             }),
         }
     }
@@ -133,7 +126,7 @@ impl<T, P> Punctuated<T, P> {
     pub fn pairs(&self) -> Pairs<T, P> {
         Pairs {
             inner: self.inner.iter(),
-            last: self.last.as_ref().map(|t| t.as_ref()).into_iter(),
+            last: self.last.as_ref().map(Box::as_ref).into_iter(),
         }
     }
 
@@ -142,7 +135,7 @@ impl<T, P> Punctuated<T, P> {
     pub fn pairs_mut(&mut self) -> PairsMut<T, P> {
         PairsMut {
             inner: self.inner.iter_mut(),
-            last: self.last.as_mut().map(|t| t.as_mut()).into_iter(),
+            last: self.last.as_mut().map(Box::as_mut).into_iter(),
         }
     }
 

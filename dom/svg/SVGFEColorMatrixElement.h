@@ -7,9 +7,9 @@
 #ifndef mozilla_dom_SVGFEColorMatrixElement_h
 #define mozilla_dom_SVGFEColorMatrixElement_h
 
-#include "nsSVGEnum.h"
-#include "nsSVGFilters.h"
 #include "SVGAnimatedNumberList.h"
+#include "SVGAnimatedEnumeration.h"
+#include "SVGFilters.h"
 
 nsresult NS_NewSVGFEColorMatrixElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -17,7 +17,9 @@ nsresult NS_NewSVGFEColorMatrixElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFE SVGFEColorMatrixElementBase;
+class DOMSVGAnimatedNumberList;
+
+typedef SVGFE SVGFEColorMatrixElementBase;
 
 class SVGFEColorMatrixElement : public SVGFEColorMatrixElementBase {
   friend nsresult(::NS_NewSVGFEColorMatrixElement(
@@ -38,17 +40,16 @@ class SVGFEColorMatrixElement : public SVGFEColorMatrixElementBase {
       nsTArray<RefPtr<SourceSurface>>& aInputImages) override;
   virtual bool AttributeAffectsRendering(int32_t aNameSpaceID,
                                          nsAtom* aAttribute) const override;
-  virtual nsSVGString& GetResultImageName() override {
+  virtual SVGAnimatedString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
-  virtual void GetSourceImageNames(
-      nsTArray<nsSVGStringInfo>& aSources) override;
+  virtual void GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) override;
 
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedString> In1();
-  already_AddRefed<SVGAnimatedEnumeration> Type();
+  already_AddRefed<DOMSVGAnimatedString> In1();
+  already_AddRefed<DOMSVGAnimatedEnumeration> Type();
   already_AddRefed<DOMSVGAnimatedNumberList> Values();
 
  protected:
@@ -57,12 +58,12 @@ class SVGFEColorMatrixElement : public SVGFEColorMatrixElementBase {
   virtual NumberListAttributesInfo GetNumberListInfo() override;
 
   enum { TYPE };
-  nsSVGEnum mEnumAttributes[1];
-  static nsSVGEnumMapping sTypeMap[];
+  SVGAnimatedEnumeration mEnumAttributes[1];
+  static SVGEnumMapping sTypeMap[];
   static EnumInfo sEnumInfo[1];
 
   enum { RESULT, IN1 };
-  nsSVGString mStringAttributes[2];
+  SVGAnimatedString mStringAttributes[2];
   static StringInfo sStringInfo[2];
 
   enum { VALUES };

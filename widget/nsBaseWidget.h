@@ -126,6 +126,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   typedef mozilla::layers::CompositorBridgeParent CompositorBridgeParent;
   typedef mozilla::layers::IAPZCTreeManager IAPZCTreeManager;
   typedef mozilla::layers::GeckoContentController GeckoContentController;
+  typedef mozilla::layers::SLGuidAndRenderRoot SLGuidAndRenderRoot;
   typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
   typedef mozilla::layers::APZEventState APZEventState;
   typedef mozilla::layers::SetAllowedTouchBehaviorCallback
@@ -168,9 +169,8 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
 
   virtual bool IsFullyOccluded() const override { return mIsFullyOccluded; }
 
-  virtual void SetCursor(nsCursor aCursor) override;
-  virtual nsresult SetCursor(imgIContainer* aCursor, uint32_t aHotspotX,
-                             uint32_t aHotspotY) override;
+  virtual void SetCursor(nsCursor aDefaultCursor, imgIContainer* aCursor,
+                         uint32_t aHotspotX, uint32_t aHotspotY) override;
   virtual void ClearCachedCursor() override { mUpdateCursor = true; }
   virtual void SetTransparencyMode(nsTransparencyMode aMode) override;
   virtual nsTransparencyMode GetTransparencyMode() override;
@@ -272,10 +272,6 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
                                                 int32_t aVertical) override {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
-  virtual MOZ_MUST_USE nsresult
-  BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) override {
-    return NS_ERROR_NOT_IMPLEMENTED;
-  }
   virtual nsresult ActivateNativeMenuItemAt(
       const nsAString& indexString) override {
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -328,16 +324,13 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
 
   void SetConfirmedTargetAPZC(
       uint64_t aInputBlockId,
-      const nsTArray<ScrollableLayerGuid>& aTargets) const override;
+      const nsTArray<SLGuidAndRenderRoot>& aTargets) const override;
 
   void UpdateZoomConstraints(
       const uint32_t& aPresShellId, const ScrollableLayerGuid::ViewID& aViewId,
       const mozilla::Maybe<ZoomConstraints>& aConstraints) override;
 
   bool AsyncPanZoomEnabled() const override;
-
-  typedef void (nsIPresShell::*NotificationFunc)(void);
-  void NotifyPresShell(NotificationFunc aNotificationFunc);
 
   void NotifyWindowDestroyed();
   void NotifySizeMoveDone();
@@ -353,8 +346,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   // theme changes.
   void NotifySysColorChanged();
   void NotifyThemeChanged();
-  void NotifyUIStateChanged(UIStateChangeType aShowAccelerators,
-                            UIStateChangeType aShowFocusRings);
+  void NotifyUIStateChanged(UIStateChangeType aShowFocusRings);
 
 #ifdef ACCESSIBILITY
   // Get the accessible for the window.
@@ -388,9 +380,9 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
       const AsyncDragMetrics& aDragMetrics) override;
 
   virtual bool StartAsyncAutoscroll(const ScreenPoint& aAnchorLocation,
-                                    const ScrollableLayerGuid& aGuid) override;
+                                    const SLGuidAndRenderRoot& aGuid) override;
 
-  virtual void StopAsyncAutoscroll(const ScrollableLayerGuid& aGuid) override;
+  virtual void StopAsyncAutoscroll(const SLGuidAndRenderRoot& aGuid) override;
 
   /**
    * Use this when GetLayerManager() returns a BasicLayerManager
@@ -420,6 +412,8 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   static nsIRollupListener* GetActiveRollupListener();
 
   void Shutdown();
+
+  void QuitIME();
 
 #if defined(XP_WIN)
   uint64_t CreateScrollCaptureContainer() override;
@@ -593,7 +587,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   virtual void WindowUsesOMTC() {}
   virtual void RegisterTouchWindow() {}
 
-  nsIDocument* GetDocument() const;
+  mozilla::dom::Document* GetDocument() const;
 
   void EnsureTextEventDispatcher();
 
@@ -624,6 +618,14 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
    * the APZ controller thread.
    */
   void DispatchTouchInput(mozilla::MultiTouchInput& aInput);
+
+  /**
+   * Dispatch the given PanGestureInput through APZ to Gecko (if APZ is enabled)
+   * or directly to gecko (if APZ is not enabled). This function must only
+   * be called from the main thread, and if APZ is enabled, that must also be
+   * the APZ controller thread.
+   */
+  void DispatchPanGestureInput(mozilla::PanGestureInput& aInput);
 
 #if defined(XP_WIN)
   void UpdateScrollCapture() override;
@@ -698,6 +700,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   bool mUpdateCursor;
   bool mUseAttachedEvents;
   bool mIMEHasFocus;
+  bool mIMEHasQuit;
   bool mIsFullyOccluded;
   static nsIRollupListener* gRollupListener;
 

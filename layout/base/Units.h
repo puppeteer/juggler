@@ -227,6 +227,7 @@ typedef gfx::Matrix4x4Typed<LayoutDevicePixel, LayoutDevicePixel>
     LayoutDeviceToLayoutDeviceMatrix4x4;
 typedef gfx::Matrix4x4Typed<LayerPixel, ParentLayerPixel>
     LayerToParentLayerMatrix4x4;
+typedef gfx::Matrix4x4Typed<LayerPixel, ScreenPixel> LayerToScreenMatrix4x4;
 typedef gfx::Matrix4x4Typed<ScreenPixel, ScreenPixel> ScreenToScreenMatrix4x4;
 typedef gfx::Matrix4x4Typed<ScreenPixel, ParentLayerPixel>
     ScreenToParentLayerMatrix4x4;
@@ -480,7 +481,7 @@ struct LayoutDevicePixel {
  * The pixels that layout rasterizes and delivers to the graphics code.
  * These also are generally referred to as "device pixels" in layout code.
  * Conversion between CSS pixels and LayerPixels is affected by:
- * 1) the "display resolution" (see nsIPresShell::SetResolution)
+ * 1) the "display resolution" (see PresShell::SetResolution)
  * 2) the "full zoom" (see nsPresContext::SetFullZoom)
  * 3) the "widget scale" (see nsIWidget::GetDefaultScale)
  * 4) rasterizing at a different scale in the presence of some CSS transforms

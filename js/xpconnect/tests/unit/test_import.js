@@ -1,17 +1,25 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
-function run_test() {   
+
+var XPCOMUtils;
+function run_test() {
   var scope = {};
-  ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", scope);
+  var exports = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", scope);
   Assert.equal(typeof(scope.XPCOMUtils), "object");
   Assert.equal(typeof(scope.XPCOMUtils.generateNSGetFactory), "function");
-  
+
+  equal(scope.XPCOMUtils, exports.XPCOMUtils);
+  deepEqual(Object.keys(scope), ["XPCOMUtils"]);
+  deepEqual(Object.keys(exports), ["XPCOMUtils"]);
+
+  exports = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+  equal(scope.XPCOMUtils, exports.XPCOMUtils);
+  deepEqual(Object.keys(exports), ["XPCOMUtils"]);
+
   // access module's global object directly without importing any
   // symbols
-  var module = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm",
-                                  null);
+  var module = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", null);
   Assert.equal(typeof(XPCOMUtils), "undefined");
   Assert.equal(typeof(module), "object");
   Assert.equal(typeof(module.XPCOMUtils), "object");
@@ -20,22 +28,24 @@ function run_test() {
 
   // import symbols to our global object
   Assert.equal(typeof(Cu.import), "function");
-  ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+  ({XPCOMUtils} = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm"));
   Assert.equal(typeof(XPCOMUtils), "object");
   Assert.equal(typeof(XPCOMUtils.generateNSGetFactory), "function");
-  
+
   // try on a new object
   var scope2 = {};
   ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", scope2);
   Assert.equal(typeof(scope2.XPCOMUtils), "object");
   Assert.equal(typeof(scope2.XPCOMUtils.generateNSGetFactory), "function");
-  
+
   Assert.ok(scope2.XPCOMUtils == scope.XPCOMUtils);
 
   // try on a new object using the resolved URL
   var res = Cc["@mozilla.org/network/protocol;1?name=resource"]
               .getService(Ci.nsIResProtocolHandler);
-  var resURI = res.newURI("resource://gre/modules/XPCOMUtils.jsm");
+  var resURI = Cc["@mozilla.org/network/io-service;1"]
+                 .getService(Ci.nsIIOService)
+                 .newURI("resource://gre/modules/XPCOMUtils.jsm");
   dump("resURI: " + resURI + "\n");
   var filePath = res.resolveURI(resURI);
   var scope3 = {};
@@ -51,7 +61,7 @@ function run_test() {
       didThrow = true;
   }
   Assert.ok(didThrow);
- 
+
   // try to create a component
   do_load_manifest("component_import.manifest");
   const contractID = "@mozilla.org/tests/module-importer;";
@@ -67,17 +77,10 @@ function run_test() {
 
   // Call getInterfaces to test line numbers in JS components.  But as long as
   // we're doing that, why not test what it returns too?
-  // Kind of odd that this is not returning an array containing the
-  // number... Or for that matter not returning an array containing an object?
-  var interfaces = foo.getInterfaces({});
-  Assert.equal(interfaces, Ci.nsIClassInfo.number);
-
-  // try to create a component by CID
-  const cid = "{6b933fe6-6eba-4622-ac86-e4f654f1b474}";
-  Assert.ok(cid in Components.classesByID);
-  foo = Components.classesByID[cid]
-                  .createInstance(Ci.nsIClassInfo);
-  Assert.ok(foo.contractID == contractID + "1");
+  var interfaces = foo.interfaces;
+  Assert.ok(Array.isArray(interfaces));
+  Assert.equal(interfaces.length, 1);
+  Assert.ok(interfaces[0].equals(Ci.nsIClassInfo))
 
   // try to create another component which doesn't directly implement QI
   Assert.ok((contractID + "2") in Cc);

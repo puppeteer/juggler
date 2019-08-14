@@ -37,8 +37,8 @@ class HeapTypeSetKey;
 
 namespace jit {
 
-class ICScript;
 struct IonScript;
+class JitScript;
 class TempAllocator;
 
 }  // namespace jit
@@ -83,19 +83,21 @@ class MOZ_RAII AutoSweepObjectGroup : public AutoSweepBase {
 #endif
 };
 
-// Sweep a TypeScript. Functions that expect a swept script should take a
-// reference to this class.
-class MOZ_RAII AutoSweepTypeScript : public AutoSweepBase {
+// Sweep the type inference data in a JitScript. Functions that expect a swept
+// script should take a reference to this class.
+class MOZ_RAII AutoSweepJitScript : public AutoSweepBase {
 #ifdef DEBUG
-  JSScript* script_;
+  Zone* zone_;
+  jit::JitScript* jitScript_;
 #endif
 
  public:
-  inline explicit AutoSweepTypeScript(JSScript* script);
+  inline explicit AutoSweepJitScript(JSScript* script);
 #ifdef DEBUG
-  inline ~AutoSweepTypeScript();
+  inline ~AutoSweepJitScript();
 
-  JSScript* script() const { return script_; }
+  jit::JitScript* jitScript() const { return jitScript_; }
+  Zone* zone() const { return zone_; }
 #endif
 };
 
@@ -198,135 +200,6 @@ class RecompileInfo {
 // single IonScript doesn't require an allocation.
 typedef Vector<RecompileInfo, 1, SystemAllocPolicy> RecompileInfoVector;
 
-/* Persistent type information for a script, retained across GCs. */
-class TypeScript {
-  friend class ::JSScript;
-
-  // The freeze constraints added to stack type sets will only directly
-  // invalidate the script containing those stack type sets. This Vector
-  // contains compilations that inlined this script, so we can invalidate
-  // them as well.
-  RecompileInfoVector inlinedCompilations_;
-
-  // ICScript and TypeScript have the same lifetimes, so we store a pointer to
-  // ICScript here to not increase sizeof(JSScript).
-  js::UniquePtr<js::jit::ICScript> icScript_;
-
-  // Variable-size array
-  StackTypeSet typeArray_[1];
-
- public:
-  RecompileInfoVector& inlinedCompilations() { return inlinedCompilations_; }
-  MOZ_MUST_USE bool addInlinedCompilation(RecompileInfo info) {
-    if (!inlinedCompilations_.empty() && inlinedCompilations_.back() == info) {
-      return true;
-    }
-    return inlinedCompilations_.append(info);
-  }
-
-  jit::ICScript* icScript() const {
-    MOZ_ASSERT(icScript_);
-    return icScript_.get();
-  }
-
-  /* Array of type sets for variables and JOF_TYPESET ops. */
-  StackTypeSet* typeArray() const {
-    // Ensure typeArray_ is the last data member of TypeScript.
-    JS_STATIC_ASSERT(sizeof(TypeScript) ==
-                     sizeof(typeArray_) + offsetof(TypeScript, typeArray_));
-    return const_cast<StackTypeSet*>(typeArray_);
-  }
-
-  static inline size_t SizeIncludingTypeArray(size_t arraySize) {
-    // Ensure typeArray_ is the last data member of TypeScript.
-    JS_STATIC_ASSERT(sizeof(TypeScript) ==
-                     sizeof(StackTypeSet) + offsetof(TypeScript, typeArray_));
-    return offsetof(TypeScript, typeArray_) + arraySize * sizeof(StackTypeSet);
-  }
-
-  static inline unsigned NumTypeSets(JSScript* script);
-
-  static inline StackTypeSet* ThisTypes(JSScript* script);
-  static inline StackTypeSet* ArgTypes(JSScript* script, unsigned i);
-
-  /* Get the type set for values observed at an opcode. */
-  static inline StackTypeSet* BytecodeTypes(JSScript* script, jsbytecode* pc);
-
-  template <typename TYPESET>
-  static inline TYPESET* BytecodeTypes(JSScript* script, jsbytecode* pc,
-                                       uint32_t* bytecodeMap, uint32_t* hint,
-                                       TYPESET* typeArray);
-
-  /*
-   * Monitor a bytecode pushing any value. This must be called for any opcode
-   * which is JOF_TYPESET, and where either the script has not been analyzed
-   * by type inference or where the pc has type barriers. For simplicity, we
-   * always monitor JOF_TYPESET opcodes in the interpreter and stub calls,
-   * and only look at barriers when generating JIT code for the script.
-   */
-  static inline void Monitor(JSContext* cx, JSScript* script, jsbytecode* pc,
-                             const js::Value& val);
-  static inline void Monitor(JSContext* cx, JSScript* script, jsbytecode* pc,
-                             TypeSet::Type type);
-  static inline void Monitor(JSContext* cx, const js::Value& rval);
-
-  static inline void Monitor(JSContext* cx, JSScript* script, jsbytecode* pc,
-                             StackTypeSet* types, const js::Value& val);
-
-  /* Monitor an assignment at a SETELEM on a non-integer identifier. */
-  static inline void MonitorAssign(JSContext* cx, HandleObject obj, jsid id);
-
-  /* Add a type for a variable in a script. */
-  static inline void SetThis(JSContext* cx, JSScript* script,
-                             TypeSet::Type type);
-  static inline void SetThis(JSContext* cx, JSScript* script,
-                             const js::Value& value);
-  static inline void SetArgument(JSContext* cx, JSScript* script, unsigned arg,
-                                 TypeSet::Type type);
-  static inline void SetArgument(JSContext* cx, JSScript* script, unsigned arg,
-                                 const js::Value& value);
-
-  /*
-   * Freeze all the stack type sets in a script, for a compilation. Returns
-   * copies of the type sets which will be checked against the actual ones
-   * under FinishCompilation, to detect any type changes.
-   */
-  static bool FreezeTypeSets(CompilerConstraintList* constraints,
-                             JSScript* script, TemporaryTypeSet** pThisTypes,
-                             TemporaryTypeSet** pArgTypes,
-                             TemporaryTypeSet** pBytecodeTypes);
-
-  static void Purge(JSContext* cx, HandleScript script);
-
-  void destroy(Zone* zone);
-
-  size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
-    // Note: icScript_ size is reported in jit::AddSizeOfBaselineData.
-    return mallocSizeOf(this);
-  }
-
-#ifdef DEBUG
-  void printTypes(JSContext* cx, HandleScript script) const;
-#endif
-};
-
-// Ensures no TypeScripts are purged in the current zone.
-class MOZ_RAII AutoKeepTypeScripts {
-  TypeZone& zone_;
-  bool prev_;
-
-  AutoKeepTypeScripts(const AutoKeepTypeScripts&) = delete;
-  void operator=(const AutoKeepTypeScripts&) = delete;
-
- public:
-  explicit inline AutoKeepTypeScripts(JSContext* cx);
-  inline ~AutoKeepTypeScripts();
-};
-
-void FillBytecodeTypeMap(JSScript* script, uint32_t* bytecodeMap);
-
-class RecompileInfo;
-
 // Generate the type constraints for the compilation. Sets |isValidOut| based on
 // whether the type constraints still hold.
 bool FinishCompilation(JSContext* cx, HandleScript script,
@@ -364,7 +237,7 @@ class TypeZone {
   ZoneData<bool> sweepingTypes;
   ZoneData<bool> oomSweepingTypes;
 
-  ZoneData<bool> keepTypeScripts;
+  ZoneData<bool> keepJitScripts;
 
   // The topmost AutoEnterAnalysis on the stack, if there is one.
   ZoneData<AutoEnterAnalysis*> activeAnalysis;
@@ -428,11 +301,11 @@ const char* InferSpewColorReset();
 const char* InferSpewColor(TypeConstraint* constraint);
 const char* InferSpewColor(TypeSet* types);
 
-#define InferSpew(channel, ...)   \
-  if (InferSpewActive(channel)) { \
-    InferSpewImpl(__VA_ARGS__);   \
-  } else {                        \
-  }
+#  define InferSpew(channel, ...)   \
+    if (InferSpewActive(channel)) { \
+      InferSpewImpl(__VA_ARGS__);   \
+    } else {                        \
+    }
 void InferSpewImpl(const char* fmt, ...) MOZ_FORMAT_PRINTF(1, 2);
 
 /* Check that the type property for id in group contains value. */
@@ -447,9 +320,9 @@ inline const char* InferSpewColor(TypeConstraint* constraint) {
 }
 inline const char* InferSpewColor(TypeSet* types) { return nullptr; }
 
-#define InferSpew(channel, ...) \
-  do {                          \
-  } while (0)
+#  define InferSpew(channel, ...) \
+    do {                          \
+    } while (0)
 
 #endif
 

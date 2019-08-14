@@ -8,20 +8,21 @@
 //! computed values and need yet another intermediate representation. This
 //! module's raison d'être is to ultimately contain all these types.
 
-use app_units::Au;
 use crate::properties::PropertyId;
-use crate::values::computed::length::CalcLengthOrPercentage;
+use crate::values::computed::length::LengthPercentage;
 use crate::values::computed::url::ComputedUrl;
 use crate::values::computed::Angle as ComputedAngle;
-use crate::values::computed::BorderCornerRadius as ComputedBorderCornerRadius;
+use crate::values::computed::Image;
+use crate::values::specified::SVGPathData;
 use crate::values::CSSFloat;
-use euclid::{Point2D, Size2D};
+use app_units::Au;
 use smallvec::SmallVec;
 use std::cmp;
 
 pub mod color;
 pub mod effects;
 mod font;
+mod grid;
 mod length;
 mod svg;
 pub mod transform;
@@ -112,7 +113,8 @@ pub fn animate_multiplicative_factor(
 /// function has been specified through `#[animate(fallback)]`.
 ///
 /// Trait bounds for type parameter `Foo` can be opted out of with
-/// `#[animation(no_bound(Foo))]` on the type definition.
+/// `#[animation(no_bound(Foo))]` on the type definition, trait bounds for
+/// fields can be opted into with `#[animation(field_bound)]` on the field.
 pub trait Animate: Sized {
     /// Animate a value towards another one, given an animation procedure.
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()>;
@@ -238,29 +240,10 @@ impl Animate for Au {
     }
 }
 
-impl<T> Animate for Size2D<T>
-where
-    T: Animate,
-{
+impl<T: Animate> Animate for Box<T> {
     #[inline]
     fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        Ok(Size2D::new(
-            self.width.animate(&other.width, procedure)?,
-            self.height.animate(&other.height, procedure)?,
-        ))
-    }
-}
-
-impl<T> Animate for Point2D<T>
-where
-    T: Animate,
-{
-    #[inline]
-    fn animate(&self, other: &Self, procedure: Procedure) -> Result<Self, ()> {
-        Ok(Point2D::new(
-            self.x.animate(&other.x, procedure)?,
-            self.y.animate(&other.y, procedure)?,
-        ))
+        Ok(Box::new((**self).animate(&other, procedure)?))
     }
 }
 
@@ -295,6 +278,66 @@ where
     #[inline]
     fn from_animated_value(animated: Self::AnimatedValue) -> Self {
         animated.into_iter().map(T::from_animated_value).collect()
+    }
+}
+
+impl<T> ToAnimatedValue for Box<T>
+where
+    T: ToAnimatedValue,
+{
+    type AnimatedValue = Box<<T as ToAnimatedValue>::AnimatedValue>;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        Box::new((*self).to_animated_value())
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        Box::new(T::from_animated_value(*animated))
+    }
+}
+
+impl<T> ToAnimatedValue for Box<[T]>
+where
+    T: ToAnimatedValue,
+{
+    type AnimatedValue = Box<[<T as ToAnimatedValue>::AnimatedValue]>;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        self.into_vec()
+            .into_iter()
+            .map(T::to_animated_value)
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        animated
+            .into_vec()
+            .into_iter()
+            .map(T::from_animated_value)
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    }
+}
+
+impl<T> ToAnimatedValue for crate::OwnedSlice<T>
+where
+    T: ToAnimatedValue,
+{
+    type AnimatedValue = crate::OwnedSlice<<T as ToAnimatedValue>::AnimatedValue>;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        self.into_box().to_animated_value().into()
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        Self::from(Box::from_animated_value(animated.into_box()))
     }
 }
 
@@ -334,28 +377,24 @@ macro_rules! trivial_to_animated_value {
 }
 
 trivial_to_animated_value!(Au);
-trivial_to_animated_value!(CalcLengthOrPercentage);
+trivial_to_animated_value!(LengthPercentage);
 trivial_to_animated_value!(ComputedAngle);
 trivial_to_animated_value!(ComputedUrl);
 trivial_to_animated_value!(bool);
 trivial_to_animated_value!(f32);
-
-impl ToAnimatedValue for ComputedBorderCornerRadius {
-    type AnimatedValue = Self;
-
-    #[inline]
-    fn to_animated_value(self) -> Self {
-        self
-    }
-
-    #[inline]
-    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
-        ComputedBorderCornerRadius::new(
-            (animated.0).0.width.clamp_to_non_negative(),
-            (animated.0).0.height.clamp_to_non_negative(),
-        )
-    }
-}
+// Note: This implementation is for ToAnimatedValue of ShapeSource.
+//
+// SVGPathData uses Box<[T]>. If we want to derive ToAnimatedValue for all the
+// types, we have to do "impl ToAnimatedValue for Box<[T]>" first.
+// However, the general version of "impl ToAnimatedValue for Box<[T]>" needs to
+// clone |T| and convert it into |T::AnimatedValue|. However, for SVGPathData
+// that is unnecessary--moving |T| is sufficient. So here, we implement this
+// trait manually.
+trivial_to_animated_value!(SVGPathData);
+// FIXME: Bug 1514342, Image is not animatable, but we still need to implement
+// this to avoid adding this derive to generic::Image and all its arms. We can
+// drop this after landing Bug 1514342.
+trivial_to_animated_value!(Image);
 
 impl ToAnimatedZero for Au {
     #[inline]
@@ -398,20 +437,27 @@ where
     }
 }
 
-impl<T> ToAnimatedZero for Size2D<T>
+impl<T> ToAnimatedZero for Vec<T>
 where
     T: ToAnimatedZero,
 {
     #[inline]
     fn to_animated_zero(&self) -> Result<Self, ()> {
-        Ok(Size2D::new(
-            self.width.to_animated_zero()?,
-            self.height.to_animated_zero()?,
-        ))
+        self.iter().map(|v| v.to_animated_zero()).collect()
     }
 }
 
-impl<T> ToAnimatedZero for Box<[T]>
+impl<T> ToAnimatedZero for crate::OwnedSlice<T>
+where
+    T: ToAnimatedZero,
+{
+    #[inline]
+    fn to_animated_zero(&self) -> Result<Self, ()> {
+        self.iter().map(|v| v.to_animated_zero()).collect()
+    }
+}
+
+impl<T> ToAnimatedZero for crate::ArcSlice<T>
 where
     T: ToAnimatedZero,
 {
@@ -421,6 +467,6 @@ where
             .iter()
             .map(|v| v.to_animated_zero())
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(v.into_boxed_slice())
+        Ok(crate::ArcSlice::from_iter(v.into_iter()))
     }
 }

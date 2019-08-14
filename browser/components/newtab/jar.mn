@@ -14,34 +14,20 @@ browser.jar:
   res/activity-stream/vendor/react-dom-dev.js (./vendor/react-dom-dev.js)
 #endif
   res/activity-stream/vendor/prop-types.js (./vendor/prop-types.js)
-  res/activity-stream/vendor/react-intl.js (./vendor/react-intl.js)
   res/activity-stream/vendor/redux.js (./vendor/redux.js)
   res/activity-stream/vendor/react-redux.js (./vendor/react-redux.js)
   res/activity-stream/data/content/assets/ (./data/content/assets/*)
   res/activity-stream/data/content/tippytop/ (./data/content/tippytop/*)
   res/activity-stream/data/content/activity-stream.bundle.js (./data/content/activity-stream.bundle.js)
-#ifndef RELEASE_OR_BETA
-  res/activity-stream/data/content/activity-stream.bundle.js.map (./data/content/activity-stream.bundle.js.map)
-#endif
 #ifdef XP_MACOSX
   res/activity-stream/css/activity-stream.css (./css/activity-stream-mac.css)
-#ifndef RELEASE_OR_BETA
-  res/activity-stream/css/activity-stream-mac.css.map (./css/activity-stream-mac.css.map)
-#endif
 #elifdef XP_WIN
   res/activity-stream/css/activity-stream.css (./css/activity-stream-windows.css)
-#ifndef RELEASE_OR_BETA
-  res/activity-stream/css/activity-stream-windows.css.map (./css/activity-stream-windows.css.map)
-#endif
 #else
   res/activity-stream/css/activity-stream.css (./css/activity-stream-linux.css)
+#endif
+  res/activity-stream/prerendered/activity-stream.html (./prerendered/activity-stream.html)
 #ifndef RELEASE_OR_BETA
-  res/activity-stream/css/activity-stream-linux.css.map (./css/activity-stream-linux.css.map)
+  res/activity-stream/prerendered/activity-stream-debug.html (./prerendered/activity-stream-debug.html)
 #endif
-#endif
-  res/activity-stream/prerendered/static/activity-stream-initial-state.js (./prerendered/static/activity-stream-initial-state.js)
-#ifndef RELEASE_OR_BETA
-  res/activity-stream/prerendered/static/activity-stream-debug.html (./prerendered/static/activity-stream-debug.html)
-  res/activity-stream/prerendered/static/activity-stream-prerendered-debug.html (./prerendered/static/activity-stream-prerendered-debug.html)
-#endif
-  res/activity-stream/prerendered/ (./prerendered/locales/*)
+  res/activity-stream/prerendered/activity-stream-noscripts.html (./prerendered/activity-stream-noscripts.html)

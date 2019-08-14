@@ -17,15 +17,16 @@
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/PBackgroundChild.h"
+#include "mozilla/StorageAccess.h"
 #include "nsContentUtils.h"
 
 #include "nsIBFCacheEntry.h"
 #include "nsICookieService.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsISupportsPrimitives.h"
 
 #ifdef XP_WIN
-#undef PostMessage
+#  undef PostMessage
 #endif
 
 namespace mozilla {
@@ -48,11 +49,12 @@ class BroadcastChannelMessage final : public StructuredCloneDataNoTransfers {
 
 namespace {
 
-nsIPrincipal* GetPrincipalFromThreadSafeWorkerRef(
+nsIPrincipal* GetStoragePrincipalFromThreadSafeWorkerRef(
     ThreadSafeWorkerRef* aWorkerRef) {
-  nsIPrincipal* principal = aWorkerRef->Private()->GetPrincipal();
-  if (principal) {
-    return principal;
+  nsIPrincipal* storagePrincipal =
+      aWorkerRef->Private()->GetEffectiveStoragePrincipal();
+  if (storagePrincipal) {
+    return storagePrincipal;
   }
 
   // Walk up to our containing page
@@ -61,21 +63,19 @@ nsIPrincipal* GetPrincipalFromThreadSafeWorkerRef(
     wp = wp->GetParent();
   }
 
-  return wp->GetPrincipal();
+  return wp->GetEffectiveStoragePrincipal();
 }
 
 class InitializeRunnable final : public WorkerMainThreadRunnable {
  public:
   InitializeRunnable(ThreadSafeWorkerRef* aWorkerRef, nsACString& aOrigin,
-                     PrincipalInfo& aPrincipalInfo, bool* aThirdPartyWindow,
-                     ErrorResult& aRv)
+                     PrincipalInfo& aStoragePrincipalInfo, ErrorResult& aRv)
       : WorkerMainThreadRunnable(
             aWorkerRef->Private(),
             NS_LITERAL_CSTRING("BroadcastChannel :: Initialize")),
         mWorkerRef(aWorkerRef),
         mOrigin(aOrigin),
-        mPrincipalInfo(aPrincipalInfo),
-        mThirdPartyWindow(aThirdPartyWindow),
+        mStoragePrincipalInfo(aStoragePrincipalInfo),
         mRv(aRv) {
     MOZ_ASSERT(mWorkerRef);
   }
@@ -83,18 +83,19 @@ class InitializeRunnable final : public WorkerMainThreadRunnable {
   bool MainThreadRun() override {
     MOZ_ASSERT(NS_IsMainThread());
 
-    nsIPrincipal* principal = GetPrincipalFromThreadSafeWorkerRef(mWorkerRef);
-    if (!principal) {
+    nsIPrincipal* storagePrincipal =
+        GetStoragePrincipalFromThreadSafeWorkerRef(mWorkerRef);
+    if (!storagePrincipal) {
       mRv.Throw(NS_ERROR_FAILURE);
       return true;
     }
 
-    mRv = PrincipalToPrincipalInfo(principal, &mPrincipalInfo);
+    mRv = PrincipalToPrincipalInfo(storagePrincipal, &mStoragePrincipalInfo);
     if (NS_WARN_IF(mRv.Failed())) {
       return true;
     }
 
-    mRv = principal->GetOrigin(mOrigin);
+    mRv = storagePrincipal->GetOrigin(mOrigin);
     if (NS_WARN_IF(mRv.Failed())) {
       return true;
     }
@@ -111,17 +112,13 @@ class InitializeRunnable final : public WorkerMainThreadRunnable {
       return true;
     }
 
-    *mThirdPartyWindow =
-        nsContentUtils::IsThirdPartyWindowOrChannel(window, nullptr, nullptr);
-
     return true;
   }
 
  private:
   RefPtr<ThreadSafeWorkerRef> mWorkerRef;
   nsACString& mOrigin;
-  PrincipalInfo& mPrincipalInfo;
-  bool* mThirdPartyWindow;
+  PrincipalInfo& mStoragePrincipalInfo;
   ErrorResult& mRv;
 };
 
@@ -204,11 +201,10 @@ class TeardownRunnableOnWorker final : public WorkerControlRunnable,
 
 }  // namespace
 
-BroadcastChannel::BroadcastChannel(nsPIDOMWindowInner* aWindow,
+BroadcastChannel::BroadcastChannel(nsIGlobalObject* aGlobal,
                                    const nsAString& aChannel)
-    : DOMEventTargetHelper(aWindow), mChannel(aChannel), mState(StateActive) {
-  // Window can be null in workers
-
+    : DOMEventTargetHelper(aGlobal), mChannel(aChannel), mState(StateActive) {
+  MOZ_ASSERT(aGlobal);
   KeepAliveIfHasListenersFor(NS_LITERAL_STRING("message"));
 }
 
@@ -222,18 +218,30 @@ JSObject* BroadcastChannel::WrapObject(JSContext* aCx,
   return BroadcastChannel_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
+/* static */
+already_AddRefed<BroadcastChannel> BroadcastChannel::Constructor(
     const GlobalObject& aGlobal, const nsAString& aChannel, ErrorResult& aRv) {
-  nsCOMPtr<nsPIDOMWindowInner> window =
-      do_QueryInterface(aGlobal.GetAsSupports());
-  // Window is null in workers.
+  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
+  if (NS_WARN_IF(!global)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
 
-  RefPtr<BroadcastChannel> bc = new BroadcastChannel(window, aChannel);
+  RefPtr<BroadcastChannel> bc = new BroadcastChannel(global, aChannel);
 
   nsAutoCString origin;
-  PrincipalInfo principalInfo;
+  PrincipalInfo storagePrincipalInfo;
 
+  StorageAccess storageAccess;
+
+  nsCOMPtr<nsICookieSettings> cs;
   if (NS_IsMainThread()) {
+    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global);
+    if (NS_WARN_IF(!window)) {
+      aRv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
+    }
+
     nsCOMPtr<nsIGlobalObject> incumbent = mozilla::dom::GetIncumbentGlobal();
 
     if (!incumbent) {
@@ -241,27 +249,33 @@ JSObject* BroadcastChannel::WrapObject(JSContext* aCx,
       return nullptr;
     }
 
-    nsIPrincipal* principal = incumbent->PrincipalOrNull();
-    if (!principal) {
+    nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(incumbent);
+    if (NS_WARN_IF(!sop)) {
+      aRv.Throw(NS_ERROR_FAILURE);
+      return nullptr;
+    }
+
+    nsIPrincipal* storagePrincipal = sop->GetEffectiveStoragePrincipal();
+    if (!storagePrincipal) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return nullptr;
     }
 
-    aRv = principal->GetOrigin(origin);
+    aRv = storagePrincipal->GetOrigin(origin);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
 
-    aRv = PrincipalToPrincipalInfo(principal, &principalInfo);
+    aRv = PrincipalToPrincipalInfo(storagePrincipal, &storagePrincipalInfo);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
 
-    if (nsContentUtils::IsThirdPartyWindowOrChannel(window, nullptr, nullptr) &&
-        nsContentUtils::StorageAllowedForWindow(window) !=
-            nsContentUtils::StorageAccess::eAllow) {
-      aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
-      return nullptr;
+    storageAccess = StorageAllowedForWindow(window);
+
+    Document* doc = window->GetExtantDoc();
+    if (doc) {
+      cs = doc->CookieSettings();
     }
   } else {
     JSContext* cx = aGlobal.Context();
@@ -280,21 +294,26 @@ JSObject* BroadcastChannel::WrapObject(JSContext* aCx,
 
     RefPtr<ThreadSafeWorkerRef> tsr = new ThreadSafeWorkerRef(workerRef);
 
-    bool thirdPartyWindow = false;
-
-    RefPtr<InitializeRunnable> runnable = new InitializeRunnable(
-        tsr, origin, principalInfo, &thirdPartyWindow, aRv);
+    RefPtr<InitializeRunnable> runnable =
+        new InitializeRunnable(tsr, origin, storagePrincipalInfo, aRv);
     runnable->Dispatch(Canceling, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
 
-    if (thirdPartyWindow && !workerPrivate->IsStorageAllowed()) {
-      aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
-      return nullptr;
-    }
+    storageAccess = workerPrivate->StorageAccess();
+    bc->mWorkerRef = workerRef;
 
-    bc->mWorkerRef = std::move(workerRef);
+    cs = workerPrivate->CookieSettings();
+  }
+
+  // We want to allow opaque origins.
+  if (storagePrincipalInfo.type() != PrincipalInfo::TNullPrincipalInfo &&
+      (storageAccess == StorageAccess::eDeny ||
+       (ShouldPartitionStorage(storageAccess) &&
+        !StoragePartitioningEnabled(storageAccess, cs)))) {
+    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return nullptr;
   }
 
   // Register this component to PBackground.
@@ -306,7 +325,7 @@ JSObject* BroadcastChannel::WrapObject(JSContext* aCx,
   }
 
   PBroadcastChannelChild* actor = actorChild->SendPBroadcastChannelConstructor(
-      principalInfo, origin, nsString(aChannel));
+      storagePrincipalInfo, origin, nsString(aChannel));
 
   bc->mActor = static_cast<BroadcastChannelChild*>(actor);
   MOZ_ASSERT(bc->mActor);
@@ -393,7 +412,7 @@ void BroadcastChannel::RemoveDocFromBFCache() {
     return;
   }
 
-  nsIDocument* doc = window->GetExtantDoc();
+  Document* doc = window->GetExtantDoc();
   if (!doc) {
     return;
   }

@@ -15,6 +15,7 @@
 #include "nsCSSPseudoElements.h"
 #include "nsMathMLElement.h"
 #include "gfxMathTable.h"
+#include "nsPresContextInlines.h"
 
 // used to map attributes into CSS rules
 #include "mozilla/ServoStyleSet.h"
@@ -89,20 +90,22 @@ nsMathMLFrame::UpdatePresentationData(uint32_t aFlagsValues,
 // a MathMLChar. Frame classes that use this should ensure that the
 // extra leaf ComputedStyle given to the MathMLChars are accessible to
 // the Style System via the Get/Set AdditionalComputedStyle() APIs.
-/* static */ void nsMathMLFrame::ResolveMathMLCharStyle(
-    nsPresContext* aPresContext, nsIContent* aContent,
-    ComputedStyle* aParentComputedStyle, nsMathMLChar* aMathMLChar) {
-  CSSPseudoElementType pseudoType =
-      CSSPseudoElementType::mozMathAnonymous;  // savings
+/* static */
+void nsMathMLFrame::ResolveMathMLCharStyle(nsPresContext* aPresContext,
+                                           nsIContent* aContent,
+                                           ComputedStyle* aParentComputedStyle,
+                                           nsMathMLChar* aMathMLChar) {
+  PseudoStyleType pseudoType = PseudoStyleType::mozMathAnonymous;  // savings
   RefPtr<ComputedStyle> newComputedStyle;
   newComputedStyle = aPresContext->StyleSet()->ResolvePseudoElementStyle(
-      aContent->AsElement(), pseudoType, aParentComputedStyle, nullptr);
+      *aContent->AsElement(), pseudoType, aParentComputedStyle);
 
   aMathMLChar->SetComputedStyle(newComputedStyle);
 }
 
-/* static */ void nsMathMLFrame::GetEmbellishDataFrom(
-    nsIFrame* aFrame, nsEmbellishData& aEmbellishData) {
+/* static */
+void nsMathMLFrame::GetEmbellishDataFrom(nsIFrame* aFrame,
+                                         nsEmbellishData& aEmbellishData) {
   // initialize OUT params
   aEmbellishData.flags = 0;
   aEmbellishData.coreFrame = nullptr;
@@ -120,7 +123,8 @@ nsMathMLFrame::UpdatePresentationData(uint32_t aFlagsValues,
 
 // helper to get the presentation data of a frame, by possibly walking up
 // the frame hierarchy if we happen to be surrounded by non-MathML frames.
-/* static */ void nsMathMLFrame::GetPresentationDataFrom(
+/* static */
+void nsMathMLFrame::GetPresentationDataFrom(
     nsIFrame* aFrame, nsPresentationData& aPresentationData, bool aClimbTree) {
   // initialize OUT params
   aPresentationData.flags = 0;
@@ -155,9 +159,10 @@ nsMathMLFrame::UpdatePresentationData(uint32_t aFlagsValues,
       "bad MathML markup - could not find the top <math> element");
 }
 
-/* static */ void nsMathMLFrame::GetRuleThickness(DrawTarget* aDrawTarget,
-                                                  nsFontMetrics* aFontMetrics,
-                                                  nscoord& aRuleThickness) {
+/* static */
+void nsMathMLFrame::GetRuleThickness(DrawTarget* aDrawTarget,
+                                     nsFontMetrics* aFontMetrics,
+                                     nscoord& aRuleThickness) {
   nscoord xHeight = aFontMetrics->XHeight();
   char16_t overBar = 0x00AF;
   nsBoundingMetrics bm = nsLayoutUtils::AppUnitBoundsOfString(
@@ -169,9 +174,10 @@ nsMathMLFrame::UpdatePresentationData(uint32_t aFlagsValues,
   }
 }
 
-/* static */ void nsMathMLFrame::GetAxisHeight(DrawTarget* aDrawTarget,
-                                               nsFontMetrics* aFontMetrics,
-                                               nscoord& aAxisHeight) {
+/* static */
+void nsMathMLFrame::GetAxisHeight(DrawTarget* aDrawTarget,
+                                  nsFontMetrics* aFontMetrics,
+                                  nscoord& aAxisHeight) {
   gfxFont* mathFont = aFontMetrics->GetThebesFontGroup()->GetFirstMathFont();
   if (mathFont) {
     aAxisHeight = mathFont->MathTable()->Constant(
@@ -190,10 +196,11 @@ nsMathMLFrame::UpdatePresentationData(uint32_t aFlagsValues,
   }
 }
 
-/* static */ nscoord nsMathMLFrame::CalcLength(nsPresContext* aPresContext,
-                                               ComputedStyle* aComputedStyle,
-                                               const nsCSSValue& aCSSValue,
-                                               float aFontSizeInflation) {
+/* static */
+nscoord nsMathMLFrame::CalcLength(nsPresContext* aPresContext,
+                                  ComputedStyle* aComputedStyle,
+                                  const nsCSSValue& aCSSValue,
+                                  float aFontSizeInflation) {
   NS_ASSERTION(aCSSValue.IsLengthUnit(), "not a length unit");
 
   if (aCSSValue.IsPixelLengthUnit()) {
@@ -218,10 +225,12 @@ nsMathMLFrame::UpdatePresentationData(uint32_t aFlagsValues,
   return 0;
 }
 
-/* static */ void nsMathMLFrame::ParseNumericValue(
-    const nsString& aString, nscoord* aLengthValue, uint32_t aFlags,
-    nsPresContext* aPresContext, ComputedStyle* aComputedStyle,
-    float aFontSizeInflation) {
+/* static */
+void nsMathMLFrame::ParseNumericValue(const nsString& aString,
+                                      nscoord* aLengthValue, uint32_t aFlags,
+                                      nsPresContext* aPresContext,
+                                      ComputedStyle* aComputedStyle,
+                                      float aFontSizeInflation) {
   nsCSSValue cssValue;
 
   if (!nsMathMLElement::ParseNumericValue(aString, cssValue, aFlags,
@@ -254,11 +263,11 @@ class nsDisplayMathMLBoundingMetrics final : public nsDisplayItem {
       : nsDisplayItem(aBuilder, aFrame), mRect(aRect) {
     MOZ_COUNT_CTOR(nsDisplayMathMLBoundingMetrics);
   }
-#ifdef NS_BUILD_REFCNT_LOGGING
+#  ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayMathMLBoundingMetrics() {
     MOZ_COUNT_DTOR(nsDisplayMathMLBoundingMetrics);
   }
-#endif
+#  endif
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("MathMLBoundingMetrics", TYPE_MATHML_BOUNDING_METRICS)
@@ -286,31 +295,29 @@ void nsMathMLFrame::DisplayBoundingMetrics(nsDisplayListBuilder* aBuilder,
   nscoord w = aMetrics.rightBearing - aMetrics.leftBearing;
   nscoord h = aMetrics.ascent + aMetrics.descent;
 
-  aLists.Content()->AppendToTop(MakeDisplayItem<nsDisplayMathMLBoundingMetrics>(
-      aBuilder, aFrame, nsRect(x, y, w, h)));
+  aLists.Content()->AppendNewToTop<nsDisplayMathMLBoundingMetrics>(
+      aBuilder, aFrame, nsRect(x, y, w, h));
 }
 #endif
 
-class nsDisplayMathMLBar final : public nsDisplayItem {
+class nsDisplayMathMLBar final : public nsPaintedDisplayItem {
  public:
   nsDisplayMathMLBar(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                     const nsRect& aRect, uint32_t aIndex)
-      : nsDisplayItem(aBuilder, aFrame), mRect(aRect), mIndex(aIndex) {
+                     const nsRect& aRect, uint16_t aIndex)
+      : nsPaintedDisplayItem(aBuilder, aFrame), mRect(aRect), mIndex(aIndex) {
     MOZ_COUNT_CTOR(nsDisplayMathMLBar);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayMathMLBar() { MOZ_COUNT_DTOR(nsDisplayMathMLBar); }
 #endif
 
-  virtual uint32_t GetPerFrameKey() const override {
-    return (mIndex << TYPE_BITS) | nsDisplayItem::GetPerFrameKey();
-  }
+  virtual uint16_t CalculatePerFrameKey() const override { return mIndex; }
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
   NS_DISPLAY_DECL_NAME("MathMLBar", TYPE_MATHML_BAR)
  private:
   nsRect mRect;
-  uint32_t mIndex;
+  uint16_t mIndex;
 };
 
 void nsDisplayMathMLBar::Paint(nsDisplayListBuilder* aBuilder,
@@ -331,8 +338,8 @@ void nsMathMLFrame::DisplayBar(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                                uint32_t aIndex) {
   if (!aFrame->StyleVisibility()->IsVisible() || aRect.IsEmpty()) return;
 
-  aLists.Content()->AppendToTop(
-      MakeDisplayItem<nsDisplayMathMLBar>(aBuilder, aFrame, aRect, aIndex));
+  aLists.Content()->AppendNewToTop<nsDisplayMathMLBar>(aBuilder, aFrame, aRect,
+                                                       aIndex);
 }
 
 void nsMathMLFrame::GetRadicalParameters(nsFontMetrics* aFontMetrics,

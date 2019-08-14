@@ -33,17 +33,17 @@
 #include <gtk/gtk.h>
 
 #ifdef MOZ_X11
-#include <gdk/gdkx.h>
-#include <X11/ICE/ICElib.h>
-#include <X11/SM/SMlib.h>
-#include <fcntl.h>
-#include "nsThreadUtils.h"
+#  include <gdk/gdkx.h>
+#  include <X11/ICE/ICElib.h>
+#  include <X11/SM/SMlib.h>
+#  include <fcntl.h>
+#  include "nsThreadUtils.h"
 
-#include <pwd.h>
+#  include <pwd.h>
 #endif
 
 #ifdef MOZ_ENABLE_DBUS
-#include <dbus/dbus.h>
+#  include <dbus/dbus.h>
 #endif
 
 #define MIN_GTK_MAJOR_VERSION 2
@@ -54,34 +54,34 @@ You have GTK+ %d.%d.\nThis application requires GTK+ %d.%d or newer.\n\n\
 Please upgrade your GTK+ library if you wish to use this application."
 
 #if MOZ_X11
-#undef IceSetIOErrorHandler
-#undef IceAddConnectionWatch
-#undef IceConnectionNumber
-#undef IceProcessMessages
-#undef IceGetConnectionContext
-#undef SmcInteractDone
-#undef SmcSaveYourselfDone
-#undef SmcInteractRequest
-#undef SmcCloseConnection
-#undef SmcOpenConnection
-#undef SmcSetProperties
+#  undef IceSetIOErrorHandler
+#  undef IceAddConnectionWatch
+#  undef IceConnectionNumber
+#  undef IceProcessMessages
+#  undef IceGetConnectionContext
+#  undef SmcInteractDone
+#  undef SmcSaveYourselfDone
+#  undef SmcInteractRequest
+#  undef SmcCloseConnection
+#  undef SmcOpenConnection
+#  undef SmcSetProperties
 
 typedef IceIOErrorHandler (*IceSetIOErrorHandlerFn)(IceIOErrorHandler);
 typedef int (*IceAddConnectionWatchFn)(IceWatchProc, IcePointer);
 typedef int (*IceConnectionNumberFn)(IceConn);
 typedef IceProcessMessagesStatus (*IceProcessMessagesFn)(IceConn,
-                                                         IceReplyWaitInfo *,
-                                                         Bool *);
+                                                         IceReplyWaitInfo*,
+                                                         Bool*);
 typedef IcePointer (*IceGetConnectionContextFn)(IceConn);
 
 typedef void (*SmcInteractDoneFn)(SmcConn, Bool);
 typedef void (*SmcSaveYourselfDoneFn)(SmcConn, Bool);
 typedef int (*SmcInteractRequestFn)(SmcConn, int, SmcInteractProc, SmPointer);
-typedef SmcCloseStatus (*SmcCloseConnectionFn)(SmcConn, int, char **);
-typedef SmcConn (*SmcOpenConnectionFn)(char *, SmPointer, int, int,
-                                       unsigned long, SmcCallbacks *,
-                                       const char *, char **, int, char *);
-typedef void (*SmcSetPropertiesFn)(SmcConn, int, SmProp **);
+typedef SmcCloseStatus (*SmcCloseConnectionFn)(SmcConn, int, char**);
+typedef SmcConn (*SmcOpenConnectionFn)(char*, SmPointer, int, int,
+                                       unsigned long, SmcCallbacks*,
+                                       const char*, char**, int, char*);
+typedef void (*SmcSetPropertiesFn)(SmcConn, int, SmProp**);
 
 static IceSetIOErrorHandlerFn IceSetIOErrorHandlerPtr;
 static IceAddConnectionWatchFn IceAddConnectionWatchPtr;
@@ -95,17 +95,17 @@ static SmcCloseConnectionFn SmcCloseConnectionPtr;
 static SmcOpenConnectionFn SmcOpenConnectionPtr;
 static SmcSetPropertiesFn SmcSetPropertiesPtr;
 
-#define IceSetIOErrorHandler IceSetIOErrorHandlerPtr
-#define IceAddConnectionWatch IceAddConnectionWatchPtr
-#define IceConnectionNumber IceConnectionNumberPtr
-#define IceProcessMessages IceProcessMessagesPtr
-#define IceGetConnectionContext IceGetConnectionContextPtr
-#define SmcInteractDone SmcInteractDonePtr
-#define SmcSaveYourselfDone SmcSaveYourselfDonePtr
-#define SmcInteractRequest SmcInteractRequestPtr
-#define SmcCloseConnection SmcCloseConnectionPtr
-#define SmcOpenConnection SmcOpenConnectionPtr
-#define SmcSetProperties SmcSetPropertiesPtr
+#  define IceSetIOErrorHandler IceSetIOErrorHandlerPtr
+#  define IceAddConnectionWatch IceAddConnectionWatchPtr
+#  define IceConnectionNumber IceConnectionNumberPtr
+#  define IceProcessMessages IceProcessMessagesPtr
+#  define IceGetConnectionContext IceGetConnectionContextPtr
+#  define SmcInteractDone SmcInteractDonePtr
+#  define SmcSaveYourselfDone SmcSaveYourselfDonePtr
+#  define SmcInteractRequest SmcInteractRequestPtr
+#  define SmcCloseConnection SmcCloseConnectionPtr
+#  define SmcOpenConnection SmcOpenConnectionPtr
+#  define SmcSetProperties SmcSetPropertiesPtr
 
 enum ClientState {
   STATE_DISCONNECTED,
@@ -115,7 +115,7 @@ enum ClientState {
   STATE_SHUTDOWN_CANCELLED
 };
 
-static const char *gClientStateTable[] = {"DISCONNECTED", "REGISTERING", "IDLE",
+static const char* gClientStateTable[] = {"DISCONNECTED", "REGISTERING", "IDLE",
                                           "INTERACTING", "SHUTDOWN_CANCELLED"};
 
 static LazyLogModule sMozSMLog("MozSM");
@@ -134,8 +134,7 @@ class nsNativeAppSupportUnix : public nsNativeAppSupportBase {
 
   void DisconnectFromSM();
 #endif
-  NS_IMETHOD Start(bool *aRetVal) override;
-  NS_IMETHOD Stop(bool *aResult) override;
+  NS_IMETHOD Start(bool* aRetVal) override;
   NS_IMETHOD Enable() override;
 
  private:
@@ -170,7 +169,7 @@ static gboolean process_ice_messages(IceConn connection) {
       return TRUE;
 
     case IceProcessMessagesIOError: {
-      nsNativeAppSupportUnix *native = static_cast<nsNativeAppSupportUnix *>(
+      nsNativeAppSupportUnix* native = static_cast<nsNativeAppSupportUnix*>(
           IceGetConnectionContext(connection));
       native->DisconnectFromSM();
     }
@@ -184,17 +183,17 @@ static gboolean process_ice_messages(IceConn connection) {
   }
 }
 
-static gboolean ice_iochannel_watch(GIOChannel *channel, GIOCondition condition,
+static gboolean ice_iochannel_watch(GIOChannel* channel, GIOCondition condition,
                                     gpointer client_data) {
   return process_ice_messages(static_cast<IceConn>(client_data));
 }
 
 static void ice_connection_watch(IceConn connection, IcePointer client_data,
-                                 Bool opening, IcePointer *watch_data) {
+                                 Bool opening, IcePointer* watch_data) {
   guint watch_id;
 
   if (opening) {
-    GIOChannel *channel;
+    GIOChannel* channel;
     int fd = IceConnectionNumber(connection);
 
     fcntl(fd, F_SETFD, fcntl(fd, F_GETFD, 0) | FD_CLOEXEC);
@@ -228,8 +227,8 @@ static void ice_init(void) {
 
 void nsNativeAppSupportUnix::InteractCB(SmcConn smc_conn,
                                         SmPointer client_data) {
-  nsNativeAppSupportUnix *self =
-      static_cast<nsNativeAppSupportUnix *>(client_data);
+  nsNativeAppSupportUnix* self =
+      static_cast<nsNativeAppSupportUnix*>(client_data);
 
   self->SetClientState(STATE_INTERACTING);
 
@@ -289,8 +288,8 @@ void nsNativeAppSupportUnix::SaveYourselfCB(SmcConn smc_conn,
                                             SmPointer client_data,
                                             int save_style, Bool shutdown,
                                             int interact_style, Bool fast) {
-  nsNativeAppSupportUnix *self =
-      static_cast<nsNativeAppSupportUnix *>(client_data);
+  nsNativeAppSupportUnix* self =
+      static_cast<nsNativeAppSupportUnix*>(client_data);
 
   // Expect a SaveYourselfCB if we're registering a new client.
   // All properties are already set in Start() so just reply with
@@ -370,8 +369,8 @@ void nsNativeAppSupportUnix::DieCB(SmcConn smc_conn, SmPointer client_data) {
 
 void nsNativeAppSupportUnix::ShutdownCancelledCB(SmcConn smc_conn,
                                                  SmPointer client_data) {
-  nsNativeAppSupportUnix *self =
-      static_cast<nsNativeAppSupportUnix *>(client_data);
+  nsNativeAppSupportUnix* self =
+      static_cast<nsNativeAppSupportUnix*>(client_data);
 
   // Interacting is the only time when we wouldn't already have called
   // SmcSaveYourselfDone. Do that now, then set the state to make sure we
@@ -395,21 +394,21 @@ void nsNativeAppSupportUnix::DisconnectFromSM() {
   }
 }
 
-static void SetSMValue(SmPropValue &val, const nsCString &data) {
-  val.value = static_cast<SmPointer>(const_cast<char *>(data.get()));
+static void SetSMValue(SmPropValue& val, const nsCString& data) {
+  val.value = static_cast<SmPointer>(const_cast<char*>(data.get()));
   val.length = data.Length();
 }
 
-static void SetSMProperty(SmProp &prop, const char *name, const char *type,
+static void SetSMProperty(SmProp& prop, const char* name, const char* type,
                           int numVals, SmPropValue vals[]) {
-  prop.name = const_cast<char *>(name);
-  prop.type = const_cast<char *>(type);
+  prop.name = const_cast<char*>(name);
+  prop.type = const_cast<char*>(type);
   prop.num_vals = numVals;
   prop.vals = vals;
 }
 #endif /* MOZ_X11 */
 
-static void RemoveArg(char **argv) {
+static void RemoveArg(char** argv) {
   do {
     *argv = *(argv + 1);
     ++argv;
@@ -419,7 +418,7 @@ static void RemoveArg(char **argv) {
 }
 
 NS_IMETHODIMP
-nsNativeAppSupportUnix::Start(bool *aRetVal) {
+nsNativeAppSupportUnix::Start(bool* aRetVal) {
   NS_ASSERTION(gAppData, "gAppData must not be null.");
 
 // The dbus library is used by both nsWifiScannerDBus and BluetoothDBusService,
@@ -439,9 +438,9 @@ nsNativeAppSupportUnix::Start(bool *aRetVal) {
 
   nsAutoCString prev_client_id;
 
-  char **curarg = gArgv + 1;
+  char** curarg = gArgv + 1;
   while (*curarg) {
-    char *arg = *curarg;
+    char* arg = *curarg;
     if (arg[0] == '-' && arg[1] == '-') {
       arg += 2;
       if (!strcmp(arg, "sm-disable")) {
@@ -468,14 +467,14 @@ nsNativeAppSupportUnix::Start(bool *aRetVal) {
   // We don't want child processes to use the same ID
   unsetenv("DESKTOP_AUTOSTART_ID");
 
-  char *client_id = nullptr;
+  char* client_id = nullptr;
   if (!sm_disable) {
-    PRLibrary *iceLib = PR_LoadLibrary("libICE.so.6");
+    PRLibrary* iceLib = PR_LoadLibrary("libICE.so.6");
     if (!iceLib) {
       return NS_OK;
     }
 
-    PRLibrary *smLib = PR_LoadLibrary("libSM.so.6");
+    PRLibrary* smLib = PR_LoadLibrary("libSM.so.6");
     if (!smLib) {
       PR_UnloadLibrary(iceLib);
       return NS_OK;
@@ -629,7 +628,7 @@ nsNativeAppSupportUnix::Start(bool *aRetVal) {
   props[n++] = &propProgram;
 
   nsAutoCString userName;  // username that started the program
-  struct passwd *pw = getpwuid(getuid());
+  struct passwd* pw = getpwuid(getuid());
   if (pw && pw->pw_name) {
     userName = pw->pw_name;
   } else {
@@ -652,17 +651,10 @@ nsNativeAppSupportUnix::Start(bool *aRetVal) {
 }
 
 NS_IMETHODIMP
-nsNativeAppSupportUnix::Stop(bool *aResult) {
-  NS_ENSURE_ARG(aResult);
-  *aResult = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsNativeAppSupportUnix::Enable() { return NS_OK; }
 
-nsresult NS_CreateNativeAppSupport(nsINativeAppSupport **aResult) {
-  nsNativeAppSupportBase *native = new nsNativeAppSupportUnix();
+nsresult NS_CreateNativeAppSupport(nsINativeAppSupport** aResult) {
+  nsNativeAppSupportBase* native = new nsNativeAppSupportUnix();
   if (!native) return NS_ERROR_OUT_OF_MEMORY;
 
   *aResult = native;

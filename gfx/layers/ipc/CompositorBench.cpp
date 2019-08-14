@@ -7,17 +7,17 @@
 #include "CompositorBench.h"
 
 #ifdef MOZ_COMPOSITOR_BENCH
-#include "mozilla/gfx/2D.h"
-#include "mozilla/layers/Compositor.h"
-#include "mozilla/layers/Effects.h"
-#include "mozilla/TimeStamp.h"
-#include "gfxPrefs.h"
-#include <math.h>
-#include "GeckoProfiler.h"
+#  include "mozilla/gfx/2D.h"
+#  include "mozilla/layers/Compositor.h"
+#  include "mozilla/layers/Effects.h"
+#  include "mozilla/StaticPrefs.h"
+#  include "mozilla/TimeStamp.h"
+#  include <math.h>
+#  include "GeckoProfiler.h"
 
-#define TEST_STEPS 1000
-#define DURATION_THRESHOLD 30
-#define THRESHOLD_ABORT_COUNT 5
+#  define TEST_STEPS 1000
+#  define DURATION_THRESHOLD 30
+#  define THRESHOLD_ABORT_COUNT 5
 
 namespace mozilla {
 namespace layers {
@@ -33,7 +33,7 @@ class BenchTest {
  public:
   BenchTest(const char* aTestName) : mTestName(aTestName) {}
 
-  virtual ~BenchTest() {}
+  virtual ~BenchTest() = default;
 
   virtual void Setup(Compositor* aCompositor, size_t aStep) {}
   virtual void Teardown(Compositor* aCompositor) {}
@@ -292,7 +292,7 @@ static void RunCompositorBench(Compositor* aCompositor,
     BenchTest* test = tests[i];
     std::vector<TimeDuration> results;
     int testsOverThreshold = 0;
-    PROFILER_ADD_MARKER(test->ToString());
+    PROFILER_ADD_MARKER(test->ToString(), GRAPHICS);
     for (size_t j = 0; j < TEST_STEPS; j++) {
       test->Setup(aCompositor, j);
 
@@ -335,7 +335,7 @@ static void RunCompositorBench(Compositor* aCompositor,
 
 void CompositorBench(Compositor* aCompositor, const gfx::IntRect& aScreenRect) {
   static bool sRanBenchmark = false;
-  bool wantBenchmark = gfxPrefs::LayersBenchEnabled();
+  bool wantBenchmark = StaticPrefs::layers_bench_enabled();
   if (wantBenchmark && !sRanBenchmark) {
     RunCompositorBench(aCompositor, aScreenRect);
   }

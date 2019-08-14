@@ -1,3 +1,9 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #include "mozilla/ShortcutKeys.h"
 #include "../nsXBLPrototypeHandler.h"
 #include "nsContentUtils.h"
@@ -33,8 +39,8 @@ nsresult ShortcutKeys::Observe(nsISupports* aSubject, const char* aTopic,
   return NS_OK;
 }
 
-/* static */ nsXBLPrototypeHandler* ShortcutKeys::GetHandlers(
-    HandlerType aType) {
+/* static */
+nsXBLPrototypeHandler* ShortcutKeys::GetHandlers(HandlerType aType) {
   if (!sInstance) {
     sInstance = new ShortcutKeys();
   }
@@ -42,7 +48,8 @@ nsresult ShortcutKeys::Observe(nsISupports* aSubject, const char* aTopic,
   return sInstance->EnsureHandlers(aType);
 }
 
-/* static */ nsAtom* ShortcutKeys::ConvertEventToDOMEventType(
+/* static */
+nsAtom* ShortcutKeys::ConvertEventToDOMEventType(
     const WidgetKeyboardEvent* aWidgetKeyboardEvent) {
   if (aWidgetKeyboardEvent->IsKeyDownOrKeyDownOnPlugin()) {
     return nsGkAtoms::keydown;

@@ -3,9 +3,8 @@
 <head>
   <title>Test for Clipboard Events</title>
   <script type="text/javascript" src="/MochiKit/MochiKit.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/EventUtils.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -193,14 +192,18 @@ add_task(async function test_input_oncopy() {
   contentInput.setSelectionRange(2, 8);
 
   var oncopy_fired = false;
+  var oninput_fired = false;
   contentInput.oncopy = function() { oncopy_fired = true; };
+  contentInput.oninput = function () { oninput_fired = true; };
   try {
     await putOnClipboard("PUT TE", () => {
       synthesizeKey("c", {accelKey: 1});
     }, "copy on plaintext editor set clipboard correctly");
     ok(oncopy_fired, "copy event firing on plaintext editor");
+    ok(!oninput_fired, "input event shouldn't be fired on plaintext editor by copy");
   } finally {
     contentInput.oncopy = null;
+    contentInput.oninput = null;
   }
 });
 
@@ -212,16 +215,30 @@ add_task(async function test_input_oncut() {
   // that the input itself is empty.
   selectContentInput();
   var oncut_fired = false;
+  var oninput_count = 0;
+  var inputType = "";
+  var data, dataTransfer;
   contentInput.oncut = function() { oncut_fired = true; };
+  contentInput.oninput = function (aEvent) {
+    oninput_count++;
+    inputType = aEvent.inputType;
+    data = aEvent.data;
+    dataTransfer = aEvent.dataTransfer;
+  };
   try {
     await putOnClipboard("INPUT TEXT", () => {
       synthesizeKey("x", {accelKey: 1});
     }, "cut on plaintext editor set clipboard correctly");
     ok(oncut_fired, "cut event firing on plaintext editor");
+    is(oninput_count, 1, "input event should be fired once by cut");
+    is(inputType, "deleteByCut", "inputType of the input event should be \"deleteByCut\"");
+    is(data, null, "data of the input event should be null when inputType is \"deleteByCut\"");
+    is(dataTransfer, null, "dataTransfer of the input event should be null when inputType is \"deleteByCut\"");
     is(contentInput.value, "",
       "cut on plaintext editor emptied editor");
   } finally {
     contentInput.oncut = null;
+    contentInput.oninput = null;
   }
 });
 
@@ -233,16 +250,31 @@ add_task(async function test_input_onpaste() {
   // input value did change (ie. paste succeeded).
   selectContentInput();
   var onpaste_fired = false;
+  var oninput_count = 0;
+  var inputType = "";
+  var data, dataTransfer;
   contentInput.onpaste = function() { onpaste_fired = true; };
+  contentInput.oninput = function(aEvent) {
+    oninput_count++;
+    inputType = aEvent.inputType;
+    data = aEvent.data;
+    dataTransfer = aEvent.dataTransfer;
+  };
+
   try {
     synthesizeKey("v", {accelKey: 1});
     ok(onpaste_fired, "paste event firing on plaintext editor");
     is(getClipboardText(), clipboardInitialValue,
       "paste on plaintext editor did not modify clipboard contents");
+    is(oninput_count, 1, "input event should be fired once by cut");
+    is(inputType, "insertFromPaste", "inputType of the input event should be \"insertFromPaste\"");
+    is(data, clipboardInitialValue, `data of the input event should be ${clipboardInitialValue}`);
+    is(dataTransfer, null, "dataTransfer of the input event should be null even when inputType is \"insertFromPaste\"");
     is(contentInput.value, clipboardInitialValue,
       "paste on plaintext editor did modify editor value");
   } finally {
     contentInput.onpaste = null;
+    contentInput.oninput = null;
   }
 });
 
@@ -254,6 +286,9 @@ add_task(async function test_input_oncopy_abort() {
   selectContentInput();
   var oncopy_fired = false;
   contentInput.oncopy = function() { oncopy_fired = true; return false; };
+  contentInput.oninput = function() {
+    ok(false, "input event shouldn't be fired by copy but canceled");
+  };
   try {
     await wontPutOnClipboard(clipboardInitialValue, () => {
       synthesizeKey("c", {accelKey: 1});
@@ -261,6 +296,7 @@ add_task(async function test_input_oncopy_abort() {
     ok(oncopy_fired, "copy event (to-be-cancelled) firing on plaintext editor");
   } finally {
     contentInput.oncopy = null;
+    contentInput.oninput = null;
   }
 });
 
@@ -273,6 +309,9 @@ add_task(async function test_input_oncut_abort() {
   selectContentInput();
   var oncut_fired = false;
   contentInput.oncut = function() { oncut_fired = true; return false; };
+  contentInput.oninput = function() {
+    ok(false, "input event shouldn't be fired by cut but canceled");
+  };
   try {
     await wontPutOnClipboard(clipboardInitialValue, () => {
       synthesizeKey("x", {accelKey: 1});
@@ -282,6 +321,7 @@ add_task(async function test_input_oncut_abort() {
       "aborted cut on plaintext editor did not modify editor contents");
   } finally {
     contentInput.oncut = null;
+    contentInput.oninput = null;
   }
 });
 
@@ -294,6 +334,9 @@ add_task(async function test_input_onpaste_abort() {
   selectContentInput();
   var onpaste_fired = false;
   contentInput.onpaste = function() { onpaste_fired = true; return false; };
+  contentInput.oninput = function() {
+    ok(false, "input event shouldn't be fired by paste but canceled");
+  };
   try {
     synthesizeKey("v", {accelKey: 1});
     ok(onpaste_fired,
@@ -304,6 +347,7 @@ add_task(async function test_input_onpaste_abort() {
       "aborted paste on plaintext editor did not modify modified editor value");
   } finally {
     contentInput.onpaste = null;
+    contentInput.oninput = null;
   }
 });
 
@@ -557,9 +601,11 @@ add_task(async function test_eventspref_disabled() {
   });
 
   var event_fired = false;
+  var input_data = undefined;
   contentInput.oncut = function() { event_fired = true; };
   contentInput.oncopy = function() { event_fired = true; };
   contentInput.onpaste = function() { event_fired = true; };
+  contentInput.oninput = function(event) { input_data = event.data; };
   try {
     selectContentInput();
     contentInput.setSelectionRange(1, 4);
@@ -568,24 +614,30 @@ add_task(async function test_eventspref_disabled() {
       synthesizeKey("x", {accelKey: 1});
     }, "cut changed clipboard when preference is disabled");
     is(contentInput.value, "IT TEXT", "cut changed text when preference is disabled");
-    ok(!event_fired, "cut event did not fire when preference is disabled")
+    ok(!event_fired, "cut event did not fire when preference is disabled");
+    is(input_data, null, "cut should cause input event whose data value is null");
 
     event_fired = false;
+    input_data = undefined;
     contentInput.setSelectionRange(3, 6);
     await putOnClipboard("TEX", () => {
       synthesizeKey("c", {accelKey: 1});
     }, "copy changed clipboard when preference is disabled");
     ok(!event_fired, "copy event did not fire when preference is disabled")
+    is(input_data, undefined, "copy shouldn't cause input event");
 
     event_fired = false;
     contentInput.setSelectionRange(0, 2);
     synthesizeKey("v", {accelKey: 1});
     is(contentInput.value, "TEX TEXT", "paste changed text when preference is disabled");
-    ok(!event_fired, "paste event did not fire when preference is disabled")
+    ok(!event_fired, "paste event did not fire when preference is disabled");
+    is(input_data, "",
+       "paste should cause input event but whose data value should be empty string if clipboard event is disabled");
   } finally {
     contentInput.oncut = null;
     contentInput.oncopy = null;
     contentInput.onpaste = null;
+    contentInput.oninput = null;
   }
 
   await new Promise(resolve => {
@@ -873,22 +925,25 @@ add_task(async function test_paste_event_for_middle_click_without_HTMLEditor() {
 
   pasteEventCount = 0;
   auxclickFired = false;
-  document.addEventListener("click", (event) => { event.preventDefault(); }, {once: true, capture: true});
+  document.addEventListener("auxclick", (event) => { event.preventDefault(); }, {once: true, capture: true});
   synthesizeMouseAtCenter(noneditableDiv, {button: 1});
+  ok(auxclickFired, "'auxclickFired' fired");
   is(pasteEventCount, 0,
-     "If 'click' event is consumed at capturing phase at the document node, 'paste' event should be not be fired");
+     "If 'auxclick' event is consumed at capturing phase at the document node, 'paste' event should not be fired");
 
   pasteEventCount = 0;
   auxclickFired = false;
-  noneditableDiv.addEventListener("click", (event) => { event.preventDefault(); }, {once: true});
+  noneditableDiv.addEventListener("auxclick", (event) => { event.preventDefault(); }, {once: true});
   synthesizeMouseAtCenter(noneditableDiv, {button: 1});
-  is(pasteEventCount, 1,
-     "Even if 'click' event listener is added to the click event target, 'paste' event should be fired");
+  ok(auxclickFired, "'auxclick' fired");
+  is(pasteEventCount, 0,
+     "If 'auxclick' event listener is added to the click event target, 'paste' event should not be fired");
 
   pasteEventCount = 0;
   auxclickFired = false;
   document.addEventListener("auxclick", (event) => { event.preventDefault(); }, {once: true});
   synthesizeMouseAtCenter(noneditableDiv, {button: 1});
+  ok(auxclickFired, "'auxclick' fired");
   is(pasteEventCount, 0,
      "If 'auxclick' event is consumed, 'paste' event should be not be fired");
 

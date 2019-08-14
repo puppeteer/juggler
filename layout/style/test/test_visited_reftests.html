@@ -5,8 +5,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=147777
 -->
 <head>
   <title>Test for Bug 147777</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="/tests/SimpleTest/WindowSnapshot.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/WindowSnapshot.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
@@ -92,8 +92,7 @@ var gTests = [
   "== visited-inherit-1.html visited-inherit-1-ref.html",
   "== transition-on-visited.html transition-on-visited-ref.html",
   "== logical-box-border-color-visited-link-001.html logical-box-border-color-visited-link-ref.html",
-  // TODO: test should equal the reference after implementing logical border shorthands.
-  "!= logical-box-border-color-visited-link-002.html logical-box-border-color-visited-link-ref.html",
+  "== logical-box-border-color-visited-link-002.html logical-box-border-color-visited-link-ref.html",
   "== logical-box-border-color-visited-link-003.html logical-box-border-color-visited-link-ref.html",
   "== svg-paint-currentcolor-visited.svg svg-paint-currentcolor-visited-ref.svg",
 ];

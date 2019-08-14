@@ -12,6 +12,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Components.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Logging.h"
 #include "mozilla/ScopeExit.h"
@@ -39,7 +40,6 @@
 #define CONTENT_DOCUMENT_LOADED_TOPIC "content-document-loaded"
 #define CACHE_WRITE_TOPIC "browser-idle-startup-tasks-finished"
 #define CLEANUP_TOPIC "xpcom-shutdown"
-#define SHUTDOWN_TOPIC "quit-application-granted"
 #define CACHE_INVALIDATE_TOPIC "startupcache-invalidate"
 
 // The maximum time we'll wait for a child process to finish starting up before
@@ -59,15 +59,6 @@ using mozilla::dom::ContentParent;
 using namespace mozilla::loader;
 
 ProcessType ScriptPreloader::sProcessType;
-
-// This type correspond to js::vm::XDRAlignment type, which is used as a size
-// reference for alignment of XDR buffers.
-using XDRAlign = uint16_t;
-static const uint8_t sAlignPadding[sizeof(XDRAlign)] = {0, 0};
-
-static inline size_t ComputeByteAlignment(size_t bytes, size_t align) {
-  return (align - (bytes % align)) % align;
-}
 
 nsresult ScriptPreloader::CollectReports(nsIHandleReportCallback* aHandleReport,
                                          nsISupports* aData, bool aAnonymize) {
@@ -197,8 +188,8 @@ ProcessType ScriptPreloader::GetChildProcessType(const nsAString& remoteType) {
   if (remoteType.EqualsLiteral(EXTENSION_REMOTE_TYPE)) {
     return ProcessType::Extension;
   }
-  if (remoteType.EqualsLiteral(PRIVILEGED_REMOTE_TYPE)) {
-    return ProcessType::Privileged;
+  if (remoteType.EqualsLiteral(PRIVILEGEDABOUT_REMOTE_TYPE)) {
+    return ProcessType::PrivilegedAbout;
   }
   return ProcessType::Web;
 }
@@ -239,7 +230,6 @@ ScriptPreloader::ScriptPreloader()
     obs->AddObserver(this, CACHE_WRITE_TOPIC, false);
   }
 
-  obs->AddObserver(this, SHUTDOWN_TOPIC, false);
   obs->AddObserver(this, CLEANUP_TOPIC, false);
   obs->AddObserver(this, CACHE_INVALIDATE_TOPIC, false);
 
@@ -247,33 +237,7 @@ ScriptPreloader::ScriptPreloader()
   JS_AddExtraGCRootsTracer(jsapi.cx(), TraceOp, this);
 }
 
-void ScriptPreloader::ForceWriteCacheFile() {
-  if (mSaveThread) {
-    MonitorAutoLock mal(mSaveMonitor);
-
-    // Make sure we've prepared scripts, so we don't risk deadlocking while
-    // dispatching the prepare task during shutdown.
-    PrepareCacheWrite();
-
-    // Unblock the save thread, so it can start saving before we get to
-    // XPCOM shutdown.
-    mal.Notify();
-  }
-}
-
 void ScriptPreloader::Cleanup() {
-  if (mSaveThread) {
-    MonitorAutoLock mal(mSaveMonitor);
-
-    // Make sure the save thread is not blocked dispatching a sync task to
-    // the main thread, or we will deadlock.
-    MOZ_RELEASE_ASSERT(!mBlockedOnSyncDispatch);
-
-    while (!mSaveComplete && mSaveThread) {
-      mal.Wait();
-    }
-  }
-
   // Wait for any pending parses to finish before clearing the mScripts
   // hashtable, since the parse tasks depend on memory allocated by those
   // scripts.
@@ -288,6 +252,16 @@ void ScriptPreloader::Cleanup() {
   JS_RemoveExtraGCRootsTracer(jsapi.cx(), TraceOp, this);
 
   UnregisterWeakMemoryReporter(this);
+}
+
+void ScriptPreloader::StartCacheWrite() {
+  MOZ_ASSERT(!mSaveThread);
+
+  Unused << NS_NewNamedThread("SaveScripts", getter_AddRefs(mSaveThread), this);
+
+  nsCOMPtr<nsIAsyncShutdownClient> barrier = GetShutdownBarrier();
+  barrier->AddBlocker(this, NS_LITERAL_STRING(__FILE__), __LINE__,
+                      EmptyString());
 }
 
 void ScriptPreloader::InvalidateCache() {
@@ -319,12 +293,7 @@ void ScriptPreloader::InvalidateCache() {
   if (mSaveComplete && mChildCache) {
     mSaveComplete = false;
 
-    // Make sure scripts are prepared to avoid deadlock when invalidating
-    // the cache during shutdown.
-    PrepareCacheWriteInternal();
-
-    Unused << NS_NewNamedThread("SaveScripts", getter_AddRefs(mSaveThread),
-                                this);
+    StartCacheWrite();
   }
 }
 
@@ -344,14 +313,13 @@ nsresult ScriptPreloader::Observe(nsISupports* subject, const char* topic,
     MOZ_ASSERT(XRE_IsParentProcess());
 
     if (mChildCache) {
-      Unused << NS_NewNamedThread("SaveScripts", getter_AddRefs(mSaveThread),
-                                  this);
+      StartCacheWrite();
     }
   } else if (mContentStartupFinishedTopic.Equals(topic)) {
     // If this is an uninitialized about:blank viewer or a chrome: document
     // (which should always be an XBL binding document), ignore it. We don't
     // have to worry about it loading malicious content.
-    if (nsCOMPtr<nsIDocument> doc = do_QueryInterface(subject)) {
+    if (nsCOMPtr<dom::Document> doc = do_QueryInterface(subject)) {
       nsCOMPtr<nsIURI> uri = doc->GetDocumentURI();
 
       bool schemeIs;
@@ -364,8 +332,6 @@ nsresult ScriptPreloader::Observe(nsISupports* subject, const char* topic,
     FinishContentStartup();
   } else if (!strcmp(topic, "timer-callback")) {
     FinishContentStartup();
-  } else if (!strcmp(topic, SHUTDOWN_TOPIC)) {
-    ForceWriteCacheFile();
   } else if (!strcmp(topic, CLEANUP_TOPIC)) {
     Cleanup();
   } else if (!strcmp(topic, CACHE_INVALIDATE_TOPIC)) {
@@ -380,9 +346,9 @@ void ScriptPreloader::FinishContentStartup() {
 
 #ifdef DEBUG
   if (mContentStartupFinishedTopic.Equals(CONTENT_DOCUMENT_LOADED_TOPIC)) {
-    MOZ_ASSERT(sProcessType == ProcessType::Privileged);
+    MOZ_ASSERT(sProcessType == ProcessType::PrivilegedAbout);
   } else {
-    MOZ_ASSERT(sProcessType != ProcessType::Privileged);
+    MOZ_ASSERT(sProcessType != ProcessType::PrivilegedAbout);
   }
 #endif /* DEBUG */
 
@@ -491,7 +457,7 @@ Result<Ok, nsresult> ScriptPreloader::InitCache(
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   MOZ_RELEASE_ASSERT(obs);
 
-  if (sProcessType == ProcessType::Privileged) {
+  if (sProcessType == ProcessType::PrivilegedAbout) {
     // Since we control all of the documents loaded in the privileged
     // content process, we can increase the window of active time for the
     // ScriptPreloader to include the scripts that are loaded until the
@@ -540,8 +506,6 @@ Result<Ok, nsresult> ScriptPreloader::InitCacheInternal(
   }
 
   auto data = mCacheData.get<uint8_t>();
-  uint8_t* start = data.get();
-  MOZ_ASSERT(reinterpret_cast<uintptr_t>(start) % sizeof(XDRAlign) == 0);
   auto end = data + size;
 
   if (memcmp(MAGIC, data.get(), sizeof(MAGIC))) {
@@ -566,10 +530,6 @@ Result<Ok, nsresult> ScriptPreloader::InitCacheInternal(
 
     InputBuffer buf(header);
 
-    size_t len = data.get() - start;
-    size_t alignLen = ComputeByteAlignment(len, sizeof(XDRAlign));
-    data += alignLen;
-
     size_t offset = 0;
     while (!buf.finished()) {
       auto script = MakeUnique<CachedScript>(*this, buf);
@@ -587,9 +547,6 @@ Result<Ok, nsresult> ScriptPreloader::InitCacheInternal(
       }
       offset += script->mSize;
 
-      MOZ_ASSERT(reinterpret_cast<uintptr_t>(scriptData.get()) %
-                     sizeof(XDRAlign) ==
-                 0);
       script->mXDRRange.emplace(scriptData, scriptData + script->mSize);
 
       // Don't pre-decode the script unless it was used in this process type
@@ -689,9 +646,6 @@ Result<Ok, nsresult> ScriptPreloader::WriteCache() {
   MOZ_ASSERT(!NS_IsMainThread());
 
   if (!mDataPrepared && !mSaveComplete) {
-    MOZ_ASSERT(!mBlockedOnSyncDispatch);
-    mBlockedOnSyncDispatch = true;
-
     MonitorAutoUnlock mau(mSaveMonitor);
 
     NS_DispatchToMainThread(
@@ -699,8 +653,6 @@ Result<Ok, nsresult> ScriptPreloader::WriteCache() {
                           &ScriptPreloader::PrepareCacheWrite),
         NS_DISPATCH_SYNC);
   }
-
-  mBlockedOnSyncDispatch = false;
 
   if (mSaveComplete) {
     // If we don't have anything we need to save, we're done.
@@ -739,7 +691,6 @@ Result<Ok, nsresult> ScriptPreloader::WriteCache() {
     OutputBuffer buf;
     size_t offset = 0;
     for (auto script : scripts) {
-      MOZ_ASSERT(offset % sizeof(XDRAlign) == 0);
       script->mOffset = offset;
       script->Code(buf);
 
@@ -749,22 +700,11 @@ Result<Ok, nsresult> ScriptPreloader::WriteCache() {
     uint8_t headerSize[4];
     LittleEndian::writeUint32(headerSize, buf.cursor());
 
-    size_t len = 0;
     MOZ_TRY(Write(fd, MAGIC, sizeof(MAGIC)));
-    len += sizeof(MAGIC);
     MOZ_TRY(Write(fd, headerSize, sizeof(headerSize)));
-    len += sizeof(headerSize);
     MOZ_TRY(Write(fd, buf.Get(), buf.cursor()));
-    len += buf.cursor();
-    size_t alignLen = ComputeByteAlignment(len, sizeof(XDRAlign));
-    if (alignLen) {
-      MOZ_TRY(Write(fd, sAlignPadding, alignLen));
-      len += alignLen;
-    }
     for (auto script : scripts) {
-      MOZ_ASSERT(script->mSize % sizeof(XDRAlign) == 0);
       MOZ_TRY(Write(fd, script->Range().begin().get(), script->mSize));
-      len += script->mSize;
 
       if (script->mScript) {
         script->FreeData();
@@ -799,12 +739,20 @@ nsresult ScriptPreloader::Run() {
   result = mChildCache->WriteCache();
   Unused << NS_WARN_IF(result.isErr());
 
-  mSaveComplete = true;
-  NS_ReleaseOnMainThreadSystemGroup("ScriptPreloader::mSaveThread",
-                                    mSaveThread.forget());
-
-  mal.NotifyAll();
+  NS_DispatchToMainThread(
+      NewRunnableMethod("ScriptPreloader::CacheWriteComplete", this,
+                        &ScriptPreloader::CacheWriteComplete),
+      NS_DISPATCH_NORMAL);
   return NS_OK;
+}
+
+void ScriptPreloader::CacheWriteComplete() {
+  mSaveThread->AsyncShutdown();
+  mSaveThread = nullptr;
+  mSaveComplete = true;
+
+  nsCOMPtr<nsIAsyncShutdownClient> barrier = GetShutdownBarrier();
+  barrier->RemoveBlocker(this);
 }
 
 void ScriptPreloader::NoteScript(const nsCString& url,
@@ -899,12 +847,23 @@ JSScript* ScriptPreloader::GetCachedScript(JSContext* cx,
   // If a script is used by both the parent and the child, it's stored only
   // in the child cache.
   if (mChildCache) {
-    auto script = mChildCache->GetCachedScript(cx, path);
+    RootedScript script(cx, mChildCache->GetCachedScriptInternal(cx, path));
     if (script) {
+      Telemetry::AccumulateCategorical(
+          Telemetry::LABELS_SCRIPT_PRELOADER_REQUESTS::HitChild);
       return script;
     }
   }
 
+  RootedScript script(cx, GetCachedScriptInternal(cx, path));
+  Telemetry::AccumulateCategorical(
+      script ? Telemetry::LABELS_SCRIPT_PRELOADER_REQUESTS::Hit
+             : Telemetry::LABELS_SCRIPT_PRELOADER_REQUESTS::Miss);
+  return script;
+}
+
+JSScript* ScriptPreloader::GetCachedScriptInternal(JSContext* cx,
+                                                   const nsCString& path) {
   auto script = mScripts.Get(path);
   if (script) {
     return WaitForCachedScript(cx, script);
@@ -939,6 +898,8 @@ JSScript* ScriptPreloader::WaitForCachedScript(JSContext* cx,
       LOG(Info, "Script is small enough to recompile on main thread\n");
 
       script->mReadyToExecute = true;
+      Telemetry::ScalarAdd(
+          Telemetry::ScalarID::SCRIPT_PRELOADER_MAINTHREAD_RECOMPILE, 1);
     } else {
       while (!script->mReadyToExecute) {
         mal.Wait();
@@ -948,14 +909,17 @@ JSScript* ScriptPreloader::WaitForCachedScript(JSContext* cx,
       }
     }
 
-    LOG(Debug, "Waited %fms\n", (TimeStamp::Now() - start).ToMilliseconds());
+    double waitedMS = (TimeStamp::Now() - start).ToMilliseconds();
+    Telemetry::Accumulate(Telemetry::SCRIPT_PRELOADER_WAIT_TIME, int(waitedMS));
+    LOG(Debug, "Waited %fms\n", waitedMS);
   }
 
   return script->GetJSScript(cx);
 }
 
-/* static */ void ScriptPreloader::OffThreadDecodeCallback(
-    JS::OffThreadToken* token, void* context) {
+/* static */
+void ScriptPreloader::OffThreadDecodeCallback(JS::OffThreadToken* token,
+                                              void* context) {
   auto cache = static_cast<ScriptPreloader*>(context);
 
   cache->mMonitor.AssertNotCurrentThreadOwns();
@@ -1181,7 +1145,39 @@ JSScript* ScriptPreloader::CachedScript::GetJSScript(JSContext* cx) {
   return mScript;
 }
 
-NS_IMPL_ISUPPORTS(ScriptPreloader, nsIObserver, nsIRunnable, nsIMemoryReporter)
+// nsIAsyncShutdownBlocker
+
+nsresult ScriptPreloader::GetName(nsAString& aName) {
+  aName.AssignLiteral(u"ScriptPreloader: Saving bytecode cache");
+  return NS_OK;
+}
+
+nsresult ScriptPreloader::GetState(nsIPropertyBag** aState) {
+  *aState = nullptr;
+  return NS_OK;
+}
+
+nsresult ScriptPreloader::BlockShutdown(
+    nsIAsyncShutdownClient* aBarrierClient) {
+  // If we're waiting on a timeout to finish saving, interrupt it and just save
+  // immediately.
+  mSaveMonitor.NotifyAll();
+  return NS_OK;
+}
+
+already_AddRefed<nsIAsyncShutdownClient> ScriptPreloader::GetShutdownBarrier() {
+  nsCOMPtr<nsIAsyncShutdownService> svc = components::AsyncShutdown::Service();
+  MOZ_RELEASE_ASSERT(svc);
+
+  nsCOMPtr<nsIAsyncShutdownClient> barrier;
+  Unused << svc->GetXpcomWillShutdown(getter_AddRefs(barrier));
+  MOZ_RELEASE_ASSERT(barrier);
+
+  return barrier.forget();
+}
+
+NS_IMPL_ISUPPORTS(ScriptPreloader, nsIObserver, nsIRunnable, nsIMemoryReporter,
+                  nsIAsyncShutdownBlocker)
 
 #undef LOG
 

@@ -35,9 +35,9 @@ IMFYCbCrImage::~IMFYCbCrImage() {
   }
 }
 
-/* static */ bool IMFYCbCrImage::CopyDataToTexture(
-    const Data& aData, ID3D11Device* aDevice,
-    DXGIYCbCrTextureData* aTextureData) {
+/* static */
+bool IMFYCbCrImage::CopyDataToTexture(const Data& aData, ID3D11Device* aDevice,
+                                      DXGIYCbCrTextureData* aTextureData) {
   MOZ_ASSERT(aTextureData);
 
   HRESULT hr;
@@ -102,7 +102,7 @@ IMFYCbCrImage::~IMFYCbCrImage() {
 }
 
 TextureClient* IMFYCbCrImage::GetD3D11TextureClient(
-    KnowsCompositor* aForwarder) {
+    KnowsCompositor* aKnowsCompositor) {
   if (!mAllocator) {
     return nullptr;
   }
@@ -134,16 +134,17 @@ TextureClient* IMFYCbCrImage::GetD3D11TextureClient(
   return mTextureClient;
 }
 
-TextureClient* IMFYCbCrImage::GetTextureClient(KnowsCompositor* aForwarder) {
+TextureClient* IMFYCbCrImage::GetTextureClient(
+    KnowsCompositor* aKnowsCompositor) {
   if (mTextureClient) {
     return mTextureClient;
   }
 
   RefPtr<ID3D11Device> device = gfx::DeviceManagerDx::Get()->GetImageDevice();
-  if (!device || !aForwarder->SupportsD3D11()) {
+  if (!device || !aKnowsCompositor->SupportsD3D11()) {
     return nullptr;
   }
-  return GetD3D11TextureClient(aForwarder);
+  return GetD3D11TextureClient(aKnowsCompositor);
 }
 
 }  // namespace layers

@@ -3,32 +3,49 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {contentProcessTargetSpec} = require("devtools/shared/specs/targets/content-process");
-const protocol = require("devtools/shared/protocol");
+const {
+  contentProcessTargetSpec,
+} = require("devtools/shared/specs/targets/content-process");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
+const { TargetMixin } = require("./target-mixin");
 
-const ContentProcessTargetFront = protocol.FrontClassWithSpec(contentProcessTargetSpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client, form);
-
-    this.client = client;
-    this.chromeDebugger = form.chromeDebugger;
-
-    // Save the full form for Target class usage
-    // Do not use `form` name to avoid colliding with protocol.js's `form` method
-    this.targetForm = form;
+class ContentProcessTargetFront extends TargetMixin(
+  FrontClassWithSpec(contentProcessTargetSpec)
+) {
+  constructor(client) {
+    super(client);
 
     this.traits = {};
-  },
+  }
 
-  attachThread() {
-    return this.client.attachThread(this.chromeDebugger);
-  },
+  form(json) {
+    this.actorID = json.actor;
 
-  reconfigure: function() {
+    // Save the full form for Target class usage.
+    // Do not use `form` name to avoid colliding with protocol.js's `form` method
+    this.targetForm = json;
+    this.targetForm.contextActor = json.chromeDebugger;
+    this._threadActor = json.chromeDebugger;
+  }
+
+  attach() {
+    // All target actors have a console actor to attach.
+    // All but xpcshell test actors... which is using a ContentProcessTargetActor
+    if (this.targetForm.consoleActor) {
+      return this.attachConsole();
+    }
+    return Promise.resolve();
+  }
+
+  reconfigure() {
     // Toolbox and options panel are calling this method but Worker Target can't be
     // reconfigured. So we ignore this call here.
     return Promise.resolve();
-  },
-});
+  }
+}
 
 exports.ContentProcessTargetFront = ContentProcessTargetFront;
+registerFront(exports.ContentProcessTargetFront);

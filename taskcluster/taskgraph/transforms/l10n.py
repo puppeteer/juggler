@@ -18,6 +18,7 @@ from taskgraph.transforms.base import (
 from taskgraph.util.schema import (
     optionally_keyed_by,
     resolve_keyed_by,
+    taskref_or_string,
 )
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.taskcluster import get_artifact_prefix
@@ -34,16 +35,6 @@ from voluptuous import (
 def _by_platform(arg):
     return optionally_keyed_by('build-platform', arg)
 
-
-# shortcut for a string where task references are allowed
-taskref_or_string = Any(
-    basestring,
-    {Required('task-reference'): basestring})
-
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-job_description_schema = {str(k): v for k, v in job_description_schema.schema.iteritems()}
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
 l10n_description_schema = schema.extend({
     # Name for this job, inferred from the dependent job before validation
@@ -89,7 +80,7 @@ l10n_description_schema = schema.extend({
         Required('job-name'): _by_platform(basestring),
 
         # Type of index
-        Optional('type'): basestring,
+        Optional('type'): _by_platform(basestring),
     },
     # Description of the localized task
     Required('description'): _by_platform(basestring),
@@ -196,8 +187,7 @@ def setup_name(config, jobs):
         dep = job['primary-dependency']
         # Set the name to the same as the dep task, without kind name.
         # Label will get set automatically with this kinds name.
-        job['name'] = job.get('name',
-                              dep.task['metadata']['name'][len(dep.kind) + 1:])
+        job['name'] = job.get('name', dep.name)
         yield job
 
 
@@ -230,10 +220,6 @@ def setup_nightly_dependency(config, jobs):
             job['dependencies'].update({
                 'repackage': job['dependent-tasks']['repackage'].label
             })
-        if job['attributes']['build_platform'].startswith('win'):
-            job['dependencies'].update({
-                'repackage-signing': job['dependent-tasks']['repackage-signing'].label
-            })
         yield job
 
 
@@ -258,6 +244,7 @@ def handle_keyed_by(config, jobs):
         "mozharness.script",
         "treeherder.tier",
         "treeherder.platform",
+        "index.type",
         "index.product",
         "index.job-name",
         "when.files-changed",
@@ -290,7 +277,9 @@ def handle_artifact_prefix(config, jobs):
 @transforms.add
 def all_locales_attribute(config, jobs):
     for job in jobs:
-        locales_platform = job['attributes']['build_platform'].replace("-nightly", "")
+        locales_platform = job['attributes']['build_platform'].replace("-shippable", "")
+        locales_platform = locales_platform.replace("-nightly", "")
+        locales_platform = locales_platform.replace("-pgo", "")
         locales_with_changesets = parse_locales_file(job["locales-file"],
                                                      platform=locales_platform)
         locales_with_changesets = _remove_locales(locales_with_changesets,
@@ -345,30 +334,6 @@ def chunk_locales(config, jobs):
             yield job
 
 
-@transforms.add
-def mh_config_replace_project(config, jobs):
-    """ Replaces {project} in mh config entries with the current project """
-    # XXXCallek This is a bad pattern but exists to satisfy ease-of-porting for buildbot
-    for job in jobs:
-        job['mozharness']['config'] = map(
-            lambda x: x.format(project=config.params['project']),
-            job['mozharness']['config']
-            )
-        yield job
-
-
-@transforms.add
-def mh_options_replace_project(config, jobs):
-    """ Replaces {project} in mh option entries with the current project """
-    # XXXCallek This is a bad pattern but exists to satisfy ease-of-porting for buildbot
-    for job in jobs:
-        job['mozharness']['options'] = map(
-            lambda x: x.format(project=config.params['project']),
-            job['mozharness']['options']
-            )
-        yield job
-
-
 transforms.add_validate(l10n_description_schema)
 
 
@@ -379,6 +344,17 @@ def stub_installer(config, jobs):
         job.setdefault('env', {})
         if job["attributes"].get('stub-installer'):
             job['env'].update({"USE_STUB_INSTALLER": "1"})
+        yield job
+
+
+@transforms.add
+def set_extra_config(config, jobs):
+    for job in jobs:
+        job['mozharness'].setdefault('extra-config', {})['branch'] = config.params['project']
+        if 'update-channel' in job['attributes']:
+            job['mozharness']['extra-config']['update_channel'] = (
+                job['attributes']['update-channel']
+            )
         yield job
 
 
@@ -407,7 +383,7 @@ def make_job_description(config, jobs):
         if job.get('extra'):
             job_description['extra'] = job['extra']
 
-        if job['worker-type'].endswith("-b-win2012"):
+        if job['worker-type'] == "b-win2012":
             job_description['worker'] = {
                 'os': 'windows',
                 'max-run-time': 7200,

@@ -237,16 +237,15 @@ nsresult TCPSocket::Init() {
   nsCOMPtr<nsISocketTransportService> sts =
       do_GetService("@mozilla.org/network/socket-transport-service;1");
 
-  const char* socketTypes[1];
+  AutoTArray<nsCString, 1> socketTypes;
   if (mSsl) {
-    socketTypes[0] = "ssl";
+    socketTypes.AppendElement(NS_LITERAL_CSTRING("ssl"));
   } else {
-    socketTypes[0] = "starttls";
+    socketTypes.AppendElement(NS_LITERAL_CSTRING("starttls"));
   }
   nsCOMPtr<nsISocketTransport> transport;
-  nsresult rv =
-      sts->CreateTransport(socketTypes, 1, NS_ConvertUTF16toUTF8(mHost), mPort,
-                           nullptr, getter_AddRefs(transport));
+  nsresult rv = sts->CreateTransport(socketTypes, NS_ConvertUTF16toUTF8(mHost),
+                                     mPort, nullptr, getter_AddRefs(transport));
   NS_ENSURE_SUCCESS(rv, rv);
 
   return InitWithUnconnectedTransport(transport);
@@ -319,13 +318,10 @@ class CopierCallbacks final : public nsIRequestObserver {
 NS_IMPL_ISUPPORTS(CopierCallbacks, nsIRequestObserver)
 
 NS_IMETHODIMP
-CopierCallbacks::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext) {
-  return NS_OK;
-}
+CopierCallbacks::OnStartRequest(nsIRequest* aRequest) { return NS_OK; }
 
 NS_IMETHODIMP
-CopierCallbacks::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                               nsresult aStatus) {
+CopierCallbacks::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   mOwner->NotifyCopyComplete(aStatus);
   mOwner = nullptr;
   return NS_OK;
@@ -389,7 +385,7 @@ void TCPSocket::NotifyCopyComplete(nsresult aStatus) {
   }
   mBufferedAmount = bufferedAmount;
 
-  if (mSocketBridgeParent) {
+  if (mSocketBridgeParent && mSocketBridgeParent->IPCOpen()) {
     mozilla::Unused << mSocketBridgeParent->SendUpdateBufferedAmount(
         BufferedAmount(), mTrackingNumber);
   }
@@ -932,14 +928,11 @@ TCPSocket::OnInputStreamReady(nsIAsyncInputStream* aStream) {
 }
 
 NS_IMETHODIMP
-TCPSocket::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext) {
-  return NS_OK;
-}
+TCPSocket::OnStartRequest(nsIRequest* aRequest) { return NS_OK; }
 
 NS_IMETHODIMP
-TCPSocket::OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
-                           nsIInputStream* aStream, uint64_t aOffset,
-                           uint32_t aCount) {
+TCPSocket::OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aStream,
+                           uint64_t aOffset, uint32_t aCount) {
   if (mUseArrayBuffers) {
     nsTArray<uint8_t> buffer;
     buffer.SetCapacity(aCount);
@@ -994,8 +987,7 @@ TCPSocket::OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
 }
 
 NS_IMETHODIMP
-TCPSocket::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                         nsresult aStatus) {
+TCPSocket::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   mInputStreamPump = nullptr;
 
   if (mAsyncCopierActive && NS_SUCCEEDED(aStatus)) {
@@ -1013,6 +1005,8 @@ TCPSocket::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
 }
 
 void TCPSocket::SetSocketBridgeParent(TCPSocketParent* aBridgeParent) {
+  MOZ_ASSERT(NS_IsMainThread());
+
   mSocketBridgeParent = aBridgeParent;
 }
 

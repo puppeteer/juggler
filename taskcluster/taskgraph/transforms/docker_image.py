@@ -15,6 +15,7 @@ from .. import GECKO
 from taskgraph.util.docker import (
     generate_context_hash,
 )
+from taskgraph.util.taskcluster import get_root_url
 from taskgraph.util.schema import (
     Schema,
 )
@@ -22,6 +23,7 @@ from voluptuous import (
     Optional,
     Required,
 )
+from .task import task_description_schema
 
 DIGEST_RE = re.compile('^[0-9a-f]{64}$')
 
@@ -50,6 +52,16 @@ docker_image_schema = Schema({
 
     # List of package tasks this docker image depends on.
     Optional('packages'): [basestring],
+
+    Optional(
+        "index",
+        description="information for indexing this build so its artifacts can be discovered",
+    ): task_description_schema['index'],
+
+    Optional(
+        "cache",
+        description="Whether this image should be cached based on inputs.",
+    ): bool,
 })
 
 
@@ -111,6 +123,8 @@ def fill_template(config, tasks):
         if parent:
             args['DOCKER_IMAGE_PARENT'] = '{}:{}'.format(parent, context_hashes[parent])
 
+        args['TASKCLUSTER_ROOT_URL'] = get_root_url(False)
+
         if not taskgraph.fast:
             context_path = os.path.join('taskcluster', 'docker', definition)
             context_hash = generate_context_hash(
@@ -137,7 +151,10 @@ def fill_template(config, tasks):
             'description': description,
             'attributes': {'image_name': image_name},
             'expires-after': '28 days' if config.params.is_try() else '1 year',
-            'scopes': ['secrets:get:project/taskcluster/gecko/hgfingerprint'],
+            'scopes': [
+                'secrets:get:project/taskcluster/gecko/hgfingerprint',
+                'secrets:get:project/taskcluster/gecko/hgmointernal',
+            ],
             'treeherder': {
                 'symbol': job_symbol,
                 'platform': 'taskcluster-images/opt',
@@ -145,8 +162,7 @@ def fill_template(config, tasks):
                 'tier': 1,
             },
             'run-on-projects': [],
-            'worker-type': 'aws-provisioner-v1/gecko-{}-images'.format(
-                config.params['level']),
+            'worker-type': 'images',
             'worker': {
                 'implementation': 'docker-worker',
                 'os': 'linux',
@@ -200,11 +216,16 @@ def fill_template(config, tasks):
             # Force images built against the in-tree image builder to
             # have a different digest by adding a fixed string to the
             # hashed data.
+            # Append to this data whenever the image builder's output behavior
+            # is changed, in order to force all downstream images to be rebuilt and
+            # cached distinctly.
             digest_data.append('image_builder')
+            # Updated for squashing images in Bug 1527394
+            digest_data.append('squashing layers')
 
         worker['caches'] = [{
             'type': 'persistent',
-            'name': 'level-{}-{}'.format(config.params['level'], cache_name),
+            'name': cache_name,
             'mount-point': '/builds/worker/checkouts',
         }]
 
@@ -225,8 +246,10 @@ def fill_template(config, tasks):
             worker['env']['DOCKER_IMAGE_PARENT_TASK'] = {
                 'task-reference': '<{}>'.format(parent),
             }
+        if 'index' in task:
+            taskdesc['index'] = task['index']
 
-        if not taskgraph.fast:
+        if task.get('cache', True) and not taskgraph.fast:
             taskdesc['cache'] = {
                 'type': 'docker-images.v2',
                 'name': image_name,

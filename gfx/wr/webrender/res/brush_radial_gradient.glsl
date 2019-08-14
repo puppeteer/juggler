@@ -6,7 +6,7 @@
 
 #include shared,prim_shared,brush
 
-flat varying int vGradientAddress;
+flat varying HIGHP_FS_ADDRESS int vGradientAddress;
 flat varying float vGradientRepeat;
 
 flat varying vec2 vCenter;
@@ -45,7 +45,8 @@ void brush_vs(
     int prim_address,
     RectWithSize local_rect,
     RectWithSize segment_rect,
-    ivec4 user_data,
+    ivec4 prim_user_data,
+    int segment_user_data,
     mat4 transform,
     PictureTask pic_task,
     int brush_flags,
@@ -56,6 +57,7 @@ void brush_vs(
     if ((brush_flags & BRUSH_FLAG_SEGMENT_RELATIVE) != 0) {
         vPos = (vi.local_pos - segment_rect.p0) / segment_rect.size;
         vPos = vPos * (texel_rect.zw - texel_rect.xy) + texel_rect.xy;
+        vPos = vPos * local_rect.size;
     } else {
         vPos = vi.local_pos - local_rect.p0;
     }
@@ -72,7 +74,7 @@ void brush_vs(
     vRepeatedSize = gradient.stretch_size;
     vRepeatedSize.y *=  gradient.ratio_xy;
 
-    vGradientAddress = user_data.x;
+    vGradientAddress = prim_user_data.x;
 
     // Whether to repeat the gradient instead of clamping.
     vGradientRepeat = float(gradient.extend_mode != EXTEND_MODE_CLAMP);

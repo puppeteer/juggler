@@ -8,9 +8,18 @@
  */
 
 const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
-const { PROFILER_BUFFER_SIZE_PREF, PROFILER_SAMPLE_RATE_PREF } = require("devtools/client/performance/test/helpers/prefs");
-const { initPerformanceInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
-const { startRecording, stopRecording } = require("devtools/client/performance/test/helpers/actions");
+const {
+  PROFILER_BUFFER_SIZE_PREF,
+  PROFILER_SAMPLE_RATE_PREF,
+} = require("devtools/client/performance/test/helpers/prefs");
+const {
+  initPerformanceInNewTab,
+  teardownToolboxAndRemoveTab,
+} = require("devtools/client/performance/test/helpers/panel-utils");
+const {
+  startRecording,
+  stopRecording,
+} = require("devtools/client/performance/test/helpers/actions");
 
 add_task(async function() {
   const { panel, toolbox } = await initPerformanceInNewTab({
@@ -22,7 +31,8 @@ add_task(async function() {
   Services.prefs.setIntPref(PROFILER_SAMPLE_RATE_PREF, 2000);
 
   await startRecording(panel);
-  const { entries, interval } = await toolbox.performance.getConfiguration();
+  const performanceFront = await toolbox.target.getFront("performance");
+  const { entries, interval } = await performanceFront.getConfiguration();
   await stopRecording(panel);
 
   is(entries, 1000, "profiler entries option is set on profiler");

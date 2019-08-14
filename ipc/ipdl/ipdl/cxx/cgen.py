@@ -20,6 +20,18 @@ class CxxCodeGen(CodePrinter, Visitor):
             self.printdent('')
         self.write(ws.ws)
 
+    def visitVerbatimNode(self, verb):
+        if verb.indent:
+            self.printdent('')
+        self.write(verb.text)
+
+    def visitGroupNode(self, group):
+        offsetCols = self.indentCols * group.offset
+        self.col += offsetCols
+        for node in group.nodes:
+            node.accept(self)
+        self.col -= offsetCols
+
     def visitCppDirective(self, cd):
         if cd.rest:
             self.println('#%s %s' % (cd.directive, cd.rest))
@@ -55,14 +67,15 @@ class CxxCodeGen(CodePrinter, Visitor):
         ts = ''
         if t.ptr:
             ts += '*'
-        elif t.ptrconst:
-            ts += '* const'
         elif t.ptrptr:
             ts += '**'
         elif t.ptrconstptr:
             ts += '* const*'
 
-        ts += '&' * t.ref
+        if t.ref:
+            ts += '&'
+        elif t.rvalref:
+            ts += '&&'
 
         self.write(ts)
 
@@ -255,8 +268,8 @@ class CxxCodeGen(CodePrinter, Visitor):
             self.write(' = 0')
 
     def visitMethodDefn(self, md):
-        if md.decl.methodspec == MethodSpec.PURE:
-            return
+        # Method specifiers are for decls, not defns.
+        assert md.decl.methodspec == MethodSpec.NONE
 
         self.printdent()
         md.decl.accept(self)
@@ -329,17 +342,11 @@ class CxxCodeGen(CodePrinter, Visitor):
         self.write(')')
 
     def visitExprCast(self, c):
-        pfx, sfx = '', ''
-        if c.dynamic:
-            pfx, sfx = 'dynamic_cast<', '>'
-        elif c.static:
+        if c.static:
             pfx, sfx = 'static_cast<', '>'
-        elif c.reinterpret:
-            pfx, sfx = 'reinterpret_cast<', '>'
-        elif c.const:
+        else:
+            assert c.const
             pfx, sfx = 'const_cast<', '>'
-        elif c.C:
-            pfx, sfx = '(', ')'
         self.write(pfx)
         c.type.accept(self)
         self.write(sfx + '(')
@@ -361,12 +368,6 @@ class CxxCodeGen(CodePrinter, Visitor):
         self.write(' : ')
         c.elsee.accept(self)
         self.write(')')
-
-    def visitExprIndex(self, ei):
-        ei.arr.accept(self)
-        self.write('[')
-        ei.idx.accept(self)
-        self.write(']')
 
     def visitExprSelect(self, es):
         self.write('(')

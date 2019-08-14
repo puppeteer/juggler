@@ -2,7 +2,7 @@
 <html>
 <head>
   <title>Test that preffed off properties do not appear in computed style</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
@@ -68,9 +68,6 @@ function step() {
 // ----
 
 var gProps = {
-  "layout.css.image-orientation.enabled": ["image-orientation"],
-  "layout.css.mix-blend-mode.enabled": ["mix-blend-mode"],
-  "layout.css.isolation.enabled": [ "isolation"],
   "layout.css.touch_action.enabled": ["touch-action"],
   "svg.transform-box.enabled": ["transform-box"]
 };

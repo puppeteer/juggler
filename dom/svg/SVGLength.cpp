@@ -4,19 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/ArrayUtils.h"
-
 #include "SVGLength.h"
-#include "nsSVGElement.h"
+
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/dom/SVGElement.h"
 #include "mozilla/dom/SVGSVGElement.h"
 #include "nsTextFormatter.h"
 #include "SVGContentUtils.h"
 #include <limits>
 #include <algorithm>
 
-namespace mozilla {
+using namespace mozilla::dom;
+using namespace mozilla::dom::SVGLength_Binding;
 
-using namespace mozilla;
+namespace mozilla {
 
 // Declare some helpers defined below:
 static void GetUnitString(nsAString& unit, uint16_t unitType);
@@ -31,9 +32,15 @@ void SVGLength::GetValueAsString(nsAString& aValue) const {
 }
 
 bool SVGLength::SetValueFromString(const nsAString& aString) {
-  RangedPtr<const char16_t> iter = SVGContentUtils::GetStartRangedPtr(aString);
-  const RangedPtr<const char16_t> end =
-      SVGContentUtils::GetEndRangedPtr(aString);
+  bool success;
+  auto token = SVGContentUtils::GetAndEnsureOneToken(aString, success);
+
+  if (!success) {
+    return false;
+  }
+
+  RangedPtr<const char16_t> iter = SVGContentUtils::GetStartRangedPtr(token);
+  const RangedPtr<const char16_t> end = SVGContentUtils::GetEndRangedPtr(token);
 
   float value;
 
@@ -91,7 +98,7 @@ inline static float GetAbsUnitsPerAbsUnit(uint8_t aUnits, uint8_t aPerUnit) {
 }
 
 float SVGLength::GetValueInSpecifiedUnit(uint8_t aUnit,
-                                         const nsSVGElement* aElement,
+                                         const SVGElement* aElement,
                                          uint8_t aAxis) const {
   if (aUnit == mUnit) {
     return mValue;
@@ -133,7 +140,7 @@ float SVGLength::GetValueInSpecifiedUnit(uint8_t aUnit,
 #define INCHES_PER_MM_FLOAT float(0.0393700787)
 #define INCHES_PER_CM_FLOAT float(0.393700787)
 
-float SVGLength::GetUserUnitsPerUnit(const nsSVGElement* aElement,
+float SVGLength::GetUserUnitsPerUnit(const SVGElement* aElement,
                                      uint8_t aAxis) const {
   switch (mUnit) {
     case SVGLength_Binding::SVG_LENGTHTYPE_NUMBER:
@@ -152,18 +159,18 @@ float SVGLength::GetUserUnitsPerUnit(const nsSVGElement* aElement,
     case SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE:
       return GetUserUnitsPerPercent(aElement, aAxis);
     case SVGLength_Binding::SVG_LENGTHTYPE_EMS:
-      return SVGContentUtils::GetFontSize(const_cast<nsSVGElement*>(aElement));
+      return SVGContentUtils::GetFontSize(const_cast<SVGElement*>(aElement));
     case SVGLength_Binding::SVG_LENGTHTYPE_EXS:
-      return SVGContentUtils::GetFontXHeight(
-          const_cast<nsSVGElement*>(aElement));
+      return SVGContentUtils::GetFontXHeight(const_cast<SVGElement*>(aElement));
     default:
       MOZ_ASSERT_UNREACHABLE("Unknown unit type");
       return std::numeric_limits<float>::quiet_NaN();
   }
 }
 
-/* static */ float SVGLength::GetUserUnitsPerPercent(
-    const nsSVGElement* aElement, uint8_t aAxis) {
+/* static */
+float SVGLength::GetUserUnitsPerPercent(const SVGElement* aElement,
+                                        uint8_t aAxis) {
   if (aElement) {
     dom::SVGViewportElement* viewportElement = aElement->GetCtx();
     if (viewportElement) {

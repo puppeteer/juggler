@@ -34,8 +34,7 @@ class HTMLSourceElement final : public nsGenericHTMLElement {
 
   // Override BindToTree() so that we can trigger a load when we add a
   // child source element.
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent) override;
+  virtual nsresult BindToTree(BindContext&, nsINode& aParent) override;
 
   // If this element's media attr matches for its owner document.  Returns true
   // if no media attr was set.
@@ -45,7 +44,7 @@ class HTMLSourceElement final : public nsGenericHTMLElement {
   // specified document. Used by the preloader to determine valid <source> tags
   // prior to DOM creation.
   static bool WouldMatchMediaForDocument(const nsAString& aMediaStr,
-                                         const nsIDocument* aDocument);
+                                         const Document* aDocument);
 
   // Return the MediaSource object if any associated with the src attribute
   // when it was set.

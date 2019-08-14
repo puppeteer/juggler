@@ -26,12 +26,10 @@
         width="640" height="480"
         persist="screenX screenY width height sizemode">
 
-<script type="application/javascript"
-        src="chrome://devtools/content/shared/theme-switching.js"/>
-<script type="application/javascript" src="chrome://global/content/globalOverlay.js"/>
-<script type="application/javascript" src="resource://devtools/client/scratchpad/scratchpad.js"/>
-
-#include ../../../toolkit/content/editMenuCommands.inc.xul
+<script src="chrome://devtools/content/shared/theme-switching.js"/>
+<script src="chrome://global/content/globalOverlay.js"/>
+<script src="resource://devtools/client/scratchpad/scratchpad.js"/>
+<script src="chrome://global/content/editMenuOverlay.js"/>
 
 <commandset id="sourceEditorCommands">
   <command id="cmd_find" oncommand=";"/>
@@ -56,7 +54,6 @@
   <command id="sp-cmd-run" oncommand=";"/>
   <command id="sp-cmd-inspect" oncommand=";"/>
   <command id="sp-cmd-display" oncommand=";"/>
-  <command id="sp-cmd-pprint" oncommand=";"/>
   <command id="sp-cmd-contentContext" oncommand=";"/>
   <command id="sp-cmd-browserContext" oncommand=";" disabled="true"/>
   <command id="sp-cmd-reloadAndRun" oncommand=";"/>
@@ -112,10 +109,6 @@
        key="&display.key;"
        command="sp-cmd-display"
        modifiers="accel"/>
-  <key id="sp-key-pprint"
-       key="&pprint.key;"
-       command="sp-cmd-pprint"
-       modifiers="accel"/>
   <key id="sp-key-reloadAndRun"
        key="&reloadAndRun.key;"
        command="sp-cmd-reloadAndRun"
@@ -144,7 +137,7 @@
 <toolbar type="menubar" id="sp-menu-toolbar">
 <menubar>
   <menu id="sp-file-menu" label="&fileMenu.label;" accesskey="&fileMenu.accesskey;">
-    <menupopup id="sp-menu-filepopup">
+    <menupopup id="sp-menu-filepopup" incontentshell="false">
       <menuitem id="sp-menu-newscratchpad"
                 label="&newWindowCmd.label;"
                 accesskey="&newWindowCmd.accesskey;"
@@ -189,7 +182,7 @@
 
   <menu id="sp-edit-menu" label="&editMenu.label;"
         accesskey="&editMenu.accesskey;">
-    <menupopup id="sp-menu_editpopup">
+    <menupopup id="sp-menu_editpopup" incontentshell="false">
       <menuitem id="menu_undo" label="&undoCmd.label;"
                 key="key_undo" accesskey="&undoCmd.accesskey;"
                 command="cmd_undo"/>
@@ -223,16 +216,11 @@
           accesskey="&gotoLineCmd.accesskey;"
           key="key_gotoLine"
           command="cmd_gotoLine"/>
-      <menuitem id="sp-menu-pprint"
-          label="&pprint.label;"
-          accesskey="&pprint.accesskey;"
-          key="sp-key-pprint"
-          command="sp-cmd-pprint"/>
     </menupopup>
   </menu>
 
   <menu id="sp-view-menu" label="&viewMenu.label;" accesskey="&viewMenu.accesskey;">
-    <menupopup id="sp-menu-viewpopup">
+    <menupopup id="sp-menu-viewpopup" incontentshell="false">
       <menuitem id="sp-menu-line-numbers"
                 label="&lineNumbers.label;"
                 accesskey="&lineNumbers.accesskey;"
@@ -269,7 +257,7 @@
 
   <menu id="sp-execute-menu" label="&executeMenu.label;"
         accesskey="&executeMenu.accesskey;">
-    <menupopup id="sp-menu_executepopup">
+    <menupopup id="sp-menu_executepopup" incontentshell="false">
       <menuitem id="sp-text-run"
                 label="&run.label;"
                 accesskey="&run.accesskey;"
@@ -303,7 +291,7 @@
         label="&environmentMenu.label;"
         accesskey="&environmentMenu.accesskey;"
         hidden="true">
-    <menupopup id="sp-menu-environment">
+    <menupopup id="sp-menu-environment" incontentshell="false">
       <menuitem id="sp-menu-content"
                 label="&contentContext.label;"
                 accesskey="&contentContext.accesskey;"
@@ -322,7 +310,7 @@
         label="&helpMenu.label;"
         accesskey="&helpMenu.accesskey;"
         accesskeywindows="&helpMenuWin.accesskey;">
-    <menupopup id="sp-menu-help">
+    <menupopup id="sp-menu-help" incontentshell="false">
       <menuitem id="sp-menu-documentation"
                 label="&documentationLink.label;"
                 accesskey="&documentationLink.accesskey;"
@@ -360,16 +348,11 @@
                  class="devtools-toolbarbutton"
                  label="&display.label;"
                  command="sp-cmd-display"/>
-  <toolbarspacer/>
-  <toolbarbutton id="sp-toolbar-pprint"
-                 class="devtools-toolbarbutton"
-                 label="&pprint.label;"
-                 command="sp-cmd-pprint"/>
 </toolbar>
 
 
 <popupset id="scratchpad-popups">
-  <menupopup id="scratchpad-text-popup">
+  <menupopup id="scratchpad-text-popup" incontentshell="false">
     <menuitem id="cMenu_cut" label="&cutCmd.label;"
               accesskey="&cutCmd.accesskey;" command="cmd_cut"/>
     <menuitem id="cMenu_copy" label="&copyCmd.label;"

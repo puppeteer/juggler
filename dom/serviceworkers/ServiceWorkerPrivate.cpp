@@ -40,8 +40,11 @@
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/net/CookieSettings.h"
+#include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Unused.h"
+#include "nsIReferrerInfo.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -638,7 +641,9 @@ class LifeCycleEventWatcher final : public ExtendableEventCallback {
                                 [self]() { self->ReportResult(false); });
     if (NS_WARN_IF(!mWorkerRef)) {
       mCallback->SetResult(false);
-      nsresult rv = workerPrivate->DispatchToMainThread(mCallback);
+      // Using DispatchToMainThreadForMessaging so that state update on
+      // the main thread doesn't happen too soon.
+      nsresult rv = workerPrivate->DispatchToMainThreadForMessaging(mCallback);
       Unused << NS_WARN_IF(NS_FAILED(rv));
       return false;
     }
@@ -654,7 +659,10 @@ class LifeCycleEventWatcher final : public ExtendableEventCallback {
     }
 
     mCallback->SetResult(aResult);
-    nsresult rv = mWorkerRef->Private()->DispatchToMainThread(mCallback);
+    // Using DispatchToMainThreadForMessaging so that state update on
+    // the main thread doesn't happen too soon.
+    nsresult rv =
+        mWorkerRef->Private()->DispatchToMainThreadForMessaging(mCallback);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       MOZ_CRASH("Failed to dispatch life cycle event handler.");
     }
@@ -1241,30 +1249,23 @@ class FetchEventRunnable : public ExtendableFunctionalEventWorkerRunnable,
     uint32_t loadFlags;
     rv = channel->GetLoadFlags(&loadFlags);
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<nsILoadInfo> loadInfo;
-    rv = channel->GetLoadInfo(getter_AddRefs(loadInfo));
-    NS_ENSURE_SUCCESS(rv, rv);
-    NS_ENSURE_STATE(loadInfo);
+    nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
     mContentPolicyType = loadInfo->InternalContentPolicyType();
 
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(channel);
     MOZ_ASSERT(httpChannel, "How come we don't have an HTTP channel?");
 
-    nsAutoCString referrer;
-    // Ignore the return value since the Referer header may not exist.
-    Unused << httpChannel->GetRequestHeader(NS_LITERAL_CSTRING("Referer"),
-                                            referrer);
-    if (!referrer.IsEmpty()) {
-      mReferrer = referrer;
-    } else {
-      // If there's no referrer Header, means the header was omitted for
-      // security/privacy reason.
-      mReferrer = EmptyCString();
-    }
-
+    mReferrer = EmptyCString();
     uint32_t referrerPolicy = 0;
-    rv = httpChannel->GetReferrerPolicy(&referrerPolicy);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsCOMPtr<nsIReferrerInfo> referrerInfo = httpChannel->GetReferrerInfo();
+    if (referrerInfo) {
+      referrerPolicy = referrerInfo->GetReferrerPolicy();
+      nsCOMPtr<nsIURI> computedReferrer = referrerInfo->GetComputedReferrer();
+      if (computedReferrer) {
+        rv = computedReferrer->GetSpec(mReferrer);
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+    }
     switch (referrerPolicy) {
       case nsIHttpChannel::REFERRER_POLICY_UNSET:
         mReferrerPolicy = ReferrerPolicy::_empty;
@@ -1444,7 +1445,7 @@ class FetchEventRunnable : public ExtendableFunctionalEventWorkerRunnable,
       // TODO: the internal request probably needs all the preferred types.
       nsAutoCString alternativeDataType;
       alternativeDataType.Assign(
-          mozilla::Get<0>(cic->PreferredAlternativeDataTypes()[0]));
+          cic->PreferredAlternativeDataTypes()[0].type());
       internalReq->SetPreferredAlternativeDataType(alternativeDataType);
     }
 
@@ -1701,37 +1702,27 @@ nsresult ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
     return rv;
   }
 
-  nsCOMPtr<nsIURI> uri;
-  rv = mInfo->Principal()->GetURI(getter_AddRefs(uri));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (NS_WARN_IF(!uri)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Create a pristine codebase principal to avoid any possibility of inheriting
-  // CSP values.  The principal on the registration may be polluted with CSP
-  // from the registering page or other places the principal is passed.  If
-  // bug 965637 is ever fixed this can be removed.
-  info.mPrincipal =
-      BasePrincipal::CreateCodebasePrincipal(uri, mInfo->GetOriginAttributes());
-  if (NS_WARN_IF(!info.mPrincipal)) {
-    return NS_ERROR_FAILURE;
-  }
+  info.mPrincipal = mInfo->Principal();
   info.mLoadingPrincipal = info.mPrincipal;
+  // StoragePrincipal for ServiceWorkers is equal to mPrincipal because, at the
+  // moment, ServiceWorkers are not exposed in partitioned contexts.
+  info.mStoragePrincipal = info.mPrincipal;
 
-  nsContentUtils::StorageAccess access =
-      nsContentUtils::StorageAllowedForPrincipal(info.mPrincipal);
-  info.mStorageAllowed =
-      access > nsContentUtils::StorageAccess::ePrivateBrowsing;
+  info.mCookieSettings = mozilla::net::CookieSettings::Create();
+  MOZ_ASSERT(info.mCookieSettings);
+
+  info.mStorageAccess =
+      StorageAllowedForServiceWorker(info.mPrincipal, info.mCookieSettings);
+
   info.mOriginAttributes = mInfo->GetOriginAttributes();
 
-  // Verify that we don't have any CSP on pristine principal.
+  // Verify that we don't have any CSP on pristine client.
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   nsCOMPtr<nsIContentSecurityPolicy> csp;
-  Unused << info.mPrincipal->GetCsp(getter_AddRefs(csp));
+  if (info.mChannel) {
+    nsCOMPtr<nsILoadInfo> loadinfo = info.mChannel->LoadInfo();
+    csp = loadinfo->GetCsp();
+  }
   MOZ_DIAGNOSTIC_ASSERT(!csp);
 #endif
 
@@ -1742,7 +1733,8 @@ nsresult ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
 
   WorkerPrivate::OverrideLoadInfoLoadGroup(info, info.mPrincipal);
 
-  rv = info.SetPrincipalOnMainThread(info.mPrincipal, info.mLoadGroup);
+  rv = info.SetPrincipalsAndCSPOnMainThread(
+      info.mPrincipal, info.mStoragePrincipal, info.mLoadGroup, nullptr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

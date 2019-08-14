@@ -5,8 +5,8 @@
 #include "HitTestingTreeNode.h"
 
 #include "AsyncPanZoomController.h"  // for AsyncPanZoomController
-#include "gfxPrefs.h"
-#include "LayersLogging.h"            // for Stringify
+#include "LayersLogging.h"           // for Stringify
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/gfx/Point.h"        // for Point4D
 #include "mozilla/layers/APZUtils.h"  // for CompleteAsyncTransform
 #include "mozilla/layers/AsyncCompositionManager.h"  // for ViewTransform::operator Matrix4x4()
@@ -29,9 +29,9 @@ HitTestingTreeNode::HitTestingTreeNode(AsyncPanZoomController* aApzc,
       mIsPrimaryApzcHolder(aIsPrimaryHolder),
       mLockCount(0),
       mLayersId(aLayersId),
-      mScrollbarAnimationId(0),
       mFixedPosTarget(ScrollableLayerGuid::NULL_SCROLL_ID),
       mIsBackfaceHidden(false),
+      mIsAsyncZoomContainer(false),
       mOverride(EventRegionsOverride::NoOverride) {
   if (mIsPrimaryApzcHolder) {
     MOZ_ASSERT(mApzc);
@@ -91,8 +91,9 @@ void HitTestingTreeNode::SetLastChild(HitTestingTreeNode* aChild) {
   }
 }
 
-void HitTestingTreeNode::SetScrollbarData(const uint64_t& aScrollbarAnimationId,
-                                          const ScrollbarData& aScrollbarData) {
+void HitTestingTreeNode::SetScrollbarData(
+    const Maybe<uint64_t>& aScrollbarAnimationId,
+    const ScrollbarData& aScrollbarData) {
   mScrollbarAnimationId = aScrollbarAnimationId;
   mScrollbarData = aScrollbarData;
 }
@@ -123,7 +124,7 @@ ScrollableLayerGuid::ViewID HitTestingTreeNode::GetScrollTargetId() const {
   return mScrollbarData.mTargetViewId;
 }
 
-const uint64_t& HitTestingTreeNode::GetScrollbarAnimationId() const {
+Maybe<uint64_t> HitTestingTreeNode::GetScrollbarAnimationId() const {
   return mScrollbarAnimationId;
 }
 
@@ -209,13 +210,15 @@ void HitTestingTreeNode::SetHitTestData(
     const EventRegions& aRegions, const LayerIntRegion& aVisibleRegion,
     const CSSTransformMatrix& aTransform,
     const Maybe<ParentLayerIntRegion>& aClipRegion,
-    const EventRegionsOverride& aOverride, bool aIsBackfaceHidden) {
+    const EventRegionsOverride& aOverride, bool aIsBackfaceHidden,
+    bool aIsAsyncZoomContainer) {
   mEventRegions = aRegions;
   mVisibleRegion = aVisibleRegion;
   mTransform = aTransform;
   mClipRegion = aClipRegion;
   mOverride = aOverride;
   mIsBackfaceHidden = aIsBackfaceHidden;
+  mIsAsyncZoomContainer = aIsAsyncZoomContainer;
 }
 
 bool HitTestingTreeNode::IsOutsideClip(const ParentLayerPoint& aPoint) const {
@@ -257,13 +260,20 @@ CompositorHitTestInfo HitTestingTreeNode::HitTest(
 
   result = CompositorHitTestFlags::eVisibleToHitTest;
 
-  if ((mOverride & EventRegionsOverride::ForceDispatchToContent) ||
-      mEventRegions.mDispatchToContentHitRegion.Contains(point.x, point.y)) {
-    result += CompositorHitTestFlags::eDispatchToContent;
+  if (mOverride & EventRegionsOverride::ForceDispatchToContent) {
+    result += CompositorHitTestFlags::eApzAwareListeners;
+  }
+  if (mEventRegions.mDispatchToContentHitRegion.Contains(point.x, point.y)) {
+    // Technically this might be some combination of eInactiveScrollframe,
+    // eApzAwareListeners, and eIrregularArea, because the round-trip through
+    // mEventRegions is lossy. We just convert it back to eIrregularArea
+    // because that's the most conservative option (i.e. eIrregularArea makes
+    // APZ rely on the main thread for everything).
+    result += CompositorHitTestFlags::eIrregularArea;
     if (mEventRegions.mDTCRequiresTargetConfirmation) {
       result += CompositorHitTestFlags::eRequiresTargetConfirmation;
     }
-  } else if (gfxPrefs::TouchActionEnabled()) {
+  } else if (StaticPrefs::layout_css_touch_action_enabled()) {
     if (mEventRegions.mNoActionRegion.Contains(point.x, point.y)) {
       // set all the touch-action flags as disabled
       result += CompositorHitTestTouchActionMask;
@@ -307,8 +317,33 @@ const CSSTransformMatrix& HitTestingTreeNode::GetTransform() const {
   return mTransform;
 }
 
+LayerToScreenMatrix4x4 HitTestingTreeNode::GetTransformToGecko() const {
+  if (mParent) {
+    LayerToParentLayerMatrix4x4 thisToParent =
+        mTransform * AsyncTransformMatrix();
+    if (mApzc) {
+      thisToParent =
+          thisToParent * ViewAs<ParentLayerToParentLayerMatrix4x4>(
+                             mApzc->GetTransformToLastDispatchedPaint());
+    }
+    ParentLayerToScreenMatrix4x4 parentToRoot =
+        ViewAs<ParentLayerToScreenMatrix4x4>(
+            mParent->GetTransformToGecko(),
+            PixelCastJustification::MovingDownToChildren);
+    return thisToParent * parentToRoot;
+  }
+
+  return ViewAs<LayerToScreenMatrix4x4>(
+      mTransform * AsyncTransformMatrix(),
+      PixelCastJustification::ScreenIsParentLayerForRoot);
+}
+
 const LayerIntRegion& HitTestingTreeNode::GetVisibleRegion() const {
   return mVisibleRegion;
+}
+
+bool HitTestingTreeNode::IsAsyncZoomContainer() const {
+  return mIsAsyncZoomContainer;
 }
 
 void HitTestingTreeNode::Dump(const char* aPrefix) const {

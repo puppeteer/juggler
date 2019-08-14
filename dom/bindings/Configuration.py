@@ -252,6 +252,8 @@ class Configuration(DescriptorProvider):
                 getter = lambda x: x.interface.isExposedInAnyWorklet()
             elif key == 'isExposedInWindow':
                 getter = lambda x: x.interface.isExposedInWindow()
+            elif key == 'isSerializable':
+                getter = lambda x: x.interface.isSerializable()
             else:
                 # Have to watch out: just closing over "key" is not enough,
                 # since we're about to mutate its value
@@ -401,10 +403,21 @@ class Descriptor(DescriptorProvider):
 
         # If we're concrete, we need to crawl our ancestor interfaces and mark
         # them as having a concrete descendant.
-        self.concrete = (not self.interface.isExternal() and
-                         not self.interface.isCallback() and
-                         not self.interface.isNamespace() and
-                         desc.get('concrete', True))
+        concreteDefault = (not self.interface.isExternal() and
+                           not self.interface.isCallback() and
+                           # Exclude interfaces that are used as the RHS of
+                           # "implements", because those would typically not be
+                           # concrete.
+                           not self.interface.isConsequential() and
+                           not self.interface.isNamespace() and
+                           # We're going to assume that leaf interfaces are
+                           # concrete; otherwise what's the point?  Also
+                           # interfaces with constructors had better be
+                           # concrete; otherwise how can you construct them?
+                           (not self.interface.hasChildInterfaces() or
+                            self.interface.ctor() is not None))
+
+        self.concrete = desc.get('concrete', concreteDefault)
         self.hasUnforgeableMembers = (self.concrete and
                                       any(MemberIsUnforgeable(m, self) for m in
                                           self.interface.members))
@@ -442,6 +455,7 @@ class Descriptor(DescriptorProvider):
 
         if self.concrete:
             self.proxy = False
+            self.hasCrossOriginMembers = False
             iface = self.interface
             for m in iface.members:
                 # Don't worry about inheriting legacycallers either: in
@@ -456,8 +470,16 @@ class Descriptor(DescriptorProvider):
                     addOperation('LegacyCaller', m)
             while iface:
                 for m in iface.members:
+                    if (m.isAttr() and
+                        (m.getExtendedAttribute("CrossOriginReadable") or
+                         m.getExtendedAttribute("CrossOriginWritable"))):
+                        self.hasCrossOriginMembers = True
+
                     if not m.isMethod():
                         continue
+
+                    if m.getExtendedAttribute("CrossOriginCallable"):
+                        self.hasCrossOriginMembers = True
 
                     def addIndexedOrNamedOperation(operation, m):
                         if m.isIndexed():
@@ -484,9 +506,19 @@ class Descriptor(DescriptorProvider):
             self.proxy = (self.supportsIndexedProperties() or
                           (self.supportsNamedProperties() and
                            not self.hasNamedPropertiesObject) or
-                          self.hasNonOrdinaryGetPrototypeOf())
+                          self.isMaybeCrossOriginObject())
 
             if self.proxy:
+                if (self.isMaybeCrossOriginObject() and
+                    (self.supportsIndexedProperties() or
+                     self.supportsNamedProperties())):
+                    raise TypeError("We don't support named or indexed "
+                                    "properties on maybe-cross-origin objects. "
+                                    "This lets us assume that their proxy "
+                                    "hooks are never called via Xrays.  "
+                                    "Fix %s.\n%s" %
+                                    (self.interface, self.interface.location))
+                    
                 if (not self.operations['IndexedGetter'] and
                     (self.operations['IndexedSetter'] or
                      self.operations['IndexedDeleter'])):
@@ -708,8 +740,10 @@ class Descriptor(DescriptorProvider):
         namedGetter = self.operations['NamedGetter']
         return namedGetter.getExtendedAttribute("NeedsCallerType")
 
-    def hasNonOrdinaryGetPrototypeOf(self):
-        return self.interface.getExtendedAttribute("NonOrdinaryGetPrototypeOf")
+    def isMaybeCrossOriginObject(self):
+        # If we're isGlobal and have cross-origin members, we're a Window, and
+        # that's not a cross-origin object.  The WindowProxy is.
+        return self.concrete and self.hasCrossOriginMembers and not self.isGlobal()
 
     def needsHeaderInclude(self):
         """

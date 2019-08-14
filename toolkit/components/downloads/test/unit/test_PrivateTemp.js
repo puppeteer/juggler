@@ -10,9 +10,9 @@
  * for the current user.
  */
 add_task(async function test_private_temp() {
-
   let download = await promiseStartExternalHelperAppServiceDownload(
-                                                         httpUrl("empty.txt"));
+    httpUrl("empty.txt")
+  );
 
   await promiseDownloadStopped(download);
 

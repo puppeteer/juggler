@@ -20,7 +20,7 @@
 // ABI target. The iOS toolchain doesn't define anything specific here,
 // but iOS always supports VFP.
 #if defined(__ARM_PCS_VFP) || defined(XP_IOS)
-#define JS_CODEGEN_ARM_HARDFP
+#  define JS_CODEGEN_ARM_HARDFP
 #endif
 
 namespace js {
@@ -163,7 +163,6 @@ class Registers {
 };
 
 // Smallest integer type that can hold a register bitmask.
-typedef uint16_t PackedRegisterMask;
 typedef uint16_t PackedRegisterMask;
 
 class FloatRegisters {
@@ -713,11 +712,11 @@ uint32_t GetARMFlags();
 bool UseHardFpABI();
 #else
 static inline bool UseHardFpABI() {
-#if defined(JS_CODEGEN_ARM_HARDFP)
+#  if defined(JS_CODEGEN_ARM_HARDFP)
   return true;
-#else
+#  else
   return false;
-#endif
+#  endif
 }
 #endif
 

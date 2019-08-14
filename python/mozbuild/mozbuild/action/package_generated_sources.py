@@ -5,12 +5,12 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 import argparse
-import json
-import os.path
 import sys
 
 import buildconfig
+import mozpack.path as mozpath
 from mozpack.archive import create_tar_gz_from_files
+from mozpack.files import BaseFile
 from mozbuild.generated_sources import get_generated_sources
 
 
@@ -20,8 +20,20 @@ def main(argv):
     parser.add_argument('outputfile', help='File to write output to')
     args = parser.parse_args(argv)
 
+    objdir_abspath = mozpath.abspath(buildconfig.topobjdir)
 
-    files = dict(get_generated_sources())
+    def is_valid_entry(entry):
+        if isinstance(entry[1], BaseFile):
+            entry_abspath = mozpath.abspath(entry[1].path)
+        else:
+            entry_abspath = mozpath.abspath(entry[1])
+        if not entry_abspath.startswith(objdir_abspath):
+            print("Warning: omitting generated source [%s] from archive" % entry_abspath,
+                  file=sys.stderr)
+            return False
+        return True
+
+    files = dict(filter(is_valid_entry, get_generated_sources()))
     with open(args.outputfile, 'wb') as fh:
         create_tar_gz_from_files(fh, files, compresslevel=5)
 

@@ -11,7 +11,6 @@
 #include "Layers.h"                         // for Layer, ContainerLayer, etc
 #include "CompositableTransactionParent.h"  // for EditReplyVector
 #include "CompositorBridgeParent.h"
-#include "gfxPrefs.h"
 #include "mozilla/gfx/BasePoint3D.h"         // for BasePoint3D
 #include "mozilla/layers/AnimationHelper.h"  // for GetAnimatedPropValue
 #include "mozilla/layers/CanvasLayerComposite.h"
@@ -26,6 +25,8 @@
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
 #include "mozilla/layers/PaintedLayerComposite.h"
 #include "mozilla/mozalloc.h"  // for operator delete, etc
+#include "mozilla/PerfStats.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 #include "nsCoord.h"          // for NSAppUnitsToFloatPixels
@@ -57,7 +58,6 @@ LayerTransactionParent::LayerTransactionParent(
       mChildEpoch{0},
       mParentEpoch{0},
       mVsyncRate(aVsyncRate),
-      mPendingTransaction{0},
       mDestroyed(false),
       mIPCOpen(false),
       mUpdateHitTestingTree(false) {
@@ -113,7 +113,7 @@ void LayerTransactionParent::Destroy() {
   mAnimStorage = nullptr;
 }
 
-class MOZ_STACK_CLASS AutoLayerTransactionParentAsyncMessageSender {
+class MOZ_STACK_CLASS AutoLayerTransactionParentAsyncMessageSender final {
  public:
   explicit AutoLayerTransactionParentAsyncMessageSender(
       LayerTransactionParent* aLayerTransaction,
@@ -152,8 +152,10 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvUpdate(
     }
   });
 
-  AUTO_PROFILER_TRACING("Paint", "LayerTransaction");
+  AUTO_PROFILER_TRACING("Paint", "LayerTransaction", GRAPHICS);
   AUTO_PROFILER_LABEL("LayerTransactionParent::RecvUpdate", GRAPHICS);
+  PerfStats::AutoMetricRecording<PerfStats::Metric::LayerTransactions>
+      autoRecording;
 
   TimeStamp updateStart = TimeStamp::Now();
 
@@ -394,8 +396,8 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvUpdate(
         if (!imageBridge) {
           return IPC_FAIL_NO_REASON(this);
         }
-        RefPtr<CompositableHost> host =
-            imageBridge->FindCompositable(op.compositable());
+        RefPtr<CompositableHost> host = imageBridge->FindCompositable(
+            op.compositable(), /* aAllowDisablingWebRender */ true);
         if (!host) {
           // This normally should not happen, but can after a GPU process crash.
           // Media may not have had time to update the ImageContainer associated
@@ -473,9 +475,10 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvUpdate(
 #endif
 
   // Enable visual warning for long transaction when draw FPS option is enabled
-  bool drawFps = gfxPrefs::LayersDrawFPS();
+  bool drawFps = StaticPrefs::layers_acceleration_draw_fps();
   if (drawFps) {
-    uint32_t visualWarningTrigger = gfxPrefs::LayerTransactionWarning();
+    uint32_t visualWarningTrigger =
+        StaticPrefs::layers_transaction_warning_ms();
     // The default theshold is 200ms to trigger, hit red when it take 4 times
     // longer
     TimeDuration latency = TimeStamp::Now() - aInfo.transactionStart();
@@ -538,7 +541,7 @@ bool LayerTransactionParent::SetLayerAttributes(
   // Clean up the Animations by id in the CompositorAnimationStorage
   // if there are no active animations on the layer
   if (mAnimStorage && layer->GetCompositorAnimationsId() &&
-      layer->GetAnimations().IsEmpty()) {
+      layer->GetPropertyAnimationGroups().IsEmpty()) {
     mAnimStorage->ClearById(layer->GetCompositorAnimationsId());
   }
   if (common.scrollMetadata() != layer->GetAllScrollMetadata()) {
@@ -592,8 +595,7 @@ bool LayerTransactionParent::SetLayerAttributes(
       containerLayer->SetPreScale(attrs.preXScale(), attrs.preYScale());
       containerLayer->SetInheritedScale(attrs.inheritedXScale(),
                                         attrs.inheritedYScale());
-      containerLayer->SetScaleToResolution(attrs.scaleToResolution(),
-                                           attrs.presShellResolution());
+      containerLayer->SetScaleToResolution(attrs.presShellResolution());
       break;
     }
     case Specific::TColorLayerAttributes: {
@@ -675,6 +677,10 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvSetTestSampleTime(
 }
 
 mozilla::ipc::IPCResult LayerTransactionParent::RecvLeaveTestMode() {
+  if (mDestroyed) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
   mCompositorBridge->LeaveTestMode(GetId());
   return IPC_OK();
 }
@@ -701,7 +707,7 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvGetAnimationValue(
 }
 
 mozilla::ipc::IPCResult LayerTransactionParent::RecvGetTransform(
-    const LayerHandle& aLayerHandle, MaybeTransform* aTransform) {
+    const LayerHandle& aLayerHandle, Maybe<Matrix4x4>* aTransform) {
   if (mDestroyed || !mLayerManager || mLayerManager->IsDestroyed()) {
     return IPC_FAIL_NO_REASON(this);
   }
@@ -724,18 +730,18 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvGetTransform(
   float scale = 1;
   Point3D scaledOrigin;
   Point3D transformOrigin;
-  for (uint32_t i = 0; i < layer->GetAnimations().Length(); i++) {
-    if (layer->GetAnimations()[i].data().type() ==
-        AnimationData::TTransformData) {
-      const TransformData& data =
-          layer->GetAnimations()[i].data().get_TransformData();
-      scale = data.appUnitsPerDevPixel();
-      scaledOrigin = Point3D(
-          NS_round(NSAppUnitsToFloatPixels(data.origin().x, scale)),
-          NS_round(NSAppUnitsToFloatPixels(data.origin().y, scale)), 0.0f);
-      transformOrigin = data.transformOrigin();
-      break;
+  for (const PropertyAnimationGroup& group :
+       layer->GetPropertyAnimationGroups()) {
+    if (group.mAnimationData.isNothing()) {
+      continue;
     }
+    const TransformData& data = group.mAnimationData.ref();
+    scale = data.appUnitsPerDevPixel();
+    scaledOrigin = Point3D(
+        NS_round(NSAppUnitsToFloatPixels(data.origin().x, scale)),
+        NS_round(NSAppUnitsToFloatPixels(data.origin().y, scale)), 0.0f);
+    transformOrigin = data.transformOrigin();
+    break;
   }
 
   // If our parent isn't a perspective layer, then the offset into reference
@@ -749,13 +755,13 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvGetTransform(
   // containers are enabled, then the APZ transform might not be on |layer| but
   // instead would be on the parent of |layer|, if that is the root scrollable
   // metrics. So we special-case that behaviour.
-  if (gfxPrefs::LayoutUseContainersForRootFrames() &&
+  if (StaticPrefs::layout_scroll_root_frame_containers() &&
       !layer->HasScrollableFrameMetrics() && layer->GetParent() &&
       layer->GetParent()->HasRootScrollableFrameMetrics()) {
     transform *= layer->GetParent()->AsHostLayer()->GetShadowBaseTransform();
   }
 
-  *aTransform = transform;
+  *aTransform = Some(transform);
 
   return IPC_OK();
 }
@@ -767,8 +773,8 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvSetAsyncScrollOffset(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  mCompositorBridge->SetTestAsyncScrollOffset(GetId(), aScrollID,
-                                              CSSPoint(aX, aY));
+  mCompositorBridge->SetTestAsyncScrollOffset(WRRootId::NonWebRender(GetId()),
+                                              aScrollID, CSSPoint(aX, aY));
   return IPC_OK();
 }
 
@@ -778,19 +784,20 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvSetAsyncZoom(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  mCompositorBridge->SetTestAsyncZoom(GetId(), aScrollID,
+  mCompositorBridge->SetTestAsyncZoom(WRRootId::NonWebRender(GetId()),
+                                      aScrollID,
                                       LayerToParentLayerScale(aValue));
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult LayerTransactionParent::RecvFlushApzRepaints() {
-  mCompositorBridge->FlushApzRepaints(GetId());
+  mCompositorBridge->FlushApzRepaints(WRRootId::NonWebRender(GetId()));
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult LayerTransactionParent::RecvGetAPZTestData(
     APZTestData* aOutData) {
-  mCompositorBridge->GetAPZTestData(GetId(), aOutData);
+  mCompositorBridge->GetAPZTestData(WRRootId::NonWebRender(GetId()), aOutData);
   return IPC_OK();
 }
 
@@ -801,7 +808,22 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvRequestProperty(
 }
 
 mozilla::ipc::IPCResult LayerTransactionParent::RecvSetConfirmedTargetAPZC(
-    const uint64_t& aBlockId, nsTArray<ScrollableLayerGuid>&& aTargets) {
+    const uint64_t& aBlockId, nsTArray<SLGuidAndRenderRoot>&& aTargets) {
+  for (size_t i = 0; i < aTargets.Length(); i++) {
+    // Guard against bad data from hijacked child processes
+    if (aTargets[i].mRenderRoot != wr::RenderRoot::Default) {
+      NS_ERROR(
+          "Unexpected render root in RecvSetConfirmedTargetAPZC; dropping "
+          "message...");
+      return IPC_FAIL(this, "Bad render root");
+    }
+    if (aTargets[i].mScrollableLayerGuid.mLayersId != GetId()) {
+      NS_ERROR(
+          "Unexpected layers id in RecvSetConfirmedTargetAPZC; dropping "
+          "message...");
+      return IPC_FAIL(this, "Bad layers id");
+    }
+  }
   mCompositorBridge->SetConfirmedTargetAPZC(GetId(), aBlockId, aTargets);
   return IPC_OK();
 }
@@ -885,77 +907,52 @@ bool LayerTransactionParent::IsSameProcess() const {
   return OtherPid() == base::GetCurrentProcId();
 }
 
-TransactionId LayerTransactionParent::FlushTransactionId(
-    const VsyncId& aId, TimeStamp& aCompositeEnd) {
-  if (mId.IsValid() && mPendingTransaction.IsValid() && !mVsyncRate.IsZero()) {
-    double latencyMs = (aCompositeEnd - mTxnStartTime).ToMilliseconds();
-    double latencyNorm = latencyMs / mVsyncRate.ToMilliseconds();
-    int32_t fracLatencyNorm = lround(latencyNorm * 100.0);
-    Telemetry::Accumulate(Telemetry::CONTENT_FRAME_TIME, fracLatencyNorm);
+void LayerTransactionParent::SetPendingTransactionId(
+    TransactionId aId, const VsyncId& aVsyncId,
+    const TimeStamp& aVsyncStartTime, const TimeStamp& aRefreshStartTime,
+    const TimeStamp& aTxnStartTime, const TimeStamp& aTxnEndTime,
+    bool aContainsSVG, const nsCString& aURL, const TimeStamp& aFwdTime) {
+  mPendingTransactions.AppendElement(PendingTransaction{
+      aId, aVsyncId, aVsyncStartTime, aRefreshStartTime, aTxnStartTime,
+      aTxnEndTime, aFwdTime, aURL, aContainsSVG});
+}
 
-    // Record CONTENT_FRAME_TIME_REASON. See
-    // WebRenderBridgeParent::FlushTransactionIdsForEpoch for more details.
-    //
-    // Note that deseralizing a layers update (RecvUpdate) can delay the receipt
-    // of the composite vsync message
-    // (CompositorBridgeParent::CompositeToTarget), since they're using the same
-    // thread. This can mean that compositing might start significantly late,
-    // but this code will still detect it as having successfully started on the
-    // right vsync (which is somewhat correct). We'd now have reduced time left
-    // in the vsync interval to finish compositing, so the chances of a missed
-    // frame increases. This is effectively including the RecvUpdate work as
-    // part of the 'compositing' phase for this metric, but it isn't included in
-    // COMPOSITE_TIME, and *is* included in CONTENT_FULL_PAINT_TIME.
-    latencyMs = (aCompositeEnd - mRefreshStartTime).ToMilliseconds();
-    latencyNorm = latencyMs / mVsyncRate.ToMilliseconds();
-    fracLatencyNorm = lround(latencyNorm * 100.0);
-    if (fracLatencyNorm < 200) {
-      // Success
-      Telemetry::AccumulateCategorical(
-          LABELS_CONTENT_FRAME_TIME_REASON::OnTime);
-    } else {
-      if (mTxnVsyncId == VsyncId() || aId == VsyncId() || mTxnVsyncId >= aId) {
-        // Vsync ids are nonsensical, possibly something got trigged from
-        // outside vsync?
-        Telemetry::AccumulateCategorical(
-            LABELS_CONTENT_FRAME_TIME_REASON::NoVsync);
-      } else if (aId - mTxnVsyncId > 1) {
-        // Composite started late (and maybe took too long as well)
-        Telemetry::AccumulateCategorical(
-            LABELS_CONTENT_FRAME_TIME_REASON::MissedComposite);
-      } else {
-        // Composite start on time, but must have taken too long.
-        Telemetry::AccumulateCategorical(
-            LABELS_CONTENT_FRAME_TIME_REASON::SlowComposite);
-      }
+TransactionId LayerTransactionParent::FlushTransactionId(
+    const VsyncId& aCompositeId, TimeStamp& aCompositeEnd) {
+  TransactionId id;
+  for (auto& transaction : mPendingTransactions) {
+    id = transaction.mId;
+    if (mId.IsValid() && transaction.mId.IsValid() && !mVsyncRate.IsZero()) {
+      RecordContentFrameTime(
+          transaction.mTxnVsyncId, transaction.mVsyncStartTime,
+          transaction.mTxnStartTime, aCompositeId, aCompositeEnd,
+          transaction.mTxnEndTime - transaction.mTxnStartTime, mVsyncRate,
+          transaction.mContainsSVG, false);
     }
-  }
 
 #if defined(ENABLE_FRAME_LATENCY_LOG)
-  if (mPendingTransaction.IsValid()) {
-    if (mRefreshStartTime) {
-      int32_t latencyMs =
-          lround((aCompositeEnd - mRefreshStartTime).ToMilliseconds());
-      printf_stderr(
-          "From transaction start to end of generate frame latencyMs %d this "
-          "%p\n",
-          latencyMs, this);
+    if (transaction.mId.IsValid()) {
+      if (transaction.mRefreshStartTime) {
+        int32_t latencyMs = lround(
+            (aCompositeEnd - transaction.mRefreshStartTime).ToMilliseconds());
+        printf_stderr(
+            "From transaction start to end of generate frame latencyMs %d this "
+            "%p\n",
+            latencyMs, this);
+      }
+      if (transaction.mFwdTime) {
+        int32_t latencyMs =
+            lround((aCompositeEnd - transaction.mFwdTime).ToMilliseconds());
+        printf_stderr(
+            "From forwarding transaction to end of generate frame latencyMs %d "
+            "this %p\n",
+            latencyMs, this);
+      }
     }
-    if (mFwdTime) {
-      int32_t latencyMs = lround((aCompositeEnd - mFwdTime).ToMilliseconds());
-      printf_stderr(
-          "From forwarding transaction to end of generate frame latencyMs %d "
-          "this %p\n",
-          latencyMs, this);
-    }
-  }
 #endif
+  }
 
-  mRefreshStartTime = TimeStamp();
-  mTxnStartTime = TimeStamp();
-  mFwdTime = TimeStamp();
-  TransactionId id = mPendingTransaction;
-  mPendingTransaction = TransactionId{0};
+  mPendingTransactions.Clear();
   return id;
 }
 
@@ -1038,7 +1035,7 @@ mozilla::ipc::IPCResult LayerTransactionParent::RecvRecordPaintTimes(
 
 mozilla::ipc::IPCResult LayerTransactionParent::RecvGetTextureFactoryIdentifier(
     TextureFactoryIdentifier* aIdentifier) {
-  if (!mLayerManager) {
+  if (mDestroyed || !mLayerManager || mLayerManager->IsDestroyed()) {
     // Default constructor sets mParentBackend to LAYERS_NONE.
     return IPC_OK();
   }

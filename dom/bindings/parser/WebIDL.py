@@ -420,47 +420,10 @@ class IDLObjectWithIdentifier(IDLObject):
         if parentScope:
             self.resolve(parentScope)
 
-        self.treatNullAs = "Default"
-
     def resolve(self, parentScope):
         assert isinstance(parentScope, IDLScope)
         assert isinstance(self.identifier, IDLUnresolvedIdentifier)
         self.identifier.resolve(parentScope, self)
-
-    def checkForStringHandlingExtendedAttributes(self, attrs,
-                                                 isDictionaryMember=False,
-                                                 isOptional=False):
-        """
-        A helper function to deal with TreatNullAs.  Returns the list
-        of attrs it didn't handle itself.
-        """
-        assert isinstance(self, IDLArgument) or isinstance(self, IDLAttribute)
-        unhandledAttrs = list()
-        for attr in attrs:
-            if not attr.hasValue():
-                unhandledAttrs.append(attr)
-                continue
-
-            identifier = attr.identifier()
-            value = attr.value()
-            if identifier == "TreatNullAs":
-                if not self.type.isDOMString() or self.type.nullable():
-                    raise WebIDLError("[TreatNullAs] is only allowed on "
-                                      "arguments or attributes whose type is "
-                                      "DOMString",
-                                      [self.location])
-                if isDictionaryMember:
-                    raise WebIDLError("[TreatNullAs] is not allowed for "
-                                      "dictionary members", [self.location])
-                if value != 'EmptyString':
-                    raise WebIDLError("[TreatNullAs] must take the identifier "
-                                      "'EmptyString', not '%s'" % value,
-                                      [self.location])
-                self.treatNullAs = value
-            else:
-                unhandledAttrs.append(attr)
-
-        return unhandledAttrs
 
 
 class IDLObjectWithScope(IDLObjectWithIdentifier, IDLScope):
@@ -518,9 +481,6 @@ class IDLExposureMixins():
 
     def isExposedOnMainThread(self):
         return self.isExposedInWindow()
-
-    def isExposedOffMainThread(self):
-        return len(self.exposureSet - {'Window', 'FakeTestPrimaryGlobal'}) > 0
 
     def isExposedInAnyWorker(self):
         return len(self.getWorkerExposureSet()) > 0
@@ -603,6 +563,9 @@ class IDLExternalInterface(IDLObjectWithIdentifier, IDLExposureMixins):
         return False
 
     def isNavigatorProperty(self):
+        return False
+
+    def isSerializable(self):
         return False
 
     def _getDependentObjects(self):
@@ -741,6 +704,7 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
         # outputs the constructs in the order that namedConstructors enumerates
         # them.
         self.namedConstructors = list()
+        self.legacyWindowAliases = []
         self.implementedInterfaces = set()
         self._consequential = False
         self._isKnownNonPartial = False
@@ -810,6 +774,16 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
                               [self.location])
 
         IDLExposureMixins.finish(self, scope)
+
+        if len(self.legacyWindowAliases) > 0:
+            if not self.hasInterfaceObject():
+                raise WebIDLError("Interface %s unexpectedly has [LegacyWindowAlias] "
+                                  "and [NoInterfaceObject] together" % self.identifier.name,
+                                  [self.location])
+            if not self.isExposedInWindow():
+                raise WebIDLError("Interface %s has [LegacyWindowAlias] "
+                                  "but not exposed in Window" % self.identifier.name,
+                                  [self.location])
 
         # Now go ahead and merge in our partial interfaces.
         for partial in self._partialInterfaces:
@@ -1363,11 +1337,6 @@ class IDLInterfaceOrNamespace(IDLObjectWithScope, IDLExposureMixins):
                     checkDuplicateNames(member, bindingAlias, "BindingAlias")
 
 
-        if self.getExtendedAttribute("Pref") and self.isExposedOffMainThread():
-            raise WebIDLError("[Pref] used on an interface that is not "
-                              "main-thread-only",
-                              [self.location])
-
         # Conditional exposure makes no sense for interfaces with no
         # interface object, unless they're navigator properties.
         # And SecureContext makes sense for interfaces with no interface object,
@@ -1683,6 +1652,11 @@ class IDLInterface(IDLInterfaceOrNamespace):
                         raise WebIDLError(str(identifier) + " must take no arguments",
                                           [attr.location])
 
+                if self.globalNames:
+                    raise WebIDLError("[%s] must not be specified together with "
+                                      "[Global]" % identifier,
+                                      [self.location, attr.location])
+
                 args = attr.args() if attr.hasArgs() else []
 
                 retType = IDLWrapperType(self.location, self)
@@ -1743,6 +1717,10 @@ class IDLInterface(IDLInterfaceOrNamespace):
                                       "an interface with inherited interfaces",
                                       [attr.location, self.location])
             elif identifier == "Global":
+                if self.ctor() or self.namedConstructors:
+                    raise WebIDLError("[Global] cannot be specified on an "
+                                      "interface with a constructor",
+                                      [attr.location, self.location]);
                 if attr.hasValue():
                     self.globalNames = [attr.value()]
                 elif attr.hasArgs():
@@ -1766,6 +1744,18 @@ class IDLInterface(IDLInterfaceOrNamespace):
                 self.parentScope.addIfaceGlobalNames(self.identifier.name,
                                                      [self.identifier.name])
                 self._isOnGlobalProtoChain = True
+            elif identifier == "LegacyWindowAlias":
+                if attr.hasValue():
+                    self.legacyWindowAliases = [attr.value()]
+                elif attr.hasArgs():
+                    self.legacyWindowAliases = attr.args()
+                else:
+                    raise WebIDLError("[%s] must either take an identifier "
+                                      "or take an identifier list" % identifier,
+                                      [attr.location])
+                for alias in self.legacyWindowAliases:
+                    unresolved = IDLUnresolvedIdentifier(attr.location, alias)
+                    IDLObjectWithIdentifier(attr.location, self.parentScope, unresolved)
             elif identifier == "SecureContext":
                 if not attr.noArguments():
                     raise WebIDLError("[%s] must take no arguments" % identifier,
@@ -1787,7 +1777,7 @@ class IDLInterface(IDLInterfaceOrNamespace):
                   identifier == "LegacyUnenumerableNamedProperties" or
                   identifier == "RunConstructorInCallerCompartment" or
                   identifier == "WantsEventListenerHooks" or
-                  identifier == "NonOrdinaryGetPrototypeOf"):
+                  identifier == "Serializable"):
                 # Known extended attributes that do not take values
                 if not attr.noArguments():
                     raise WebIDLError("[%s] must take no arguments" % identifier,
@@ -1811,6 +1801,19 @@ class IDLInterface(IDLInterfaceOrNamespace):
 
             attrlist = attr.listValue()
             self._extendedAttrDict[identifier] = attrlist if len(attrlist) else True
+
+    def validate(self):
+        IDLInterfaceOrNamespace.validate(self)
+        if self.parent and self.isSerializable() and not self.parent.isSerializable():
+            raise WebIDLError(
+                "Serializable interface inherits from non-serializable "
+                "interface.  Per spec, that means the object should not be "
+                "serializable, so chances are someone made a mistake here "
+                "somewhere.",
+                [self.location, self.parent.location])
+
+    def isSerializable(self):
+        return self.getExtendedAttribute("Serializable")
 
 
 class IDLNamespace(IDLInterfaceOrNamespace):
@@ -1847,7 +1850,9 @@ class IDLNamespace(IDLInterfaceOrNamespace):
                 if not attr.noArguments():
                     raise WebIDLError("[%s] must not have arguments" % identifier,
                                       [attr.location])
-            elif identifier == "Pref" or identifier == "Func":
+            elif (identifier == "Pref" or
+                  identifier == "HeaderFile" or
+                  identifier == "Func"):
                 # Known extended attributes that take a string value
                 if not attr.hasValue():
                     raise WebIDLError("[%s] must have a value" % identifier,
@@ -1859,6 +1864,9 @@ class IDLNamespace(IDLInterfaceOrNamespace):
 
             attrlist = attr.listValue()
             self._extendedAttrDict[identifier] = attrlist if len(attrlist) else True
+
+    def isSerializable(self):
+        return False
 
 
 class IDLDictionary(IDLObjectWithScope):
@@ -2095,9 +2103,15 @@ class IDLType(IDLObject):
         IDLObject.__init__(self, location)
         self.name = name
         self.builtin = False
+        self.clamp = False
+        self.treatNullAsEmpty = False
+        self.enforceRange = False
+        self._extendedAttrDict = {}
 
     def __eq__(self, other):
-        return other and self.builtin == other.builtin and self.name == other.name
+        return (other and self.builtin == other.builtin and self.name == other.name and
+                          self.clamp == other.clamp and self.enforceRange == other.enforceRange and
+                          self.treatNullAsEmpty == other.treatNullAsEmpty)
 
     def __ne__(self, other):
         return not self == other
@@ -2223,12 +2237,14 @@ class IDLType(IDLObject):
         assert self.tag() == IDLType.Tags.callback
         return self.nullable() and self.inner.callback._treatNonObjectAsNull
 
-    def addExtendedAttributes(self, attrs):
-        if len(attrs) != 0:
-            raise WebIDLError("There are no extended attributes that are "
-                              "allowed on types, for now (but this is "
-                              "changing; see bug 1359269)",
+    def withExtendedAttributes(self, attrs):
+        if len(attrs) > 0:
+            raise WebIDLError("Extended attributes on types only supported for builtins",
                               [attrs[0].location, self.location])
+        return self
+
+    def getExtendedAttribute(self, name):
+        return self._extendedAttrDict.get(name, None)
 
     def resolveType(self, parentScope):
         pass
@@ -2249,8 +2265,9 @@ class IDLUnresolvedType(IDLType):
         Unresolved types are interface types
     """
 
-    def __init__(self, location, name):
+    def __init__(self, location, name, attrs=[]):
         IDLType.__init__(self, location, name)
+        self.extraTypeAttributes = attrs
 
     def isComplete(self):
         return False
@@ -2272,13 +2289,16 @@ class IDLUnresolvedType(IDLType):
             typedefType = IDLTypedefType(self.location, obj.innerType,
                                          obj.identifier)
             assert not typedefType.isComplete()
-            return typedefType.complete(scope)
+            return typedefType.complete(scope).withExtendedAttributes(self.extraTypeAttributes)
         elif obj.isCallback() and not obj.isInterface():
             assert self.name.name == obj.identifier.name
             return IDLCallbackType(self.location, obj)
 
         name = self.name.resolve(scope, None)
         return IDLWrapperType(self.location, obj)
+
+    def withExtendedAttributes(self, attrs):
+        return IDLUnresolvedType(self.location, self.name, attrs)
 
     def isDistinguishableFrom(self, other):
         raise TypeError("Can't tell whether an unresolved type is or is not "
@@ -2787,12 +2807,17 @@ class IDLTypedefType(IDLType):
     def _getDependentObjects(self):
         return self.inner._getDependentObjects()
 
+    def withExtendedAttributes(self, attrs):
+        return IDLTypedefType(self.location, self.inner.withExtendedAttributes(attrs), self.name)
+
 
 class IDLTypedef(IDLObjectWithIdentifier):
     def __init__(self, location, parentScope, innerType, name):
+        # Set self.innerType first, because IDLObjectWithIdentifier.__init__
+        # will call our __str__, which wants to use it.
+        self.innerType = innerType
         identifier = IDLUnresolvedIdentifier(location, name)
         IDLObjectWithIdentifier.__init__(self, location, parentScope, identifier)
-        self.innerType = innerType
 
     def __str__(self):
         return "Typedef %s %s" % (self.identifier.name, self.innerType)
@@ -3104,10 +3129,59 @@ class IDLBuiltinType(IDLType):
         Types.ReadableStream: IDLType.Tags.interface,
     }
 
-    def __init__(self, location, name, type):
+    def __init__(self, location, name, type, clamp=False, enforceRange=False, treatNullAsEmpty=False,
+                 attrLocation=[]):
+        """
+        The mutually exclusive clamp/enforceRange/treatNullAsEmpty arguments are used to create instances
+        of this type with the appropriate attributes attached. Use .clamped(), .rangeEnforced(), and .treatNullAs().
+
+        attrLocation is an array of source locations of these attributes for error reporting.
+        """
         IDLType.__init__(self, location, name)
         self.builtin = True
         self._typeTag = type
+        self._clamped = None
+        self._rangeEnforced = None
+        self._withTreatNullAs = None
+        if self.isNumeric():
+            if clamp:
+                self.clamp = True
+                self.name = "Clamped" + self.name
+                self._extendedAttrDict["Clamp"] = True
+            elif enforceRange:
+                self.enforceRange = True
+                self.name = "RangeEnforced" + self.name
+                self._extendedAttrDict["EnforceRange"] = True
+        elif clamp or enforceRange:
+            raise WebIDLError("Non-numeric types cannot be [Clamp] or [EnforceRange]", attrLocation)
+        if self.isDOMString():
+            if treatNullAsEmpty:
+                self.treatNullAsEmpty = True
+                self.name = "NullIsEmpty" + self.name
+                self._extendedAttrDict["TreatNullAs"] = ["EmptyString"]
+        elif treatNullAsEmpty:
+            raise WebIDLError("Non-string types cannot be [TreatNullAs]", attrLocation)
+
+    def clamped(self, attrLocation):
+        if not self._clamped:
+            self._clamped = IDLBuiltinType(self.location, self.name,
+                                           self._typeTag, clamp=True,
+                                           attrLocation=attrLocation)
+        return self._clamped
+
+    def rangeEnforced(self, attrLocation):
+        if not self._rangeEnforced:
+            self._rangeEnforced = IDLBuiltinType(self.location, self.name,
+                                           self._typeTag, enforceRange=True,
+                                           attrLocation=attrLocation)
+        return self._rangeEnforced
+
+    def withTreatNullAs(self, attrLocation):
+        if not self._withTreatNullAs:
+            self._withTreatNullAs = IDLBuiltinType(self.location, self.name,
+                                           self._typeTag, treatNullAsEmpty=True,
+                                           attrLocation=attrLocation)
+        return self._withTreatNullAs
 
     def isPrimitive(self):
         return self._typeTag <= IDLBuiltinType.Types.double
@@ -3242,6 +3316,45 @@ class IDLBuiltinType(IDLType):
 
     def _getDependentObjects(self):
         return set()
+
+    def withExtendedAttributes(self, attrs):
+        ret = self
+        for attribute in attrs:
+            identifier = attribute.identifier()
+            if identifier == "Clamp":
+                if not attribute.noArguments():
+                    raise WebIDLError("[Clamp] must take no arguments",
+                                      [attribute.location])
+                if ret.enforceRange or self.enforceRange:
+                    raise WebIDLError("[EnforceRange] and [Clamp] are mutually exclusive",
+                                      [self.location, attribute.location])
+                ret = self.clamped([self.location, attribute.location])
+            elif identifier == "EnforceRange":
+                if not attribute.noArguments():
+                    raise WebIDLError("[EnforceRange] must take no arguments",
+                                      [attribute.location])
+                if ret.clamp or self.clamp:
+                    raise WebIDLError("[EnforceRange] and [Clamp] are mutually exclusive",
+                                      [self.location, attribute.location])
+                ret = self.rangeEnforced([self.location, attribute.location])
+            elif identifier == "TreatNullAs":
+                if not self.isDOMString():
+                    raise WebIDLError("[TreatNullAs] only allowed on DOMStrings",
+                                      [self.location, attribute.location])
+                assert not self.nullable()
+                if not attribute.hasValue():
+                    raise WebIDLError("[TreatNullAs] must take an identifier argument"
+                                      [attribute.location])
+                value = attribute.value()
+                if value != 'EmptyString':
+                    raise WebIDLError("[TreatNullAs] must take the identifier "
+                                      "'EmptyString', not '%s'" % value,
+                                      [attribute.location])
+                ret = self.withTreatNullAs([self.location, attribute.location])
+            else:
+                raise WebIDLError("Unhandled extended attribute on type",
+                                  [self.location, attribute.location])
+        return ret
 
 BuiltinTypes = {
     IDLBuiltinType.Types.byte:
@@ -3457,6 +3570,10 @@ class IDLValue(IDLObject):
             # extra normalization step.
             assert self.type.isDOMString()
             return self
+        elif self.type.isDOMString() and type.treatNullAsEmpty:
+            # TreatNullAsEmpty is a different type for resolution reasons,
+            # however once you have a value it doesn't matter
+            return self
         elif self.type.isString() and type.isByteString():
             # Allow ByteStrings to use a default value like DOMString.
             # No coercion is required as Codegen.py will handle the
@@ -3487,8 +3604,6 @@ class IDLNullValue(IDLObject):
     def coerceToType(self, type, location):
         if (not isinstance(type, IDLNullableType) and
             not (type.isUnion() and type.hasNullableType) and
-            not (type.isUnion() and type.hasDictionaryType()) and
-            not type.isDictionary() and
             not type.isAny()):
             raise WebIDLError("Cannot coerce null value to type %s." % type,
                               [location])
@@ -3532,6 +3647,35 @@ class IDLEmptySequenceValue(IDLObject):
         emptySequenceValue = IDLEmptySequenceValue(self.location)
         emptySequenceValue.type = type
         return emptySequenceValue
+
+    def _getDependentObjects(self):
+        return set()
+
+
+class IDLDefaultDictionaryValue(IDLObject):
+    def __init__(self, location):
+        IDLObject.__init__(self, location)
+        self.type = None
+        self.value = None
+
+    def coerceToType(self, type, location):
+        if type.isUnion():
+            # We use the flat member types here, because if we have a nullable
+            # member type, or a nested union, we want the type the value
+            # actually coerces to, not the nullable or nested union type.
+            for subtype in type.unroll().flatMemberTypes:
+                try:
+                    return self.coerceToType(subtype, location)
+                except:
+                    pass
+
+        if not type.isDictionary():
+            raise WebIDLError("Cannot coerce default dictionary value to type %s." % type,
+                              [location])
+
+        defaultDictionaryValue = IDLDefaultDictionaryValue(self.location)
+        defaultDictionaryValue.type = type
+        return defaultDictionaryValue
 
     def _getDependentObjects(self):
         return set()
@@ -3619,11 +3763,6 @@ class IDLInterfaceMember(IDLObjectWithIdentifier, IDLExposureMixins):
         IDLExposureMixins.finish(self, scope)
 
     def validate(self):
-        if self.getExtendedAttribute("Pref") and self.isExposedOffMainThread():
-            raise WebIDLError("[Pref] used on an interface member that is not "
-                              "main-thread-only",
-                              [self.location])
-
         if self.isAttr() or self.isMethod():
             if self.affects == "Everything" and self.dependsOn != "Everything":
                 raise WebIDLError("Interface member is flagged as affecting "
@@ -4098,8 +4237,6 @@ class IDLAttribute(IDLInterfaceMember):
         self.lenientThis = False
         self._unforgeable = False
         self.stringifier = stringifier
-        self.enforceRange = False
-        self.clamp = False
         self.slotIndices = None
         assert maplikeOrSetlike is None or isinstance(maplikeOrSetlike, IDLMaplikeOrSetlike)
         self.maplikeOrSetlike = maplikeOrSetlike
@@ -4136,6 +4273,9 @@ class IDLAttribute(IDLInterfaceMember):
             assert not isinstance(t.name, IDLUnresolvedIdentifier)
             self.type = t
 
+        if self.readonly and (self.type.clamp or self.type.enforceRange or self.type.treatNullAsEmpty):
+            raise WebIDLError("A readonly attribute cannot be [Clamp] or [EnforceRange]",
+                              [self.location])
         if self.type.isDictionary() and not self.getExtendedAttribute("Cached"):
             raise WebIDLError("An attribute cannot be of a dictionary type",
                               [self.location])
@@ -4359,16 +4499,6 @@ class IDLAttribute(IDLInterfaceMember):
                 raise WebIDLError("[LenientFloat] used on an attribute with a "
                                   "non-restricted-float type",
                                   [attr.location, self.location])
-        elif identifier == "EnforceRange":
-            if self.readonly:
-                raise WebIDLError("[EnforceRange] used on a readonly attribute",
-                                  [attr.location, self.location])
-            self.enforceRange = True
-        elif identifier == "Clamp":
-            if self.readonly:
-                raise WebIDLError("[Clamp] used on a readonly attribute",
-                                  [attr.location, self.location])
-            self.clamp = True
         elif identifier == "StoreInSlot":
             if self.getExtendedAttribute("Cached"):
                 raise WebIDLError("[StoreInSlot] and [Cached] must not be "
@@ -4381,7 +4511,7 @@ class IDLAttribute(IDLInterfaceMember):
                                   [attr.location, self.location])
         elif (identifier == "CrossOriginReadable" or
               identifier == "CrossOriginWritable"):
-            if not attr.noArguments() and identifier == "CrossOriginReadable":
+            if not attr.noArguments():
                 raise WebIDLError("[%s] must take no arguments" % identifier,
                                   [attr.location])
             if self.isStatic():
@@ -4470,10 +4600,6 @@ class IDLAttribute(IDLInterfaceMember):
         self.type.resolveType(parentScope)
         IDLObjectWithIdentifier.resolve(self, parentScope)
 
-    def addExtendedAttributes(self, attrs):
-        attrs = self.checkForStringHandlingExtendedAttributes(attrs)
-        IDLInterfaceMember.addExtendedAttributes(self, attrs)
-
     def hasLenientThis(self):
         return self.lenientThis
 
@@ -4493,7 +4619,7 @@ class IDLAttribute(IDLInterfaceMember):
 
 
 class IDLArgument(IDLObjectWithIdentifier):
-    def __init__(self, location, identifier, type, optional=False, defaultValue=None, variadic=False, dictionaryMember=False):
+    def __init__(self, location, identifier, type, optional=False, defaultValue=None, variadic=False, dictionaryMember=False, allowTypeAttributes=False):
         IDLObjectWithIdentifier.__init__(self, location, None, identifier)
 
         assert isinstance(type, IDLType)
@@ -4504,41 +4630,25 @@ class IDLArgument(IDLObjectWithIdentifier):
         self.variadic = variadic
         self.dictionaryMember = dictionaryMember
         self._isComplete = False
-        self.enforceRange = False
-        self.clamp = False
         self._allowTreatNonCallableAsNull = False
         self._extendedAttrDict = {}
+        self.allowTypeAttributes = allowTypeAttributes
 
         assert not variadic or optional
         assert not variadic or not defaultValue
 
     def addExtendedAttributes(self, attrs):
-        attrs = self.checkForStringHandlingExtendedAttributes(
-            attrs,
-            isDictionaryMember=self.dictionaryMember,
-            isOptional=self.optional)
         for attribute in attrs:
             identifier = attribute.identifier()
-            if identifier == "Clamp":
-                if not attribute.noArguments():
-                    raise WebIDLError("[Clamp] must take no arguments",
-                                      [attribute.location])
-                if self.enforceRange:
-                    raise WebIDLError("[EnforceRange] and [Clamp] are mutually exclusive",
-                                      [self.location])
-                self.clamp = True
-            elif identifier == "EnforceRange":
-                if not attribute.noArguments():
-                    raise WebIDLError("[EnforceRange] must take no arguments",
-                                      [attribute.location])
-                if self.clamp:
-                    raise WebIDLError("[EnforceRange] and [Clamp] are mutually exclusive",
-                                      [self.location])
-                self.enforceRange = True
+            if self.allowTypeAttributes and (identifier == "EnforceRange" or identifier == "Clamp" or
+                                             identifier == "TreatNullAs"):
+                self.type = self.type.withExtendedAttributes([attribute])
             elif identifier == "TreatNonCallableAsNull":
                 self._allowTreatNonCallableAsNull = True
             elif (self.dictionaryMember and
-                  (identifier == "ChromeOnly" or identifier == "Func")):
+                  (identifier == "ChromeOnly" or
+                   identifier == "Func" or
+                   identifier == "Pref")):
                 if not self.optional:
                     raise WebIDLError("[%s] must not be used on a required "
                                       "dictionary member" % identifier,
@@ -4570,14 +4680,7 @@ class IDLArgument(IDLObjectWithIdentifier):
             assert not isinstance(type.name, IDLUnresolvedIdentifier)
             self.type = type
 
-        if ((self.type.isDictionary() or
-             self.type.isUnion() and self.type.unroll().hasDictionaryType()) and
-            self.optional and not self.defaultValue and not self.variadic and
-            not self.dictionaryMember):
-            # Default optional non-variadic dictionary arguments to null,
-            # for simplicity, so the codegen doesn't have to special-case this.
-            self.defaultValue = IDLNullValue(self.location)
-        elif self.type.isAny():
+        if self.type.isAny():
             assert (self.defaultValue is None or
                     isinstance(self.defaultValue, IDLNullValue))
             # optional 'any' values always have a default value
@@ -4586,6 +4689,8 @@ class IDLArgument(IDLObjectWithIdentifier):
                 # codegen doesn't have to special-case this.
                 self.defaultValue = IDLUndefinedValue(self.location)
 
+        if self.dictionaryMember and self.type.treatNullAsEmpty:
+            raise WebIDLError("Dictionary members cannot be [TreatNullAs]", [self.location])
         # Now do the coercing thing; this needs to happen after the
         # above creation of a default value.
         if self.defaultValue:
@@ -4607,7 +4712,7 @@ class IDLArgument(IDLObjectWithIdentifier):
 
 
 class IDLCallback(IDLObjectWithScope):
-    def __init__(self, location, parentScope, identifier, returnType, arguments):
+    def __init__(self, location, parentScope, identifier, returnType, arguments, isConstructor):
         assert isinstance(returnType, IDLType)
 
         self._returnType = returnType
@@ -4622,9 +4727,14 @@ class IDLCallback(IDLObjectWithScope):
 
         self._treatNonCallableAsNull = False
         self._treatNonObjectAsNull = False
+        self._isRunScriptBoundary = False
+        self._isConstructor = isConstructor
 
     def isCallback(self):
         return True
+
+    def isConstructor(self):
+        return self._isConstructor
 
     def signatures(self):
         return [(self._returnType, self._arguments)]
@@ -4658,7 +4768,16 @@ class IDLCallback(IDLObjectWithScope):
             if attr.identifier() == "TreatNonCallableAsNull":
                 self._treatNonCallableAsNull = True
             elif attr.identifier() == "TreatNonObjectAsNull":
+                if self._isConstructor:
+                    raise WebIDLError("[TreatNonObjectAsNull] is not supported "
+                                      "on constructors", [self.location])
                 self._treatNonObjectAsNull = True
+            elif attr.identifier() == "MOZ_CAN_RUN_SCRIPT_BOUNDARY":
+                if self._isConstructor:
+                    raise WebIDLError("[MOZ_CAN_RUN_SCRIPT_BOUNDARY] is not "
+                                      "permitted on constructors",
+                                      [self.location])
+                self._isRunScriptBoundary = True
             else:
                 unhandledAttrs.append(attr)
         if self._treatNonCallableAsNull and self._treatNonObjectAsNull:
@@ -4669,6 +4788,9 @@ class IDLCallback(IDLObjectWithScope):
 
     def _getDependentObjects(self):
         return set([self._returnType] + self._arguments)
+
+    def isRunScriptBoundary(self):
+        return self._isRunScriptBoundary;
 
 
 class IDLCallbackType(IDLType):
@@ -4998,6 +5120,15 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
                                           "must be optional",
                                           [argument.location])
 
+                    if (not argument.defaultValue and
+                        all(arg.optional for arg in arguments[idx+1:])):
+                        raise WebIDLError("Dictionary argument without any "
+                                          "required fields or union argument "
+                                          "containing such dictionary not "
+                                          "followed by a required argument "
+                                          "must have a default value",
+                                          [argument.location])
+
                     # An argument cannot be a Nullable Dictionary
                     if argument.type.nullable():
                         raise WebIDLError("An argument cannot be a nullable "
@@ -5138,6 +5269,10 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
             if not attr.noArguments():
                 raise WebIDLError("[%s] must take no arguments" % identifier,
                                   [attr.location])
+            if identifier == "CrossOriginCallable" and self.isStatic():
+                raise WebIDLError("[CrossOriginCallable] is only allowed on non-static "
+                                  "attributes"
+                                  [attr.location, self.location])
         elif identifier == "Pure":
             if not attr.noArguments():
                 raise WebIDLError("[Pure] must take no arguments",
@@ -5206,7 +5341,8 @@ class IDLMethod(IDLInterfaceMember, IDLScope):
               identifier == "NeedsSubjectPrincipal" or
               identifier == "NeedsCallerType" or
               identifier == "StaticClassOverride" or
-              identifier == "NonEnumerable"):
+              identifier == "NonEnumerable" or
+              identifier == "Unexposed"):
             # Known attributes that we don't need to do anything with here
             pass
         else:
@@ -5342,7 +5478,7 @@ class Tokenizer(object):
         return t
 
     def t_IDENTIFIER(self, t):
-        r'[A-Z_a-z][0-9A-Z_a-z-]*'
+        r'[_-]?[A-Za-z][0-9A-Z_a-z-]*'
         t.type = self.keywords.get(t.value, 'IDENTIFIER')
         return t
 
@@ -5433,6 +5569,7 @@ class Tokenizer(object):
         "iterable": "ITERABLE",
         "namespace": "NAMESPACE",
         "ReadableStream": "READABLESTREAM",
+        "constructor": "CONSTRUCTOR",
         }
 
     tokens.extend(keywords.values())
@@ -5559,6 +5696,7 @@ class Parser(Tokenizer):
     def p_CallbackRestOrInterface(self, p):
         """
             CallbackRestOrInterface : CallbackRest
+                                    | CallbackConstructorRest
                                     | Interface
         """
         assert p[1]
@@ -5810,30 +5948,41 @@ class Parser(Tokenizer):
             # We're at the end of the list
             p[0] = []
             return
-        # Add our extended attributes
         p[2].addExtendedAttributes(p[1])
         p[0] = [p[2]]
         p[0].extend(p[3])
 
-    def p_DictionaryMember(self, p):
+    def p_DictionaryMemberRequired(self, p):
         """
-            DictionaryMember : Required Type IDENTIFIER Default SEMICOLON
+            DictionaryMember : REQUIRED TypeWithExtendedAttributes IDENTIFIER SEMICOLON
         """
-        # These quack a lot like optional arguments, so just treat them that way.
+        # These quack a lot like required arguments, so just treat them that way.
         t = p[2]
         assert isinstance(t, IDLType)
         identifier = IDLUnresolvedIdentifier(self.getLocation(p, 3), p[3])
-        defaultValue = p[4]
-        optional = not p[1]
-
-        if not optional and defaultValue:
-            raise WebIDLError("Required dictionary members can't have a default value.",
-                              [self.getLocation(p, 4)])
 
         p[0] = IDLArgument(self.getLocation(p, 3), identifier, t,
-                           optional=optional,
-                           defaultValue=defaultValue, variadic=False,
+                           optional=False,
+                           defaultValue=None, variadic=False,
                            dictionaryMember=True)
+
+    def p_DictionaryMember(self, p):
+        """
+            DictionaryMember : Type IDENTIFIER Default SEMICOLON
+        """
+        # These quack a lot like optional arguments, so just treat them that way.
+        t = p[1]
+        assert isinstance(t, IDLType)
+        identifier = IDLUnresolvedIdentifier(self.getLocation(p, 2), p[2])
+        defaultValue = p[3]
+
+        # Any attributes that precede this may apply to the type, so
+        # we configure the argument to forward type attributes down instead of producing
+        # a parse error
+        p[0] = IDLArgument(self.getLocation(p, 2), identifier, t,
+                           optional=True,
+                           defaultValue=defaultValue, variadic=False,
+                           dictionaryMember=True, allowTypeAttributes=True)
 
     def p_Default(self, p):
         """
@@ -5849,12 +5998,23 @@ class Parser(Tokenizer):
         """
             DefaultValue : ConstValue
                          | LBRACKET RBRACKET
+                         | LBRACE RBRACE
         """
         if len(p) == 2:
             p[0] = p[1]
         else:
-            assert len(p) == 3  # Must be []
-            p[0] = IDLEmptySequenceValue(self.getLocation(p, 1))
+            assert len(p) == 3  # Must be [] or {}
+            if p[1] == "[":
+                p[0] = IDLEmptySequenceValue(self.getLocation(p, 1))
+            else:
+                assert p[1] == "{"
+                p[0] = IDLDefaultDictionaryValue(self.getLocation(p, 1))
+
+    def p_DefaultValueNull(self, p):
+        """
+            DefaultValue : NULL
+        """
+        p[0] = IDLNullValue(self.getLocation(p, 1))
 
     def p_Exception(self, p):
         """
@@ -5911,7 +6071,15 @@ class Parser(Tokenizer):
         """
         identifier = IDLUnresolvedIdentifier(self.getLocation(p, 1), p[1])
         p[0] = IDLCallback(self.getLocation(p, 1), self.globalScope(),
-                           identifier, p[3], p[5])
+                           identifier, p[3], p[5], isConstructor=False)
+
+    def p_CallbackConstructorRest(self, p):
+        """
+            CallbackConstructorRest : CONSTRUCTOR IDENTIFIER EQUALS ReturnType LPAREN ArgumentList RPAREN SEMICOLON
+        """
+        identifier = IDLUnresolvedIdentifier(self.getLocation(p, 2), p[2])
+        p[0] = IDLCallback(self.getLocation(p, 2), self.globalScope(),
+                           identifier, p[4], p[6], isConstructor=True)
 
     def p_ExceptionMembers(self, p):
         """
@@ -5922,7 +6090,7 @@ class Parser(Tokenizer):
 
     def p_Typedef(self, p):
         """
-            Typedef : TYPEDEF Type IDENTIFIER SEMICOLON
+            Typedef : TYPEDEF TypeWithExtendedAttributes IDENTIFIER SEMICOLON
         """
         typedef = IDLTypedef(self.getLocation(p, 1), self.globalScope(),
                              p[2], p[3])
@@ -5985,12 +6153,6 @@ class Parser(Tokenizer):
         stringType = BuiltinTypes[IDLBuiltinType.Types.domstring]
         p[0] = IDLValue(location, stringType, p[1])
 
-    def p_ConstValueNull(self, p):
-        """
-            ConstValue : NULL
-        """
-        p[0] = IDLNullValue(self.getLocation(p, 1))
-
     def p_BooleanLiteralTrue(self, p):
         """
             BooleanLiteral : TRUE
@@ -6015,8 +6177,8 @@ class Parser(Tokenizer):
 
     def p_Iterable(self, p):
         """
-            Iterable : ITERABLE LT Type GT SEMICOLON
-                     | ITERABLE LT Type COMMA Type GT SEMICOLON
+            Iterable : ITERABLE LT TypeWithExtendedAttributes GT SEMICOLON
+                     | ITERABLE LT TypeWithExtendedAttributes COMMA TypeWithExtendedAttributes GT SEMICOLON
         """
         location = self.getLocation(p, 2)
         identifier = IDLUnresolvedIdentifier(location, "__iterable",
@@ -6032,7 +6194,7 @@ class Parser(Tokenizer):
 
     def p_Setlike(self, p):
         """
-            Setlike : ReadOnly SETLIKE LT Type GT SEMICOLON
+            Setlike : ReadOnly SETLIKE LT TypeWithExtendedAttributes GT SEMICOLON
         """
         readonly = p[1]
         maplikeOrSetlikeType = p[2]
@@ -6046,7 +6208,7 @@ class Parser(Tokenizer):
 
     def p_Maplike(self, p):
         """
-            Maplike : ReadOnly MAPLIKE LT Type COMMA Type GT SEMICOLON
+            Maplike : ReadOnly MAPLIKE LT TypeWithExtendedAttributes COMMA TypeWithExtendedAttributes GT SEMICOLON
         """
         readonly = p[1]
         maplikeOrSetlikeType = p[2]
@@ -6084,7 +6246,7 @@ class Parser(Tokenizer):
 
     def p_AttributeRest(self, p):
         """
-            AttributeRest : ReadOnly ATTRIBUTE Type AttributeName SEMICOLON
+            AttributeRest : ReadOnly ATTRIBUTE TypeWithExtendedAttributes AttributeName SEMICOLON
         """
         location = self.getLocation(p, 2)
         readonly = p[1]
@@ -6338,32 +6500,47 @@ class Parser(Tokenizer):
 
     def p_Argument(self, p):
         """
-            Argument : ExtendedAttributeList Optional Type Ellipsis ArgumentName Default
+            Argument : ExtendedAttributeList ArgumentRest
         """
-        t = p[3]
+        p[0] = p[2]
+        p[0].addExtendedAttributes(p[1])
+
+    def p_ArgumentRestOptional(self, p):
+        """
+            ArgumentRest : OPTIONAL TypeWithExtendedAttributes ArgumentName Default
+        """
+        t = p[2]
         assert isinstance(t, IDLType)
-        identifier = IDLUnresolvedIdentifier(self.getLocation(p, 5), p[5])
+        identifier = IDLUnresolvedIdentifier(self.getLocation(p, 3), p[3])
 
-        optional = p[2]
-        variadic = p[4]
-        defaultValue = p[6]
+        defaultValue = p[4]
 
-        if not optional and defaultValue:
-            raise WebIDLError("Mandatory arguments can't have a default value.",
-                              [self.getLocation(p, 6)])
 
         # We can't test t.isAny() here and give it a default value as needed,
         # since at this point t is not a fully resolved type yet (e.g. it might
         # be a typedef).  We'll handle the 'any' case in IDLArgument.complete.
 
-        if variadic:
-            if optional:
-                raise WebIDLError("Variadic arguments should not be marked optional.",
-                                  [self.getLocation(p, 2)])
-            optional = variadic
+        p[0] = IDLArgument(self.getLocation(p, 3), identifier, t, True, defaultValue, False)
 
-        p[0] = IDLArgument(self.getLocation(p, 5), identifier, t, optional, defaultValue, variadic)
-        p[0].addExtendedAttributes(p[1])
+    def p_ArgumentRest(self, p):
+        """
+            ArgumentRest : Type Ellipsis ArgumentName
+        """
+        t = p[1]
+        assert isinstance(t, IDLType)
+        identifier = IDLUnresolvedIdentifier(self.getLocation(p, 3), p[3])
+
+        variadic = p[2]
+
+        # We can't test t.isAny() here and give it a default value as needed,
+        # since at this point t is not a fully resolved type yet (e.g. it might
+        # be a typedef).  We'll handle the 'any' case in IDLArgument.complete.
+
+        # variadic implies optional
+        # Any attributes that precede this may apply to the type, so
+        # we configure the argument to forward type attributes down instead of producing
+        # a parse error
+        p[0] = IDLArgument(self.getLocation(p, 3), identifier, t, variadic, None, variadic, allowTypeAttributes=True)
 
     def p_ArgumentName(self, p):
         """
@@ -6371,6 +6548,7 @@ class Parser(Tokenizer):
                          | ATTRIBUTE
                          | CALLBACK
                          | CONST
+                         | CONSTRUCTOR
                          | DELETER
                          | DICTIONARY
                          | ENUM
@@ -6401,30 +6579,6 @@ class Parser(Tokenizer):
                           | REQUIRED
         """
         p[0] = p[1]
-
-    def p_Optional(self, p):
-        """
-            Optional : OPTIONAL
-        """
-        p[0] = True
-
-    def p_OptionalEmpty(self, p):
-        """
-            Optional :
-        """
-        p[0] = False
-
-    def p_Required(self, p):
-        """
-            Required : REQUIRED
-        """
-        p[0] = True
-
-    def p_RequiredEmpty(self, p):
-        """
-            Required :
-        """
-        p[0] = False
 
     def p_Ellipsis(self, p):
         """
@@ -6519,6 +6673,7 @@ class Parser(Tokenizer):
                   | BYTE
                   | LEGACYCALLER
                   | CONST
+                  | CONSTRUCTOR
                   | DELETER
                   | DOUBLE
                   | EXCEPTION
@@ -6566,9 +6721,15 @@ class Parser(Tokenizer):
         """
         p[0] = self.handleNullable(p[1], p[2])
 
-    def p_SingleTypeNonAnyType(self, p):
+    def p_TypeWithExtendedAttributes(self, p):
         """
-            SingleType : NonAnyType
+            TypeWithExtendedAttributes : ExtendedAttributeList Type
+        """
+        p[0] = p[2].withExtendedAttributes(p[1])
+
+    def p_SingleTypeDistinguishableType(self, p):
+        """
+            SingleType : DistinguishableType
         """
         p[0] = p[1]
 
@@ -6578,6 +6739,14 @@ class Parser(Tokenizer):
         """
         p[0] = BuiltinTypes[IDLBuiltinType.Types.any]
 
+    # Note: Promise<void> is allowed, so we want to parametrize on ReturnType,
+    # not Type.  Promise types can't be null, hence no "Null" in there.
+    def p_SingleTypePromiseType(self, p):
+        """
+            SingleType : PROMISE LT ReturnType GT
+        """
+        p[0] = IDLPromiseType(self.getLocation(p, 1), p[3])
+
     def p_UnionType(self, p):
         """
             UnionType : LPAREN UnionMemberType OR UnionMemberType UnionMemberTypes RPAREN
@@ -6586,11 +6755,11 @@ class Parser(Tokenizer):
         types.extend(p[5])
         p[0] = IDLUnionType(self.getLocation(p, 1), types)
 
-    def p_UnionMemberTypeNonAnyType(self, p):
+    def p_UnionMemberTypeDistinguishableType(self, p):
         """
-            UnionMemberType : NonAnyType
+            UnionMemberType : ExtendedAttributeList DistinguishableType
         """
-        p[0] = p[1]
+        p[0] = p[2].withExtendedAttributes(p[1])
 
     def p_UnionMemberType(self, p):
         """
@@ -6611,13 +6780,13 @@ class Parser(Tokenizer):
         """
         p[0] = []
 
-    def p_NonAnyType(self, p):
+    def p_DistinguishableType(self, p):
         """
-            NonAnyType : PrimitiveType Null
-                       | ARRAYBUFFER Null
-                       | SHAREDARRAYBUFFER Null
-                       | READABLESTREAM Null
-                       | OBJECT Null
+            DistinguishableType : PrimitiveType Null
+                                | ARRAYBUFFER Null
+                                | SHAREDARRAYBUFFER Null
+                                | READABLESTREAM Null
+                                | OBJECT Null
         """
         if p[1] == "object":
             type = BuiltinTypes[IDLBuiltinType.Types.object]
@@ -6632,40 +6801,32 @@ class Parser(Tokenizer):
 
         p[0] = self.handleNullable(type, p[2])
 
-    def p_NonAnyTypeStringType(self, p):
+    def p_DistinguishableTypeStringType(self, p):
         """
-            NonAnyType : StringType Null
+            DistinguishableType : StringType Null
         """
         p[0] = self.handleNullable(p[1], p[2])
 
-    def p_NonAnyTypeSequenceType(self, p):
+    def p_DistinguishableTypeSequenceType(self, p):
         """
-            NonAnyType : SEQUENCE LT Type GT Null
+            DistinguishableType : SEQUENCE LT TypeWithExtendedAttributes GT Null
         """
         innerType = p[3]
         type = IDLSequenceType(self.getLocation(p, 1), innerType)
         p[0] = self.handleNullable(type, p[5])
 
-    # Note: Promise<void> is allowed, so we want to parametrize on ReturnType,
-    # not Type.  Promise types can't be null, hence no "Null" in there.
-    def p_NonAnyTypePromiseType(self, p):
+    def p_DistinguishableTypeRecordType(self, p):
         """
-            NonAnyType : PROMISE LT ReturnType GT
-        """
-        p[0] = IDLPromiseType(self.getLocation(p, 1), p[3])
-
-    def p_NonAnyTypeRecordType(self, p):
-        """
-            NonAnyType : RECORD LT StringType COMMA Type GT Null
+            DistinguishableType : RECORD LT StringType COMMA TypeWithExtendedAttributes GT Null
         """
         keyType = p[3]
         valueType = p[5]
         type = IDLRecordType(self.getLocation(p, 1), keyType, valueType)
         p[0] = self.handleNullable(type, p[7])
 
-    def p_NonAnyTypeScopedName(self, p):
+    def p_DistinguishableTypeScopedName(self, p):
         """
-            NonAnyType : ScopedName Null
+            DistinguishableType : ScopedName Null
         """
         assert isinstance(p[1], IDLUnresolvedIdentifier)
 
@@ -6695,28 +6856,26 @@ class Parser(Tokenizer):
         type = IDLUnresolvedType(self.getLocation(p, 1), p[1])
         p[0] = self.handleNullable(type, p[2])
 
-    def p_NonAnyTypeDate(self, p):
+    def p_DistinguishableTypeDate(self, p):
         """
-            NonAnyType : DATE Null
+            DistinguishableType : DATE Null
         """
         p[0] = self.handleNullable(BuiltinTypes[IDLBuiltinType.Types.date],
                                    p[2])
 
     def p_ConstType(self, p):
         """
-            ConstType : PrimitiveType Null
+            ConstType : PrimitiveType
         """
-        type = BuiltinTypes[p[1]]
-        p[0] = self.handleNullable(type, p[2])
+        p[0] = BuiltinTypes[p[1]]
 
     def p_ConstTypeIdentifier(self, p):
         """
-            ConstType : IDENTIFIER Null
+            ConstType : IDENTIFIER
         """
         identifier = IDLUnresolvedIdentifier(self.getLocation(p, 1), p[1])
 
-        type = IDLUnresolvedType(self.getLocation(p, 1), identifier)
-        p[0] = self.handleNullable(type, p[2])
+        p[0] = IDLUnresolvedType(self.getLocation(p, 1), identifier)
 
     def p_PrimitiveTypeUint(self, p):
         """

@@ -8,9 +8,24 @@
 
 const promise = require("promise");
 
-loader.lazyRequireGetter(this, "KeyCodes", "devtools/client/shared/keycodes", true);
-loader.lazyRequireGetter(this, "getCSSLexer", "devtools/shared/css/lexer", true);
-loader.lazyRequireGetter(this, "parseDeclarations", "devtools/shared/css/parsing-utils", true);
+loader.lazyRequireGetter(
+  this,
+  "KeyCodes",
+  "devtools/client/shared/keycodes",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "getCSSLexer",
+  "devtools/shared/css/lexer",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "parseDeclarations",
+  "devtools/shared/css/parsing-utils",
+  true
+);
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -72,7 +87,7 @@ function appendText(parent, text) {
  * multiple CSS properties as the value.
  */
 function blurOnMultipleProperties(cssProperties) {
-  return (e) => {
+  return e => {
     setTimeout(() => {
       const props = parseDeclarations(cssProperties.isKnown, e.target.value);
       if (props.length > 1) {
@@ -110,6 +125,24 @@ function createChild(parent, tagName, attributes = {}) {
 }
 
 /**
+ * Retrieve the content of a longString (via a promise resolving a LongStringActor).
+ *
+ * @param  {Promise} longStringActorPromise
+ *         promise expected to resolve a LongStringActor instance
+ * @return {Promise} promise resolving with the retrieved string as argument
+ */
+function getLongString(longStringActorPromise) {
+  return longStringActorPromise
+    .then(longStringActor => {
+      return longStringActor.string().then(string => {
+        longStringActor.release().catch(console.error);
+        return string;
+      });
+    })
+    .catch(console.error);
+}
+
+/**
  * Returns a selector of the Element Rep from the grip. This is based on the
  * getElements() function in our devtools-reps component for a ElementNode.
  *
@@ -123,10 +156,15 @@ function getSelectorFromGrip(grip) {
     nodeName,
     isAfterPseudoElement,
     isBeforePseudoElement,
+    isMarkerPseudoElement,
   } = grip.preview;
 
-  if (isAfterPseudoElement || isBeforePseudoElement) {
-    return `::${isAfterPseudoElement ? "after" : "before"}`;
+  if (isAfterPseudoElement) {
+    return "::after";
+  } else if (isBeforePseudoElement) {
+    return "::before";
+  } else if (isMarkerPseudoElement) {
+    return "::marker";
   }
 
   let selector = nodeName;
@@ -160,7 +198,7 @@ function promiseWarn(error) {
 }
 
 /**
- * While waiting for a reps fix in https://github.com/devtools-html/reps/issues/92,
+ * While waiting for a reps fix in https://github.com/firefox-devtools/reps/issues/92,
  * translate nodeFront to a grip-like object that can be used with an ElementNode rep.
  *
  * @params  {NodeFront} nodeFront
@@ -173,7 +211,7 @@ function translateNodeFrontToGrip(nodeFront) {
   // The main difference between NodeFront and grips is that attributes are treated as
   // a map in grips and as an array in NodeFronts.
   const attributesMap = {};
-  for (const {name, value} of attributes) {
+  for (const { name, value } of attributes) {
     attributesMap[name] = value;
   }
 
@@ -184,6 +222,7 @@ function translateNodeFrontToGrip(nodeFront) {
       attributesLength: attributes.length,
       isAfterPseudoElement: nodeFront.isAfterPseudoElement,
       isBeforePseudoElement: nodeFront.isBeforePseudoElement,
+      isMarkerPseudoElement: nodeFront.isMarkerPseudoElement,
       // All the grid containers are assumed to be in the DOM tree.
       isConnected: true,
       // nodeName is already lowerCased in Node grips
@@ -197,6 +236,7 @@ exports.advanceValidate = advanceValidate;
 exports.appendText = appendText;
 exports.blurOnMultipleProperties = blurOnMultipleProperties;
 exports.createChild = createChild;
+exports.getLongString = getLongString;
 exports.getSelectorFromGrip = getSelectorFromGrip;
 exports.promiseWarn = promiseWarn;
 exports.translateNodeFrontToGrip = translateNodeFrontToGrip;

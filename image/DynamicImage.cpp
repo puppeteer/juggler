@@ -104,11 +104,9 @@ DynamicImage::GetIntrinsicSize(nsSize* aSize) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-DynamicImage::GetIntrinsicRatio(nsSize* aSize) {
-  IntSize intSize(mDrawable->Size());
-  *aSize = nsSize(intSize.width, intSize.height);
-  return NS_OK;
+Maybe<AspectRatio> DynamicImage::GetIntrinsicRatio() {
+  auto size = mDrawable->Size();
+  return Some(AspectRatio::FromSize(size.width, size.height));
 }
 
 NS_IMETHODIMP_(Orientation)
@@ -117,6 +115,12 @@ DynamicImage::GetOrientation() { return Orientation(); }
 NS_IMETHODIMP
 DynamicImage::GetType(uint16_t* aType) {
   *aType = imgIContainer::TYPE_RASTER;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DynamicImage::GetProducerId(uint32_t* aId) {
+  *aId = 0;
   return NS_OK;
 }
 
@@ -215,12 +219,23 @@ DynamicImage::Draw(gfxContext* aContext, const nsIntSize& aSize,
 }
 
 NS_IMETHODIMP
-DynamicImage::StartDecoding(uint32_t aFlags) { return NS_OK; }
+DynamicImage::StartDecoding(uint32_t aFlags, uint32_t aWhichFrame) {
+  return NS_OK;
+}
 
-bool DynamicImage::StartDecodingWithResult(uint32_t aFlags) { return true; }
+bool DynamicImage::StartDecodingWithResult(uint32_t aFlags,
+                                           uint32_t aWhichFrame) {
+  return true;
+}
+
+bool DynamicImage::RequestDecodeWithResult(uint32_t aFlags,
+                                           uint32_t aWhichFrame) {
+  return true;
+}
 
 NS_IMETHODIMP
-DynamicImage::RequestDecodeForSize(const nsIntSize& aSize, uint32_t aFlags) {
+DynamicImage::RequestDecodeForSize(const nsIntSize& aSize, uint32_t aFlags,
+                                   uint32_t aWhichFrame) {
   return NS_OK;
 }
 
@@ -275,7 +290,7 @@ already_AddRefed<imgIContainer> DynamicImage::Unwrap() {
   return self.forget();
 }
 
-void DynamicImage::PropagateUseCounters(nsIDocument*) {
+void DynamicImage::PropagateUseCounters(dom::Document*) {
   // No use counters.
 }
 

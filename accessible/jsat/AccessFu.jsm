@@ -6,14 +6,15 @@
 
 var EXPORTED_SYMBOLS = ["AccessFu"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
-ChromeUtils.defineModuleGetter(this, "Rect",
-                               "resource://gre/modules/Geometry.jsm");
-
-if (Utils.MozBuildApp === "mobile/android") {
-  ChromeUtils.import("resource://gre/modules/Messaging.jsm");
-}
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Logger, Utils } = ChromeUtils.import(
+  "resource://gre/modules/accessibility/Utils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "Rect",
+  "resource://gre/modules/Geometry.jsm"
+);
 
 const GECKOVIEW_MESSAGE = {
   ACTIVATE: "GeckoView:AccessibilityActivate",
@@ -54,8 +55,6 @@ var AccessFu = {
       return;
     }
     this._enabled = true;
-
-    ChromeUtils.import("resource://gre/modules/accessibility/Utils.jsm");
 
     Services.obs.addObserver(this, "remote-browser-shown");
     Services.obs.addObserver(this, "inprocess-browser-shown");
@@ -121,10 +120,16 @@ var AccessFu = {
     mm.loadFrameScript(FRAME_SCRIPT, true);
 
     win.addEventListener("TabSelect", this);
-    if (win.WindowEventDispatcher) {
+    if (win.WindowEventDispatcher && !this._eventDispatcherListeners.has(win)) {
+      const listener = (event, data, callback) => {
+        this.onEvent(event, data, callback, win);
+      };
+      this._eventDispatcherListeners.set(win, listener);
       // desktop mochitests don't have this.
-      win.WindowEventDispatcher.registerListener(this,
-        Object.values(GECKOVIEW_MESSAGE));
+      win.WindowEventDispatcher.registerListener(
+        listener,
+        Object.values(GECKOVIEW_MESSAGE)
+      );
     }
   },
 
@@ -137,14 +142,17 @@ var AccessFu = {
     }
 
     win.removeEventListener("TabSelect", this);
-    if (win.WindowEventDispatcher) {
+    if (win.WindowEventDispatcher && this._eventDispatcherListeners.has(win)) {
       // desktop mochitests don't have this.
-      win.WindowEventDispatcher.unregisterListener(this,
-        Object.values(GECKOVIEW_MESSAGE));
+      win.WindowEventDispatcher.unregisterListener(
+        this._eventDispatcherListeners.get(win),
+        Object.values(GECKOVIEW_MESSAGE)
+      );
+      this._eventDispatcherListeners.delete(win);
     }
   },
 
-  onEvent(event, data, callback) {
+  onEvent(event, data, callback, win) {
     switch (event) {
       case GECKOVIEW_MESSAGE.SETTINGS:
         if (data.enabled) {
@@ -157,39 +165,40 @@ var AccessFu = {
       case GECKOVIEW_MESSAGE.PREVIOUS: {
         let rule = "Simple";
         if (data && data.rule && data.rule.length) {
-          rule = data.rule.substr(0, 1).toUpperCase() +
+          rule =
+            data.rule.substr(0, 1).toUpperCase() +
             data.rule.substr(1).toLowerCase();
         }
         let method = event.replace(/GeckoView:Accessibility(\w+)/, "move$1");
-        this.Input.moveCursor(method, rule, "gesture");
+        this.Input.moveCursor(method, rule, "gesture", win);
         break;
       }
       case GECKOVIEW_MESSAGE.ACTIVATE:
-        this.Input.activateCurrent(data);
+        this.Input.activateCurrent(data, win);
         break;
       case GECKOVIEW_MESSAGE.LONG_PRESS:
         // XXX: Advertize long press on supported objects and implement action
         break;
       case GECKOVIEW_MESSAGE.SCROLL_FORWARD:
-        this.Input.androidScroll("forward");
+        this.Input.androidScroll("forward", win);
         break;
       case GECKOVIEW_MESSAGE.SCROLL_BACKWARD:
-        this.Input.androidScroll("backward");
+        this.Input.androidScroll("backward", win);
         break;
       case GECKOVIEW_MESSAGE.CURSOR_TO_FOCUSED:
-        this.autoMove({ moveToFocused: true });
+        this.autoMove({ moveToFocused: true }, win);
         break;
       case GECKOVIEW_MESSAGE.BY_GRANULARITY:
-        this.Input.moveByGranularity(data);
+        this.Input.moveByGranularity(data, win);
         break;
       case GECKOVIEW_MESSAGE.EXPLORE_BY_TOUCH:
-        this.Input.moveToPoint("Simple", ...data.coordinates);
+        this.Input.moveToPoint("Simple", ...data.coordinates, win);
         break;
       case GECKOVIEW_MESSAGE.SET_SELECTION:
-        this.Input.setSelection(data);
+        this.Input.setSelection(data, win);
         break;
       case GECKOVIEW_MESSAGE.CLIPBOARD:
-        this.Input.clipboard(data);
+        this.Input.clipboard(data, win);
         break;
     }
   },
@@ -198,9 +207,13 @@ var AccessFu = {
     switch (aTopic) {
       case "domwindowopened": {
         let win = aSubject.QueryInterface(Ci.nsIDOMWindow);
-        win.addEventListener("load", () => {
-          this._attachWindow(win);
-        }, { once: true });
+        win.addEventListener(
+          "load",
+          () => {
+            this._attachWindow(win);
+          },
+          { once: true }
+        );
         break;
       }
     }
@@ -208,8 +221,7 @@ var AccessFu = {
 
   _handleEvent: function _handleEvent(aEvent) {
     switch (aEvent.type) {
-      case "TabSelect":
-      {
+      case "TabSelect": {
         if (this._focused) {
           // We delay this for half a second so the awesomebar could close,
           // and we could use the current coordinates for the content item.
@@ -218,7 +230,8 @@ var AccessFu = {
             delay: 500,
             forcePresent: true,
             noOpIfOnScreen: true,
-            moveMethod: "moveFirst" });
+            moveMethod: "moveFirst",
+          });
         }
         break;
       }
@@ -227,8 +240,8 @@ var AccessFu = {
     }
   },
 
-  autoMove: function autoMove(aOptions) {
-    const mm = Utils.getMessageManager();
+  autoMove: function autoMove(aOptions, aWindow) {
+    const mm = Utils.getCurrentMessageManager(aWindow);
     mm.sendAsyncMessage("AccessFu:AutoMove", aOptions);
   },
 
@@ -238,6 +251,8 @@ var AccessFu = {
   // Layerview is focused
   _focused: false,
 
+  _eventDispatcherListeners: new WeakMap(),
+
   /**
    * Adjusts the given bounds that are defined in device display pixels
    * to client-relative CSS pixels of the chrome window.
@@ -245,55 +260,67 @@ var AccessFu = {
    * @param {Window} aWindow the window containing the item
    */
   screenToClientBounds(aJsonBounds, aWindow) {
-      let bounds = new Rect(aJsonBounds.left, aJsonBounds.top,
-                            aJsonBounds.right - aJsonBounds.left,
-                            aJsonBounds.bottom - aJsonBounds.top);
-      let { devicePixelRatio, mozInnerScreenX, mozInnerScreenY } = aWindow;
+    let bounds = new Rect(
+      aJsonBounds.left,
+      aJsonBounds.top,
+      aJsonBounds.right - aJsonBounds.left,
+      aJsonBounds.bottom - aJsonBounds.top
+    );
+    let { devicePixelRatio, mozInnerScreenX, mozInnerScreenY } = aWindow;
 
-      bounds = bounds.scale(1 / devicePixelRatio, 1 / devicePixelRatio);
-      bounds = bounds.translate(-mozInnerScreenX, -mozInnerScreenY);
-      return bounds.expandToIntegers();
-    },
+    bounds = bounds.scale(1 / devicePixelRatio, 1 / devicePixelRatio);
+    bounds = bounds.translate(-mozInnerScreenX, -mozInnerScreenY);
+    return bounds.expandToIntegers();
+  },
 };
 
 var Input = {
-  moveToPoint: function moveToPoint(aRule, aX, aY) {
-    const mm = Utils.getMessageManager();
-    mm.sendAsyncMessage("AccessFu:MoveToPoint",
-      {rule: aRule, x: aX, y: aY, origin: "top"});
+  moveToPoint: function moveToPoint(aRule, aX, aY, aWindow) {
+    Logger.debug("moveToPoint", aX, aY);
+    const mm = Utils.getCurrentMessageManager(aWindow);
+    mm.sendAsyncMessage("AccessFu:MoveToPoint", {
+      rule: aRule,
+      x: aX,
+      y: aY,
+      origin: "top",
+    });
   },
 
-  moveCursor: function moveCursor(aAction, aRule, aInputType, aAdjustRange) {
-    const mm = Utils.getMessageManager();
-    mm.sendAsyncMessage("AccessFu:MoveCursor",
-                        { action: aAction, rule: aRule,
-                          origin: "top", inputType: aInputType,
-                          adjustRange: aAdjustRange });
+  moveCursor: function moveCursor(aAction, aRule, aInputType, aWindow) {
+    const mm = Utils.getCurrentMessageManager(aWindow);
+    mm.sendAsyncMessage("AccessFu:MoveCursor", {
+      action: aAction,
+      rule: aRule,
+      origin: "top",
+      inputType: aInputType,
+    });
   },
 
-  androidScroll: function androidScroll(aDirection) {
-    const mm = Utils.getMessageManager();
-    mm.sendAsyncMessage("AccessFu:AndroidScroll",
-                        { direction: aDirection, origin: "top" });
+  androidScroll: function androidScroll(aDirection, aWindow) {
+    const mm = Utils.getCurrentMessageManager(aWindow);
+    mm.sendAsyncMessage("AccessFu:AndroidScroll", {
+      direction: aDirection,
+      origin: "top",
+    });
   },
 
-  moveByGranularity: function moveByGranularity(aDetails) {
-    const mm = Utils.getMessageManager();
+  moveByGranularity: function moveByGranularity(aDetails, aWindow) {
+    const mm = Utils.getCurrentMessageManager(aWindow);
     mm.sendAsyncMessage("AccessFu:MoveByGranularity", aDetails);
   },
 
-  setSelection: function setSelection(aDetails) {
-    const mm = Utils.getMessageManager();
+  setSelection: function setSelection(aDetails, aWindow) {
+    const mm = Utils.getCurrentMessageManager(aWindow);
     mm.sendAsyncMessage("AccessFu:SetSelection", aDetails);
   },
 
-  clipboard: function clipboard(aDetails) {
-    const mm = Utils.getMessageManager();
+  clipboard: function clipboard(aDetails, aWindow) {
+    const mm = Utils.getCurrentMessageManager(aWindow);
     mm.sendAsyncMessage("AccessFu:Clipboard", aDetails);
   },
 
-  activateCurrent: function activateCurrent(aData) {
-    let mm = Utils.getMessageManager();
+  activateCurrent: function activateCurrent(aData, aWindow) {
+    let mm = Utils.getCurrentMessageManager(aWindow);
     mm.sendAsyncMessage("AccessFu:Activate", { offset: 0 });
   },
 
@@ -303,9 +330,18 @@ var Input = {
     let win = aBrowser.ownerGlobal;
     let winUtils = win.windowUtils;
     let p = AccessFu.screenToClientBounds(aDetails.bounds, win).center();
-    winUtils.sendWheelEvent(p.x, p.y,
-      horizontal ? page : 0, horizontal ? 0 : page, 0,
-      win.WheelEvent.DOM_DELTA_PAGE, 0, 0, 0, 0);
+    winUtils.sendWheelEvent(
+      p.x,
+      p.y,
+      horizontal ? page : 0,
+      horizontal ? 0 : page,
+      0,
+      win.WheelEvent.DOM_DELTA_PAGE,
+      0,
+      0,
+      0,
+      0
+    );
   },
 };
 AccessFu.Input = Input;

@@ -3,15 +3,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {preferenceSpec} = require("devtools/shared/specs/preference");
-const protocol = require("devtools/shared/protocol");
+const { preferenceSpec } = require("devtools/shared/specs/preference");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
 
-const PreferenceFront = protocol.FrontClassWithSpec(preferenceSpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = form.preferenceActor;
-    this.manage(this);
-  },
-});
+class PreferenceFront extends FrontClassWithSpec(preferenceSpec) {
+  constructor(client) {
+    super(client);
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "preferenceActor";
+  }
+}
 
 exports.PreferenceFront = PreferenceFront;
+registerFront(PreferenceFront);

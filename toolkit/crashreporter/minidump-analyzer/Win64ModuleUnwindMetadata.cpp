@@ -5,17 +5,17 @@
 
 #if XP_WIN && HAVE_64BIT_BUILD
 
-#include "Win64ModuleUnwindMetadata.h"
+#  include "Win64ModuleUnwindMetadata.h"
 
-#include "MinidumpAnalyzerUtils.h"
+#  include "MinidumpAnalyzerUtils.h"
 
-#include <windows.h>
-#include <winnt.h>
-#include <imagehlp.h>
-#include <iostream>
-#include <set>
-#include <sstream>
-#include <string>
+#  include <windows.h>
+#  include <winnt.h>
+#  include <imagehlp.h>
+#  include <iostream>
+#  include <set>
+#  include <sstream>
+#  include <string>
 
 namespace CrashReporter {
 
@@ -184,7 +184,9 @@ bool ModuleUnwindParser::GenerateCFIForFunction(
           rip_offset += 80;
           break;
         }
-        default: { return false; }
+        default: {
+          return false;
+        }
       }
     }
 

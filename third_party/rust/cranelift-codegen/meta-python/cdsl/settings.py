@@ -229,15 +229,24 @@ class SettingGroup(object):
                 .format(self, SettingGroup._current))
         SettingGroup._current = None
         if globs:
+            # Ensure that named predicates are ordered in a deterministic way
+            # that the Rust crate may simply reproduce, by pushing entries into
+            # a vector that we'll sort by name later.
+            named_predicates = []
+
             for name, obj in globs.items():
                 if isinstance(obj, Setting):
                     assert obj.name is None, obj.name
                     obj.name = name
                 if isinstance(obj, Predicate):
-                    self.named_predicates[name] = obj
+                    named_predicates.append((name, obj))
                 if isinstance(obj, Preset):
                     assert obj.name is None, obj.name
                     obj.name = name
+
+            named_predicates.sort(key=lambda x: x[0])
+            for (name, obj) in named_predicates:
+                self.named_predicates[name] = obj
 
         self.layout()
 
@@ -340,7 +349,7 @@ class SettingGroup(object):
         precomputed predicates.
 
         This is the size of the byte-sized settings plus all the numbered
-        predcate bits rounded up to a whole number of bytes.
+        predicate bits rounded up to a whole number of bytes.
         """
         return self.boolean_offset + (len(self.predicate_number) + 7) // 8
 

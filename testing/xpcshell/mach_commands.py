@@ -162,9 +162,6 @@ class AndroidXPCShellRunner(MozbuildObject):
         if not kwargs["objdir"]:
             kwargs["objdir"] = self.topobjdir
 
-        if not kwargs["localLib"]:
-            kwargs["localLib"] = os.path.join(self.topobjdir, 'dist/fennec')
-
         if not kwargs["localBin"]:
             kwargs["localBin"] = os.path.join(self.topobjdir, 'dist/bin')
 
@@ -248,7 +245,7 @@ class MachCommands(MachCommandBase):
         if conditions.is_android(self):
             from mozrunner.devices.android_device import verify_android_device, get_adb_path
             device_serial = params.get('deviceSerial')
-            verify_android_device(self, device_serial=device_serial)
+            verify_android_device(self, network=True, device_serial=device_serial)
             if not params['adbPath']:
                 params['adbPath'] = get_adb_path(self)
             xpcshell = self._spawn(AndroidXPCShellRunner)

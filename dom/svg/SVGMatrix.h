@@ -37,7 +37,7 @@
 #ifndef mozilla_dom_SVGMatrix_h
 #define mozilla_dom_SVGMatrix_h
 
-#include "mozilla/dom/SVGTransform.h"
+#include "DOMSVGTransform.h"
 #include "gfxMatrix.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
@@ -55,15 +55,15 @@ class SVGMatrix final : public nsWrapperCache {
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(SVGMatrix)
 
   /**
-   * Ctor for SVGMatrix objects that belong to a SVGTransform.
+   * Ctor for SVGMatrix objects that belong to a DOMSVGTransform.
    */
-  explicit SVGMatrix(SVGTransform& aTransform) : mTransform(&aTransform) {}
+  explicit SVGMatrix(DOMSVGTransform& aTransform) : mTransform(&aTransform) {}
 
   /**
-   * Ctors for SVGMatrix objects created independently of a SVGTransform.
+   * Ctors for SVGMatrix objects created independently of a DOMSVGTransform.
    */
   // Default ctor for gfxMatrix will produce identity mx
-  SVGMatrix() {}
+  SVGMatrix() = default;
 
   explicit SVGMatrix(const gfxMatrix& aMatrix) : mMatrix(aMatrix) {}
 
@@ -72,7 +72,7 @@ class SVGMatrix final : public nsWrapperCache {
   }
 
   // WebIDL
-  SVGTransform* GetParentObject() const;
+  DOMSVGTransform* GetParentObject() const;
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
@@ -103,7 +103,7 @@ class SVGMatrix final : public nsWrapperCache {
   already_AddRefed<SVGMatrix> SkewY(float angle, ErrorResult& rv);
 
  private:
-  ~SVGMatrix() {}
+  ~SVGMatrix() = default;
 
   void SetMatrix(const gfxMatrix& aMatrix) {
     if (mTransform) {
@@ -117,10 +117,11 @@ class SVGMatrix final : public nsWrapperCache {
     return mTransform ? mTransform->IsAnimVal() : false;
   }
 
-  RefPtr<SVGTransform> mTransform;
+  RefPtr<DOMSVGTransform> mTransform;
 
   // Typically we operate on the matrix data accessed via mTransform but for
-  // matrices that exist independently of an SVGTransform we use mMatrix below.
+  // matrices that exist independently of an DOMSVGTransform we use mMatrix
+  // below.
   gfxMatrix mMatrix;
 };
 

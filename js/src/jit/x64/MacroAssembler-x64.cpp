@@ -302,7 +302,6 @@ void MacroAssembler::subFromStackPtr(Imm32 imm32) {
 // ABI function calls.
 
 void MacroAssembler::setupUnalignedABICall(Register scratch) {
-  MOZ_ASSERT(!IsCompilingWasm(), "wasm should only use aligned ABI calls");
   setupABICall();
   dynamicAlignment_ = true;
 
@@ -427,7 +426,7 @@ void MacroAssembler::moveValue(const TypedOrValueRegister& src,
     convertFloat32ToDouble(freg, scratch);
     freg = scratch;
   }
-  vmovq(freg, dest.valueReg());
+  boxDouble(freg, dest, freg);
 }
 
 void MacroAssembler::moveValue(const ValueOperand& src,
@@ -543,7 +542,7 @@ void MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value,
                                        MIRType valueType, const T& dest,
                                        MIRType slotType) {
   if (valueType == MIRType::Double) {
-    storeDouble(value.reg().typedReg().fpu(), dest);
+    boxDouble(value.reg().typedReg().fpu(), dest);
     return;
   }
 
@@ -580,6 +579,12 @@ template void MacroAssembler::storeUnboxedValue(
     const ConstantOrRegister& value, MIRType valueType,
     const BaseObjectElementIndex& dest, MIRType slotType);
 
+void MacroAssembler::PushBoxed(FloatRegister reg) {
+  subq(Imm32(sizeof(double)), StackPointer);
+  boxDouble(reg, Address(StackPointer, 0));
+  adjustFrame(sizeof(double));
+}
+
 // ========================================================================
 // wasm support
 
@@ -613,6 +618,8 @@ void MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access,
       break;
     case Scalar::Int64:
       MOZ_CRASH("int64 loads must use load64");
+    case Scalar::BigInt64:
+    case Scalar::BigUint64:
     case Scalar::Uint8Clamped:
     case Scalar::MaxTypedArrayViewType:
       MOZ_CRASH("unexpected array type");
@@ -653,6 +660,8 @@ void MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access,
     case Scalar::Float64:
       MOZ_CRASH("non-int64 loads should use load()");
     case Scalar::Uint8Clamped:
+    case Scalar::BigInt64:
+    case Scalar::BigUint64:
     case Scalar::MaxTypedArrayViewType:
       MOZ_CRASH("unexpected array type");
   }
@@ -688,6 +697,8 @@ void MacroAssembler::wasmStore(const wasm::MemoryAccessDesc& access,
       storeUncanonicalizedDouble(value.fpu(), dstAddr);
       break;
     case Scalar::Uint8Clamped:
+    case Scalar::BigInt64:
+    case Scalar::BigUint64:
     case Scalar::MaxTypedArrayViewType:
       MOZ_CRASH("unexpected array type");
   }
@@ -930,27 +941,33 @@ void MacroAssembler::wasmAtomicExchange64(const wasm::MemoryAccessDesc& access,
 }
 
 template <typename T>
-static void WasmAtomicFetchOp64(MacroAssembler& masm,
-                                const wasm::MemoryAccessDesc access,
-                                AtomicOp op, Register value, const T& mem,
-                                Register temp, Register output) {
+static void AtomicFetchOp64(MacroAssembler& masm,
+                            const wasm::MemoryAccessDesc* access, AtomicOp op,
+                            Register value, const T& mem, Register temp,
+                            Register output) {
   if (op == AtomicFetchAddOp) {
     if (value != output) {
       masm.movq(value, output);
     }
-    masm.append(access, masm.size());
+    if (access) {
+      masm.append(*access, masm.size());
+    }
     masm.lock_xaddq(output, Operand(mem));
   } else if (op == AtomicFetchSubOp) {
     if (value != output) {
       masm.movq(value, output);
     }
     masm.negq(output);
-    masm.append(access, masm.size());
+    if (access) {
+      masm.append(*access, masm.size());
+    }
     masm.lock_xaddq(output, Operand(mem));
   } else {
     Label again;
     MOZ_ASSERT(output == rax);
-    masm.append(access, masm.size());
+    if (access) {
+      masm.append(*access, masm.size());
+    }
     masm.movq(Operand(mem), rax);
     masm.bind(&again);
     masm.movq(rax, temp);
@@ -976,14 +993,14 @@ void MacroAssembler::wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access,
                                          AtomicOp op, Register64 value,
                                          const Address& mem, Register64 temp,
                                          Register64 output) {
-  WasmAtomicFetchOp64(*this, access, op, value.reg, mem, temp.reg, output.reg);
+  AtomicFetchOp64(*this, &access, op, value.reg, mem, temp.reg, output.reg);
 }
 
 void MacroAssembler::wasmAtomicFetchOp64(const wasm::MemoryAccessDesc& access,
                                          AtomicOp op, Register64 value,
                                          const BaseIndex& mem, Register64 temp,
                                          Register64 output) {
-  WasmAtomicFetchOp64(*this, access, op, value.reg, mem, temp.reg, output.reg);
+  AtomicFetchOp64(*this, &access, op, value.reg, mem, temp.reg, output.reg);
 }
 
 void MacroAssembler::wasmAtomicEffectOp64(const wasm::MemoryAccessDesc& access,
@@ -1009,6 +1026,32 @@ void MacroAssembler::wasmAtomicEffectOp64(const wasm::MemoryAccessDesc& access,
     default:
       MOZ_CRASH();
   }
+}
+
+void MacroAssembler::compareExchange64(const Synchronization&,
+                                       const Address& mem, Register64 expected,
+                                       Register64 replacement,
+                                       Register64 output) {
+  MOZ_ASSERT(output.reg == rax);
+  if (expected != output) {
+    movq(expected.reg, output.reg);
+  }
+  lock_cmpxchgq(replacement.reg, Operand(mem));
+}
+
+void MacroAssembler::atomicExchange64(const Synchronization&,
+                                      const Address& mem, Register64 value,
+                                      Register64 output) {
+  if (value != output) {
+    movq(value.reg, output.reg);
+  }
+  xchgq(output.reg, Operand(mem));
+}
+
+void MacroAssembler::atomicFetchOp64(const Synchronization& sync, AtomicOp op,
+                                     Register64 value, const Address& mem,
+                                     Register64 temp, Register64 output) {
+  AtomicFetchOp64(*this, nullptr, op, value.reg, mem, temp.reg, output.reg);
 }
 
 //}}} check_macroassembler_style

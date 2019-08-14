@@ -12,7 +12,6 @@
 #include "GeckoProfiler.h"          // for AUTO_PROFILER_LABEL
 #include "Layers.h"                 // for PaintedLayer, Layer, etc
 #include "gfxPlatform.h"            // for gfxPlatform
-#include "gfxPrefs.h"               // for gfxPrefs
 #include "gfxUtils.h"               // for gfxUtils
 #include "mozilla/ArrayUtils.h"     // for ArrayLength
 #include "mozilla/gfx/BasePoint.h"  // for BasePoint
@@ -25,6 +24,7 @@
 #include "mozilla/layers/ShadowLayers.h"   // for ShadowableLayer
 #include "mozilla/layers/TextureClient.h"  // for TextureClient
 #include "mozilla/Move.h"                  // for Move
+#include "mozilla/StaticPrefs.h"           // for StaticPrefs
 #include "mozilla/gfx/Point.h"             // for IntSize
 #include "gfx2DGlue.h"
 #include "nsLayoutUtils.h"  // for invalidation debugging
@@ -76,7 +76,7 @@ void RotatedBuffer::BeginCapture() {
   MOZ_ASSERT(!mCapture);
   MOZ_ASSERT(target);
   mCapture = Factory::CreateCaptureDrawTargetForTarget(
-      target, gfxPrefs::LayersOMTPCaptureLimit());
+      target, StaticPrefs::layers_omtp_capture_limit());
 }
 
 RefPtr<gfx::DrawTargetCapture> RotatedBuffer::EndCapture() {
@@ -193,7 +193,8 @@ void RotatedBuffer::DrawBufferWithRotation(
                      aMaskTransform);
 }
 
-bool IsClippingCheap(gfx::DrawTarget* aTarget, const nsIntRegion& aRegion) {
+static bool IsClippingCheap(gfx::DrawTarget* aTarget,
+                            const nsIntRegion& aRegion) {
   // Assume clipping is cheap if the draw target just has an integer
   // translation, and the visible region is simple.
   return !aTarget->GetTransform().HasNonIntegerTranslation() &&

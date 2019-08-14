@@ -7,7 +7,6 @@
 DIRS += [
     'accessibility',
     'addon',
-    'canvas',
     'emulation',
     'highlighters',
     'inspector',
@@ -26,11 +25,9 @@ DevToolsModules(
     'animation.js',
     'array-buffer.js',
     'breakpoint.js',
-    'canvas.js',
     'changes.js',
     'common.js',
     'css-properties.js',
-    'csscoverage.js',
     'device.js',
     'emulation.js',
     'environment.js',
@@ -50,7 +47,6 @@ DevToolsModules(
     'performance-recording.js',
     'performance.js',
     'preference.js',
-    'pretty-print-worker.js',
     'process.js',
     'promises.js',
     'reflow.js',
@@ -62,23 +58,18 @@ DevToolsModules(
     'styles.js',
     'stylesheets.js',
     'thread.js',
-    'webaudio.js',
     'webbrowser.js',
     'webconsole.js',
-    'webgl.js',
 )
 
 with Files('animation.js'):
-    BUG_COMPONENT = ('DevTools', 'Animation Inspector')
+    BUG_COMPONENT = ('DevTools', 'Inspector: Animations')
 
 with Files('breakpoint.js'):
     BUG_COMPONENT = ('DevTools', 'Debugger')
 
 with Files('css-properties.js'):
-    BUG_COMPONENT = ('DevTools', 'CSS Rules Inspector')
-
-with Files('csscoverage.js'):
-    BUG_COMPONENT = ('DevTools', 'Graphics Commandline and Toolbar')
+    BUG_COMPONENT = ('DevTools', 'Inspector: Rules')
 
 with Files('memory.js'):
     BUG_COMPONENT = ('DevTools', 'Memory')
@@ -95,11 +86,5 @@ with Files('storage.js'):
 with Files('stylesheets.js'):
     BUG_COMPONENT = ('DevTools', 'Style Editor')
 
-with Files('webaudio.js'):
-    BUG_COMPONENT = ('DevTools', 'Web Audio Editor')
-
 with Files('webconsole.js'):
     BUG_COMPONENT = ('DevTools', 'Console')
-
-with Files('webgl.js'):
-    BUG_COMPONENT = ('DevTools', 'WebGL Shader Editor')

@@ -16,14 +16,18 @@
 
 class nsSplitterFrameInner;
 
-nsIFrame* NS_NewSplitterFrame(nsIPresShell* aPresShell,
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
+nsIFrame* NS_NewSplitterFrame(mozilla::PresShell* aPresShell,
                               mozilla::ComputedStyle* aStyle);
 
 class nsSplitterFrame final : public nsBoxFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsSplitterFrame)
 
-  explicit nsSplitterFrame(ComputedStyle* aStyle);
+  explicit nsSplitterFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
   virtual void DestroyFrom(nsIFrame* aDestructRoot,
                            PostDestroyData& aPostDestroyData) override;
 
@@ -40,9 +44,6 @@ class nsSplitterFrame final : public nsBoxFrame {
   virtual void Init(nsIContent* aContent, nsContainerFrame* aParent,
                     nsIFrame* aPrevInFlow) override;
 
-  virtual nsresult GetCursor(const nsPoint& aPoint,
-                             nsIFrame::Cursor& aCursor) override;
-
   NS_IMETHOD DoXULLayout(nsBoxLayoutState& aBoxLayoutState) override;
 
   NS_IMETHOD HandlePress(nsPresContext* aPresContext,
@@ -54,6 +55,7 @@ class nsSplitterFrame final : public nsBoxFrame {
                                  nsEventStatus* aEventStatus,
                                  bool aControlHeld) override;
 
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD HandleDrag(nsPresContext* aPresContext,
                         mozilla::WidgetGUIEvent* aEvent,
                         nsEventStatus* aEventStatus) override;

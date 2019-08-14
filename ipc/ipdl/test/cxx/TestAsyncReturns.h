@@ -9,11 +9,10 @@
 namespace mozilla {
 namespace _ipdltest {
 
+class TestAsyncReturnsParent : public PTestAsyncReturnsParent {
+  friend class PTestAsyncReturnsParent;
 
-class TestAsyncReturnsParent :
-    public PTestAsyncReturnsParent
-{
-public:
+ public:
   TestAsyncReturnsParent();
   virtual ~TestAsyncReturnsParent();
 
@@ -22,41 +21,34 @@ public:
 
   void Main();
 
-protected:
-  mozilla::ipc::IPCResult RecvPong(PongResolver&& aResolve) override;
+ protected:
+  mozilla::ipc::IPCResult RecvPong(PongResolver&& aResolve);
 
-  virtual void ActorDestroy(ActorDestroyReason why) override
-  {
-    if (NormalShutdown != why)
-      fail("unexpected destruction!");
+  virtual void ActorDestroy(ActorDestroyReason why) override {
+    if (NormalShutdown != why) fail("unexpected destruction!");
     passed("ok");
     QuitParent();
   }
 };
 
+class TestAsyncReturnsChild : public PTestAsyncReturnsChild {
+  friend class PTestAsyncReturnsChild;
 
-class TestAsyncReturnsChild :
-    public PTestAsyncReturnsChild
-{
-public:
+ public:
   TestAsyncReturnsChild();
   virtual ~TestAsyncReturnsChild();
 
-protected:
-  mozilla::ipc::IPCResult RecvPing(PingResolver&& aResolve) override;
-  mozilla::ipc::IPCResult RecvNoReturn(NoReturnResolver&& aResolve) override;
+ protected:
+  mozilla::ipc::IPCResult RecvPing(PingResolver&& aResolve);
+  mozilla::ipc::IPCResult RecvNoReturn(NoReturnResolver&& aResolve);
 
-  virtual void ActorDestroy(ActorDestroyReason why) override
-  {
-    if (NormalShutdown != why)
-      fail("unexpected destruction!");
+  virtual void ActorDestroy(ActorDestroyReason why) override {
+    if (NormalShutdown != why) fail("unexpected destruction!");
     QuitChild();
   }
 };
 
+}  // namespace _ipdltest
+}  // namespace mozilla
 
-} // namespace _ipdltest
-} // namespace mozilla
-
-
-#endif // ifndef mozilla__ipdltest_TestAsyncReturns_h
+#endif  // ifndef mozilla__ipdltest_TestAsyncReturns_h

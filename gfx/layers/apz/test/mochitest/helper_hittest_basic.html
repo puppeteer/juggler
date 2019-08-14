@@ -4,7 +4,7 @@
   <title>Various tests to exercise the APZ hit-testing codepaths</title>
   <script type="application/javascript" src="apz_test_utils.js"></script>
   <script type="application/javascript" src="apz_test_native_event_utils.js"></script>
-  <script type="application/javascript" src="/tests/SimpleTest/paint_listener.js"></script>
+  <script src="/tests/SimpleTest/paint_listener.js"></script>
   <meta name="viewport" content="width=device-width"/>
 </head>
 <body>
@@ -21,12 +21,15 @@ function* test(testDriver) {
   var config = getHitTestConfig();
   var utils = config.utils;
 
-  var scroller = document.getElementById('scroller');
-  var apzaware = document.getElementById('apzaware');
+  var scroller = document.getElementById("scroller");
+  var apzaware = document.getElementById("apzaware");
 
   checkHitResult(hitTest(centerOf(scroller)),
-                 APZHitResultFlags.VISIBLE | APZHitResultFlags.DISPATCH_TO_CONTENT,
+                 APZHitResultFlags.VISIBLE |
+                 (config.isWebRender ? APZHitResultFlags.INACTIVE_SCROLLFRAME
+                                     : APZHitResultFlags.IRREGULAR_AREA),
                  utils.getViewId(document.scrollingElement),
+                 utils.getLayersId(),
                  "inactive scrollframe");
 
   // The apz-aware div (which has a non-passive wheel listener) is not visible
@@ -35,6 +38,7 @@ function* test(testDriver) {
   checkHitResult(hitTest(centerOf(apzaware)),
                  APZHitResultFlags.VISIBLE,
                  utils.getViewId(document.scrollingElement),
+                 utils.getLayersId(),
                  "inactive scrollframe - apzaware block");
 
   // Hit test where the scroll thumbs should be.
@@ -42,9 +46,10 @@ function* test(testDriver) {
     element: scroller,
     directions: { vertical: true, horizontal: true },
     expectedScrollId: utils.getViewId(document.scrollingElement),
+    expectedLayersId: utils.getLayersId(),
     trackLocation: ScrollbarTrackLocation.START,
     expectThumb: true,
-    layerState: LayerState.INACTIVE
+    layerState: LayerState.INACTIVE,
   });
 
   // activate the scrollframe but keep the main-thread scroll position at 0.
@@ -68,14 +73,18 @@ function* test(testDriver) {
   checkHitResult(hitTest(centerOf(scroller)),
                  APZHitResultFlags.VISIBLE,
                  scrollerViewId,
+                 utils.getLayersId(),
                  "active scrollframe");
 
   // Test the apz-aware block
   var apzawarePosition = centerOf(apzaware); // main thread position
   apzawarePosition.y -= scrollY; // APZ position
   checkHitResult(hitTest(apzawarePosition),
-                 APZHitResultFlags.VISIBLE | APZHitResultFlags.DISPATCH_TO_CONTENT,
+                 APZHitResultFlags.VISIBLE |
+                 (config.isWebRender ? APZHitResultFlags.APZ_AWARE_LISTENERS
+                                     : APZHitResultFlags.IRREGULAR_AREA),
                  scrollerViewId,
+                 utils.getLayersId(),
                  "active scrollframe - apzaware block");
 
   // Test the scrollbars. Note that this time the vertical scrollthumb is
@@ -87,36 +96,40 @@ function* test(testDriver) {
     element: scroller,
     directions: { vertical: true },
     expectedScrollId: scrollerViewId,
+    expectedLayersId: utils.getLayersId(),
     trackLocation: ScrollbarTrackLocation.START,
     expectThumb: false,
-    layerState: LayerState.ACTIVE
+    layerState: LayerState.ACTIVE,
   });
   // bottom of scrollbar track (scrollthumb)
   hitTestScrollbar({
     element: scroller,
     directions: { vertical: true },
     expectedScrollId: scrollerViewId,
+    expectedLayersId: utils.getLayersId(),
     trackLocation: ScrollbarTrackLocation.END,
     expectThumb: true,
-    layerState: LayerState.ACTIVE
+    layerState: LayerState.ACTIVE,
   });
   // left part of scrollbar track (has scrollthumb)
   hitTestScrollbar({
     element: scroller,
     directions: { horizontal: true },
     expectedScrollId: scrollerViewId,
+    expectedLayersId: utils.getLayersId(),
     trackLocation: ScrollbarTrackLocation.START,
     expectThumb: true,
-    layerState: LayerState.ACTIVE
+    layerState: LayerState.ACTIVE,
   });
   // right part of scrollbar track
   hitTestScrollbar({
     element: scroller,
     directions: { horizontal: true },
     expectedScrollId: scrollerViewId,
+    expectedLayersId: utils.getLayersId(),
     trackLocation: ScrollbarTrackLocation.END,
     expectThumb: false,
-    layerState: LayerState.ACTIVE
+    layerState: LayerState.ACTIVE,
   });
 
   subtestDone();

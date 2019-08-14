@@ -1,11 +1,15 @@
 "use strict";
 
+var FormAutofillContent;
 add_task(async function setup() {
-  ChromeUtils.import("resource://formautofill/FormAutofillContent.jsm");
+  ({ FormAutofillContent } = ChromeUtils.import(
+    "resource://formautofill/FormAutofillContent.jsm"
+  ));
 });
 
-const MOCK_DOC = MockDocument.createTestDocument("http://localhost:8080/test/",
-                   `<form id="form1">
+const MOCK_DOC = MockDocument.createTestDocument(
+  "http://localhost:8080/test/",
+  `<form id="form1">
                       <input id="street-addr" autocomplete="street-address">
                       <select id="address-level1" autocomplete="address-level1">
                         <option value=""></option>
@@ -29,15 +33,17 @@ const MOCK_DOC = MockDocument.createTestDocument("http://localhost:8080/test/",
                       <input id="cc-exp-month" autocomplete="cc-exp-month">
                       <input id="cc-exp-year" autocomplete="cc-exp-year">
                       <input id="submit" type="submit">
-                    </form>`);
+                    </form>`
+);
 const TARGET_ELEMENT_ID = "street-addr";
 
 const TESTCASES = [
   {
-    description: "Should not trigger address saving if the number of fields is less than 3",
+    description:
+      "Should not trigger address saving if the number of fields is less than 3",
     formValue: {
       "street-addr": "331 E. Evelyn Avenue",
-      "tel": "1-650-903-0800",
+      tel: "1-650-903-0800",
     },
     expectedResult: {
       formSubmission: false,
@@ -58,24 +64,26 @@ const TESTCASES = [
     description: "Trigger address saving",
     formValue: {
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
-      "tel": "1-650-903-0800",
+      country: "US",
+      tel: "1-650-903-0800",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "",
-            "address-level2": "",
-            "country": "US",
-            "email": "",
-            "tel": "1-650-903-0800",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "",
+              "address-level2": "",
+              country: "US",
+              email: "",
+              tel: "1-650-903-0800",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -92,16 +100,18 @@ const TESTCASES = [
       formSubmission: true,
       records: {
         address: [],
-        creditCard: [{
-          guid: null,
-          record: {
-            "cc-name": "John Doe",
-            "cc-number": "5105105105105100",
-            "cc-exp-month": 12,
-            "cc-exp-year": 2000,
+        creditCard: [
+          {
+            guid: null,
+            record: {
+              "cc-name": "John Doe",
+              "cc-number": "5105105105105100",
+              "cc-exp-month": 12,
+              "cc-exp-year": 2000,
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
       },
     },
   },
@@ -109,8 +119,8 @@ const TESTCASES = [
     description: "Trigger address and credit card saving",
     formValue: {
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
-      "tel": "1-650-903-0800",
+      country: "US",
+      tel: "1-650-903-0800",
       "cc-name": "John Doe",
       "cc-number": "5105105105105100",
       "cc-exp-month": 12,
@@ -119,28 +129,32 @@ const TESTCASES = [
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "",
-            "address-level2": "",
-            "country": "US",
-            "email": "",
-            "tel": "1-650-903-0800",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "",
+              "address-level2": "",
+              country: "US",
+              email: "",
+              tel: "1-650-903-0800",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
-        creditCard: [{
-          guid: null,
-          record: {
-            "cc-name": "John Doe",
-            "cc-number": "5105105105105100",
-            "cc-exp-month": 12,
-            "cc-exp-year": 2000,
+        ],
+        creditCard: [
+          {
+            guid: null,
+            record: {
+              "cc-name": "John Doe",
+              "cc-number": "5105105105105100",
+              "cc-exp-month": 12,
+              "cc-exp-year": 2000,
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
       },
     },
   },
@@ -148,24 +162,26 @@ const TESTCASES = [
     description: "Profile saved with trimmed string",
     formValue: {
       "street-addr": "331 E. Evelyn Avenue  ",
-      "country": "US",
-      "tel": "  1-650-903-0800",
+      country: "US",
+      tel: "  1-650-903-0800",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "",
-            "address-level2": "",
-            "country": "US",
-            "email": "",
-            "tel": "1-650-903-0800",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "",
+              "address-level2": "",
+              country: "US",
+              email: "",
+              tel: "1-650-903-0800",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -174,25 +190,27 @@ const TESTCASES = [
     description: "Eliminate the field that is empty after trimmed",
     formValue: {
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
-      "email": "  ",
-      "tel": "1-650-903-0800",
+      country: "US",
+      email: "  ",
+      tel: "1-650-903-0800",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "",
-            "address-level2": "",
-            "country": "US",
-            "email": "",
-            "tel": "1-650-903-0800",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "",
+              "address-level2": "",
+              country: "US",
+              email: "",
+              tel: "1-650-903-0800",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -202,23 +220,25 @@ const TESTCASES = [
     formValue: {
       "address-level1": "CA",
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
+      country: "US",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "address-level1": "CA",
-            "address-level2": "",
-            "street-address": "331 E. Evelyn Avenue",
-            "country": "US",
-            "email": "",
-            "tel": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "address-level1": "CA",
+              "address-level2": "",
+              "street-address": "331 E. Evelyn Avenue",
+              country: "US",
+              email: "",
+              tel: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -228,23 +248,25 @@ const TESTCASES = [
     formValue: {
       "address-level1": "ca",
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
+      country: "US",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "address-level1": "CA",
-            "address-level2": "",
-            "street-address": "331 E. Evelyn Avenue",
-            "country": "US",
-            "email": "",
-            "tel": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "address-level1": "CA",
+              "address-level2": "",
+              "street-address": "331 E. Evelyn Avenue",
+              country: "US",
+              email: "",
+              tel: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -254,23 +276,25 @@ const TESTCASES = [
     formValue: {
       "address-level1": "AR",
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
+      country: "US",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "address-level1": "AR",
-            "address-level2": "",
-            "street-address": "331 E. Evelyn Avenue",
-            "country": "US",
-            "email": "",
-            "tel": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "address-level1": "AR",
+              "address-level2": "",
+              "street-address": "331 E. Evelyn Avenue",
+              country: "US",
+              email: "",
+              tel: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -280,75 +304,83 @@ const TESTCASES = [
     formValue: {
       "address-level1": "US-CA",
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
+      country: "US",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "address-level1": "CA",
-            "address-level2": "",
-            "street-address": "331 E. Evelyn Avenue",
-            "country": "US",
-            "email": "",
-            "tel": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "address-level1": "CA",
+              "address-level2": "",
+              "street-address": "331 E. Evelyn Avenue",
+              country: "US",
+              email: "",
+              tel: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
   },
   {
-    description: "Save state with a country code prefixed to the value and label",
+    description:
+      "Save state with a country code prefixed to the value and label",
     formValue: {
       "address-level1": "US-AZ",
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
+      country: "US",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "address-level1": "AZ",
-            "address-level2": "",
-            "street-address": "331 E. Evelyn Avenue",
-            "country": "US",
-            "email": "",
-            "tel": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "address-level1": "AZ",
+              "address-level2": "",
+              "street-address": "331 E. Evelyn Avenue",
+              country: "US",
+              email: "",
+              tel: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
   },
   {
-    description: "Should save select label instead when failed to abbreviate the value",
+    description:
+      "Should save select label instead when failed to abbreviate the value",
     formValue: {
       "address-level1": "Ariz",
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
+      country: "US",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "address-level1": "Arizonac",
-            "address-level2": "",
-            "street-address": "331 E. Evelyn Avenue",
-            "country": "US",
-            "email": "",
-            "tel": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "address-level1": "Arizonac",
+              "address-level2": "",
+              "street-address": "331 E. Evelyn Avenue",
+              country: "US",
+              email: "",
+              tel: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -358,24 +390,26 @@ const TESTCASES = [
     formValue: {
       "address-level1": ["AL", "AK", "AP"],
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
-      "tel": "1-650-903-0800",
+      country: "US",
+      tel: "1-650-903-0800",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "",
-            "address-level2": "",
-            "country": "US",
-            "tel": "1-650-903-0800",
-            "email": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "",
+              "address-level2": "",
+              country: "US",
+              tel: "1-650-903-0800",
+              email: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -385,24 +419,26 @@ const TESTCASES = [
     formValue: {
       "address-level1": "",
       "street-addr": "331 E. Evelyn Avenue",
-      "country": "US",
-      "tel": "1-650-903-0800",
+      country: "US",
+      tel: "1-650-903-0800",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "",
-            "address-level2": "",
-            "country": "US",
-            "tel": "1-650-903-0800",
-            "email": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "",
+              "address-level2": "",
+              country: "US",
+              tel: "1-650-903-0800",
+              email: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -412,24 +448,26 @@ const TESTCASES = [
     formValue: {
       "street-addr": "331 E. Evelyn Avenue",
       "address-level1": "CA",
-      "country": "US",
-      "tel": "1234",
+      country: "US",
+      tel: "1234",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "CA",
-            "address-level2": "",
-            "country": "US",
-            "tel": "",
-            "email": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "CA",
+              "address-level2": "",
+              country: "US",
+              tel: "",
+              email: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -439,24 +477,26 @@ const TESTCASES = [
     formValue: {
       "street-addr": "331 E. Evelyn Avenue",
       "address-level1": "CA",
-      "country": "US",
-      "tel": "1234567890123456",
+      country: "US",
+      tel: "1234567890123456",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "CA",
-            "address-level2": "",
-            "country": "US",
-            "tel": "",
-            "email": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "CA",
+              "address-level2": "",
+              country: "US",
+              tel: "",
+              email: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
@@ -466,36 +506,38 @@ const TESTCASES = [
     formValue: {
       "street-addr": "331 E. Evelyn Avenue",
       "address-level1": "CA",
-      "country": "US",
-      "tel": "12345###!!",
+      country: "US",
+      tel: "12345###!!",
     },
     expectedResult: {
       formSubmission: true,
       records: {
-        address: [{
-          guid: null,
-          record: {
-            "street-address": "331 E. Evelyn Avenue",
-            "address-level1": "CA",
-            "address-level2": "",
-            "country": "US",
-            "tel": "",
-            "email": "",
+        address: [
+          {
+            guid: null,
+            record: {
+              "street-address": "331 E. Evelyn Avenue",
+              "address-level1": "CA",
+              "address-level2": "",
+              country: "US",
+              tel: "",
+              email: "",
+            },
+            untouchedFields: [],
           },
-          untouchedFields: [],
-        }],
+        ],
         creditCard: [],
       },
     },
   },
 ];
 
-add_task(async function handle_earlyformsubmit_event() {
+add_task(async function handle_invalid_form() {
   info("Starting testcase: Test an invalid form element");
   let fakeForm = MOCK_DOC.createElement("form");
   sinon.spy(FormAutofillContent, "_onFormSubmit");
 
-  Assert.equal(FormAutofillContent.notify(fakeForm), true);
+  FormAutofillContent.formSubmitted(fakeForm, null);
   Assert.equal(FormAutofillContent._onFormSubmit.called, false);
   FormAutofillContent._onFormSubmit.restore();
 });
@@ -506,8 +548,8 @@ add_task(async function autofill_disabled() {
 
   let testcase = {
     "street-addr": "331 E. Evelyn Avenue",
-    "country": "US",
-    "tel": "+16509030800",
+    country: "US",
+    tel: "+16509030800",
     "cc-number": "1111222233334444",
   };
   for (let key in testcase) {
@@ -522,37 +564,55 @@ add_task(async function autofill_disabled() {
 
   // "_onFormSubmit" shouldn't be called if both "addresses" and "creditCards"
   // are disabled.
-  Services.prefs.setBoolPref("extensions.formautofill.addresses.enabled", false);
-  Services.prefs.setBoolPref("extensions.formautofill.creditCards.enabled", false);
-  FormAutofillContent.notify(form);
+  Services.prefs.setBoolPref(
+    "extensions.formautofill.addresses.enabled",
+    false
+  );
+  Services.prefs.setBoolPref(
+    "extensions.formautofill.creditCards.enabled",
+    false
+  );
+  FormAutofillContent.formSubmitted(form, null);
   Assert.equal(FormAutofillContent._onFormSubmit.called, false);
-  FormAutofillContent._onFormSubmit.reset();
+  FormAutofillContent._onFormSubmit.resetHistory();
 
   // "_onFormSubmit" should be called as usual.
   Services.prefs.clearUserPref("extensions.formautofill.addresses.enabled");
   Services.prefs.clearUserPref("extensions.formautofill.creditCards.enabled");
-  FormAutofillContent.notify(form);
+  FormAutofillContent.formSubmitted(form, null);
   Assert.equal(FormAutofillContent._onFormSubmit.called, true);
   Assert.notDeepEqual(FormAutofillContent._onFormSubmit.args[0][0].address, []);
-  Assert.notDeepEqual(FormAutofillContent._onFormSubmit.args[0][0].creditCard, []);
-  FormAutofillContent._onFormSubmit.reset();
+  Assert.notDeepEqual(
+    FormAutofillContent._onFormSubmit.args[0][0].creditCard,
+    []
+  );
+  FormAutofillContent._onFormSubmit.resetHistory();
 
   // "address" should be empty if "addresses" pref is disabled.
-  Services.prefs.setBoolPref("extensions.formautofill.addresses.enabled", false);
-  FormAutofillContent.notify(form);
+  Services.prefs.setBoolPref(
+    "extensions.formautofill.addresses.enabled",
+    false
+  );
+  FormAutofillContent.formSubmitted(form, null);
   Assert.equal(FormAutofillContent._onFormSubmit.called, true);
   Assert.deepEqual(FormAutofillContent._onFormSubmit.args[0][0].address, []);
-  Assert.notDeepEqual(FormAutofillContent._onFormSubmit.args[0][0].creditCard, []);
-  FormAutofillContent._onFormSubmit.reset();
+  Assert.notDeepEqual(
+    FormAutofillContent._onFormSubmit.args[0][0].creditCard,
+    []
+  );
+  FormAutofillContent._onFormSubmit.resetHistory();
   Services.prefs.clearUserPref("extensions.formautofill.addresses.enabled");
 
   // "creditCard" should be empty if "creditCards" pref is disabled.
-  Services.prefs.setBoolPref("extensions.formautofill.creditCards.enabled", false);
-  FormAutofillContent.notify(form);
+  Services.prefs.setBoolPref(
+    "extensions.formautofill.creditCards.enabled",
+    false
+  );
+  FormAutofillContent.formSubmitted(form, null);
   Assert.deepEqual(FormAutofillContent._onFormSubmit.called, true);
   Assert.notDeepEqual(FormAutofillContent._onFormSubmit.args[0][0].address, []);
   Assert.deepEqual(FormAutofillContent._onFormSubmit.args[0][0].creditCard, []);
-  FormAutofillContent._onFormSubmit.reset();
+  FormAutofillContent._onFormSubmit.resetHistory();
   Services.prefs.clearUserPref("extensions.formautofill.creditCards.enabled");
 
   FormAutofillContent._onFormSubmit.restore();
@@ -581,14 +641,18 @@ TESTCASES.forEach(testcase => {
 
     let element = MOCK_DOC.getElementById(TARGET_ELEMENT_ID);
     FormAutofillContent.identifyAutofillFields(element);
-    FormAutofillContent.notify(form);
+    FormAutofillContent.formSubmitted(form, null);
 
-    Assert.equal(FormAutofillContent._onFormSubmit.called,
-                 testcase.expectedResult.formSubmission,
-                 "Check expected onFormSubmit.called");
+    Assert.equal(
+      FormAutofillContent._onFormSubmit.called,
+      testcase.expectedResult.formSubmission,
+      "Check expected onFormSubmit.called"
+    );
     if (FormAutofillContent._onFormSubmit.called) {
-      Assert.deepEqual(FormAutofillContent._onFormSubmit.args[0][0],
-                       testcase.expectedResult.records);
+      Assert.deepEqual(
+        FormAutofillContent._onFormSubmit.args[0][0],
+        testcase.expectedResult.records
+      );
     }
     FormAutofillContent._onFormSubmit.restore();
   });

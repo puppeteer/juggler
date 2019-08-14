@@ -25,26 +25,32 @@ class WebAuthnManagerBase : public nsIDOMEventListener {
  public:
   NS_DECL_NSIDOMEVENTLISTENER
 
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(WebAuthnManagerBase)
+
   explicit WebAuthnManagerBase(nsPIDOMWindowInner* aParent);
 
+  MOZ_CAN_RUN_SCRIPT
   virtual void FinishMakeCredential(
       const uint64_t& aTransactionId,
       const WebAuthnMakeCredentialResult& aResult) = 0;
 
+  MOZ_CAN_RUN_SCRIPT
   virtual void FinishGetAssertion(
       const uint64_t& aTransactionId,
       const WebAuthnGetAssertionResult& aResult) = 0;
 
+  MOZ_CAN_RUN_SCRIPT
   virtual void RequestAborted(const uint64_t& aTransactionId,
                               const nsresult& aError) = 0;
 
   void ActorDestroyed();
 
  protected:
-  ~WebAuthnManagerBase();
+  MOZ_CAN_RUN_SCRIPT virtual ~WebAuthnManagerBase();
 
-  // Needed by HandleEvent() to cancel transactions.
-  virtual void CancelTransaction(const nsresult& aError) = 0;
+  // Needed by HandleEvent() to track visibilty changes.
+  MOZ_CAN_RUN_SCRIPT virtual void HandleVisibilityChange() = 0;
 
   // Visibility event handling.
   void ListenForVisibilityEvents();

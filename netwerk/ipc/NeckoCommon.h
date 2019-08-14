@@ -15,14 +15,14 @@
 
 namespace mozilla {
 namespace dom {
-class TabChild;
+class BrowserChild;
 }  // namespace dom
 }  // namespace mozilla
 
 #if defined(DEBUG)
-#define NECKO_ERRORS_ARE_FATAL_DEFAULT true
+#  define NECKO_ERRORS_ARE_FATAL_DEFAULT true
 #else
-#define NECKO_ERRORS_ARE_FATAL_DEFAULT false
+#  define NECKO_ERRORS_ARE_FATAL_DEFAULT false
 #endif
 
 // TODO: Eventually remove NECKO_MAYBE_ABORT and DROP_DEAD (bug 575494).
@@ -38,7 +38,7 @@ class TabChild;
       msg.AppendLiteral(                                        \
           " (set NECKO_ERRORS_ARE_FATAL=0 in your environment " \
           "to convert this error into a warning.)");            \
-      MOZ_CRASH_UNSAFE_OOL(msg.get());                          \
+      MOZ_CRASH_UNSAFE(msg.get());                              \
     } else {                                                    \
       msg.AppendLiteral(                                        \
           " (set NECKO_ERRORS_ARE_FATAL=1 in your environment " \
@@ -95,6 +95,11 @@ inline bool IsNeckoChild() {
   return amChild;
 }
 
+inline bool IsSocketProcessChild() {
+  static bool amChild = (XRE_GetProcessType() == GeckoProcessType_Socket);
+  return amChild;
+}
+
 namespace NeckoCommonInternal {
 extern bool gSecurityDisabled;
 extern bool gRegisteredBool;
@@ -105,10 +110,10 @@ inline bool UsingNeckoIPCSecurity() {
   return !NeckoCommonInternal::gSecurityDisabled;
 }
 
-inline bool MissingRequiredTabChild(mozilla::dom::TabChild* tabChild,
-                                    const char* context) {
+inline bool MissingRequiredBrowserChild(
+    mozilla::dom::BrowserChild* browserChild, const char* context) {
   if (UsingNeckoIPCSecurity()) {
-    if (!tabChild) {
+    if (!browserChild) {
       printf_stderr(
           "WARNING: child tried to open %s IPDL channel w/o "
           "security info\n",

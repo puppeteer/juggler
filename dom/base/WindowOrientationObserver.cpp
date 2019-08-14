@@ -35,14 +35,15 @@ WindowOrientationObserver::~WindowOrientationObserver() {
 void WindowOrientationObserver::Notify(
     const mozilla::hal::ScreenConfiguration& aConfiguration) {
   uint16_t currentAngle = aConfiguration.angle();
-  if (mAngle != currentAngle && mWindow->AsInner()->IsCurrentInnerWindow()) {
+  if (mAngle != currentAngle && mWindow->IsCurrentInnerWindow()) {
     mAngle = currentAngle;
     mWindow->GetOuterWindow()->DispatchCustomEvent(
         NS_LITERAL_STRING("orientationchange"));
   }
 }
 
-/* static */ int16_t WindowOrientationObserver::OrientationAngle() {
+/* static */
+int16_t WindowOrientationObserver::OrientationAngle() {
   hal::ScreenConfiguration config;
   hal::GetCurrentScreenConfiguration(&config);
   int16_t angle = static_cast<int16_t>(config.angle());

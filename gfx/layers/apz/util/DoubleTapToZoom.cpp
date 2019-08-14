@@ -8,49 +8,59 @@
 
 #include <algorithm>  // for std::min, std::max
 
+#include "mozilla/PresShell.h"
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/dom/Element.h"
 #include "nsCOMPtr.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDOMWindow.h"
 #include "nsIFrame.h"
 #include "nsIFrameInlines.h"
-#include "nsIPresShell.h"
 #include "nsLayoutUtils.h"
 #include "nsStyleConsts.h"
 
 namespace mozilla {
 namespace layers {
 
+namespace {
+
+using FrameForPointOption = nsLayoutUtils::FrameForPointOption;
+
 // Returns the DOM element found at |aPoint|, interpreted as being relative to
-// the root frame of |aShell|. If the point is inside a subdocument, returns
+// the root frame of |aPresShell|. If the point is inside a subdocument, returns
 // an element inside the subdocument, rather than the subdocument element
 // (and does so recursively).
-// The implementation was adapted from nsDocument::ElementFromPoint(), with
-// the notable exception that we don't pass nsLayoutUtils::IGNORE_CROSS_DOC
+// The implementation was adapted from DocumentOrShadowRoot::ElementFromPoint(),
+// with the notable exception that we don't pass nsLayoutUtils::IGNORE_CROSS_DOC
 // to GetFrameForPoint(), so as to get the behaviour described above in the
 // presence of subdocuments.
 static already_AddRefed<dom::Element> ElementFromPoint(
-    const nsCOMPtr<nsIPresShell>& aShell, const CSSPoint& aPoint) {
-  if (nsIFrame* rootFrame = aShell->GetRootFrame()) {
-    if (nsIFrame* frame = nsLayoutUtils::GetFrameForPoint(
-            rootFrame, CSSPoint::ToAppUnits(aPoint),
-            nsLayoutUtils::IGNORE_PAINT_SUPPRESSION |
-                nsLayoutUtils::IGNORE_ROOT_SCROLL_FRAME)) {
-      while (frame && (!frame->GetContent() ||
-                       frame->GetContent()->IsInAnonymousSubtree())) {
-        frame = nsLayoutUtils::GetParentOrPlaceholderFor(frame);
-      }
-      nsIContent* content = frame->GetContent();
-      if (content && !content->IsElement()) {
-        content = content->GetParent();
-      }
-      if (content) {
-        nsCOMPtr<dom::Element> result = content->AsElement();
-        return result.forget();
-      }
-    }
+    const RefPtr<PresShell>& aPresShell, const CSSPoint& aPoint) {
+  nsIFrame* rootFrame = aPresShell->GetRootFrame();
+  if (!rootFrame) {
+    return nullptr;
+  }
+  nsIFrame* frame = nsLayoutUtils::GetFrameForPoint(
+      rootFrame, CSSPoint::ToAppUnits(aPoint),
+      {FrameForPointOption::IgnorePaintSuppression,
+       FrameForPointOption::IgnoreRootScrollFrame});
+  while (frame && (!frame->GetContent() ||
+                   frame->GetContent()->IsInAnonymousSubtree())) {
+    frame = nsLayoutUtils::GetParentOrPlaceholderFor(frame);
+  }
+  if (!frame) {
+    return nullptr;
+  }
+  // FIXME(emilio): This should probably use the flattened tree, GetParent() is
+  // not guaranteed to be an element in presence of shadow DOM.
+  nsIContent* content = frame->GetContent();
+  if (content && !content->IsElement()) {
+    content = content->GetParent();
+  }
+  if (content && content->IsElement()) {
+    nsCOMPtr<dom::Element> result = content->AsElement();
+    return result.forget();
   }
   return nullptr;
 }
@@ -84,7 +94,9 @@ static bool IsRectZoomedIn(const CSSRect& aRect,
   return showing > 0.9 && (ratioW > 0.9 || ratioH > 0.9);
 }
 
-CSSRect CalculateRectToZoomTo(const nsCOMPtr<nsIDocument>& aRootContentDocument,
+}  // namespace
+
+CSSRect CalculateRectToZoomTo(const RefPtr<dom::Document>& aRootContentDocument,
                               const CSSPoint& aPoint) {
   // Ensure the layout information we get is up-to-date.
   aRootContentDocument->FlushPendingNotifications(FlushType::Layout);
@@ -92,17 +104,18 @@ CSSRect CalculateRectToZoomTo(const nsCOMPtr<nsIDocument>& aRootContentDocument,
   // An empty rect as return value is interpreted as "zoom out".
   const CSSRect zoomOut;
 
-  nsCOMPtr<nsIPresShell> shell = aRootContentDocument->GetShell();
-  if (!shell) {
+  RefPtr<PresShell> presShell = aRootContentDocument->GetPresShell();
+  if (!presShell) {
     return zoomOut;
   }
 
-  nsIScrollableFrame* rootScrollFrame = shell->GetRootScrollFrameAsScrollable();
+  nsIScrollableFrame* rootScrollFrame =
+      presShell->GetRootScrollFrameAsScrollable();
   if (!rootScrollFrame) {
     return zoomOut;
   }
 
-  nsCOMPtr<dom::Element> element = ElementFromPoint(shell, aPoint);
+  nsCOMPtr<dom::Element> element = ElementFromPoint(presShell, aPoint);
   if (!element) {
     return zoomOut;
   }
@@ -118,7 +131,7 @@ CSSRect CalculateRectToZoomTo(const nsCOMPtr<nsIDocument>& aRootContentDocument,
   FrameMetrics metrics =
       nsLayoutUtils::CalculateBasicFrameMetrics(rootScrollFrame);
   CSSRect compositedArea(
-      CSSPoint::FromAppUnits(shell->GetVisualViewportOffset()),
+      CSSPoint::FromAppUnits(presShell->GetVisualViewportOffset()),
       metrics.CalculateCompositedSizeInCssPixels());
   const CSSCoord margin = 15;
   CSSRect rect =

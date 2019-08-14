@@ -11,7 +11,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Unused.h"
-#include "mozilla/mscom/COMApartmentRegion.h"
 #include "mozilla/mscom/Utils.h"
 #include "nsCOMPtr.h"
 #include "nsIThread.h"
@@ -51,9 +50,16 @@ class MOZ_STACK_CLASS EnsureMTA final {
     Unused << thread;
   }
 
+  enum class Option {
+    Default,
+    // Forcibly dispatch to the thread returned by GetMTAThread(), even if the
+    // current thread is already inside a MTA.
+    ForceDispatch,
+  };
+
   template <typename FuncT>
-  explicit EnsureMTA(const FuncT& aClosure) {
-    if (IsCurrentThreadMTA()) {
+  explicit EnsureMTA(const FuncT& aClosure, Option aOpt = Option::Default) {
+    if (aOpt != Option::ForceDispatch && IsCurrentThreadMTA()) {
       // We're already on the MTA, we can run aClosure directly
       aClosure();
       return;

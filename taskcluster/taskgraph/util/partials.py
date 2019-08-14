@@ -8,12 +8,17 @@ import requests
 import redo
 
 import logging
+
+from taskgraph.util.scriptworker import BALROG_SCOPE_ALIAS_TO_PROJECT, BALROG_SERVER_SCOPES
+
 logger = logging.getLogger(__name__)
 
 PLATFORM_RENAMES = {
     'windows2012-32': 'win32',
     'windows2012-64': 'win64',
+    'windows2012-aarch64': 'win64-aarch64',
     'osx-cross': 'macosx64',
+    'osx': 'macosx64',
 }
 
 BALROG_PLATFORM_MAP = {
@@ -46,7 +51,10 @@ BALROG_PLATFORM_MAP = {
     ],
     "win64-asan-reporter": [
         "WINNT_x86_64-msvc-x64-asan"
-    ]
+    ],
+    "win64-aarch64": [
+        "WINNT_aarch64-msvc-aarch64",
+    ],
 }
 
 FTP_PLATFORM_MAP = {
@@ -63,6 +71,7 @@ FTP_PLATFORM_MAP = {
     "WINNT_x86-msvc-x86": "win32",
     "WINNT_x86_64-msvc": "win64",
     "WINNT_x86_64-msvc-x64": "win64",
+    "WINNT_aarch64-msvc-aarch64": "win64-aarch64",
 }
 
 
@@ -72,6 +81,8 @@ def get_balrog_platform_name(platform):
         platform = platform.replace('-nightly', '')
     if '-devedition' in platform:
         platform = platform.replace('-devedition', '')
+    if '-shippable' in platform:
+        platform = platform.replace('-shippable', '')
     return PLATFORM_RENAMES.get(platform, platform)
 
 
@@ -89,7 +100,7 @@ def get_builds(release_history, platform, locale):
     return release_history.get(platform, {}).get(locale, {})
 
 
-def get_partials_artifacts(release_history, platform, locale):
+def get_partials_artifacts_from_params(release_history, platform, locale):
     platform = _sanitize_platform(platform)
     return [
         (artifact, details.get('previousVersion', None))
@@ -97,7 +108,7 @@ def get_partials_artifacts(release_history, platform, locale):
     ]
 
 
-def get_partials_artifact_map(release_history, platform, locale):
+def get_partials_info_from_params(release_history, platform, locale):
     platform = _sanitize_platform(platform)
 
     artifact_map = {}
@@ -165,10 +176,20 @@ def get_release_builds(release, branch):
 
 
 def _get_balrog_api_root(branch):
-    if branch in ('mozilla-central', 'mozilla-beta', 'mozilla-release') or 'mozilla-esr' in branch:
-        return 'https://aus5.mozilla.org/api/v1'
+    # Query into the scopes scriptworker uses to make sure we check against the same balrog server
+    # That our jobs would use.
+    scope = None
+    for alias, projects in BALROG_SCOPE_ALIAS_TO_PROJECT:
+        if branch in projects and alias in BALROG_SERVER_SCOPES:
+            scope = BALROG_SERVER_SCOPES[alias]
+            break
     else:
-        return 'https://aus5.stage.mozaws.net/api/v1'
+        scope = BALROG_SERVER_SCOPES['default']
+
+    if scope == u'balrog:server:dep':
+        return 'https://stage.balrog.nonprod.cloudops.mozgcp.net/api/v1'
+    else:
+        return 'https://aus5.mozilla.org/api/v1'
 
 
 def find_localtest(fileUrls):

@@ -11,9 +11,11 @@ extern crate winit;
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
-use boilerplate::{Example, HandyDandyRectBuilder};
+use crate::boilerplate::{Example, HandyDandyRectBuilder};
 use std::cmp;
 use webrender::api::*;
+use webrender::api::units::DeviceIntSize;
+
 
 struct App {
     rect_count: usize,
@@ -25,24 +27,24 @@ impl Example for App {
         _api: &RenderApi,
         builder: &mut DisplayListBuilder,
         _txn: &mut Transaction,
-        _framebuffer_size: DeviceIntSize,
-        _pipeline_id: PipelineId,
+        _device_size: DeviceIntSize,
+        pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
         let bounds = (0, 0).to(1920, 1080);
-        let info = LayoutPrimitiveInfo::new(bounds);
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
 
-        builder.push_stacking_context(
-            &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+        builder.push_simple_stacking_context(
+            bounds.origin,
+            space_and_clip.spatial_id,
+            true,
         );
 
         for _ in 0 .. self.rect_count {
-            builder.push_rect(&info, ColorF::new(1.0, 1.0, 1.0, 0.05));
+            builder.push_rect(
+                &CommonItemProperties::new(bounds, space_and_clip),
+                ColorF::new(1.0, 1.0, 1.0, 0.05)
+            );
         }
 
         builder.pop_stacking_context();

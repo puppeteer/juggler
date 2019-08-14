@@ -1,7 +1,10 @@
 "use strict";
 
+var FormAutofillHeuristics, LabelUtils;
 add_task(async function() {
-  ChromeUtils.import("resource://formautofill/FormAutofillHeuristics.jsm");
+  ({ FormAutofillHeuristics, LabelUtils } = ChromeUtils.import(
+    "resource://formautofill/FormAutofillHeuristics.jsm"
+  ));
 });
 
 const TESTCASES = [
@@ -21,7 +24,8 @@ const TESTCASES = [
     },
   },
   {
-    description: "A label element is out of the form contains the related input",
+    description:
+      "A label element is out of the form contains the related input",
     document: `<label for="targetElement"> E-Mail</label>
                <form>
                  <input id="targetElement" type="text">
@@ -160,7 +164,7 @@ const TESTCASES = [
     },
   },
   {
-    description: "input element with \"submit\" type",
+    description: 'input element with "submit" type',
     document: `<input id="targetElement" type="submit" />`,
     elementId: "targetElement",
     expectedReturnValue: null,
@@ -177,7 +181,7 @@ const TESTCASES = [
     },
   },
   {
-    description: "input element with \"email\" type",
+    description: 'input element with "email" type',
     document: `<input id="targetElement" type="email" />`,
     elementId: "targetElement",
     expectedReturnValue: {
@@ -196,7 +200,7 @@ const TESTCASES = [
     expectedReturnValue: null,
   },
   {
-    description: "\"County\" field with \"United State\" string",
+    description: '"County" field with "United State" string',
     document: `<label>United State County
                  <input id="targetElement" />
                </label>`,
@@ -209,7 +213,7 @@ const TESTCASES = [
     },
   },
   {
-    description: "\"city\" field with double \"United State\" string",
+    description: '"city" field with double "United State" string',
     document: `<label>United State united sTATE city
                  <input id="targetElement" />
                </label>`,
@@ -242,7 +246,9 @@ TESTCASES.forEach(testcase => {
     info("Starting testcase: " + testcase.description);
 
     let doc = MockDocument.createTestDocument(
-      "http://localhost:8080/test/", testcase.document);
+      "http://localhost:8080/test/",
+      testcase.document
+    );
 
     let element = doc.getElementById(testcase.elementId);
     let value = FormAutofillHeuristics.getInfo(element);
@@ -255,43 +261,47 @@ TESTCASES.forEach(testcase => {
 add_task(async function test_regexp_list() {
   info("Verify the fieldName support for select element.");
   let SUPPORT_LIST = {
-    "email": null, // email
+    email: null, // email
     "tel-extension": null, // tel-extension
-    "phone": null, // tel
-    "organization": null, // organization
+    phone: null, // tel
+    organization: null, // organization
     "street-address": null, // street-address
-    "address1": null, // address-line1
-    "address2": null, // address-line2
-    "address3": null, // address-line3
-    "city": "address-level2",
-    "region": "address-level1",
+    address1: null, // address-line1
+    address2: null, // address-line2
+    address3: null, // address-line3
+    city: "address-level2",
+    region: "address-level1",
     "postal-code": null, // postal-code
-    "country": "country",
-    "fullname": null, // name
-    "fname": null, // given-name
-    "mname": null, // additional-name
-    "lname": null, // family-name
-    "cardholder": null, // cc-name
+    country: "country",
+    fullname: null, // name
+    fname: null, // given-name
+    mname: null, // additional-name
+    lname: null, // family-name
+    cardholder: null, // cc-name
     "cc-number": null, // cc-number
-    "addmonth": "cc-exp-month",
-    "addyear": "cc-exp-year",
+    addmonth: "cc-exp-month",
+    addyear: "cc-exp-year",
   };
   for (let label of Object.keys(SUPPORT_LIST)) {
     let testcase = {
       description: `A select element supports ${label} or not`,
       document: `<select id="${label}"></select>`,
       elementId: label,
-      expectedReturnValue: (SUPPORT_LIST[label] ? {
-        fieldName: SUPPORT_LIST[label],
-        section: "",
-        addressType: "",
-        contactType: "",
-      } : null),
+      expectedReturnValue: SUPPORT_LIST[label]
+        ? {
+            fieldName: SUPPORT_LIST[label],
+            section: "",
+            addressType: "",
+            contactType: "",
+          }
+        : null,
     };
     info(testcase.description);
     info(testcase.document);
     let doc = MockDocument.createTestDocument(
-      "http://localhost:8080/test/", testcase.document);
+      "http://localhost:8080/test/",
+      testcase.document
+    );
 
     let element = doc.getElementById(testcase.elementId);
     let value = FormAutofillHeuristics.getInfo(element);
@@ -300,4 +310,3 @@ add_task(async function test_regexp_list() {
   }
   LabelUtils.clearLabelMap();
 });
-

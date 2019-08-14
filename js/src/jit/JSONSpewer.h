@@ -9,10 +9,10 @@
 
 #ifdef JS_JITSPEW
 
-#include <stdio.h>
+#  include <stdio.h>
 
-#include "js/TypeDecls.h"
-#include "vm/JSONPrinter.h"
+#  include "js/TypeDecls.h"
+#  include "vm/JSONPrinter.h"
 
 namespace js {
 namespace jit {
@@ -28,6 +28,7 @@ class JSONSpewer : JSONPrinter {
   explicit JSONSpewer(GenericPrinter& out) : JSONPrinter(out) {}
 
   void beginFunction(JSScript* script);
+  void beginWasmFunction(unsigned funcIndex);
   void beginPass(const char* pass);
   void spewMDef(MDefinition* def);
   void spewMResumePoint(MResumePoint* rp);

@@ -16,7 +16,7 @@
 #include "mozilla/dom/indexedDB/ActorsParent.h"
 #include "mozilla/dom/indexedDB/PBackgroundIDBDatabaseParent.h"
 #include "mozilla/dom/IPCBlobUtils.h"
-#include "mozilla/dom/ipc/PendingIPCBlobParent.h"
+#include "mozilla/dom/PendingIPCBlobParent.h"
 #include "mozilla/dom/quota/MemoryOutputStream.h"
 #include "nsAutoPtr.h"
 #include "nsComponentManagerUtils.h"
@@ -41,11 +41,11 @@
 #define DISABLE_ASSERTS_FOR_FUZZING 0
 
 #if DISABLE_ASSERTS_FOR_FUZZING
-#define ASSERT_UNLESS_FUZZING(...) \
-  do {                             \
-  } while (0)
+#  define ASSERT_UNLESS_FUZZING(...) \
+    do {                             \
+    } while (0)
 #else
-#define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
+#  define ASSERT_UNLESS_FUZZING(...) MOZ_ASSERT(false, __VA_ARGS__)
 #endif
 
 namespace mozilla {
@@ -1988,9 +1988,9 @@ nsresult GetMetadataOp::DoFileWork(FileHandle* aFileHandle) {
       return NS_ERROR_FAILURE;
     }
 
-    mMetadata.size() = uint64_t(size);
+    mMetadata.size() = Some(uint64_t(size));
   } else {
-    mMetadata.size() = void_t();
+    mMetadata.size() = Nothing();
   }
 
   if (mParams.lastModified()) {
@@ -2000,9 +2000,9 @@ nsresult GetMetadataOp::DoFileWork(FileHandle* aFileHandle) {
       return rv;
     }
 
-    mMetadata.lastModified() = lastModified;
+    mMetadata.lastModified() = Some(lastModified);
   } else {
-    mMetadata.lastModified() = void_t();
+    mMetadata.lastModified() = Nothing();
   }
 
   return NS_OK;

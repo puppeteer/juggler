@@ -27,16 +27,16 @@ bool TableAccessible::IsProbablyLayoutTable() {
   // the algorithm. Integrate it into Logging.
   // Change to |#define SHOW_LAYOUT_HEURISTIC DEBUG| before final release
 #ifdef SHOW_LAYOUT_HEURISTIC
-#define RETURN_LAYOUT_ANSWER(isLayout, heuristic)                          \
-  {                                                                        \
-    mLayoutHeuristic = isLayout                                            \
-                           ? NS_LITERAL_STRING("layout table: " heuristic) \
-                           : NS_LITERAL_STRING("data table: " heuristic);  \
-    return isLayout;                                                       \
-  }
+#  define RETURN_LAYOUT_ANSWER(isLayout, heuristic)                          \
+    {                                                                        \
+      mLayoutHeuristic = isLayout                                            \
+                             ? NS_LITERAL_STRING("layout table: " heuristic) \
+                             : NS_LITERAL_STRING("data table: " heuristic);  \
+      return isLayout;                                                       \
+    }
 #else
-#define RETURN_LAYOUT_ANSWER(isLayout, heuristic) \
-  { return isLayout; }
+#  define RETURN_LAYOUT_ANSWER(isLayout, heuristic) \
+    { return isLayout; }
 #endif
 
   Accessible* thisacc = AsAccessible();
@@ -262,4 +262,35 @@ Accessible* TableAccessible::CellInRowAt(Accessible* aRow, int32_t aColumn) {
   }
 
   return cell;
+}
+
+int32_t TableAccessible::ColIndexAt(uint32_t aCellIdx) {
+  uint32_t colCount = ColCount();
+  if (colCount < 1 || aCellIdx >= colCount * RowCount()) {
+    return -1;  // Error: column count is 0 or index out of bounds.
+  }
+
+  return aCellIdx % colCount;
+}
+
+int32_t TableAccessible::RowIndexAt(uint32_t aCellIdx) {
+  uint32_t colCount = ColCount();
+  if (colCount < 1 || aCellIdx >= colCount * RowCount()) {
+    return -1;  // Error: column count is 0 or index out of bounds.
+  }
+
+  return aCellIdx / colCount;
+}
+
+void TableAccessible::RowAndColIndicesAt(uint32_t aCellIdx, int32_t* aRowIdx,
+                                         int32_t* aColIdx) {
+  uint32_t colCount = ColCount();
+  if (colCount < 1 || aCellIdx >= colCount * RowCount()) {
+    *aRowIdx = -1;
+    *aColIdx = -1;
+    return;  // Error: column count is 0 or index out of bounds.
+  }
+
+  *aRowIdx = aCellIdx / colCount;
+  *aColIdx = aCellIdx % colCount;
 }

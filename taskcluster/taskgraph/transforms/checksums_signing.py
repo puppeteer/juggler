@@ -13,18 +13,10 @@ from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.scriptworker import (
     get_signing_cert_scope,
     get_worker_type_for_scope,
-    add_scope_prefix,
 )
+from taskgraph.util.treeherder import replace_group
 from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
-
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
-
-taskref_or_string = Any(
-    basestring,
-    {Required('task-reference'): basestring})
+from voluptuous import Required, Optional
 
 checksums_signing_description_schema = schema.extend({
     Required('depname', default='beetmover'): basestring,
@@ -45,7 +37,10 @@ def make_checksums_signing_description(config, jobs):
         attributes = dep_job.attributes
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'cs(N)')
+        treeherder.setdefault(
+            'symbol',
+            replace_group(dep_job.task['extra']['treeherder']['symbol'], 'cs')
+        )
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
@@ -79,7 +74,7 @@ def make_checksums_signing_description(config, jobs):
             "paths": [
                 "public/target.checksums",
             ],
-            "formats": ["gpg"]
+            "formats": ["autograph_gpg"]
         }]
 
         signing_cert_scope = get_signing_cert_scope(config)
@@ -92,7 +87,6 @@ def make_checksums_signing_description(config, jobs):
                        'max-run-time': 3600},
             'scopes': [
                 signing_cert_scope,
-                add_scope_prefix(config, 'signing:format:gpg'),
             ],
             'dependencies': dependencies,
             'attributes': attributes,

@@ -26,7 +26,7 @@ use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
 /// An [`@supports`][supports] rule.
 ///
 /// [supports]: https://drafts.csswg.org/css-conditional-3/#at-supports
-#[derive(Debug)]
+#[derive(Debug, ToShmem)]
 pub struct SupportsRule {
     /// The parsed condition
     pub condition: SupportsCondition,
@@ -76,7 +76,7 @@ impl DeepCloneWithLock for SupportsRule {
 /// An @supports condition
 ///
 /// <https://drafts.csswg.org/css-conditional-3/#at-supports>
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToShmem)]
 pub enum SupportsCondition {
     /// `not (condition)`
     Not(Box<SupportsCondition>),
@@ -145,7 +145,7 @@ impl SupportsCondition {
         function: &str,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        match_ignore_ascii_case!{ function,
+        match_ignore_ascii_case! { function,
             // Although this is an internal syntax, it is not necessary
             // to check parsing context as far as we accept any
             // unexpected token as future syntax, and evaluate it to
@@ -223,8 +223,7 @@ impl SupportsCondition {
 #[cfg(feature = "gecko")]
 fn eval_moz_bool_pref(name: &CStr, cx: &ParserContext) -> bool {
     use crate::gecko_bindings::bindings;
-    use crate::stylesheets::Origin;
-    if cx.stylesheet_origin != Origin::UserAgent && !cx.chrome_rules_enabled() {
+    if !cx.in_ua_or_chrome_sheet() {
         return false;
     }
     unsafe { bindings::Gecko_GetBoolPrefValue(name.as_ptr()) }
@@ -306,7 +305,7 @@ impl ToCss for SupportsCondition {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToShmem)]
 /// A possibly-invalid CSS selector.
 pub struct RawSelector(pub String);
 
@@ -325,7 +324,7 @@ impl RawSelector {
         #[cfg(feature = "gecko")]
         {
             if unsafe {
-                !crate::gecko_bindings::structs::StaticPrefs_sVarCache_layout_css_supports_selector_enabled
+                !crate::gecko_bindings::structs::StaticPrefs::sVarCache_layout_css_supports_selector_enabled
             } {
                 return false;
             }
@@ -350,9 +349,8 @@ impl RawSelector {
                     use crate::selector_parser::PseudoElement;
                     use selectors::parser::Component;
 
-                    let has_any_unknown_webkit_pseudo = selector.has_pseudo_element() && selector
-                        .iter_raw_match_order()
-                        .any(|component| {
+                    let has_any_unknown_webkit_pseudo = selector.has_pseudo_element() &&
+                        selector.iter_raw_match_order().any(|component| {
                             matches!(
                                 *component,
                                 Component::PseudoElement(PseudoElement::UnknownWebkit(..))
@@ -369,7 +367,7 @@ impl RawSelector {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, ToShmem)]
 /// A possibly-invalid property declaration
 pub struct Declaration(pub String);
 

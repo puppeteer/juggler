@@ -5,26 +5,69 @@
  */
 
 add_task(async function() {
-  let tab = BrowserTestUtils.addTab(gBrowser, "about:blank", {userContextId: 1});
+  let tab = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+    userContextId: 1,
+  });
+  let ReferrerInfo = Components.Constructor(
+    "@mozilla.org/referrer-info;1",
+    "nsIReferrerInfo",
+    "init"
+  );
 
   gBrowser.selectedTab = tab;
-  let relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {relatedToCurrent: true});
-  is(relatedTab.getAttribute("usercontextid"), 1, "Related tab (relatedToCurrent) inherits current tab's usercontextid");
+  let relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+    relatedToCurrent: true,
+  });
+  is(
+    relatedTab.getAttribute("usercontextid"),
+    1,
+    "Related tab (relatedToCurrent) inherits current tab's usercontextid"
+  );
   BrowserTestUtils.removeTab(relatedTab);
 
   gBrowser.selectedTab = tab;
-  relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {relatedToCurrent: true, userContextId: 2});
-  is(relatedTab.getAttribute("usercontextid"), 2, "Related tab (relatedToCurrent) with overridden usercontextid");
+  relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+    relatedToCurrent: true,
+    userContextId: 2,
+  });
+  is(
+    relatedTab.getAttribute("usercontextid"),
+    2,
+    "Related tab (relatedToCurrent) with overridden usercontextid"
+  );
   BrowserTestUtils.removeTab(relatedTab);
 
   gBrowser.selectedTab = tab;
-  relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {referrerURI: gBrowser.currentURI});
-  is(relatedTab.getAttribute("usercontextid"), 1, "Related tab (referrer) inherits current tab's usercontextid");
+  let referrerInfo = new ReferrerInfo(
+    Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
+    true,
+    gBrowser.currentURI
+  );
+  relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+    referrerInfo,
+  });
+  is(
+    relatedTab.getAttribute("usercontextid"),
+    1,
+    "Related tab (referrer) inherits current tab's usercontextid"
+  );
   BrowserTestUtils.removeTab(relatedTab);
 
   gBrowser.selectedTab = tab;
-  relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {referrerURI: gBrowser.currentURI, userContextId: 2});
-  is(relatedTab.getAttribute("usercontextid"), 2, "Related tab (referrer) with overridden usercontextid");
+  referrerInfo = new ReferrerInfo(
+    Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
+    true,
+    gBrowser.currentURI
+  );
+  relatedTab = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+    referrerInfo,
+    userContextId: 2,
+  });
+  is(
+    relatedTab.getAttribute("usercontextid"),
+    2,
+    "Related tab (referrer) with overridden usercontextid"
+  );
   BrowserTestUtils.removeTab(relatedTab);
 
   BrowserTestUtils.removeTab(tab);

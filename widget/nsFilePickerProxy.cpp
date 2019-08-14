@@ -10,7 +10,7 @@
 #include "nsSimpleEnumerator.h"
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/File.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 
 using namespace mozilla::dom;
@@ -24,8 +24,8 @@ nsFilePickerProxy::~nsFilePickerProxy() {}
 NS_IMETHODIMP
 nsFilePickerProxy::Init(mozIDOMWindowProxy* aParent, const nsAString& aTitle,
                         int16_t aMode) {
-  TabChild* tabChild = TabChild::GetFrom(aParent);
-  if (!tabChild) {
+  BrowserChild* browserChild = BrowserChild::GetFrom(aParent);
+  if (!browserChild) {
     return NS_ERROR_FAILURE;
   }
 
@@ -34,7 +34,7 @@ nsFilePickerProxy::Init(mozIDOMWindowProxy* aParent, const nsAString& aTitle,
   mMode = aMode;
 
   NS_ADDREF_THIS();
-  tabChild->SendPFilePickerConstructor(this, nsString(aTitle), aMode);
+  browserChild->SendPFilePickerConstructor(this, nsString(aTitle), aMode);
 
   mIPCActive = true;
   return NS_OK;
@@ -125,8 +125,8 @@ nsFilePickerProxy::Open(nsIFilePickerShownCallback* aCallback) {
   }
 
   SendOpen(mSelectedType, mAddToRecentDocs, mDefault, mDefaultExtension,
-           mFilters, mFilterNames, displayDirectory, mDisplaySpecialDirectory,
-           mOkButtonLabel);
+           mFilters, mFilterNames, mRawFilters, displayDirectory,
+           mDisplaySpecialDirectory, mOkButtonLabel);
 
   return NS_OK;
 }

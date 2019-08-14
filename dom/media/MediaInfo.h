@@ -4,21 +4,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #if !defined(MediaInfo_h)
-#define MediaInfo_h
+#  define MediaInfo_h
 
-#include "mozilla/UniquePtr.h"
-#include "mozilla/RefPtr.h"
-#include "nsDataHashtable.h"
-#include "nsString.h"
-#include "nsTArray.h"
-#include "AudioConfig.h"
-#include "ImageTypes.h"
-#include "MediaData.h"
-#include "TrackID.h"  // for TrackID
-#include "TimeUnits.h"
-#include "mozilla/gfx/Point.h"  // for gfx::IntSize
-#include "mozilla/gfx/Rect.h"   // for gfx::IntRect
-#include "mozilla/gfx/Types.h"  // for gfx::ColorDepth
+#  include "mozilla/UniquePtr.h"
+#  include "mozilla/RefPtr.h"
+#  include "nsDataHashtable.h"
+#  include "nsString.h"
+#  include "nsTArray.h"
+#  include "AudioConfig.h"
+#  include "ImageTypes.h"
+#  include "MediaData.h"
+#  include "TrackID.h"  // for TrackID
+#  include "TimeUnits.h"
+#  include "mozilla/gfx/Point.h"  // for gfx::IntSize
+#  include "mozilla/gfx/Rect.h"   // for gfx::IntRect
+#  include "mozilla/gfx/Types.h"  // for gfx::ColorDepth
 
 namespace mozilla {
 
@@ -32,6 +32,9 @@ class MetadataTag {
       : mKey(aKey), mValue(aValue) {}
   nsCString mKey;
   nsCString mValue;
+  bool operator==(const MetadataTag& rhs) const {
+    return mKey == rhs.mKey && mValue == rhs.mValue;
+  }
 };
 
 typedef nsDataHashtable<nsCStringHashKey, nsCString> MetadataTags;
@@ -119,6 +122,7 @@ class TrackInfo {
     mTags = aOther.mTags;
     MOZ_COUNT_CTOR(TrackInfo);
   }
+  bool IsEqualTo(const TrackInfo& rhs) const;
 
  private:
   TrackType mType;
@@ -153,17 +157,9 @@ class VideoInfo : public TrackInfo {
         mRotation(kDegree_0),
         mImageRect(gfx::IntRect(gfx::IntPoint(), aSize)) {}
 
-  VideoInfo(const VideoInfo& aOther)
-      : TrackInfo(aOther),
-        mDisplay(aOther.mDisplay),
-        mStereoMode(aOther.mStereoMode),
-        mImage(aOther.mImage),
-        mCodecSpecificConfig(aOther.mCodecSpecificConfig),
-        mExtraData(aOther.mExtraData),
-        mRotation(aOther.mRotation),
-        mColorDepth(aOther.mColorDepth),
-        mImageRect(aOther.mImageRect),
-        mAlphaPresent(aOther.mAlphaPresent) {}
+  VideoInfo(const VideoInfo& aOther) = default;
+
+  bool operator==(const VideoInfo& rhs) const;
 
   bool IsValid() const override {
     return mDisplay.width > 0 && mDisplay.height > 0;
@@ -251,6 +247,12 @@ class VideoInfo : public TrackInfo {
   // Should be 8, 10 or 12. Default value is 8.
   gfx::ColorDepth mColorDepth = gfx::ColorDepth::COLOR_8;
 
+  gfx::YUVColorSpace mColorSpace = gfx::YUVColorSpace::UNKNOWN;
+
+  // True indicates no restriction on Y, U, V values (otherwise 16-235 for 8
+  // bits etc)
+  bool mFullRange = false;
+
  private:
   // mImage may be cropped; currently only used with the WebM container.
   // A negative width or height indicate that no cropping is to occur.
@@ -275,16 +277,9 @@ class AudioInfo : public TrackInfo {
         mCodecSpecificConfig(new MediaByteBuffer),
         mExtraData(new MediaByteBuffer) {}
 
-  AudioInfo(const AudioInfo& aOther)
-      : TrackInfo(aOther),
-        mRate(aOther.mRate),
-        mChannels(aOther.mChannels),
-        mChannelMap(aOther.mChannelMap),
-        mBitDepth(aOther.mBitDepth),
-        mProfile(aOther.mProfile),
-        mExtendedProfile(aOther.mExtendedProfile),
-        mCodecSpecificConfig(aOther.mCodecSpecificConfig),
-        mExtraData(aOther.mExtraData) {}
+  AudioInfo(const AudioInfo& aOther) = default;
+
+  bool operator==(const AudioInfo& rhs) const;
 
   static const uint32_t MAX_RATE = 640000;
 
@@ -394,8 +389,8 @@ class MediaInfo {
   }
 
   bool IsEncrypted() const {
-    return (HasAudio() && mAudio.mCrypto.mValid) ||
-           (HasVideo() && mVideo.mCrypto.mValid);
+    return (HasAudio() && mAudio.mCrypto.IsEncrypted()) ||
+           (HasVideo() && mVideo.mCrypto.IsEncrypted());
   }
 
   bool HasValidMedia() const { return HasVideo() || HasAudio(); }

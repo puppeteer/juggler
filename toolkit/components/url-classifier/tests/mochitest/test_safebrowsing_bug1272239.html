@@ -2,7 +2,7 @@
 <html>
 <head>
   <title>Bug 1272239 - Only tables with provider could register gethash url in listmanager.</title>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
 </head>
 
@@ -32,7 +32,7 @@ const prefs = [
 var providers = {};
 
 var branch = SpecialPowers.Services.prefs.getBranch("browser.safebrowsing.provider.");
-var children = branch.getChildList("", {});
+var children = branch.getChildList("");
 
 for (var child of children) {
   var prefComponents =  child.split(".");
@@ -60,14 +60,14 @@ for (let pref of prefs) {
 var listmanager = Cc["@mozilla.org/url-classifier/listmanager;1"].
                   getService(Ci.nsIUrlListManager);
 
-let googleKey = SpecialPowers.Services.urlFormatter.formatURL("%GOOGLE_API_KEY%").trim();
+let googleKey = SpecialPowers.Services.urlFormatter.formatURL("%GOOGLE_SAFEBROWSING_API_KEY%").trim();
 
 for (let list of lists) {
   if (!list)
     continue;
 
   // For lists having a provider, it should have a correct gethash url
-  // For lists without a provider, for example, test-malware-simple, it should not
+  // For lists without a provider, for example, moztest-malware-simple, it should not
   // have a gethash url.
   var url = listmanager.getGethashUrl(list);
   var index = listsWithProvider.indexOf(list);
@@ -75,7 +75,7 @@ for (let list of lists) {
     let provider = listsToProvider[index];
     let pref = "browser.safebrowsing.provider." + provider + ".gethashURL";
     if ((provider == "google" || provider == "google4") &&
-        (!googleKey || googleKey == "no-google-api-key")) {
+        (!googleKey || googleKey == "no-google-safebrowsing-api-key")) {
       is(url, "", "getHash url of " + list + " should be empty");
     } else {
       is(url, SpecialPowers.getCharPref(pref), list + " matches its gethash url");

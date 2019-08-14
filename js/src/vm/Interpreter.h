@@ -289,16 +289,6 @@ inline void RunState::setReturnValue(const Value& v) {
 
 extern bool RunScript(JSContext* cx, RunState& state);
 
-extern bool StrictlyEqual(JSContext* cx, HandleValue lval, HandleValue rval,
-                          bool* equal);
-
-extern bool LooselyEqual(JSContext* cx, HandleValue lval, HandleValue rval,
-                         bool* equal);
-
-/* === except that NaN is the same as NaN and -0 is not the same as +0. */
-extern bool SameValue(JSContext* cx, HandleValue v1, HandleValue v2,
-                      bool* same);
-
 extern JSType TypeOfObject(JSObject* obj);
 
 extern JSType TypeOfValue(const Value& v);
@@ -319,19 +309,94 @@ extern void UnwindAllEnvironmentsInFrame(JSContext* cx, EnvironmentIter& ei);
 extern jsbytecode* UnwindEnvironmentToTryPc(JSScript* script,
                                             const JSTryNote* tn);
 
-template <class StackDepthOp>
+template <class TryNoteFilter>
 class MOZ_STACK_CLASS TryNoteIter {
   RootedScript script_;
   uint32_t pcOffset_;
-  StackDepthOp getStackDepth_;
+  TryNoteFilter isTryNoteValid_;
 
   const JSTryNote* tn_;
   const JSTryNote* tnEnd_;
 
   void settle() {
     for (; tn_ != tnEnd_; ++tn_) {
-      /* If pc is out of range, try the next one. */
-      if (pcOffset_ - tn_->start >= tn_->length) {
+      if (!pcInRange()) {
+        continue;
+      }
+
+      /*  Try notes cannot be disjoint. That is, we can't have
+       *  multiple notes with disjoint pc ranges jumping to the same
+       *  catch block. This interacts awkwardly with for-of loops, in
+       *  which calls to IteratorClose emitted due to abnormal
+       *  completion (break, throw, return) are emitted inline, at the
+       *  source location of the break, throw, or return
+       *  statement. For example:
+       *
+       *      for (x of iter) {
+       *        try { return; } catch (e) { }
+       *      }
+       *
+       *  From the try-note nesting's perspective, the IteratorClose
+       *  resulting from |return| is covered by the inner try, when it
+       *  should not be. If IteratorClose throws, we don't want to
+       *  catch it here.
+       *
+       *  To make this work, we use JSTRY_FOR_OF_ITERCLOSE try-notes,
+       *  which cover the range of the abnormal completion. When
+       *  looking up trynotes, a for-of iterclose note indicates that
+       *  the enclosing for-of has just been terminated. As a result,
+       *  trynotes within that for-of are no longer active. When we
+       *  see a for-of-iterclose, we skip ahead in the trynotes list
+       *  until we see the matching for-of.
+       *
+       *  Breaking out of multiple levels of for-of at once is handled
+       *  using nested FOR_OF_ITERCLOSE try-notes. Consider this code:
+       *
+       *  try {
+       *    loop: for (i of first) {
+       *      <A>
+       *      for (j of second) {
+       *        <B>
+       *        break loop; // <C1/2>
+       *      }
+       *    }
+       *  } catch {...}
+       *
+       *  Here is the mapping from various PCs to try-notes that we
+       *  want to return:
+       *
+       *        A     B     C1     C2
+       *        |     |     |      |
+       *        |     |     |  [---|---]     ForOfIterClose (outer)
+       *        |     | [---|------|---]     ForOfIterClose (inner)
+       *        |  [--X-----|------|----]    ForOf (inner)
+       *    [---X-----------X------|-----]   ForOf (outer)
+       *  [------------------------X------]  TryCatch
+       *
+       *  - At A, we find the outer for-of.
+       *  - At B, we find the inner for-of.
+       *  - At C1, we find one FOR_OF_ITERCLOSE, skip past one FOR_OF, and find
+       *    the outer for-of. (This occurs if an exception is thrown while
+       *    closing the inner iterator.)
+       *  - At C2, we find two FOR_OF_ITERCLOSE, skip past two FOR_OF, and reach
+       *    the outer try-catch. (This occurs if an exception is thrown while
+       *    closing the outer iterator.)
+       */
+      if (tn_->kind == JSTRY_FOR_OF_ITERCLOSE) {
+        uint32_t iterCloseDepth = 1;
+        do {
+          ++tn_;
+          MOZ_ASSERT(tn_ != tnEnd_);
+          if (pcInRange()) {
+            if (tn_->kind == JSTRY_FOR_OF_ITERCLOSE) {
+              iterCloseDepth++;
+            } else if (tn_->kind == JSTRY_FOR_OF) {
+              iterCloseDepth--;
+            }
+          }
+        } while (iterCloseDepth > 0);
+
+        // Advance to trynote following the enclosing for-of.
         continue;
       }
 
@@ -354,18 +419,18 @@ class MOZ_STACK_CLASS TryNoteIter {
        * depth exceeding the current one and this condition is what we use to
        * filter them out.
        */
-      if (tn_->stackDepth <= getStackDepth_()) {
-        break;
+      if (tn_ == tnEnd_ || isTryNoteValid_(tn_)) {
+        return;
       }
     }
   }
 
  public:
   TryNoteIter(JSContext* cx, JSScript* script, jsbytecode* pc,
-              StackDepthOp getStackDepth)
+              TryNoteFilter isTryNoteValid)
       : script_(cx, script),
         pcOffset_(script->pcToOffset(pc)),
-        getStackDepth_(getStackDepth) {
+        isTryNoteValid_(isTryNoteValid) {
     if (script->hasTrynotes()) {
       // NOTE: The Span is a temporary so we can't use begin()/end()
       // here or the iterator will outlive the span.
@@ -383,6 +448,14 @@ class MOZ_STACK_CLASS TryNoteIter {
     settle();
   }
 
+  bool pcInRange() const {
+    // This checks both ends of the range at once
+    // because unsigned integers wrap on underflow.
+    uint32_t offset = pcOffset_;
+    uint32_t start = tn_->start;
+    uint32_t length = tn_->length;
+    return offset - start < length;
+  }
   bool done() const { return tn_ == tnEnd_; }
   const JSTryNote* operator*() const { return tn_; }
 };
@@ -392,21 +465,18 @@ bool HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame,
 
 /************************************************************************/
 
-bool Throw(JSContext* cx, HandleValue v);
+bool ThrowOperation(JSContext* cx, HandleValue v);
 
 bool GetProperty(JSContext* cx, HandleValue value, HandlePropertyName name,
                  MutableHandleValue vp);
+
+bool GetValueProperty(JSContext* cx, HandleValue value, HandlePropertyName name,
+                      MutableHandleValue vp);
 
 JSObject* Lambda(JSContext* cx, HandleFunction fun, HandleObject parent);
 
 JSObject* LambdaArrow(JSContext* cx, HandleFunction fun, HandleObject parent,
                       HandleValue newTargetv);
-
-bool GetElement(JSContext* cx, MutableHandleValue lref, HandleValue rref,
-                MutableHandleValue res);
-
-bool CallElement(JSContext* cx, MutableHandleValue lref, HandleValue rref,
-                 MutableHandleValue res);
 
 bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                       HandleValue value, bool strict);
@@ -414,8 +484,9 @@ bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                       HandleValue value, bool strict, HandleScript script,
                       jsbytecode* pc);
 
-bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
-                      HandleValue value, HandleValue receiver, bool strict);
+bool SetObjectElementWithReceiver(JSContext* cx, HandleObject obj,
+                                  HandleValue index, HandleValue value,
+                                  HandleValue receiver, bool strict);
 bool SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
                       HandleValue value, HandleValue receiver, bool strict,
                       HandleScript script, jsbytecode* pc);
@@ -454,12 +525,30 @@ template <bool strict>
 bool DeleteElementJit(JSContext* cx, HandleValue val, HandleValue index,
                       bool* bv);
 
+JSObject* BindVarOperation(JSContext* cx, JSObject* envChain);
+
+bool DefVarOperation(JSContext* cx, HandleObject envChain, HandleScript script,
+                     jsbytecode* pc);
+
+bool DefLexicalOperation(JSContext* cx, HandleObject envChain,
+                         HandleScript script, jsbytecode* pc);
+
 bool DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
                      HandleFunction funArg);
+
+JSObject* SingletonObjectLiteralOperation(JSContext* cx, HandleScript script,
+                                          jsbytecode* pc);
+
+JSObject* ImportMetaOperation(JSContext* cx, HandleScript script);
+
+JSObject* BuiltinProtoOperation(JSContext* cx, jsbytecode* pc);
 
 bool ThrowMsgOperation(JSContext* cx, const unsigned errorNum);
 
 bool GetAndClearException(JSContext* cx, MutableHandleValue res);
+
+bool GetAndClearExceptionAndStack(JSContext* cx, MutableHandleValue res,
+                                  MutableHandleSavedFrame stack);
 
 bool DeleteNameOperation(JSContext* cx, HandlePropertyName name,
                          HandleObject scopeObj, MutableHandleValue res);
@@ -467,21 +556,18 @@ bool DeleteNameOperation(JSContext* cx, HandlePropertyName name,
 bool ImplicitThisOperation(JSContext* cx, HandleObject scopeObj,
                            HandlePropertyName name, MutableHandleValue res);
 
-bool RunOnceScriptPrologue(JSContext* cx, HandleScript script);
-
-bool InitGetterSetterOperation(JSContext* cx, jsbytecode* pc, HandleObject obj,
-                               HandleId id, HandleObject val);
-
-bool InitGetterSetterOperation(JSContext* cx, jsbytecode* pc, HandleObject obj,
-                               HandlePropertyName name, HandleObject val);
+bool InitPropGetterSetterOperation(JSContext* cx, jsbytecode* pc,
+                                   HandleObject obj, HandlePropertyName name,
+                                   HandleObject val);
 
 unsigned GetInitDataPropAttrs(JSOp op);
 
 bool EnterWithOperation(JSContext* cx, AbstractFramePtr frame, HandleValue val,
                         Handle<WithScope*> scope);
 
-bool InitGetterSetterOperation(JSContext* cx, jsbytecode* pc, HandleObject obj,
-                               HandleValue idval, HandleObject val);
+bool InitElemGetterSetterOperation(JSContext* cx, jsbytecode* pc,
+                                   HandleObject obj, HandleValue idval,
+                                   HandleObject val);
 
 bool SpreadCallOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
                          HandleValue thisv, HandleValue callee, HandleValue arr,
@@ -494,6 +580,7 @@ JSObject* NewObjectOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
 
 JSObject* NewObjectOperationWithTemplate(JSContext* cx,
                                          HandleObject templateObject);
+JSObject* CreateThisWithTemplate(JSContext* cx, HandleObject templateObject);
 
 JSObject* NewArrayOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
                             uint32_t length,
@@ -501,6 +588,13 @@ JSObject* NewArrayOperation(JSContext* cx, HandleScript script, jsbytecode* pc,
 
 JSObject* NewArrayOperationWithTemplate(JSContext* cx,
                                         HandleObject templateObject);
+
+ArrayObject* NewArrayCopyOnWriteOperation(JSContext* cx, HandleScript script,
+                                          jsbytecode* pc);
+
+MOZ_MUST_USE bool GetImportOperation(JSContext* cx, HandleObject envChain,
+                                     HandleScript script, jsbytecode* pc,
+                                     MutableHandleValue vp);
 
 void ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
                                HandleId id);

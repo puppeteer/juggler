@@ -28,6 +28,7 @@ FTP_PLATFORMS_PER_BOUNCER_PLATFORM = {
     'osx': 'mac',
     'win': 'win32',
     'win64': 'win64',
+    'win64-aarch64': 'win64-aarch64'
 }
 
 # :lang is interpolated by bouncer at runtime
@@ -74,6 +75,7 @@ CONFIG_PER_BOUNCER_PRODUCT = {
             'osx': '{pretty_product}%20{version}.dmg',
             'win': '{pretty_product}%20Setup%20{version}.exe',
             'win64': '{pretty_product}%20Setup%20{version}.exe',
+            'win64-aarch64': '{pretty_product}%20Setup%20{version}.exe',
         },
     },
     'partial-mar': {
@@ -92,10 +94,13 @@ CONFIG_PER_BOUNCER_PRODUCT = {
     },
     'stub-installer': {
         'name_postfix': '-stub',
-        'path_template': RELEASES_PATH_TEMPLATE,
+        # We currently have a sole win32 stub installer that is to be used
+        # in all windows platforms to toggle between full installers
+        'path_template': RELEASES_PATH_TEMPLATE.replace('{ftp_platform}', 'win32'),
         'file_names': {
             'win': '{pretty_product}%20Installer.exe',
             'win64': '{pretty_product}%20Installer.exe',
+            'win64-aarch64': '{pretty_product}%20Installer.exe',
         },
     },
     'msi': {
@@ -126,7 +131,8 @@ def make_task_worker(config, jobs):
             **{'release-level': config.params.release_level()}
         )
         resolve_keyed_by(
-            job, 'bouncer-products', item_name=job['name'], project=config.params['project']
+            job, 'bouncer-products', item_name=job['name'],
+            **{'release-type': config.params['release_type']}
         )
 
         # No need to filter out ja-JP-mac, we need to upload both; but we do
@@ -182,7 +188,6 @@ partial-related entry for "{}"'.format(job['name']))
         ): {
             'options': {
                 'add_locales': craft_add_locales(product),
-                'check_uptake': craft_check_uptake(bouncer_product),
                 'ssl_only': craft_ssl_only(bouncer_product, project),
             },
             'paths_per_bouncer_platform': craft_paths_per_bouncer_platform(
@@ -222,7 +227,7 @@ def craft_paths_per_bouncer_platform(product, bouncer_product, bouncer_platforms
             version=current_version,
             build_number=current_build_number,
             update_folder='update/' if '-mar' in bouncer_product else '',
-            ftp_platform=_craft_ftp_platform(bouncer_platform, file_name),
+            ftp_platform=FTP_PLATFORMS_PER_BOUNCER_PLATFORM[bouncer_platform],
             file=file_name,
         )
 
@@ -233,16 +238,6 @@ def craft_paths_per_bouncer_platform(product, bouncer_product, bouncer_platforms
 
 def _craft_ftp_product(product):
     return 'mobile' if product == 'fennec' else product.lower()
-
-
-def _craft_ftp_platform(bouncer_platform, file_name):
-    ftp_platform = FTP_PLATFORMS_PER_BOUNCER_PLATFORM[bouncer_platform]
-    # We currently have a sole win32 stub installer that is to be used
-    # in both windows platforms to toggle between full installers
-    if 'Installer.exe' in file_name and ftp_platform == 'win64':
-        return 'win32'
-
-    return ftp_platform
 
 
 def _craft_filename_product(product):
@@ -273,10 +268,6 @@ def craft_bouncer_product_name(product, bouncer_product, current_version,
     return '{product}-{version}{postfix}'.format(
         product=product.capitalize(), version=current_version, postfix=postfix
     )
-
-
-def craft_check_uptake(bouncer_product):
-    return bouncer_product != 'complete-mar-candidates'
 
 
 def craft_ssl_only(bouncer_product, project):

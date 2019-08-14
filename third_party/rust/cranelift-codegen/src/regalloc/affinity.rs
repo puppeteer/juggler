@@ -8,9 +8,9 @@
 //! subclass. This is just a hint, and the register allocator is allowed to pick a register from a
 //! larger register class instead.
 
-use ir::{AbiParam, ArgumentLoc};
-use isa::{ConstraintKind, OperandConstraint, RegClassIndex, RegInfo, TargetIsa};
-use std::fmt;
+use crate::ir::{AbiParam, ArgumentLoc};
+use crate::isa::{ConstraintKind, OperandConstraint, RegClassIndex, RegInfo, TargetIsa};
+use core::fmt;
 
 /// Preferred register allocation for an SSA value.
 #[derive(Clone, Copy, Debug)]
@@ -48,7 +48,7 @@ impl Affinity {
     }
 
     /// Create an affinity that matches an ABI argument for `isa`.
-    pub fn abi(arg: &AbiParam, isa: &TargetIsa) -> Self {
+    pub fn abi(arg: &AbiParam, isa: &dyn TargetIsa) -> Self {
         match arg.location {
             ArgumentLoc::Unassigned => Affinity::Unassigned,
             ArgumentLoc::Reg(_) => Affinity::Reg(isa.regclass_for_abi_type(arg.value_type).into()),

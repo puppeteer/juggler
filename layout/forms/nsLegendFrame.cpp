@@ -6,6 +6,7 @@
 
 #include "nsLegendFrame.h"
 
+#include "mozilla/PresShell.h"
 #include "ComputedStyle.h"
 #include "nsIContent.h"
 #include "nsGenericHTMLElement.h"
@@ -18,14 +19,15 @@
 
 using namespace mozilla;
 
-nsIFrame* NS_NewLegendFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
+nsIFrame* NS_NewLegendFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
 #ifdef DEBUG
   const nsStyleDisplay* disp = aStyle->StyleDisplay();
   NS_ASSERTION(!disp->IsAbsolutelyPositionedStyle() && !disp->IsFloatingStyle(),
                "Legends should not be positioned and should not float");
 #endif
 
-  nsIFrame* f = new (aPresShell) nsLegendFrame(aStyle);
+  nsIFrame* f =
+      new (aPresShell) nsLegendFrame(aStyle, aPresShell->GetPresContext());
   f->AddStateBits(NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
   return f;
 }

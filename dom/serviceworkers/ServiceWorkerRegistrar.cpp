@@ -9,6 +9,7 @@
 #include "mozilla/dom/DOMException.h"
 #include "mozilla/net/MozURL.h"
 
+#include "mozIThirdPartyUtil.h"
 #include "nsIEventTarget.h"
 #include "nsIInputStream.h"
 #include "nsILineInputStream.h"
@@ -53,7 +54,8 @@ static const uint32_t kInvalidGeneration = static_cast<uint32_t>(-1);
 
 StaticRefPtr<ServiceWorkerRegistrar> gServiceWorkerRegistrar;
 
-nsresult GetOrigin(const nsACString& aURL, nsACString& aOrigin) {
+nsresult GetOriginAndBaseDomain(const nsACString& aURL, nsACString& aOrigin,
+                                nsACString& aBaseDomain) {
   RefPtr<net::MozURL> url;
   nsresult rv = net::MozURL::Init(getter_AddRefs(url), aURL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -61,6 +63,12 @@ nsresult GetOrigin(const nsACString& aURL, nsACString& aOrigin) {
   }
 
   url->Origin(aOrigin);
+
+  rv = url->BaseDomain(aBaseDomain);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
   return NS_OK;
 }
 
@@ -106,13 +114,14 @@ nsresult CreatePrincipalInfo(nsILineInputStream* aStream,
   }
 
   nsCString origin;
-  rv = GetOrigin(aEntry->scope(), origin);
+  nsCString baseDomain;
+  rv = GetOriginAndBaseDomain(aEntry->scope(), origin, baseDomain);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  aEntry->principal() =
-      mozilla::ipc::ContentPrincipalInfo(attrs, origin, aEntry->scope());
+  aEntry->principal() = mozilla::ipc::ContentPrincipalInfo(
+      attrs, origin, aEntry->scope(), Nothing(), baseDomain);
 
   return NS_OK;
 }
@@ -139,8 +148,8 @@ void ServiceWorkerRegistrar::Initialize() {
   }
 }
 
-/* static */ already_AddRefed<ServiceWorkerRegistrar>
-ServiceWorkerRegistrar::Get() {
+/* static */
+already_AddRefed<ServiceWorkerRegistrar> ServiceWorkerRegistrar::Get() {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   MOZ_ASSERT(gServiceWorkerRegistrar);

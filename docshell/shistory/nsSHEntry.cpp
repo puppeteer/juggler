@@ -8,6 +8,7 @@
 
 #include <algorithm>
 
+#include "nsIContentSecurityPolicy.h"
 #include "nsDocShellEditorData.h"
 #include "nsDocShellLoadTypes.h"
 #include "nsIContentViewer.h"
@@ -20,6 +21,10 @@
 #include "nsSHistory.h"
 
 #include "mozilla/net/ReferrerPolicy.h"
+#include "mozilla/Logging.h"
+#include "nsIReferrerInfo.h"
+
+extern mozilla::LazyLogModule gPageCacheLog;
 
 namespace dom = mozilla::dom;
 
@@ -27,7 +32,6 @@ static uint32_t gEntryID = 0;
 
 nsSHEntry::nsSHEntry()
     : mShared(new nsSHEntryShared()),
-      mReferrerPolicy(mozilla::net::RP_Unset),
       mLoadType(0),
       mID(gEntryID++),
       mScrollPositionX(0),
@@ -45,8 +49,7 @@ nsSHEntry::nsSHEntry(const nsSHEntry& aOther)
       mURI(aOther.mURI),
       mOriginalURI(aOther.mOriginalURI),
       mResultPrincipalURI(aOther.mResultPrincipalURI),
-      mReferrerURI(aOther.mReferrerURI),
-      mReferrerPolicy(aOther.mReferrerPolicy),
+      mReferrerInfo(aOther.mReferrerInfo),
       mTitle(aOther.mTitle),
       mPostData(aOther.mPostData),
       mLoadType(0)  // XXX why not copy?
@@ -156,27 +159,15 @@ nsSHEntry::SetLoadReplace(bool aLoadReplace) {
 }
 
 NS_IMETHODIMP
-nsSHEntry::GetReferrerURI(nsIURI** aReferrerURI) {
-  *aReferrerURI = mReferrerURI;
-  NS_IF_ADDREF(*aReferrerURI);
+nsSHEntry::GetReferrerInfo(nsIReferrerInfo** aReferrerInfo) {
+  *aReferrerInfo = mReferrerInfo;
+  NS_IF_ADDREF(*aReferrerInfo);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsSHEntry::SetReferrerURI(nsIURI* aReferrerURI) {
-  mReferrerURI = aReferrerURI;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsSHEntry::GetReferrerPolicy(uint32_t* aReferrerPolicy) {
-  *aReferrerPolicy = mReferrerPolicy;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsSHEntry::SetReferrerPolicy(uint32_t aReferrerPolicy) {
-  mReferrerPolicy = aReferrerPolicy;
+nsSHEntry::SetReferrerInfo(nsIReferrerInfo* aReferrerInfo) {
+  mReferrerInfo = aReferrerInfo;
   return NS_OK;
 }
 
@@ -189,38 +180,6 @@ NS_IMETHODIMP
 nsSHEntry::GetContentViewer(nsIContentViewer** aResult) {
   *aResult = mShared->mContentViewer;
   NS_IF_ADDREF(*aResult);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsSHEntry::GetAnyContentViewer(nsISHEntry** aOwnerEntry,
-                               nsIContentViewer** aResult) {
-  // Find a content viewer in the root node or any of its children,
-  // assuming that there is only one content viewer total in any one
-  // nsSHEntry tree
-  nsCOMPtr<nsIContentViewer> viewer = GetContentViewer();
-  viewer.forget(aResult);
-  if (*aResult) {
-#ifdef DEBUG_PAGE_CACHE
-    printf("Found content viewer\n");
-#endif
-    *aOwnerEntry = this;
-    NS_ADDREF(*aOwnerEntry);
-    return NS_OK;
-  }
-  // The root SHEntry doesn't have a ContentViewer, so check child nodes
-  for (int32_t i = 0; i < mChildren.Count(); i++) {
-    nsISHEntry* child = mChildren[i];
-    if (child) {
-#ifdef DEBUG_PAGE_CACHE
-      printf("Evaluating SHEntry child %d\n", i);
-#endif
-      child->GetAnyContentViewer(aOwnerEntry, aResult);
-      if (*aResult) {
-        return NS_OK;
-      }
-    }
-  }
   return NS_OK;
 }
 
@@ -397,7 +356,9 @@ nsSHEntry::Create(nsIURI* aURI, const nsAString& aTitle,
                   nsILayoutHistoryState* aLayoutHistoryState,
                   uint32_t aCacheKey, const nsACString& aContentType,
                   nsIPrincipal* aTriggeringPrincipal,
-                  nsIPrincipal* aPrincipalToInherit, const nsID& aDocShellID,
+                  nsIPrincipal* aPrincipalToInherit,
+                  nsIPrincipal* aStoragePrincipalToInherit,
+                  nsIContentSecurityPolicy* aCsp, const nsID& aDocShellID,
                   bool aDynamicCreation) {
   MOZ_ASSERT(
       aTriggeringPrincipal,
@@ -414,6 +375,8 @@ nsSHEntry::Create(nsIURI* aURI, const nsAString& aTitle,
   mShared->mContentType = aContentType;
   mShared->mTriggeringPrincipal = aTriggeringPrincipal;
   mShared->mPrincipalToInherit = aPrincipalToInherit;
+  mShared->mStoragePrincipalToInherit = aStoragePrincipalToInherit;
+  mShared->mCsp = aCsp;
   mShared->mDocShellID = aDocShellID;
   mShared->mDynamicallyCreated = aDynamicCreation;
 
@@ -505,6 +468,33 @@ nsSHEntry::GetPrincipalToInherit(nsIPrincipal** aPrincipalToInherit) {
 NS_IMETHODIMP
 nsSHEntry::SetPrincipalToInherit(nsIPrincipal* aPrincipalToInherit) {
   mShared->mPrincipalToInherit = aPrincipalToInherit;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::GetStoragePrincipalToInherit(
+    nsIPrincipal** aStoragePrincipalToInherit) {
+  NS_IF_ADDREF(*aStoragePrincipalToInherit =
+                   mShared->mStoragePrincipalToInherit);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::SetStoragePrincipalToInherit(
+    nsIPrincipal* aStoragePrincipalToInherit) {
+  mShared->mStoragePrincipalToInherit = aStoragePrincipalToInherit;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::GetCsp(nsIContentSecurityPolicy** aCsp) {
+  NS_IF_ADDREF(*aCsp = mShared->mCsp);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsSHEntry::SetCsp(nsIContentSecurityPolicy* aCsp) {
+  mShared->mCsp = aCsp;
   return NS_OK;
 }
 

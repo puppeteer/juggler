@@ -9,19 +9,21 @@
 
 // Keep others in (case-insensitive) order:
 #include "gfxContext.h"
-#include "SVGObserverUtils.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/SVGMarkerElement.h"
 #include "SVGGeometryElement.h"
 #include "SVGGeometryFrame.h"
+#include "SVGObserverUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
-nsContainerFrame* NS_NewSVGMarkerFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewSVGMarkerFrame(PresShell* aPresShell,
                                        ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGMarkerFrame(aStyle);
+  return new (aPresShell)
+      nsSVGMarkerFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGMarkerFrame)
@@ -88,7 +90,7 @@ static nsIFrame* GetAnonymousChildFrame(nsIFrame* aFrame) {
 void nsSVGMarkerFrame::PaintMark(gfxContext& aContext,
                                  const gfxMatrix& aToMarkedFrameUserSpace,
                                  SVGGeometryFrame* aMarkedFrame,
-                                 const nsSVGMark& aMark, float aStrokeWidth,
+                                 const SVGMark& aMark, float aStrokeWidth,
                                  imgDrawingParams& aImgParams) {
   // If the flag is set when we get here, it means this marker frame
   // has already been used painting the current mark, and the document
@@ -104,7 +106,7 @@ void nsSVGMarkerFrame::PaintMark(gfxContext& aContext,
     return;
   }
 
-  const nsSVGViewBoxRect viewBox = marker->GetViewBoxRect();
+  const SVGViewBox viewBox = marker->GetViewBox();
 
   if (viewBox.width <= 0.0f || viewBox.height <= 0.0f) {
     // We must disable rendering if the viewBox width or height are zero.
@@ -136,14 +138,15 @@ void nsSVGMarkerFrame::PaintMark(gfxContext& aContext,
 
 SVGBBox nsSVGMarkerFrame::GetMarkBBoxContribution(
     const Matrix& aToBBoxUserspace, uint32_t aFlags,
-    SVGGeometryFrame* aMarkedFrame, const nsSVGMark& aMark,
-    float aStrokeWidth) {
+    SVGGeometryFrame* aMarkedFrame, const SVGMark& aMark, float aStrokeWidth) {
   SVGBBox bbox;
 
   // If the flag is set when we get here, it means this marker frame
   // has already been used in calculating the current mark bbox, and
   // the document has a marker reference loop.
-  if (mInUse) return bbox;
+  if (mInUse) {
+    return bbox;
+  }
 
   AutoMarkerReferencer markerRef(this, aMarkedFrame);
 
@@ -152,7 +155,7 @@ SVGBBox nsSVGMarkerFrame::GetMarkBBoxContribution(
     return bbox;
   }
 
-  const nsSVGViewBoxRect viewBox = content->GetViewBoxRect();
+  const SVGViewBox viewBox = content->GetViewBox();
 
   if (viewBox.width <= 0.0f || viewBox.height <= 0.0f) {
     return bbox;
@@ -197,7 +200,7 @@ nsSVGMarkerFrame::AutoMarkerReferencer::AutoMarkerReferencer(
   mFrame->mMarkedFrame = aMarkedFrame;
 
   SVGViewportElement* ctx =
-      static_cast<nsSVGElement*>(aMarkedFrame->GetContent())->GetCtx();
+      static_cast<SVGElement*>(aMarkedFrame->GetContent())->GetCtx();
   mFrame->SetParentCoordCtxProvider(ctx);
 }
 
@@ -211,9 +214,10 @@ nsSVGMarkerFrame::AutoMarkerReferencer::~AutoMarkerReferencer() {
 //----------------------------------------------------------------------
 // Implementation of nsSVGMarkerAnonChildFrame
 
-nsContainerFrame* NS_NewSVGMarkerAnonChildFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewSVGMarkerAnonChildFrame(PresShell* aPresShell,
                                                 ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGMarkerAnonChildFrame(aStyle);
+  return new (aPresShell)
+      nsSVGMarkerAnonChildFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGMarkerAnonChildFrame)

@@ -27,6 +27,7 @@ add_task(async function test_setup() {
   do_get_profile();
   loadAddonManager("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
   finishAddonManagerStartup();
+  fakeIntlReady();
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();
 
@@ -45,15 +46,23 @@ add_task(async function test_sendTelemetryShutsDownWithinReasonableTimeout() {
   Services.prefs.setBoolPref("toolkit.asyncshutdown.testing", true);
   // Reducing the max delay for waitiing on phases to complete from 1 minute
   // (standard) to 20 seconds to avoid blocking the tests in case of misbehavior.
-  Services.prefs.setIntPref("toolkit.asyncshutdown.crash_timeout", CRASH_TIMEOUT_MS);
+  Services.prefs.setIntPref(
+    "toolkit.asyncshutdown.crash_timeout",
+    CRASH_TIMEOUT_MS
+  );
 
   let httpServer = new HttpServer();
   httpServer.registerPrefixHandler("/", contentHandler);
   httpServer.start(-1);
 
   await TelemetryController.testSetup();
-  TelemetrySend.setServer("http://localhost:" + httpServer.identity.primaryPort);
-  let submissionPromise = TelemetryController.submitExternalPing("test-ping-type", {});
+  TelemetrySend.setServer(
+    "http://localhost:" + httpServer.identity.primaryPort
+  );
+  let submissionPromise = TelemetryController.submitExternalPing(
+    "test-ping-type",
+    {}
+  );
 
   // Trigger the AsyncShutdown phase TelemetryController hangs off.
   AsyncShutdown.profileBeforeChange._trigger();

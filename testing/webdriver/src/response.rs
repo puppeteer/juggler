@@ -5,6 +5,7 @@ use serde_json::Value;
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged, remote = "Self")]
 pub enum WebDriverResponse {
+    NewWindow(NewWindowResponse),
     CloseWindow(CloseWindowResponse),
     Cookie(CookieResponse),
     Cookies(CookiesResponse),
@@ -30,6 +31,13 @@ impl Serialize for WebDriverResponse {
 
         Wrapper { value: self }.serialize(serializer)
     }
+}
+
+#[derive(Debug, PartialEq, Serialize)]
+pub struct NewWindowResponse {
+    pub handle: String,
+    #[serde(rename = "type")]
+    pub typ: String,
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -84,14 +92,14 @@ impl NewSessionResponse {
 
 #[derive(Debug, PartialEq, Serialize)]
 pub struct TimeoutsResponse {
-    pub script: u64,
+    pub script: Option<u64>,
     #[serde(rename = "pageLoad")]
     pub page_load: u64,
     pub implicit: u64,
 }
 
 impl TimeoutsResponse {
-    pub fn new(script: u64, page_load: u64, implicit: u64) -> TimeoutsResponse {
+    pub fn new(script: Option<u64>, page_load: u64, implicit: u64) -> TimeoutsResponse {
         TimeoutsResponse {
             script,
             page_load,
@@ -134,6 +142,17 @@ mod tests {
     use serde_json;
 
     #[test]
+    fn test_json_new_window_response() {
+        let json = r#"{"value":{"handle":"42","type":"window"}}"#;
+        let data = WebDriverResponse::NewWindow(NewWindowResponse {
+            handle: "42".into(),
+            typ: "window".into(),
+        });
+
+        check_serialize(&json, &data);
+    }
+
+    #[test]
     fn test_json_close_window_response() {
         let json = r#"{"value":["1234"]}"#;
         let data = WebDriverResponse::CloseWindow(CloseWindowResponse(vec!["1234".into()]));
@@ -159,7 +178,7 @@ mod tests {
             domain: Some("foo.bar".into()),
             expiry: Some(Date(123)),
             secure: true,
-            httpOnly: false,
+            http_only: false,
         }));
 
         check_serialize(&json, &data);
@@ -182,7 +201,7 @@ mod tests {
             domain: None,
             expiry: None,
             secure: true,
-            httpOnly: false,
+            http_only: false,
         }));
 
         check_serialize(&json, &data);
@@ -205,7 +224,7 @@ mod tests {
             domain: None,
             expiry: None,
             secure: true,
-            httpOnly: false,
+            http_only: false,
         }]));
 
         check_serialize(&json, &data);
@@ -260,7 +279,15 @@ mod tests {
     #[test]
     fn test_json_timeouts_response() {
         let json = r#"{"value":{"script":1,"pageLoad":2,"implicit":3}}"#;
-        let data = WebDriverResponse::Timeouts(TimeoutsResponse::new(1, 2, 3));
+        let data = WebDriverResponse::Timeouts(TimeoutsResponse::new(Some(1), 2, 3));
+
+        check_serialize(&json, &data);
+    }
+
+    #[test]
+    fn test_json_timeouts_response_with_null_script_timeout() {
+        let json = r#"{"value":{"script":null,"pageLoad":2,"implicit":3}}"#;
+        let data = WebDriverResponse::Timeouts(TimeoutsResponse::new(None, 2, 3));
 
         check_serialize(&json, &data);
     }

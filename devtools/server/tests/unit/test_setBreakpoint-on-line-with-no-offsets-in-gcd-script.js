@@ -1,59 +1,55 @@
 "use strict";
 
-var SOURCE_URL = getFileUrl("setBreakpoint-on-line-with-no-offsets-in-gcd-script.js");
+const SOURCE_URL = getFileUrl(
+  "setBreakpoint-on-line-with-no-offsets-in-gcd-script.js"
+);
 
-function run_test() {
-  return (async function() {
-    do_test_pending();
-
-    const global = createTestGlobal("test");
-    loadSubScriptWithOptions(SOURCE_URL, {target: global, ignoreCache: true});
-    Cu.forceGC(); Cu.forceGC(); Cu.forceGC();
-
-    const { createRootActor } = require("xpcshell-test/testactors");
-    DebuggerServer.setRootActor(createRootActor);
-    DebuggerServer.init(() => true);
-    DebuggerServer.addTestGlobal(global);
-
-    const client = new DebuggerClient(DebuggerServer.connectPipe());
-    await connect(client);
-
-    const { tabs } = await listTabs(client);
-    const tab = findTab(tabs, "test");
-    const [, targetFront] = await attachTarget(client, tab);
-    const [, threadClient] = await attachThread(targetFront);
-    await resume(threadClient);
-
-    const { sources } = await getSources(threadClient);
-    const source = findSource(sources, SOURCE_URL);
-    const sourceClient = threadClient.source(source);
-
-    const location = { line: 7 };
-    let [packet, breakpointClient] = await setBreakpoint(sourceClient, location);
-    Assert.ok(packet.isPending);
-    Assert.equal(false, "actualLocation" in packet);
-
-    packet = await executeOnNextTickAndWaitForPause(function() {
-      reload(targetFront).then(function() {
-        loadSubScriptWithOptions(SOURCE_URL, {target: global, ignoreCache: true});
+add_task(
+  threadClientTest(
+    async ({ threadClient, debuggee, targetFront }) => {
+      const promise = waitForNewSource(threadClient, SOURCE_URL);
+      loadSubScriptWithOptions(SOURCE_URL, {
+        target: debuggee,
+        ignoreCache: true,
       });
-    }, client);
-    Assert.equal(packet.type, "paused");
-    const why = packet.why;
-    Assert.equal(why.type, "breakpoint");
-    Assert.equal(why.actors.length, 1);
-    Assert.equal(why.actors[0], breakpointClient.actor);
-    const frame = packet.frame;
-    const where = frame.where;
-    Assert.equal(where.source.actor, source.actor);
-    Assert.equal(where.line, 8);
-    const variables = frame.environment.bindings.variables;
-    Assert.equal(variables.a.value, 1);
-    Assert.equal(variables.c.value.type, "undefined");
+      Cu.forceGC();
+      Cu.forceGC();
+      Cu.forceGC();
 
-    await resume(threadClient);
-    await close(client);
+      const { source } = await promise;
+      const sourceFront = threadClient.source(source);
 
-    do_test_finished();
-  })();
-}
+      const location = { line: 7 };
+      let [packet, breakpointClient] = await setBreakpoint(
+        sourceFront,
+        location
+      );
+      Assert.ok(packet.isPending);
+      Assert.equal(false, "actualLocation" in packet);
+
+      packet = await executeOnNextTickAndWaitForPause(function() {
+        reload(targetFront).then(function() {
+          loadSubScriptWithOptions(SOURCE_URL, {
+            target: debuggee,
+            ignoreCache: true,
+          });
+        });
+      }, threadClient);
+      Assert.equal(packet.type, "paused");
+      const why = packet.why;
+      Assert.equal(why.type, "breakpoint");
+      Assert.equal(why.actors.length, 1);
+      Assert.equal(why.actors[0], breakpointClient.actor);
+      const frame = packet.frame;
+      const where = frame.where;
+      Assert.equal(where.actor, source.actor);
+      Assert.equal(where.line, 8);
+      const variables = frame.environment.bindings.variables;
+      Assert.equal(variables.a.value, 1);
+      Assert.equal(variables.c.value.type, "undefined");
+
+      await resume(threadClient);
+    },
+    { doNotRunWorker: true }
+  )
+);

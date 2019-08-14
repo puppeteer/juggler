@@ -24,6 +24,7 @@
 #include "builtin/intl/ScopedICUObject.h"
 #include "js/CharacterEncoding.h"
 #include "js/Class.h"
+#include "js/PropertySpec.h"
 #include "js/StableStringChars.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
@@ -518,8 +519,8 @@ static const JSFunctionSpec intl_static_methods[] = {
  * Initializes the Intl Object and its standard built-in properties.
  * Spec: ECMAScript Internationalization API Specification, 8.0, 8.1
  */
-/* static */ bool GlobalObject::initIntlObject(JSContext* cx,
-                                               Handle<GlobalObject*> global) {
+/* static */
+bool GlobalObject::initIntlObject(JSContext* cx, Handle<GlobalObject*> global) {
   RootedObject proto(cx, GlobalObject::getOrCreateObjectPrototype(cx, global));
   if (!proto) {
     return false;

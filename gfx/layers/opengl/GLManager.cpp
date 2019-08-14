@@ -5,8 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "GLManager.h"
-#include "CompositorOGL.h"              // for CompositorOGL
-#include "GLContext.h"                  // for GLContext
+#include "CompositorOGL.h"  // for CompositorOGL
+#include "GLContext.h"      // for GLContext
+#include "OGLShaderProgram.h"
 #include "mozilla/Attributes.h"         // for override
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/Compositor.h"  // for Compositor
@@ -24,25 +25,24 @@ class GLManagerCompositor : public GLManager {
   explicit GLManagerCompositor(CompositorOGL* aCompositor)
       : mImpl(aCompositor) {}
 
-  virtual GLContext* gl() const override { return mImpl->gl(); }
+  GLContext* gl() const override { return mImpl->gl(); }
 
-  virtual void ActivateProgram(ShaderProgramOGL* aProg) override {
+  void ActivateProgram(ShaderProgramOGL* aProg) override {
     mImpl->ActivateProgram(aProg);
   }
 
-  virtual ShaderProgramOGL* GetProgram(GLenum aTarget,
-                                       gfx::SurfaceFormat aFormat) override {
+  ShaderProgramOGL* GetProgram(GLenum aTarget,
+                               gfx::SurfaceFormat aFormat) override {
     ShaderConfigOGL config = ShaderConfigFromTargetAndFormat(aTarget, aFormat);
     return mImpl->GetShaderProgramFor(config);
   }
 
-  virtual const gfx::Matrix4x4& GetProjMatrix() const override {
+  const gfx::Matrix4x4& GetProjMatrix() const override {
     return mImpl->GetProjMatrix();
   }
 
-  virtual void BindAndDrawQuad(ShaderProgramOGL* aProg,
-                               const gfx::Rect& aLayerRect,
-                               const gfx::Rect& aTextureRect) override {
+  void BindAndDrawQuad(ShaderProgramOGL* aProg, const gfx::Rect& aLayerRect,
+                       const gfx::Rect& aTextureRect) override {
     mImpl->BindAndDrawQuad(aProg, aLayerRect, aTextureRect);
   }
 
@@ -50,8 +50,8 @@ class GLManagerCompositor : public GLManager {
   RefPtr<CompositorOGL> mImpl;
 };
 
-/* static */ GLManager* GLManager::CreateGLManager(
-    LayerManagerComposite* aManager) {
+/* static */
+GLManager* GLManager::CreateGLManager(LayerManagerComposite* aManager) {
   if (aManager && aManager->GetCompositor()->GetBackendType() ==
                       LayersBackend::LAYERS_OPENGL) {
     return new GLManagerCompositor(

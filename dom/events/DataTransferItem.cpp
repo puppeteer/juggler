@@ -7,6 +7,7 @@
 #include "DataTransferItem.h"
 #include "DataTransferItemList.h"
 
+#include "mozilla/Attributes.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/DataTransferItemBinding.h"
@@ -137,37 +138,39 @@ void DataTransferItem::FillInExternalData() {
     format = kURLDataMime;
   }
 
-  nsCOMPtr<nsITransferable> trans =
-      do_CreateInstance("@mozilla.org/widget/transferable;1");
-  if (NS_WARN_IF(!trans)) {
-    return;
-  }
-
-  trans->Init(nullptr);
-  trans->AddDataFlavor(format);
-
-  if (mDataTransfer->GetEventMessage() == ePaste) {
-    MOZ_ASSERT(mIndex == 0, "index in clipboard must be 0");
-
-    nsCOMPtr<nsIClipboard> clipboard =
-        do_GetService("@mozilla.org/widget/clipboard;1");
-    if (!clipboard || mDataTransfer->ClipboardType() < 0) {
+  nsCOMPtr<nsITransferable> trans = mDataTransfer->GetTransferable();
+  if (!trans) {
+    trans = do_CreateInstance("@mozilla.org/widget/transferable;1");
+    if (NS_WARN_IF(!trans)) {
       return;
     }
 
-    nsresult rv = clipboard->GetData(trans, mDataTransfer->ClipboardType());
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
-    }
-  } else {
-    nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
-    if (!dragSession) {
-      return;
-    }
+    trans->Init(nullptr);
+    trans->AddDataFlavor(format);
 
-    nsresult rv = dragSession->GetData(trans, mIndex);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return;
+    if (mDataTransfer->GetEventMessage() == ePaste) {
+      MOZ_ASSERT(mIndex == 0, "index in clipboard must be 0");
+
+      nsCOMPtr<nsIClipboard> clipboard =
+          do_GetService("@mozilla.org/widget/clipboard;1");
+      if (!clipboard || mDataTransfer->ClipboardType() < 0) {
+        return;
+      }
+
+      nsresult rv = clipboard->GetData(trans, mDataTransfer->ClipboardType());
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return;
+      }
+    } else {
+      nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
+      if (!dragSession) {
+        return;
+      }
+
+      nsresult rv = dragSession->GetData(trans, mIndex);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return;
+      }
     }
   }
 
@@ -428,6 +431,9 @@ void DataTransferItem::GetAsString(FunctionStringCallback* aCallback,
           mCallback(aCallback),
           mStringData(aStringData) {}
 
+    // MOZ_CAN_RUN_SCRIPT_BOUNDARY until runnables are opted into
+    // MOZ_CAN_RUN_SCRIPT.  See bug 1535398.
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY
     NS_IMETHOD Run() override {
       ErrorResult rv;
       mCallback->Call(mStringData, rv);
@@ -436,7 +442,7 @@ void DataTransferItem::GetAsString(FunctionStringCallback* aCallback,
     }
 
    private:
-    RefPtr<FunctionStringCallback> mCallback;
+    const RefPtr<FunctionStringCallback> mCallback;
     nsString mStringData;
   };
 
@@ -500,7 +506,8 @@ already_AddRefed<nsIVariant> DataTransferItem::Data(nsIPrincipal* aPrincipal,
 
   bool checkItemPrincipal = mDataTransfer->IsCrossDomainSubFrameDrop() ||
                             (mDataTransfer->GetEventMessage() != eDrop &&
-                             mDataTransfer->GetEventMessage() != ePaste);
+                             mDataTransfer->GetEventMessage() != ePaste &&
+                             mDataTransfer->GetEventMessage() != eEditorInput);
 
   // Check if the caller is allowed to access the drag data. Callers with
   // chrome privileges can always read the data. During the

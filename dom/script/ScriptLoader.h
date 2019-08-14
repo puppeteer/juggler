@@ -16,17 +16,18 @@
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
 #include "nsICacheInfoChannel.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIIncrementalStreamLoader.h"
 #include "nsURIHashKey.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/dom/ScriptLoadRequest.h"
 #include "mozilla/dom/SRIMetadata.h"
 #include "mozilla/dom/SRICheck.h"
-#include "mozilla/Maybe.h"
+#include "mozilla/MaybeOneOf.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/net/ReferrerPolicy.h"
 #include "mozilla/StaticPrefs.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 #include "mozilla/Vector.h"
 
 class nsIURI;
@@ -42,6 +43,7 @@ namespace mozilla {
 namespace dom {
 
 class AutoJSAPI;
+class LoadedScript;
 class ModuleLoadRequest;
 class ModuleScript;
 class ScriptLoadHandler;
@@ -78,7 +80,7 @@ class ScriptLoader final : public nsISupports {
   friend class AutoCurrentScriptUpdater;
 
  public:
-  explicit ScriptLoader(nsIDocument* aDocument);
+  explicit ScriptLoader(Document* aDocument);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS(ScriptLoader)
@@ -180,30 +182,35 @@ class ScriptLoader final : public nsISupports {
   }
 
   /**
-   * Convert the given buffer to a UTF-16 string.
+   * Convert the given buffer to a UTF-16 string.  If the buffer begins with a
+   * BOM, it is interpreted as that encoding; otherwise the first of |aChannel|,
+   * |aHintCharset|, or |aDocument| that provides a recognized encoding is used,
+   * or Windows-1252 if none of them do.
+   *
+   * Encoding errors in the buffer are converted to replacement characters, so
+   * allocation failure is the only way this function can fail.
+   *
    * @param aChannel     Channel corresponding to the data. May be null.
    * @param aData        The data to convert
    * @param aLength      Length of the data
-   * @param aHintCharset Hint for the character set (e.g., from a charset
-   *                     attribute). May be the empty string.
-   * @param aDocument    Document which the data is loaded for. Must not be
-   *                     null.
-   * @param aBufOut      [out] char16_t array allocated by ConvertToUTF16 and
-   *                     containing data converted to unicode.  Caller must
-   *                     js_free() this data when no longer needed.
+   * @param aHintCharset Character set hint (e.g., from a charset attribute).
+   * @param aDocument    Document which the data is loaded for. May be null.
+   * @param aBufOut      [out] fresh char16_t array containing data converted to
+   *                     Unicode.  Caller must js_free() this data when finished
+   *                     with it.
    * @param aLengthOut   [out] Length of array returned in aBufOut in number
    *                     of char16_t code units.
    */
   static nsresult ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
                                  uint32_t aLength,
                                  const nsAString& aHintCharset,
-                                 nsIDocument* aDocument, char16_t*& aBufOut,
+                                 Document* aDocument, char16_t*& aBufOut,
                                  size_t& aLengthOut);
 
   static inline nsresult ConvertToUTF16(nsIChannel* aChannel,
                                         const uint8_t* aData, uint32_t aLength,
                                         const nsAString& aHintCharset,
-                                        nsIDocument* aDocument,
+                                        Document* aDocument,
                                         JS::UniqueTwoByteChars& aBufOut,
                                         size_t& aLengthOut) {
     char16_t* bufOut;
@@ -214,6 +221,31 @@ class ScriptLoader final : public nsISupports {
     }
     return rv;
   };
+
+  /**
+   * Convert the given buffer to a UTF-8 string.  If the buffer begins with a
+   * BOM, it is interpreted as that encoding; otherwise the first of |aChannel|,
+   * |aHintCharset|, or |aDocument| that provides a recognized encoding is used,
+   * or Windows-1252 if none of them do.
+   *
+   * Encoding errors in the buffer are converted to replacement characters, so
+   * allocation failure is the only way this function can fail.
+   *
+   * @param aChannel     Channel corresponding to the data. May be null.
+   * @param aData        The data to convert
+   * @param aLength      Length of the data
+   * @param aHintCharset Character set hint (e.g., from a charset attribute).
+   * @param aDocument    Document which the data is loaded for. May be null.
+   * @param aBufOut      [out] fresh Utf8Unit array containing data converted to
+   *                     Unicode.  Caller must js_free() this data when finished
+   *                     with it.
+   * @param aLengthOut   [out] Length of array returned in aBufOut in UTF-8 code
+   *                     units (i.e. in bytes).
+   */
+  static nsresult ConvertToUTF8(nsIChannel* aChannel, const uint8_t* aData,
+                                uint32_t aLength, const nsAString& aHintCharset,
+                                Document* aDocument, Utf8Unit*& aBufOut,
+                                size_t& aLengthOut);
 
   /**
    * Handle the completion of a stream.  This is called by the
@@ -310,8 +342,40 @@ class ScriptLoader final : public nsISupports {
    */
   void Destroy() { GiveUpBytecodeEncoding(); }
 
+  /**
+   * Implement the HostResolveImportedModule abstract operation.
+   *
+   * Resolve a module specifier string and look this up in the module
+   * map, returning the result. This is only called for previously
+   * loaded modules and always succeeds.
+   *
+   * @param aReferencingPrivate A JS::Value which is either undefined
+   *                            or contains a LoadedScript private pointer.
+   * @param aSpecifier The module specifier.
+   * @param aModuleOut This is set to the module found.
+   */
+  static void ResolveImportedModule(JSContext* aCx,
+                                    JS::Handle<JS::Value> aReferencingPrivate,
+                                    JS::Handle<JSString*> aSpecifier,
+                                    JS::MutableHandle<JSObject*> aModuleOut);
+
+  void StartDynamicImport(ModuleLoadRequest* aRequest);
+  void FinishDynamicImport(ModuleLoadRequest* aRequest, nsresult aResult);
+  void FinishDynamicImport(JSContext* aCx, ModuleLoadRequest* aRequest,
+                           nsresult aResult);
+
+  /*
+   * Get the currently active script. This is used as the initiating script when
+   * executing timeout handler scripts.
+   */
+  static LoadedScript* GetActiveScript(JSContext* aCx);
+
+  Document* GetDocument() const { return mDocument; }
+
  private:
   virtual ~ScriptLoader();
+
+  void EnsureModuleHooksInitialized();
 
   ScriptLoadRequest* CreateLoadRequest(
       ScriptKind aKind, nsIURI* aURI, nsIScriptElement* aElement,
@@ -350,9 +414,18 @@ class ScriptLoader final : public nsISupports {
   /**
    * Helper function to check the content policy for a given request.
    */
-  static nsresult CheckContentPolicy(nsIDocument* aDocument,
-                                     nsISupports* aContext, nsIURI* aURI,
-                                     const nsAString& aType, bool aIsPreLoad);
+  static nsresult CheckContentPolicy(Document* aDocument, nsISupports* aContext,
+                                     const nsAString& aType,
+                                     ScriptLoadRequest* aRequest);
+
+  /**
+   * Helper function to determine whether an about: page loads a chrome: URI.
+   * Please note that this function only returns true if:
+   *   * the about: page uses a CodeBasePrincipal with scheme about:
+   *   * the about: page is not linkable from content
+   *     (e.g. the function will return false for about:blank or about:srcdoc)
+   */
+  static bool IsAboutPageLoadingChromeURI(ScriptLoadRequest* aRequest);
 
   /**
    * Start a load for aRequest's URI.
@@ -367,14 +440,6 @@ class ScriptLoader final : public nsISupports {
   nsresult RestartLoad(ScriptLoadRequest* aRequest);
 
   void HandleLoadError(ScriptLoadRequest* aRequest, nsresult aResult);
-
-  static bool BinASTEncodingEnabled() {
-#ifdef JS_BUILD_BINAST
-    return StaticPrefs::dom_script_loader_binast_encoding_enabled();
-#else
-    return false;
-#endif
-  }
 
   /**
    * Process any pending requests asynchronously (i.e. off an event) if there
@@ -415,10 +480,12 @@ class ScriptLoader final : public nsISupports {
 
   void ReportErrorToConsole(ScriptLoadRequest* aRequest,
                             nsresult aResult) const;
+  void ReportPreloadErrorsToConsole(ScriptLoadRequest* aRequest);
 
   nsresult AttemptAsyncScriptCompile(ScriptLoadRequest* aRequest,
                                      bool* aCouldCompileOut);
   nsresult ProcessRequest(ScriptLoadRequest* aRequest);
+  void ProcessDynamicImport(ModuleLoadRequest* aRequest);
   nsresult CompileOffThreadOrProcessRequest(ScriptLoadRequest* aRequest);
   void FireScriptAvailable(nsresult aResult, ScriptLoadRequest* aRequest);
   void FireScriptEvaluated(nsresult aResult, ScriptLoadRequest* aRequest);
@@ -465,8 +532,14 @@ class ScriptLoader final : public nsISupports {
 
   void MaybeMoveToLoadedList(ScriptLoadRequest* aRequest);
 
-  mozilla::Maybe<JS::SourceText<char16_t>> GetScriptSource(
-      JSContext* aCx, ScriptLoadRequest* aRequest);
+  using MaybeSourceText =
+      mozilla::MaybeOneOf<JS::SourceText<char16_t>, JS::SourceText<Utf8Unit>>;
+
+  // Get source text.  On success |aMaybeSource| will contain either UTF-8 or
+  // UTF-16 source; on failure it will remain in its initial state.
+  MOZ_MUST_USE nsresult GetScriptSource(JSContext* aCx,
+                                        ScriptLoadRequest* aRequest,
+                                        MaybeSourceText* aMaybeSource);
 
   void SetModuleFetchStarted(ModuleLoadRequest* aRequest);
   void SetModuleFetchFinishedAndResumeWaitingRequests(
@@ -475,7 +548,7 @@ class ScriptLoader final : public nsISupports {
   bool IsFetchingModule(ModuleLoadRequest* aRequest) const;
 
   bool ModuleMapContainsURL(nsIURI* aURL) const;
-  RefPtr<mozilla::GenericPromise> WaitForModuleFetch(nsIURI* aURL);
+  RefPtr<mozilla::GenericNonExclusivePromise> WaitForModuleFetch(nsIURI* aURL);
   ModuleScript* GetFetchedModule(nsIURI* aURL) const;
 
   friend JSObject* HostResolveImportedModule(
@@ -497,10 +570,12 @@ class ScriptLoader final : public nsISupports {
   RefPtr<mozilla::GenericPromise> StartFetchingModuleAndDependencies(
       ModuleLoadRequest* aParent, nsIURI* aURI);
 
-  nsresult AssociateSourceElementsForModuleTree(JSContext* aCx,
-                                                ModuleLoadRequest* aRequest);
+  nsresult InitDebuggerDataForModuleTree(JSContext* aCx,
+                                         ModuleLoadRequest* aRequest);
 
-  nsIDocument* mDocument;  // [WEAK]
+  void RunScriptWhenSafe(ScriptLoadRequest* aRequest);
+
+  Document* mDocument;  // [WEAK]
   nsCOMArray<nsIScriptLoaderObserver> mObservers;
   ScriptLoadRequestList mNonAsyncExternalScriptInsertedRequests;
   // mLoadingAsyncRequests holds async requests while they're loading; when they
@@ -509,6 +584,7 @@ class ScriptLoader final : public nsISupports {
   ScriptLoadRequestList mLoadedAsyncRequests;
   ScriptLoadRequestList mDeferRequests;
   ScriptLoadRequestList mXSLTRequests;
+  ScriptLoadRequestList mDynamicImportRequests;
   RefPtr<ScriptLoadRequest> mParserBlockingRequest;
 
   // List of script load request that are holding a buffer which has to be saved
@@ -553,20 +629,21 @@ class ScriptLoader final : public nsISupports {
   bool mGiveUpEncoding;
 
   // Module map
-  nsRefPtrHashtable<nsURIHashKey, mozilla::GenericPromise::Private>
+  nsRefPtrHashtable<nsURIHashKey, mozilla::GenericNonExclusivePromise::Private>
       mFetchingModules;
   nsRefPtrHashtable<nsURIHashKey, ModuleScript> mFetchedModules;
 
   nsCOMPtr<nsIConsoleReportCollector> mReporter;
 
   // Logging
+ public:
   static LazyLogModule gCspPRLog;
   static LazyLogModule gScriptLoaderLog;
 };
 
 class nsAutoScriptLoaderDisabler {
  public:
-  explicit nsAutoScriptLoaderDisabler(nsIDocument* aDoc) {
+  explicit nsAutoScriptLoaderDisabler(Document* aDoc) {
     mLoader = aDoc->ScriptLoader();
     mWasEnabled = mLoader->GetEnabled();
     if (mWasEnabled) {

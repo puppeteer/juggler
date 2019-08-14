@@ -35,16 +35,19 @@ function details(state = getInitialState(), action) {
 function onUpdateDetails(state, action) {
   const { accessible, response, error } = action;
   if (error) {
-    console.warn("Error fetching DOMNode for accessible", accessible, error);
-    return state;
+    if (accessible.actorID) {
+      console.warn(`Error fetching accessible details: `, accessible, error);
+    }
+
+    return getInitialState();
   }
 
-  const [ DOMNode, relationObjects ] = response;
+  const [DOMNode, relationObjects, audit] = response;
   const relations = {};
   relationObjects.forEach(({ type, targets }) => {
     relations[type] = targets.length === 1 ? targets[0] : targets;
   });
-  return { accessible, DOMNode, relations };
+  return { accessible, DOMNode, relations, audit };
 }
 
 exports.details = details;

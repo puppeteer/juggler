@@ -8,7 +8,9 @@
 use super::CustomIdent;
 use crate::counter_style::{parse_counter_style_name, Symbols};
 use crate::parser::{Parse, ParserContext};
+use crate::Zero;
 use cssparser::Parser;
+use std::ops::Add;
 use style_traits::{KeywordsCollectFn, ParseError};
 use style_traits::{SpecifiedValueInfo, StyleParseErrorKind};
 
@@ -24,8 +26,6 @@ pub mod easing;
 pub mod effects;
 pub mod flex;
 pub mod font;
-#[cfg(feature = "gecko")]
-pub mod gecko;
 pub mod grid;
 pub mod image;
 pub mod length;
@@ -41,7 +41,19 @@ pub mod url;
 // https://drafts.csswg.org/css-counter-styles/#typedef-symbols-type
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
-#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, Parse, PartialEq, ToComputedValue, ToCss)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    Parse,
+    PartialEq,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
 pub enum SymbolsType {
     Cyclic,
     Numeric,
@@ -83,7 +95,7 @@ impl SymbolsType {
 /// Since wherever <counter-style> is used, 'none' is a valid value as
 /// well, we combine them into one type to make code simpler.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
-#[derive(Clone, Debug, Eq, PartialEq, ToComputedValue, ToCss)]
+#[derive(Clone, Debug, Eq, PartialEq, ToComputedValue, ToCss, ToResolvedValue, ToShmem)]
 pub enum CounterStyleOrNone {
     /// `none`
     None,
@@ -91,7 +103,12 @@ pub enum CounterStyleOrNone {
     Name(CustomIdent),
     /// `symbols()`
     #[css(function)]
-    Symbols(SymbolsType, Symbols),
+    Symbols(#[css(skip_if = "is_symbolic")] SymbolsType, Symbols),
+}
+
+#[inline]
+fn is_symbolic(symbols_type: &SymbolsType) -> bool {
+    *symbols_type == SymbolsType::Symbolic
 }
 
 impl CounterStyleOrNone {
@@ -117,27 +134,25 @@ impl Parse for CounterStyleOrNone {
         if input.try(|i| i.expect_ident_matching("none")).is_ok() {
             return Ok(CounterStyleOrNone::None);
         }
-        if input.try(|i| i.expect_function_matching("symbols")).is_ok() {
-            return input.parse_nested_block(|input| {
-                let symbols_type = input
-                    .try(|i| SymbolsType::parse(i))
-                    .unwrap_or(SymbolsType::Symbolic);
-                let symbols = Symbols::parse(context, input)?;
-                // There must be at least two symbols for alphabetic or
-                // numeric system.
-                if (symbols_type == SymbolsType::Alphabetic ||
-                    symbols_type == SymbolsType::Numeric) && symbols.0.len() < 2
-                {
-                    return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
-                }
-                // Identifier is not allowed in symbols() function.
-                if symbols.0.iter().any(|sym| !sym.is_allowed_in_symbols()) {
-                    return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
-                }
-                Ok(CounterStyleOrNone::Symbols(symbols_type, symbols))
-            });
-        }
-        Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError))
+        input.expect_function_matching("symbols")?;
+        input.parse_nested_block(|input| {
+            let symbols_type = input
+                .try(SymbolsType::parse)
+                .unwrap_or(SymbolsType::Symbolic);
+            let symbols = Symbols::parse(context, input)?;
+            // There must be at least two symbols for alphabetic or
+            // numeric system.
+            if (symbols_type == SymbolsType::Alphabetic || symbols_type == SymbolsType::Numeric) &&
+                symbols.0.len() < 2
+            {
+                return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
+            }
+            // Identifier is not allowed in symbols() function.
+            if symbols.0.iter().any(|sym| !sym.is_allowed_in_symbols()) {
+                return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
+            }
+            Ok(CounterStyleOrNone::Symbols(symbols_type, symbols))
+        })
     }
 }
 
@@ -173,8 +188,29 @@ impl SpecifiedValueInfo for CounterStyleOrNone {
     ToAnimatedZero,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
+#[repr(transparent)]
 pub struct NonNegative<T>(pub T);
+
+impl<T: Add<Output = T>> Add<NonNegative<T>> for NonNegative<T> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        NonNegative(self.0 + other.0)
+    }
+}
+
+impl<T: Zero> Zero for NonNegative<T> {
+    fn is_zero(&self) -> bool {
+        self.0.is_zero()
+    }
+
+    fn zero() -> Self {
+        NonNegative(T::zero())
+    }
+}
 
 /// A wrapper of greater-than-or-equal-to-one values.
 #[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
@@ -191,5 +227,54 @@ pub struct NonNegative<T>(pub T);
     ToAnimatedZero,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
 pub struct GreaterThanOrEqualToOne<T>(pub T);
+
+/// A wrapper of values between zero and one.
+#[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    Hash,
+    MallocSizeOf,
+    PartialEq,
+    PartialOrd,
+    SpecifiedValueInfo,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
+#[repr(transparent)]
+pub struct ZeroToOne<T>(pub T);
+
+/// A clip rect for clip and image-region
+#[allow(missing_docs)]
+#[derive(
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedValue,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
+#[css(function = "rect", comma)]
+pub struct ClipRect<LengthOrAuto> {
+    pub top: LengthOrAuto,
+    pub right: LengthOrAuto,
+    pub bottom: LengthOrAuto,
+    pub left: LengthOrAuto,
+}

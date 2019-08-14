@@ -1,30 +1,30 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-ChromeUtils.defineModuleGetter(this, "OfflineAppCacheHelper",
-                               "resource://gre/modules/offlineAppCache.jsm");
-ChromeUtils.defineModuleGetter(this, "ServiceWorkerCleanUp",
-                               "resource://gre/modules/ServiceWorkerCleanUp.jsm");
-
-var EXPORTED_SYMBOLS = [
-  "SiteDataManager",
-];
+var EXPORTED_SYMBOLS = ["SiteDataManager"];
 
 XPCOMUtils.defineLazyGetter(this, "gStringBundle", function() {
-  return Services.strings.createBundle("chrome://browser/locale/siteData.properties");
+  return Services.strings.createBundle(
+    "chrome://browser/locale/siteData.properties"
+  );
 });
 
 XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
-  return Services.strings.createBundle("chrome://branding/locale/brand.properties");
+  return Services.strings.createBundle(
+    "chrome://branding/locale/brand.properties"
+  );
 });
 
 var SiteDataManager = {
-
   _qms: Services.qms,
 
-  _appCache: Cc["@mozilla.org/network/application-cache-service;1"].getService(Ci.nsIApplicationCacheService),
+  _appCache: Cc["@mozilla.org/network/application-cache-service;1"].getService(
+    Ci.nsIApplicationCacheService
+  ),
 
   // A Map of sites and their disk usage according to Quota Manager and appcache
   // Key is host (group sites based on host across scheme, port, origin atttributes).
@@ -59,8 +59,10 @@ var SiteDataManager = {
     try {
       result = Services.eTLD.getBaseDomainFromHost(host);
     } catch (e) {
-      if (e.result == Cr.NS_ERROR_HOST_IS_IP_ADDRESS ||
-          e.result == Cr.NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS) {
+      if (
+        e.result == Cr.NS_ERROR_HOST_IS_IP_ADDRESS ||
+        e.result == Cr.NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS
+      ) {
         // For these 2 expected errors, just take the host as the result.
         // - NS_ERROR_HOST_IS_IP_ADDRESS: the host is in ipv4/ipv6.
         // - NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS: not enough domain parts to extract.
@@ -140,8 +142,9 @@ var SiteDataManager = {
               // An non-persistent-storage site with 0 byte quota usage is redundant for us so skip it.
               continue;
             }
-            let principal =
-              Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(item.origin);
+            let principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(
+              item.origin
+            );
             let uri = principal.URI;
             if (uri.scheme == "http" || uri.scheme == "https") {
               let site = this._getOrInsertSite(uri.host);
@@ -209,7 +212,9 @@ var SiteDataManager = {
         // A site with 0 byte appcache usage is redundant for us so skip it.
         continue;
       }
-      let principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(group);
+      let principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(
+        group
+      );
       let uri = principal.URI;
       let site = this._getOrInsertSite(uri.host);
       if (!site.principals.some(p => p.origin == principal.origin)) {
@@ -300,13 +305,22 @@ var SiteDataManager = {
         continue;
       }
       removals.add(originNoSuffix);
-      promises.push(new Promise(resolve => {
-        // We are clearing *All* across OAs so need to ensure a principal without suffix here,
-        // or the call of `clearStoragesForPrincipal` would fail.
-        principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(originNoSuffix);
-        let request = this._qms.clearStoragesForPrincipal(principal, null, null, true);
-        request.callback = resolve;
-      }));
+      promises.push(
+        new Promise(resolve => {
+          // We are clearing *All* across OAs so need to ensure a principal without suffix here,
+          // or the call of `clearStoragesForPrincipal` would fail.
+          principal = Services.scriptSecurityManager.createCodebasePrincipalFromOrigin(
+            originNoSuffix
+          );
+          let request = this._qms.clearStoragesForPrincipal(
+            principal,
+            null,
+            null,
+            true
+          );
+          request.callback = resolve;
+        })
+      );
     }
     return Promise.all(promises);
   },
@@ -320,9 +334,33 @@ var SiteDataManager = {
   _removeCookies(site) {
     for (let cookie of site.cookies) {
       Services.cookies.remove(
-        cookie.host, cookie.name, cookie.path, false, cookie.originAttributes);
+        cookie.host,
+        cookie.name,
+        cookie.path,
+        false,
+        cookie.originAttributes
+      );
     }
     site.cookies = [];
+  },
+
+  // Returns a list of permissions from the permission manager that
+  // we consider part of "site data and cookies".
+  _getDeletablePermissions() {
+    let perms = [];
+    let enumerator = Services.perms.enumerator;
+
+    while (enumerator.hasMoreElements()) {
+      let permission = enumerator.getNext().QueryInterface(Ci.nsIPermission);
+      if (
+        permission.type == "persistent-storage" ||
+        permission.type == "storage-access"
+      ) {
+        perms.push(permission);
+      }
+    }
+
+    return perms;
   },
 
   /**
@@ -333,33 +371,33 @@ var SiteDataManager = {
    *          manager has been updated.
    */
   async remove(hosts) {
-    // Make sure we have up-to-date information.
-    await this._getQuotaUsage();
-    this._updateAppCache();
-
-    let unknownHost = "";
+    let perms = this._getDeletablePermissions();
     let promises = [];
     for (let host of hosts) {
-      let site = this._sites.get(host);
-      if (site) {
-        // Clear localstorage.
-        Services.obs.notifyObservers(null, "browser:purge-domain-data", host);
-        this._removePermission(site);
-        this._removeAppCache(site);
-        this._removeCookies(site);
-        promises.push(ServiceWorkerCleanUp.removeFromHost(host));
-        promises.push(this._removeQuotaUsage(site));
-      } else {
-        unknownHost = host;
-        break;
+      promises.push(
+        new Promise(function(resolve) {
+          Services.clearData.deleteDataFromHost(
+            host,
+            true,
+            Ci.nsIClearDataService.CLEAR_COOKIES |
+              Ci.nsIClearDataService.CLEAR_DOM_STORAGES |
+              Ci.nsIClearDataService.CLEAR_SECURITY_SETTINGS |
+              Ci.nsIClearDataService.CLEAR_PLUGIN_DATA |
+              Ci.nsIClearDataService.CLEAR_EME |
+              Ci.nsIClearDataService.CLEAR_ALL_CACHES,
+            resolve
+          );
+        })
+      );
+
+      for (let perm of perms) {
+        if (Services.eTLD.hasRootDomain(perm.principal.URI.host, host)) {
+          Services.perms.removePermission(perm);
+        }
       }
     }
 
     await Promise.all(promises);
-
-    if (unknownHost) {
-      throw `SiteDataManager: removing unknown site of ${unknownHost}`;
-    }
 
     return this.updateSites();
   },
@@ -380,7 +418,12 @@ var SiteDataManager = {
         allowed: false,
       };
       let features = "centerscreen,chrome,modal,resizable=no";
-      win.openDialog("chrome://browser/content/preferences/siteDataRemoveSelected.xul", "", features, args);
+      win.openDialog(
+        "chrome://browser/content/preferences/siteDataRemoveSelected.xul",
+        "",
+        features,
+        args
+      );
       return args.allowed;
     }
 
@@ -390,11 +433,22 @@ var SiteDataManager = {
       Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1 +
       Services.prompt.BUTTON_POS_0_DEFAULT;
     let title = gStringBundle.GetStringFromName("clearSiteDataPromptTitle");
-    let text = gStringBundle.formatStringFromName("clearSiteDataPromptText", [brandName], 1);
+    let text = gStringBundle.formatStringFromName("clearSiteDataPromptText", [
+      brandName,
+    ]);
     let btn0Label = gStringBundle.GetStringFromName("clearSiteDataNow");
 
     let result = Services.prompt.confirmEx(
-      win, title, text, flags, btn0Label, null, null, null, {});
+      win,
+      title,
+      text,
+      flags,
+      btn0Label,
+      null,
+      null,
+      null,
+      {}
+    );
     return result == 0;
   },
 
@@ -404,54 +458,46 @@ var SiteDataManager = {
    * @returns a Promise that resolves when the data is cleared.
    */
   async removeAll() {
-    this.removeCache();
+    await this.removeCache();
     return this.removeSiteData();
   },
 
   /**
-   * Clears the entire network cache.
+   * Clears all caches.
+   *
+   * @returns a Promise that resolves when the data is cleared.
    */
   removeCache() {
-    Services.cache2.clear();
+    return new Promise(function(resolve) {
+      Services.clearData.deleteData(
+        Ci.nsIClearDataService.CLEAR_ALL_CACHES,
+        resolve
+      );
+    });
   },
 
   /**
-   * Clears all site data, which currently means
-   *   - Cookies
-   *   - AppCache
-   *   - LocalStorage
-   *   - ServiceWorkers
-   *   - Quota Managed Storage
-   *   - persistent-storage permissions
+   * Clears all site data, but not cache, because the UI offers
+   * that functionality separately.
    *
-   * @returns a Promise that resolves with the cache size on disk in bytes
+   * @returns a Promise that resolves when the data is cleared.
    */
   async removeSiteData() {
-    // LocalStorage
-    Services.obs.notifyObservers(null, "extension:purge-localStorage");
+    await new Promise(function(resolve) {
+      Services.clearData.deleteData(
+        Ci.nsIClearDataService.CLEAR_COOKIES |
+          Ci.nsIClearDataService.CLEAR_DOM_STORAGES |
+          Ci.nsIClearDataService.CLEAR_SECURITY_SETTINGS |
+          Ci.nsIClearDataService.CLEAR_EME |
+          Ci.nsIClearDataService.CLEAR_PLUGIN_DATA,
+        resolve
+      );
+    });
 
-    Services.cookies.removeAll();
-    OfflineAppCacheHelper.clear();
-
-    await ServiceWorkerCleanUp.removeAll();
-
-    // Refresh sites using quota usage again.
-    // This is for the case:
-    //   1. User goes to the about:preferences Site Data section.
-    //   2. With the about:preferences opened, user visits another website.
-    //   3. The website saves to quota usage, like indexedDB.
-    //   4. User goes back to the Site Data section and commands to clear all site data.
-    // For this case, we should refresh the site list so not to miss the website in the step 3.
-    // We don't do "Clear All" on the quota manager like the cookie, appcache, http cache above
-    // because that would clear browser data as well too,
-    // see https://bugzilla.mozilla.org/show_bug.cgi?id=1312361#c9
-    this._sites.clear();
-    await this._getQuotaUsage();
-    let promises = [];
-    for (let site of this._sites.values()) {
-      this._removePermission(site);
-      promises.push(this._removeQuotaUsage(site));
+    for (let permission of this._getDeletablePermissions()) {
+      Services.perms.removePermission(permission);
     }
-    return Promise.all(promises).then(() => this.updateSites());
+
+    return this.updateSites();
   },
 };

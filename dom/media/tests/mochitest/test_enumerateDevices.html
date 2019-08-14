@@ -38,9 +38,7 @@ var validateDevice = ({kind, label, deviceId, groupId}) => {
   ok(kind == "videoinput" || kind == "audioinput", "Known device kind");
   is(deviceId.length, 44, "deviceId length id as expected for Firefox");
   ok(label.length !== undefined, "Device label: " + label);
-
-  // TODO: s/todo_// once Bug 1213453 is fixed.
-  todo_isnot(groupId, "", "groupId must be present.");
+  isnot(groupId, "", "groupId must be present.");
 }
 
 runTest(async () => {
@@ -84,7 +82,7 @@ runTest(async () => {
   // Check that deviceIds are stable for same origin and differ across origins.
 
   const path = "/tests/dom/media/tests/mochitest/test_enumerateDevices_iframe.html";
-  const origins = ["http://mochi.test:8888", "http://test1.mochi.test:8888"];
+  const origins = ["https://example.com", "https://test1.example.com"];
   info(window.location);
 
   let haveDevicesMap = new Promise(resolve => {

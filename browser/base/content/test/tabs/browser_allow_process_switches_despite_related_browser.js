@@ -21,13 +21,20 @@ add_task(async function() {
 
   let dummyPage = getChromeDir(getResolvedURI(gTestPath));
   dummyPage.append(DUMMY_FILE);
+  dummyPage.normalize();
   const uriString = Services.io.newFileURI(dummyPage).spec;
 
   let viewSourceBrowser = viewSourceTab.linkedBrowser;
-  let promiseLoad =
-    BrowserTestUtils.browserLoaded(viewSourceBrowser, false, uriString);
+  let promiseLoad = BrowserTestUtils.browserLoaded(
+    viewSourceBrowser,
+    false,
+    uriString
+  );
   BrowserTestUtils.loadURI(viewSourceBrowser, uriString);
   let href = await promiseLoad;
-  is(href, uriString,
-    "Check file:// URI loads in a browser that was previously for view-source");
+  is(
+    href,
+    uriString,
+    "Check file:// URI loads in a browser that was previously for view-source"
+  );
 });

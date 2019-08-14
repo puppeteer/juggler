@@ -31,6 +31,7 @@
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIThreadRetargetableStreamListener.h"
+#include "nsIChildChannel.h"
 
 #include "nsString.h"
 #include "nsThreadUtils.h"
@@ -38,7 +39,7 @@
 #include "nsError.h"
 
 #include "nsICategoryManager.h"
-#include "nsCExternalHandlerService.h"  // contains contractids for the helper app service
+#include "nsCExternalHandlerService.h"
 
 #include "nsIMIMEHeaderParam.h"
 #include "nsNetCID.h"
@@ -197,8 +198,7 @@ nsresult nsDocumentOpenInfo::Prepare() {
   return rv;
 }
 
-NS_IMETHODIMP nsDocumentOpenInfo::OnStartRequest(nsIRequest* request,
-                                                 nsISupports* aCtxt) {
+NS_IMETHODIMP nsDocumentOpenInfo::OnStartRequest(nsIRequest* request) {
   LOG(("[0x%p] nsDocumentOpenInfo::OnStartRequest", this));
   MOZ_ASSERT(request);
   if (!request) {
@@ -296,7 +296,7 @@ NS_IMETHODIMP nsDocumentOpenInfo::OnStartRequest(nsIRequest* request,
     return NS_OK;
   }
 
-  rv = DispatchContent(request, aCtxt);
+  rv = DispatchContent(request, nullptr);
 
   LOG(("  After dispatch, m_targetStreamListener: 0x%p, rv: 0x%08" PRIX32,
        m_targetStreamListener.get(), static_cast<uint32_t>(rv)));
@@ -308,7 +308,7 @@ NS_IMETHODIMP nsDocumentOpenInfo::OnStartRequest(nsIRequest* request,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (m_targetStreamListener)
-    rv = m_targetStreamListener->OnStartRequest(request, aCtxt);
+    rv = m_targetStreamListener->OnStartRequest(request);
 
   LOG(("  OnStartRequest returning: 0x%08" PRIX32, static_cast<uint32_t>(rv)));
 
@@ -333,8 +333,7 @@ nsDocumentOpenInfo::CheckListenerChain() {
 }
 
 NS_IMETHODIMP
-nsDocumentOpenInfo::OnDataAvailable(nsIRequest* request, nsISupports* aCtxt,
-                                    nsIInputStream* inStr,
+nsDocumentOpenInfo::OnDataAvailable(nsIRequest* request, nsIInputStream* inStr,
                                     uint64_t sourceOffset, uint32_t count) {
   // if we have retarged to the end stream listener, then forward the call....
   // otherwise, don't do anything
@@ -342,13 +341,12 @@ nsDocumentOpenInfo::OnDataAvailable(nsIRequest* request, nsISupports* aCtxt,
   nsresult rv = NS_OK;
 
   if (m_targetStreamListener)
-    rv = m_targetStreamListener->OnDataAvailable(request, aCtxt, inStr,
-                                                 sourceOffset, count);
+    rv = m_targetStreamListener->OnDataAvailable(request, inStr, sourceOffset,
+                                                 count);
   return rv;
 }
 
 NS_IMETHODIMP nsDocumentOpenInfo::OnStopRequest(nsIRequest* request,
-                                                nsISupports* aCtxt,
                                                 nsresult aStatus) {
   LOG(("[0x%p] nsDocumentOpenInfo::OnStopRequest", this));
 
@@ -359,7 +357,7 @@ NS_IMETHODIMP nsDocumentOpenInfo::OnStopRequest(nsIRequest* request,
     // OnStartRequest after this... reset state.
     m_targetStreamListener = nullptr;
     mContentType.Truncate();
-    listener->OnStopRequest(request, aCtxt, aStatus);
+    listener->OnStopRequest(request, aStatus);
   }
 
   // Remember...
@@ -828,13 +826,25 @@ NS_IMETHODIMP nsURILoader::OpenURI(nsIChannel* channel, uint32_t aFlags,
                             getter_AddRefs(loader));
 
   if (NS_SUCCEEDED(rv)) {
+    if (aFlags & nsIURILoader::REDIRECTED_CHANNEL) {
+      // Our channel was redirected from another process, so doesn't need to be
+      // opened again. However, it does need its listener hooked up correctly.
+      nsCOMPtr<nsIChildChannel> childChannel = do_QueryInterface(channel);
+      MOZ_ASSERT(childChannel);
+      if (!childChannel) {
+        return NS_ERROR_UNEXPECTED;
+      }
+
+      return childChannel->CompleteRedirectSetup(loader, nullptr);
+    }
+
     // this method is not complete!!! Eventually, we should first go
     // to the content listener and ask them for a protocol handler...
     // if they don't give us one, we need to go to the registry and get
     // the preferred protocol handler.
 
     // But for now, I'm going to let necko do the work for us....
-    rv = channel->AsyncOpen2(loader);
+    rv = channel->AsyncOpen(loader);
 
     // no content from this load - that's OK.
     if (rv == NS_ERROR_NO_CONTENT) {

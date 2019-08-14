@@ -14,9 +14,7 @@
 #include "prlock.h"
 #include "mozilla/RefPtr.h"
 #include "nsAutoPtr.h"
-#include "nsIWeakReferenceUtils.h"  // for the definition of nsWeakPtr
 #include "IPeerConnection.h"
-#include "sigslot.h"
 #include "nsComponentManagerUtils.h"
 #include "nsPIDOMWindow.h"
 #include "nsIUUIDGenerator.h"
@@ -25,7 +23,7 @@
 
 // Work around nasty macro in webrtc/voice_engine/voice_engine_defines.h
 #ifdef GetLastError
-#undef GetLastError
+#  undef GetLastError
 #endif
 
 #include "signaling/src/jsep/JsepSession.h"
@@ -33,7 +31,6 @@
 #include "signaling/src/sdp/SdpMediaSection.h"
 
 #include "mozilla/ErrorResult.h"
-#include "mozilla/dom/PeerConnectionImplEnumsBinding.h"
 #include "mozilla/dom/RTCPeerConnectionBinding.h"  // mozPacketDumpType, maybe move?
 #include "mozilla/dom/RTCRtpTransceiverBinding.h"
 #include "mozilla/dom/RTCConfigurationBinding.h"
@@ -57,6 +54,7 @@ class AFakePCObserver;
 class nsDOMDataChannel;
 
 namespace mozilla {
+struct CandidateInfo;
 class DataChannel;
 class DtlsIdentity;
 class MediaPipeline;
@@ -86,7 +84,7 @@ typedef NS_ConvertUTF8toUTF16 PCObserverString;
 #if defined(__cplusplus) && __cplusplus >= 201103L
 typedef struct Timecard Timecard;
 #else
-#include "signaling/src/common/time_profiling/timecard.h"
+#  include "signaling/src/common/time_profiling/timecard.h"
 #endif
 
 // To preserve blame, convert nsresult to ErrorResult with wrappers. These
@@ -100,8 +98,6 @@ typedef struct Timecard Timecard;
 #define NS_IMETHODIMP_TO_ERRORRESULT_RETREF(resulttype, func, rv, ...) \
   NS_IMETHODIMP func(__VA_ARGS__, resulttype** result);                \
   already_AddRefed<resulttype> func(__VA_ARGS__, rv)
-
-struct MediaStreamTable;
 
 namespace mozilla {
 
@@ -129,15 +125,16 @@ class PCUuidGenerator : public mozilla::JsepUuidGenerator {
 // Not an inner class so we can forward declare.
 class RTCStatsQuery {
  public:
-  explicit RTCStatsQuery(bool internalStats);
+  explicit RTCStatsQuery(bool aInternalStats, bool aRecordTelemetry);
   RTCStatsQuery(RTCStatsQuery&& aOrig) = default;
   ~RTCStatsQuery();
 
-  nsAutoPtr<mozilla::dom::RTCStatsReportInternal> report;
+  std::unique_ptr<mozilla::dom::RTCStatsReportInternal> report;
   // A timestamp to help with telemetry.
   mozilla::TimeStamp iceStartTime;
 
   bool internalStats;
+  bool recordTelemetry;
   std::string transportId;
   bool grabAllLevels;
   DOMHighResTimeStamp now;
@@ -165,26 +162,12 @@ typedef MozPromise<UniquePtr<RTCStatsQuery>, nsresult, true>
 class PeerConnectionImpl final
     : public nsISupports,
       public mozilla::DataChannelConnection::DataConnectionListener,
-      public dom::PrincipalChangeObserver<dom::MediaStreamTrack>,
-      public sigslot::has_slots<> {
+      public dom::PrincipalChangeObserver<dom::MediaStreamTrack> {
   struct Internal;  // Avoid exposing c includes to bindings
 
  public:
   explicit PeerConnectionImpl(
       const mozilla::dom::GlobalObject* aGlobal = nullptr);
-
-  enum Error {
-    kNoError = 0,
-    kInvalidCandidate = 2,
-    kInvalidMediastreamTrack = 3,
-    kInvalidState = 4,
-    kInvalidSessionDescription = 5,
-    kIncompatibleSessionDescription = 6,
-    kIncompatibleMediaStreamTrack = 8,
-    kInternalError = 9,
-    kTypeError = 10,
-    kOperationError = 11
-  };
 
   NS_DECL_THREADSAFE_ISUPPORTS
 
@@ -204,6 +187,8 @@ class PeerConnectionImpl final
       // inside libxul.
       override;
 
+  const RefPtr<MediaTransportHandler> GetTransportHandler() const;
+
   // Get the media object
   const RefPtr<PeerConnectionMedia>& media() const {
     PC_AUTO_ENTER_API_CALL_NO_CHECK();
@@ -217,8 +202,10 @@ class PeerConnectionImpl final
   virtual const std::string& GetName();
 
   // ICE events
-  void IceConnectionStateChange(dom::PCImplIceConnectionState state);
-  void IceGatheringStateChange(dom::PCImplIceGatheringState state);
+  void IceConnectionStateChange(dom::RTCIceConnectionState state);
+  void IceGatheringStateChange(dom::RTCIceGatheringState state);
+  void OnCandidateFound(const std::string& aTransportId,
+                        const CandidateInfo& aCandidateInfo);
   void UpdateDefaultCandidate(const std::string& defaultAddr,
                               uint16_t defaultPort,
                               const std::string& defaultRtcpAddr,
@@ -229,10 +216,7 @@ class PeerConnectionImpl final
   static void ConnectThread(void* aData);
 
   // Get the main thread
-  nsCOMPtr<nsIThread> GetMainThread() {
-    PC_AUTO_ENTER_API_CALL_NO_CHECK();
-    return mThread;
-  }
+  nsCOMPtr<nsIThread> GetMainThread() { return mThread; }
 
   // Get the STS thread
   nsIEventTarget* GetSTSThread() {
@@ -291,13 +275,16 @@ class PeerConnectionImpl final
   }
 
   NS_IMETHODIMP AddIceCandidate(const char* aCandidate, const char* aMid,
+                                const char* aUfrag,
                                 const dom::Nullable<unsigned short>& aLevel);
 
   void AddIceCandidate(const nsAString& aCandidate, const nsAString& aMid,
+                       const nsAString& aUfrag,
                        const dom::Nullable<unsigned short>& aLevel,
                        ErrorResult& rv) {
     rv = AddIceCandidate(NS_ConvertUTF16toUTF8(aCandidate).get(),
-                         NS_ConvertUTF16toUTF8(aMid).get(), aLevel);
+                         NS_ConvertUTF16toUTF8(aMid).get(),
+                         NS_ConvertUTF16toUTF8(aUfrag).get(), aLevel);
   }
 
   void UpdateNetworkState(bool online);
@@ -385,6 +372,7 @@ class PeerConnectionImpl final
   void GetPeerIdentity(nsAString& peerIdentity) {
     if (mPeerIdentity) {
       peerIdentity = mPeerIdentity->ToString();
+      return;
     }
 
     peerIdentity.SetIsVoid(true);
@@ -415,38 +403,32 @@ class PeerConnectionImpl final
     delete[] tmp;
   }
 
-  void GetLocalDescription(nsAString& aSDP);
   void GetCurrentLocalDescription(nsAString& aSDP);
   void GetPendingLocalDescription(nsAString& aSDP);
 
-  void GetRemoteDescription(nsAString& aSDP);
   void GetCurrentRemoteDescription(nsAString& aSDP);
   void GetPendingRemoteDescription(nsAString& aSDP);
 
-  NS_IMETHODIMP SignalingState(mozilla::dom::PCImplSignalingState* aState);
+  NS_IMETHODIMP SignalingState(mozilla::dom::RTCSignalingState* aState);
 
-  mozilla::dom::PCImplSignalingState SignalingState() {
-    mozilla::dom::PCImplSignalingState state;
+  mozilla::dom::RTCSignalingState SignalingState() {
+    mozilla::dom::RTCSignalingState state;
     SignalingState(&state);
     return state;
   }
 
-  NS_IMETHODIMP IceConnectionState(
-      mozilla::dom::PCImplIceConnectionState* aState);
+  NS_IMETHODIMP IceConnectionState(mozilla::dom::RTCIceConnectionState* aState);
 
-  mozilla::dom::PCImplIceConnectionState IceConnectionState() {
-    mozilla::dom::PCImplIceConnectionState state;
+  mozilla::dom::RTCIceConnectionState IceConnectionState() {
+    mozilla::dom::RTCIceConnectionState state;
     IceConnectionState(&state);
     return state;
   }
 
-  NS_IMETHODIMP IceGatheringState(
-      mozilla::dom::PCImplIceGatheringState* aState);
+  NS_IMETHODIMP IceGatheringState(mozilla::dom::RTCIceGatheringState* aState);
 
-  mozilla::dom::PCImplIceGatheringState IceGatheringState() {
-    mozilla::dom::PCImplIceGatheringState state;
-    IceGatheringState(&state);
-    return state;
+  mozilla::dom::RTCIceGatheringState IceGatheringState() {
+    return mIceGatheringState;
   }
 
   NS_IMETHODIMP Close();
@@ -480,7 +462,7 @@ class PeerConnectionImpl final
   const std::vector<std::string>& GetSdpParseErrors();
 
   // Sets the RTC Signaling State
-  void SetSignalingState_m(mozilla::dom::PCImplSignalingState aSignalingState,
+  void SetSignalingState_m(mozilla::dom::RTCSignalingState aSignalingState,
                            bool rollback = false);
 
   // Updates the RTC signaling state based on the JsepSession state
@@ -496,7 +478,8 @@ class PeerConnectionImpl final
   void startCallTelem();
 
   RefPtr<RTCStatsQueryPromise> GetStats(dom::MediaStreamTrack* aSelector,
-                                        bool aInternalStats);
+                                        bool aInternalStats,
+                                        bool aRecordTelemetry);
 
   // for monitoring changes in track ownership
   // PeerConnectionMedia can't do it because it doesn't know about principals
@@ -549,9 +532,10 @@ class PeerConnectionImpl final
   void ShutdownMedia();
 
   void CandidateReady(const std::string& candidate,
-                      const std::string& transportId);
+                      const std::string& transportId, const std::string& ufrag);
   void SendLocalIceCandidateToContent(uint16_t level, const std::string& mid,
-                                      const std::string& candidate);
+                                      const std::string& candidate,
+                                      const std::string& ufrag);
 
   nsresult GetDatachannelParameters(uint32_t* channels, uint16_t* localport,
                                     uint16_t* remoteport,
@@ -583,15 +567,14 @@ class PeerConnectionImpl final
   // any other attributes of this class.
   Timecard* mTimeCard;
 
-  mozilla::dom::PCImplSignalingState mSignalingState;
+  mozilla::dom::RTCSignalingState mSignalingState;
 
   // ICE State
-  mozilla::dom::PCImplIceConnectionState mIceConnectionState;
-  mozilla::dom::PCImplIceGatheringState mIceGatheringState;
+  mozilla::dom::RTCIceConnectionState mIceConnectionState;
+  mozilla::dom::RTCIceGatheringState mIceGatheringState;
 
   nsCOMPtr<nsIThread> mThread;
-  // TODO: Remove if we ever properly wire PeerConnection for cycle-collection.
-  nsWeakPtr mPCObserver;
+  RefPtr<PeerConnectionObserver> mPCObserver;
 
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
 
@@ -631,6 +614,7 @@ class PeerConnectionImpl final
 
   bool mForceIceTcp;
   RefPtr<PeerConnectionMedia> mMedia;
+  RefPtr<MediaTransportHandler> mTransportHandler;
 
   // The JSEP negotiation session.
   mozilla::UniquePtr<PCUuidGenerator> mUuidGen;
@@ -668,7 +652,10 @@ class PeerConnectionImpl final
     NS_DECL_NSITIMERCALLBACK
     NS_DECL_THREADSAFE_ISUPPORTS
 
-    nsWeakPtr mPCObserver;
+    void StopPlayout();
+    void StartPlayout(uint32_t aDelay);
+
+    RefPtr<PeerConnectionObserver> mPCObserver;
     RefPtr<TransceiverImpl> mTransceiver;
     nsCOMPtr<nsITimer> mSendTimer;
     nsString mTones;

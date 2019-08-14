@@ -8,6 +8,8 @@ property, or deprecated DOM operation.  Custom use counters can also be
 defined to test frequency of things that don't fall into one of those
 categories.
 
+As of Firefox 65 the collection of Use Counters is enabled on all channels.
+
 The API
 =======
 The process to add a new use counter is different depending on the type feature that needs
@@ -70,7 +72,7 @@ The definition files are processed twice:
 
 .. note::
 
-    The histograms that are generated out of use counters are set to *never* expire and are *opt-in*.
+    The histograms that are generated out of use counters are set to *never* expire and are collected from Firefox release. Note that before Firefox 65 they were only collected on pre-release.
 
 gen-usecounters.py
 ------------------
@@ -95,3 +97,10 @@ used in 25 of those 30 documents.
 Things are done this way, rather than accumulating a boolean flag for each use counter,
 to avoid sending histograms for features that don't get widely used. Doing things in this
 fashion means smaller telemetry payloads and faster processing on the server side.
+
+Version History
+---------------
+
+- Firefox 65:
+
+  - Enable Use Counters on release channel (`bug 1477433 <https://bugzilla.mozilla.org/show_bug.cgi?id=1477433>`_)

@@ -19,8 +19,10 @@
  * process). Given flushing the page table is expensive, and its utility is
  * predominantly diagnostic (in case of overrun), turn it off by default.
  */
-#define SHARED_SURFACE_PROTECT_FINALIZED
+#  define SHARED_SURFACE_PROTECT_FINALIZED
 #endif
+
+using namespace mozilla::layers;
 
 namespace mozilla {
 namespace gfx {

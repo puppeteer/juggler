@@ -86,14 +86,14 @@ class ScreenOrientation final
   already_AddRefed<Promise> LockInternal(hal::ScreenOrientation aOrientation,
                                          ErrorResult& aRv);
 
-  void DispatchChangeEvent();
+  nsCOMPtr<nsIRunnable> DispatchChangeEventAndResolvePromise();
 
   bool ShouldResistFingerprinting() const;
 
   LockPermission GetLockOrientationPermission(bool aCheckSandbox) const;
 
   // Gets the responsible document as defined in the spec.
-  nsIDocument* GetResponsibleDocument() const;
+  Document* GetResponsibleDocument() const;
 
   RefPtr<nsScreen> mScreen;
   RefPtr<FullscreenEventListener> mFullscreenListener;

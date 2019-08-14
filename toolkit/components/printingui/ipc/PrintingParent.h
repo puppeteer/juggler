@@ -28,36 +28,32 @@ class PrintingParent final : public PPrintingParent {
  public:
   NS_INLINE_DECL_REFCOUNTING(PrintingParent)
 
-  virtual mozilla::ipc::IPCResult RecvShowProgress(
+  mozilla::ipc::IPCResult RecvShowProgress(
       PBrowserParent* parent, PPrintProgressDialogParent* printProgressDialog,
-      PRemotePrintJobParent* remotePrintJob,
-      const bool& isForPrinting) override;
-  virtual mozilla::ipc::IPCResult RecvShowPrintDialog(
+      PRemotePrintJobParent* remotePrintJob, const bool& isForPrinting) final;
+  mozilla::ipc::IPCResult RecvShowPrintDialog(
       PPrintSettingsDialogParent* aDialog, PBrowserParent* aParent,
-      const PrintData& aData) override;
+      const PrintData& aData) final;
 
-  virtual mozilla::ipc::IPCResult RecvSavePrintSettings(
+  mozilla::ipc::IPCResult RecvSavePrintSettings(
       const PrintData& data, const bool& usePrinterNamePrefix,
-      const uint32_t& flags, nsresult* rv) override;
+      const uint32_t& flags, nsresult* rv) final;
 
-  virtual PPrintProgressDialogParent* AllocPPrintProgressDialogParent()
-      override;
+  PPrintProgressDialogParent* AllocPPrintProgressDialogParent() final;
 
-  virtual bool DeallocPPrintProgressDialogParent(
-      PPrintProgressDialogParent* aActor) override;
+  bool DeallocPPrintProgressDialogParent(
+      PPrintProgressDialogParent* aActor) final;
 
-  virtual PPrintSettingsDialogParent* AllocPPrintSettingsDialogParent()
-      override;
+  PPrintSettingsDialogParent* AllocPPrintSettingsDialogParent() final;
 
-  virtual bool DeallocPPrintSettingsDialogParent(
-      PPrintSettingsDialogParent* aActor) override;
+  bool DeallocPPrintSettingsDialogParent(
+      PPrintSettingsDialogParent* aActor) final;
 
-  virtual PRemotePrintJobParent* AllocPRemotePrintJobParent() override;
+  PRemotePrintJobParent* AllocPRemotePrintJobParent() final;
 
-  virtual bool DeallocPRemotePrintJobParent(
-      PRemotePrintJobParent* aActor) override;
+  bool DeallocPRemotePrintJobParent(PRemotePrintJobParent* aActor) final;
 
-  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+  void ActorDestroy(ActorDestroyReason aWhy) final;
 
   MOZ_IMPLICIT PrintingParent();
 
@@ -79,7 +75,7 @@ class PrintingParent final : public PPrintingParent {
       layout::RemotePrintJobParent* aRemotePrintJob, PrintData* aPrintData);
 
  private:
-  virtual ~PrintingParent();
+  ~PrintingParent() final;
 
   nsPIDOMWindowOuter* DOMWindowFromBrowserParent(PBrowserParent* parent);
 

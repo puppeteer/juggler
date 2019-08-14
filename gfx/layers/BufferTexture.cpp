@@ -15,7 +15,7 @@
 #include "mozilla/layers/ImageDataSerializer.h"
 
 #ifdef MOZ_WIDGET_GTK
-#include "gfxPlatformGtk.h"
+#  include "gfxPlatformGtk.h"
 #endif
 
 namespace mozilla {
@@ -154,7 +154,7 @@ BufferTextureData* BufferTextureData::CreateInternal(
 BufferTextureData* BufferTextureData::CreateForYCbCr(
     KnowsCompositor* aAllocator, gfx::IntSize aYSize, uint32_t aYStride,
     gfx::IntSize aCbCrSize, uint32_t aCbCrStride, StereoMode aStereoMode,
-    gfx::ColorDepth aColorDepth, YUVColorSpace aYUVColorSpace,
+    gfx::ColorDepth aColorDepth, gfx::YUVColorSpace aYUVColorSpace,
     TextureFlags aTextureFlags) {
   uint32_t bufSize = ImageDataSerializer::ComputeYCbCrBufferSize(
       aYSize, aYStride, aCbCrSize, aCbCrStride);
@@ -224,7 +224,7 @@ Maybe<gfx::IntSize> BufferTextureData::GetCbCrSize() const {
   return ImageDataSerializer::CbCrSizeFromBufferDescriptor(mDescriptor);
 }
 
-Maybe<YUVColorSpace> BufferTextureData::GetYUVColorSpace() const {
+Maybe<gfx::YUVColorSpace> BufferTextureData::GetYUVColorSpace() const {
   return ImageDataSerializer::YUVColorSpaceFromBufferDescriptor(mDescriptor);
 }
 
@@ -484,7 +484,8 @@ bool ShmemTextureData::Serialize(SurfaceDescriptor& aOutDescriptor) {
     return false;
   }
 
-  aOutDescriptor = SurfaceDescriptorBuffer(mDescriptor, MemoryOrShmem(mShmem));
+  aOutDescriptor =
+      SurfaceDescriptorBuffer(mDescriptor, MemoryOrShmem(std::move(mShmem)));
 
   return true;
 }
@@ -532,8 +533,6 @@ ShmemTextureData* ShmemTextureData::Create(gfx::IntSize aSize,
       RGBDescriptor(aSize, aFormat, hasIntermediateBuffer);
 
   return new ShmemTextureData(descriptor, aMoz2DBackend, shm);
-
-  return nullptr;
 }
 
 TextureData* ShmemTextureData::CreateSimilar(

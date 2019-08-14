@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <title>Test the WebSocket debugger transport</title>
   <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script src="chrome://mochikit/content/tests/SimpleTest/AddTask.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
 </head>
 <body>
@@ -12,7 +11,7 @@
 "use strict";
 
 window.onload = function() {
-  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
   const Services = require("Services");
   const {DebuggerClient} = require("devtools/shared/client/debugger-client");
   const {DebuggerServer} = require("devtools/server/main");
@@ -52,17 +51,16 @@ window.onload = function() {
     const onUnexpectedClose = () => {
       ok(false, "Closed unexpectedly");
     };
-    client.addListener("closed", onUnexpectedClose);
+    client.on("closed", onUnexpectedClose);
 
     await client.connect();
-    await client.listTabs();
 
     // Send a message the server that will echo back
     const message = "message";
     const reply = await client.mainRoot.echo({ message });
     is(reply.message, message, "Echo message matches");
 
-    client.removeListener("closed", onUnexpectedClose);
+    client.off("closed", onUnexpectedClose);
     transport.close();
     listener.close();
     is(DebuggerServer.listeningSockets, 0, "0 listening sockets");

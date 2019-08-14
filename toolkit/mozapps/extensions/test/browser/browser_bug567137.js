@@ -12,23 +12,29 @@ async function test() {
 
   // Open the plugins category
   utils.openType("plugin", async function() {
-
     // Re-open the manager
     await close_manager(aWindow);
     aWindow = await open_manager(null);
     utils = new CategoryUtilities(aWindow);
 
-    is(utils.selectedCategory, "plugin", "Should have shown the plugins category");
+    is(
+      utils.selectedCategory,
+      "plugin",
+      "Should have shown the plugins category"
+    );
 
     // Open the extensions category
     utils.openType("extension", async function() {
-
       // Re-open the manager
       await close_manager(aWindow);
       aWindow = await open_manager(null);
       utils = new CategoryUtilities(aWindow);
 
-      is(utils.selectedCategory, "extension", "Should have shown the extensions category");
+      is(
+        utils.selectedCategory,
+        "extension",
+        "Should have shown the extensions category"
+      );
       close_manager(aWindow, finish);
     });
   });

@@ -16,15 +16,17 @@
 
 include protocol PBackground;
 
-using struct mozilla::null_t from "ipc/IPCMessageUtils.h";
+using mozilla::dom::AttestationConveyancePreference from "mozilla/dom/WebAuthnUtil.h";
+using mozilla::dom::AuthenticatorAttachment from "mozilla/dom/WebAuthnUtil.h";
+using mozilla::dom::UserVerificationRequirement from "mozilla/dom/WebAuthnUtil.h";
 
 namespace mozilla {
 namespace dom {
 
 struct WebAuthnAuthenticatorSelection {
   bool requireResidentKey;
-  bool requireUserVerification;
-  bool requirePlatformAttachment;
+  UserVerificationRequirement userVerificationRequirement;
+  AuthenticatorAttachment? authenticatorAttachment;
 };
 
 struct WebAuthnScopedCredential {
@@ -34,29 +36,54 @@ struct WebAuthnScopedCredential {
 
 struct WebAuthnExtensionAppId {
   uint8_t[] AppId;
+  nsString appIdentifier;
+};
+
+struct WebAuthnExtensionHmacSecret {
+  bool hmacCreateSecret;
 };
 
 union WebAuthnExtension {
   WebAuthnExtensionAppId;
+  WebAuthnExtensionHmacSecret;
 };
 
 struct WebAuthnExtensionResultAppId {
   bool AppId;
 };
 
+struct WebAuthnExtensionResultHmacSecret {
+  bool hmacCreateSecret;
+};
+
 union WebAuthnExtensionResult {
   WebAuthnExtensionResultAppId;
+  WebAuthnExtensionResultHmacSecret;
+};
+
+struct WebAuthnMakeCredentialRpInfo {
+  nsString Name;
+  nsString Icon;
+};
+
+struct WebAuthnMakeCredentialUserInfo {
+  uint8_t[] Id;
+  nsString Name;
+  nsString Icon;
+  nsString DisplayName;
+};
+
+struct CoseAlg {
+  long alg;
 };
 
 struct WebAuthnMakeCredentialExtraInfo {
+  WebAuthnMakeCredentialRpInfo Rp;
+  WebAuthnMakeCredentialUserInfo User;
+  CoseAlg[] coseAlgs;
   WebAuthnExtension[] Extensions;
   WebAuthnAuthenticatorSelection AuthenticatorSelection;
-  bool RequestDirectAttestation;
-};
-
-union WebAuthnMaybeMakeCredentialExtraInfo {
-  WebAuthnMakeCredentialExtraInfo;
-  null_t;
+  AttestationConveyancePreference attestationConveyancePreference;
 };
 
 struct WebAuthnMakeCredentialInfo {
@@ -66,7 +93,7 @@ struct WebAuthnMakeCredentialInfo {
   nsCString ClientDataJSON;
   uint32_t TimeoutMS;
   WebAuthnScopedCredential[] ExcludeList;
-  WebAuthnMaybeMakeCredentialExtraInfo Extra;
+  WebAuthnMakeCredentialExtraInfo? Extra;
 };
 
 struct WebAuthnMakeCredentialResult {
@@ -75,16 +102,12 @@ struct WebAuthnMakeCredentialResult {
   uint8_t[] KeyHandle;
   /* Might be empty if the token implementation doesn't support CTAP1. */
   uint8_t[] RegistrationData;
+  WebAuthnExtensionResult[] Extensions;
 };
 
 struct WebAuthnGetAssertionExtraInfo {
   WebAuthnExtension[] Extensions;
-  bool RequireUserVerification;
-};
-
-union WebAuthnMaybeGetAssertionExtraInfo {
-  WebAuthnGetAssertionExtraInfo;
-  null_t;
+  UserVerificationRequirement userVerificationRequirement;
 };
 
 struct WebAuthnGetAssertionInfo {
@@ -94,7 +117,7 @@ struct WebAuthnGetAssertionInfo {
   nsCString ClientDataJSON;
   uint32_t TimeoutMS;
   WebAuthnScopedCredential[] AllowList;
-  WebAuthnMaybeGetAssertionExtraInfo Extra;
+  WebAuthnGetAssertionExtraInfo? Extra;
 };
 
 struct WebAuthnGetAssertionResult {
@@ -105,6 +128,7 @@ struct WebAuthnGetAssertionResult {
   WebAuthnExtensionResult[] Extensions;
   /* Might be empty if the token implementation doesn't support CTAP1. */
   uint8_t[] SignatureData;
+  uint8_t[] UserHandle;
 };
 
 async protocol PWebAuthnTransaction {

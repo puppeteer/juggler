@@ -25,29 +25,29 @@
 #include "pathsub.h"
 
 #ifdef HAVE_GETOPT_H
-#include <getopt.h>
+#  include <getopt.h>
 #endif
 
 #ifdef SUNOS4
-#include "sunos4.h"
+#  include "sunos4.h"
 #endif
 
 #ifdef NEXTSTEP
-#include <bsd/libc.h>
+#  include <bsd/libc.h>
 #endif
 
 #ifdef __QNX__
-#include <unix.h>
+#  include <unix.h>
 #endif
 
 #ifdef NEED_S_ISLNK
-#if !defined(S_ISLNK) && defined(S_IFLNK)
-#define S_ISLNK(a) (((a)&S_IFMT) == S_IFLNK)
-#endif
+#  if !defined(S_ISLNK) && defined(S_IFLNK)
+#    define S_ISLNK(a) (((a)&S_IFMT) == S_IFLNK)
+#  endif
 #endif
 
 #ifndef _DIRECTORY_SEPARATOR
-#define _DIRECTORY_SEPARATOR "/"
+#  define _DIRECTORY_SEPARATOR "/"
 #endif /* _DIRECTORY_SEPARATOR */
 
 #ifdef NEED_FCHMOD_PROTO
@@ -62,8 +62,8 @@ static void usage(void) {
   exit(2);
 }
 
-static int mkdirs(char *path, mode_t mode) {
-  char *cp;
+static int mkdirs(char* path, mode_t mode) {
+  char* cp;
   struct stat sb;
   int res;
   int l;
@@ -91,10 +91,10 @@ static int mkdirs(char *path, mode_t mode) {
     return res;
 }
 
-static uid_t touid(char *owner) {
-  struct passwd *pw;
+static uid_t touid(char* owner) {
+  struct passwd* pw;
   uid_t uid;
-  char *cp;
+  char* cp;
 
   pw = getpwnam(owner);
   if (pw) return pw->pw_uid;
@@ -103,10 +103,10 @@ static uid_t touid(char *owner) {
   return uid;
 }
 
-static gid_t togid(char *group) {
-  struct group *gr;
+static gid_t togid(char* group) {
+  struct group* gr;
   gid_t gid;
-  char *cp;
+  char* cp;
 
   gr = getgrnam(group);
   if (gr) return gr->gr_gid;
@@ -115,8 +115,8 @@ static gid_t togid(char *group) {
   return gid;
 }
 
-static void copyfile(char *name, char *toname, mode_t mode, char *group,
-                     char *owner, int dotimes, uid_t uid, gid_t gid) {
+static void copyfile(char* name, char* toname, mode_t mode, char* group,
+                     char* owner, int dotimes, uid_t uid, gid_t gid) {
   int fromfd, tofd = -1, cc, wc, exists;
   char buf[BUFSIZ], *bp;
   struct stat sb, tosb;
@@ -157,11 +157,11 @@ static void copyfile(char *name, char *toname, mode_t mode, char *group,
     utb.modtime = sb.st_mtime;
     if (utime(toname, &utb) < 0) fail("cannot set times of %s", toname);
   }
-#ifdef HAVE_FCHMOD
+#  ifdef HAVE_FCHMOD
   if (fchmod(tofd, mode) < 0)
-#else
+#  else
   if (chmod(toname, mode) < 0)
-#endif
+#  endif
     fail("cannot change mode of %s", toname);
 #endif
   if ((owner || group) && fchown(tofd, uid, gid) < 0)
@@ -181,10 +181,10 @@ static void copyfile(char *name, char *toname, mode_t mode, char *group,
 #endif
 }
 
-static void copydir(char *from, char *to, mode_t mode, char *group, char *owner,
+static void copydir(char* from, char* to, mode_t mode, char* group, char* owner,
                     int dotimes, uid_t uid, gid_t gid) {
-  DIR *dir;
-  struct dirent *ep;
+  DIR* dir;
+  struct dirent* ep;
   struct stat sb;
   char *base, *destdir, *direntry, *destentry;
 
@@ -226,7 +226,7 @@ static void copydir(char *from, char *to, mode_t mode, char *group, char *owner,
   closedir(dir);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   int onlydir, dodir, dolink, dorelsymlink, dotimes, opt, len, lplen, tdlen,
       bnlen, exists;
   mode_t mode = 0755;
@@ -290,12 +290,12 @@ int main(int argc, char **argv) {
 
   if (!cwd) {
 #ifndef NEEDS_GETCWD
-#ifndef GETCWD_CANT_MALLOC
+#  ifndef GETCWD_CANT_MALLOC
     cwd = getcwd(0, PATH_MAX);
-#else
+#  else
     cwd = malloc(PATH_MAX + 1);
     cwd = getcwd(cwd, PATH_MAX);
-#endif
+#  endif
 #else
     cwd = malloc(PATH_MAX + 1);
     cwd = getwd(cwd);
@@ -304,12 +304,12 @@ int main(int argc, char **argv) {
 
   xchdir(todir);
 #ifndef NEEDS_GETCWD
-#ifndef GETCWD_CANT_MALLOC
+#  ifndef GETCWD_CANT_MALLOC
   todir = getcwd(0, PATH_MAX);
-#else
+#  else
   todir = malloc(PATH_MAX + 1);
   todir = getcwd(todir, PATH_MAX);
-#endif
+#  endif
 #else
   todir = malloc(PATH_MAX + 1);
   todir = getwd(todir);

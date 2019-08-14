@@ -1,4 +1,4 @@
-var NotificationTest = (function () {
+var NotificationTest = (function() {
   "use strict";
 
   function info(msg, name) {
@@ -8,10 +8,13 @@ var NotificationTest = (function () {
   function setup_testing_env() {
     SimpleTest.waitForExplicitFinish();
     // turn on testing pref (used by notification.cpp, and mock the alerts
-    SpecialPowers.setBoolPref("notification.prompt.testing", true);
+    return SpecialPowers.setBoolPref("notification.prompt.testing", true);
   }
 
-  function teardown_testing_env() {
+  async function teardown_testing_env() {
+    await SpecialPowers.clearUserPref("notification.prompt.testing");
+    await SpecialPowers.clearUserPref("notification.prompt.testing.allow");
+
     SimpleTest.finish();
   }
 
@@ -22,7 +25,8 @@ var NotificationTest = (function () {
 
     (function executeRemainingTests(remainingTests) {
       if (!remainingTests.length) {
-        return callback();
+        callback();
+        return;
       }
 
       var nextTest = remainingTests.shift();
@@ -43,9 +47,9 @@ var NotificationTest = (function () {
     })(tests);
   }
 
-  var fakeCustomData = (function () {
+  var fakeCustomData = (function() {
     var buffer = new ArrayBuffer(2);
-    var dv = new DataView(buffer).setInt16(0, 42, true);
+    new DataView(buffer).setInt16(0, 42, true);
     var canvas = document.createElement("canvas");
     canvas.width = canvas.height = 100;
     var context = canvas.getContext("2d");
@@ -53,73 +57,84 @@ var NotificationTest = (function () {
     var map = new Map();
     var set = new Set();
     map.set("test", 42);
-    set.add(4); set.add(2);
+    set.add(4);
+    set.add(2);
 
     return {
       primitives: {
         a: 123,
         b: "test",
         c: true,
-        d: [1, 2, 3]
+        d: [1, 2, 3],
       },
       date: new Date(2013, 2, 1, 1, 10),
       regexp: new RegExp("[^.]+"),
       arrayBuffer: buffer,
       imageData: context.createImageData(100, 100),
-      map: map,
-      set: set
+      map,
+      set,
     };
   })();
 
   // NotificationTest API
   return {
-    run: function (tests, callback) {
-      setup_testing_env();
+    run(tests, callback) {
+      let ready = setup_testing_env();
 
-      addLoadEvent(function () {
-        executeTests(tests, function () {
+      addLoadEvent(async function() {
+        await ready;
+        executeTests(tests, function() {
           teardown_testing_env();
           callback && callback();
         });
       });
     },
 
-    allowNotifications: function () {
-      SpecialPowers.setBoolPref("notification.prompt.testing.allow", true);
+    allowNotifications() {
+      return SpecialPowers.setBoolPref(
+        "notification.prompt.testing.allow",
+        true
+      );
     },
 
-    denyNotifications: function () {
-      SpecialPowers.setBoolPref("notification.prompt.testing.allow", false);
+    denyNotifications() {
+      return SpecialPowers.setBoolPref(
+        "notification.prompt.testing.allow",
+        false
+      );
     },
 
-    clickNotification: function (notification) {
+    clickNotification(notification) {
       // TODO: how??
     },
 
-    fireCloseEvent: function (title) {
-      window.dispatchEvent(new CustomEvent("mock-notification-close-event", {
-        detail: {
-          title: title
-        }
-      }));
+    fireCloseEvent(title) {
+      window.dispatchEvent(
+        new CustomEvent("mock-notification-close-event", {
+          detail: {
+            title,
+          },
+        })
+      );
     },
 
-    info: info,
+    info,
 
-    customDataMatches: function(dataObj) {
+    customDataMatches(dataObj) {
       var url = "http://www.domain.com";
       try {
-        return (JSON.stringify(dataObj.primitives) ===
-                JSON.stringify(fakeCustomData.primitives)) &&
-               (dataObj.date.toDateString() ===
-                fakeCustomData.date.toDateString()) &&
-               (dataObj.regexp.exec(url)[0].substr(7) === "www") &&
-               (new Int16Array(dataObj.arrayBuffer)[0] === 42) &&
-               (JSON.stringify(dataObj.imageData.data) ===
-                JSON.stringify(fakeCustomData.imageData.data)) &&
-               (dataObj.map.get("test") == 42) &&
-               (dataObj.set.has(4) && dataObj.set.has(2));
-      } catch(e) {
+        return (
+          JSON.stringify(dataObj.primitives) ===
+            JSON.stringify(fakeCustomData.primitives) &&
+          dataObj.date.toDateString() === fakeCustomData.date.toDateString() &&
+          dataObj.regexp.exec(url)[0].substr(7) === "www" &&
+          new Int16Array(dataObj.arrayBuffer)[0] === 42 &&
+          JSON.stringify(dataObj.imageData.data) ===
+            JSON.stringify(fakeCustomData.imageData.data) &&
+          dataObj.map.get("test") == 42 &&
+          (dataObj.set.has(4) && dataObj.set.has(2))
+        );
+      } catch (e) {
         return false;
       }
     },
@@ -130,7 +145,7 @@ var NotificationTest = (function () {
       icon: "icon.jpg",
       lang: "en-US",
       dir: "ltr",
-      data: fakeCustomData
-    }
+      data: fakeCustomData,
+    },
   };
 })();

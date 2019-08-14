@@ -4,18 +4,33 @@
 
 "use strict";
 
-ChromeUtils.defineModuleGetter(this, "ExtensionControlledPopup",
-                               "resource:///modules/ExtensionControlledPopup.jsm");
-ChromeUtils.defineModuleGetter(this, "ExtensionSettingsStore",
-                               "resource://gre/modules/ExtensionSettingsStore.jsm");
+var { ExtensionParent } = ChromeUtils.import(
+  "resource://gre/modules/ExtensionParent.jsm"
+);
 
-XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
-                                   "@mozilla.org/browser/aboutnewtab-service;1",
-                                   "nsIAboutNewTabService");
+ChromeUtils.defineModuleGetter(
+  this,
+  "ExtensionControlledPopup",
+  "resource:///modules/ExtensionControlledPopup.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "ExtensionSettingsStore",
+  "resource://gre/modules/ExtensionSettingsStore.jsm"
+);
+
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "aboutNewTabService",
+  "@mozilla.org/browser/aboutnewtab-service;1",
+  "nsIAboutNewTabService"
+);
 
 const STORE_TYPE = "url_overrides";
 const NEW_TAB_SETTING_NAME = "newTabURL";
 const NEW_TAB_CONFIRMED_TYPE = "newTabNotification";
+const NEW_TAB_PRIVATE_ALLOWED = "browser.newtab.privateAllowed";
+const NEW_TAB_EXTENSION_CONTROLLED = "browser.newtab.extensionControlled";
 
 XPCOMUtils.defineLazyGetter(this, "newTabPopup", () => {
   return new ExtensionControlledPopup({
@@ -44,15 +59,18 @@ XPCOMUtils.defineLazyGetter(this, "newTabPopup", () => {
       let gBrowser = win.gBrowser;
       let tab = gBrowser.selectedTab;
       await replaceUrlInTab(gBrowser, tab, "about:blank");
-      Services.obs.addObserver({
-        async observe() {
-          await replaceUrlInTab(gBrowser, tab, aboutNewTabService.newTabURL);
-          // Now that the New Tab is loading, try to open the popup again. This
-          // will only open the popup if a new extension is controlling the New Tab.
-          popup.open();
-          Services.obs.removeObserver(this, "newtab-url-changed");
+      Services.obs.addObserver(
+        {
+          async observe() {
+            await replaceUrlInTab(gBrowser, tab, aboutNewTabService.newTabURL);
+            // Now that the New Tab is loading, try to open the popup again. This
+            // will only open the popup if a new extension is controlling the New Tab.
+            popup.open();
+            Services.obs.removeObserver(this, "newtab-url-changed");
+          },
         },
-      }, "newtab-url-changed");
+        "newtab-url-changed"
+      );
     },
   });
 });
@@ -60,71 +78,136 @@ XPCOMUtils.defineLazyGetter(this, "newTabPopup", () => {
 function setNewTabURL(extensionId, url) {
   if (extensionId) {
     newTabPopup.addObserver(extensionId);
+    let policy = ExtensionParent.WebExtensionPolicy.getByID(extensionId);
+    Services.prefs.setBoolPref(
+      NEW_TAB_PRIVATE_ALLOWED,
+      policy && policy.privateBrowsingAllowed
+    );
+    Services.prefs.setBoolPref(NEW_TAB_EXTENSION_CONTROLLED, true);
   } else {
     newTabPopup.removeObserver();
+    Services.prefs.clearUserPref(NEW_TAB_PRIVATE_ALLOWED);
+    Services.prefs.clearUserPref(NEW_TAB_EXTENSION_CONTROLLED);
   }
-  aboutNewTabService.newTabURL = url;
+  if (url) {
+    aboutNewTabService.newTabURL = url;
+  }
 }
 
+// eslint-disable-next-line mozilla/balanced-listeners
+ExtensionParent.apiManager.on(
+  "extension-setting-changed",
+  async (eventName, setting) => {
+    let extensionId, url;
+    if (setting.type === STORE_TYPE && setting.key === NEW_TAB_SETTING_NAME) {
+      if (setting.action === "enable" || setting.item) {
+        let { item } = setting;
+        // If setting.item exists, it is the new value.  If it doesn't exist, and an
+        // extension is being enabled, we use the id.
+        extensionId = (item && item.id) || setting.id;
+        url = item && (item.value || item.initialValue);
+      }
+    }
+    setNewTabURL(extensionId, url);
+  }
+);
+
 this.urlOverrides = class extends ExtensionAPI {
-  static onUninstall(id) {
-    // TODO: This can be removed once bug 1438364 is fixed and all data is cleaned up.
+  static async onDisable(id) {
     newTabPopup.clearConfirmation(id);
+    await ExtensionSettingsStore.initialize();
+    if (
+      ExtensionSettingsStore.hasSetting(id, STORE_TYPE, NEW_TAB_SETTING_NAME)
+    ) {
+      ExtensionSettingsStore.disable(id, STORE_TYPE, NEW_TAB_SETTING_NAME);
+    }
   }
 
-  processNewTabSetting(action) {
-    let {extension} = this;
-    let item = ExtensionSettingsStore[action](extension.id, STORE_TYPE, NEW_TAB_SETTING_NAME);
-    if (item) {
-      setNewTabURL(item.id, item.value || item.initialValue);
+  static async onUninstall(id) {
+    // TODO: This can be removed once bug 1438364 is fixed and all data is cleaned up.
+    newTabPopup.clearConfirmation(id);
+
+    await ExtensionSettingsStore.initialize();
+    if (
+      ExtensionSettingsStore.hasSetting(id, STORE_TYPE, NEW_TAB_SETTING_NAME)
+    ) {
+      ExtensionSettingsStore.removeSetting(
+        id,
+        STORE_TYPE,
+        NEW_TAB_SETTING_NAME
+      );
+    }
+  }
+
+  static async onUpdate(id, manifest) {
+    if (
+      !manifest.chrome_url_overrides ||
+      !manifest.chrome_url_overrides.newtab
+    ) {
+      await ExtensionSettingsStore.initialize();
+      if (
+        ExtensionSettingsStore.hasSetting(id, STORE_TYPE, NEW_TAB_SETTING_NAME)
+      ) {
+        ExtensionSettingsStore.removeSetting(
+          id,
+          STORE_TYPE,
+          NEW_TAB_SETTING_NAME
+        );
+      }
     }
   }
 
   async onManifestEntry(entryName) {
-    let {extension} = this;
-    let {manifest} = extension;
+    let { extension } = this;
+    let { manifest } = extension;
 
     await ExtensionSettingsStore.initialize();
 
     if (manifest.chrome_url_overrides.newtab) {
-      // Set up the shutdown code for the setting.
-      extension.callOnClose({
-        close: () => {
-          switch (extension.shutdownReason) {
-            case "ADDON_DISABLE":
-              this.processNewTabSetting("disable");
-              newTabPopup.clearConfirmation(extension.id);
-              break;
-
-            // We can remove the setting on upgrade or downgrade because it will be
-            // added back in when the manifest is re-read. This will cover the case
-            // where a new version of an add-on removes the manifest key.
-            case "ADDON_DOWNGRADE":
-            case "ADDON_UPGRADE":
-            case "ADDON_UNINSTALL":
-              this.processNewTabSetting("removeSetting");
-              break;
-          }
-        },
-      });
-
       let url = extension.baseURI.resolve(manifest.chrome_url_overrides.newtab);
 
       let item = await ExtensionSettingsStore.addSetting(
-        extension.id, STORE_TYPE, NEW_TAB_SETTING_NAME, url,
-        () => aboutNewTabService.newTabURL);
-
-      // If the extension was just re-enabled, change the setting to enabled.
-      // This is required because addSetting above is used for both add and update.
-      if (["ADDON_ENABLE", "ADDON_UPGRADE", "ADDON_DOWNGRADE"]
-          .includes(extension.startupReason)) {
-        item = ExtensionSettingsStore.enable(extension.id, STORE_TYPE, NEW_TAB_SETTING_NAME);
-      }
+        extension.id,
+        STORE_TYPE,
+        NEW_TAB_SETTING_NAME,
+        url,
+        () => aboutNewTabService.newTabURL
+      );
 
       // Set the newTabURL to the current value of the setting.
       if (item) {
         setNewTabURL(item.id, item.value || item.initialValue);
       }
+
+      // We need to monitor permission change and update the preferences.
+      // eslint-disable-next-line mozilla/balanced-listeners
+      extension.on("add-permissions", async (ignoreEvent, permissions) => {
+        if (
+          permissions.permissions.includes("internal:privateBrowsingAllowed")
+        ) {
+          let item = await ExtensionSettingsStore.getSetting(
+            STORE_TYPE,
+            NEW_TAB_SETTING_NAME
+          );
+          if (item && item.id == extension.id) {
+            Services.prefs.setBoolPref(NEW_TAB_PRIVATE_ALLOWED, true);
+          }
+        }
+      });
+      // eslint-disable-next-line mozilla/balanced-listeners
+      extension.on("remove-permissions", async (ignoreEvent, permissions) => {
+        if (
+          permissions.permissions.includes("internal:privateBrowsingAllowed")
+        ) {
+          let item = await ExtensionSettingsStore.getSetting(
+            STORE_TYPE,
+            NEW_TAB_SETTING_NAME
+          );
+          if (item && item.id == extension.id) {
+            Services.prefs.setBoolPref(NEW_TAB_PRIVATE_ALLOWED, false);
+          }
+        }
+      });
     }
   }
 };

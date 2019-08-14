@@ -6,6 +6,7 @@
 NoVisibilityFlags()
 
 EXPORTS.mozilla += [
+    'cxxalloc.h',
     'mozalloc.h',
     'mozalloc_abort.h',
     'mozalloc_oom.h',
@@ -14,7 +15,7 @@ EXPORTS.mozilla += [
 if CONFIG['WRAP_STL_INCLUDES']:
     if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
         EXPORTS.mozilla += ['throw_gcc.h']
-    elif CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
+    elif CONFIG['CC_TYPE'] == 'clang-cl':
         DEFINES['_HAS_EXCEPTIONS'] = 0
         SOURCES += [
             'msvc_raise_wrappers.cpp',
@@ -35,6 +36,11 @@ SOURCES += [
     'mozalloc_abort.cpp',
 ]
 
+if CONFIG['MOZ_MEMORY']:
+    SOURCES += [
+        'cxxalloc.cpp',
+    ]
+
 if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['CC_TYPE'] == 'clang':
     SOURCES['mozalloc_abort.cpp'].flags += ['-Wno-infinite-recursion']
 
@@ -44,8 +50,6 @@ FINAL_LIBRARY = 'mozglue'
 DEFINES['_GNU_SOURCE'] = True
 
 DisableStlWrapping()
-
-DEFINES['IMPL_MFBT'] = True
 
 LOCAL_INCLUDES += [
     '!/xpcom',

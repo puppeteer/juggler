@@ -16,11 +16,11 @@
 #include "gfxCrashReporterUtils.h"  // for ScopedGfxFeatureReporter
 #include "gfxEnv.h"                 // for gfxEnv
 #include "gfxPlatform.h"            // for gfxPlatform
-#include "gfxPrefs.h"               // for gfxPrefs
 #include "gfxRect.h"                // for gfxRect
 #include "gfxUtils.h"               // for gfxUtils, etc
 #include "mozilla/ArrayUtils.h"     // for ArrayLength
 #include "mozilla/Preferences.h"    // for Preferences
+#include "mozilla/StaticPrefs.h"    // for StaticPrefs
 #include "mozilla/gfx/BasePoint.h"  // for BasePoint
 #include "mozilla/gfx/Matrix.h"     // for Matrix4x4, Matrix
 #include "mozilla/gfx/Triangle.h"   // for Triangle
@@ -33,7 +33,7 @@
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureSourceOGL, etc
 #include "mozilla/layers/PTextureParent.h"  // for OtherPid() on PTextureParent
 #ifdef XP_DARWIN
-#include "mozilla/layers/TextureSync.h"  // for TextureSync::etc.
+#  include "mozilla/layers/TextureSync.h"  // for TextureSync::etc.
 #endif
 #include "mozilla/mozalloc.h"  // for operator delete, etc
 #include "nsAppRunner.h"
@@ -45,6 +45,7 @@
 #include "nsRect.h"                 // for mozilla::gfx::IntRect
 #include "nsServiceManagerUtils.h"  // for do_GetService
 #include "nsString.h"               // for nsString, nsAutoCString, etc
+#include "OGLShaderProgram.h"       // for ShaderProgramOGL, etc
 #include "ScopedGLHelpers.h"
 #include "GLReadTexImageHelper.h"
 #include "GLBlitTextureImageHelper.h"
@@ -53,7 +54,7 @@
 #include "mozilla/gfx/Swizzle.h"
 
 #if MOZ_WIDGET_ANDROID
-#include "GeneratedJNIWrappers.h"
+#  include "GeneratedJNIWrappers.h"
 #endif
 
 #include "GeckoProfiler.h"
@@ -83,7 +84,7 @@ class AsyncReadbackBufferOGL final : public AsyncReadbackBuffer {
   }
 
  protected:
-  ~AsyncReadbackBufferOGL() override;
+  virtual ~AsyncReadbackBufferOGL();
 
  private:
   GLContext* mGL;
@@ -151,6 +152,12 @@ bool AsyncReadbackBufferOGL::MapAndCopyInto(DataSourceSurface* aSurface,
 
   return true;
 }
+
+PerUnitTexturePoolOGL::PerUnitTexturePoolOGL(gl::GLContext* aGL)
+    : mTextureTarget(0),  // zero is never a valid texture target
+      mGL(aGL) {}
+
+PerUnitTexturePoolOGL::~PerUnitTexturePoolOGL() { DestroyTextures(); }
 
 static void BindMaskForProgram(ShaderProgramOGL* aProgram,
                                TextureSourceOGL* aSourceMask, GLenum aTexUnit,
@@ -220,8 +227,8 @@ already_AddRefed<mozilla::gl::GLContext> CompositorOGL::CreateContext() {
 #ifdef XP_WIN
   if (gfxEnv::LayersPreferEGL()) {
     printf_stderr("Trying GL layers...\n");
-    context =
-        gl::GLContextProviderEGL::CreateForCompositorWidget(mWidget, false);
+    context = gl::GLContextProviderEGL::CreateForCompositorWidget(
+        mWidget, /* aWebRender */ false, /* aForceAccelerated */ false);
   }
 #endif
 
@@ -239,7 +246,9 @@ already_AddRefed<mozilla::gl::GLContext> CompositorOGL::CreateContext() {
 
   if (!context) {
     context = gl::GLContextProvider::CreateForCompositorWidget(
-        mWidget, gfxVars::RequiresAcceleratedGLContextForCompositorOGL());
+        mWidget,
+        /* aWebRender */ false,
+        gfxVars::RequiresAcceleratedGLContextForCompositorOGL());
   }
 
   if (!context) {
@@ -290,6 +299,16 @@ void CompositorOGL::CleanupResources() {
     delete iter->second;
   }
   mPrograms.clear();
+
+#ifdef MOZ_WIDGET_GTK
+  // TextureSources might hold RefPtr<gl::GLContext>.
+  // All of them needs to be released to destroy GLContext.
+  // GLContextGLX has to be destroyed before related gtk window is destroyed.
+  for (auto textureSource : mRegisteredTextureSources) {
+    textureSource->DeallocateDeviceData();
+  }
+  mRegisteredTextureSources.clear();
+#endif
 
   ctx->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, 0);
 
@@ -646,12 +665,14 @@ void CompositorOGL::SetRenderTarget(CompositingRenderTarget* aSurface) {
   PrepareViewport(mCurrentRenderTarget);
 }
 
-CompositingRenderTarget* CompositorOGL::GetCurrentRenderTarget() const {
-  return mCurrentRenderTarget;
+already_AddRefed<CompositingRenderTarget>
+CompositorOGL::GetCurrentRenderTarget() const {
+  return do_AddRef(mCurrentRenderTarget);
 }
 
-CompositingRenderTarget* CompositorOGL::GetWindowRenderTarget() const {
-  return mWindowRenderTarget;
+already_AddRefed<CompositingRenderTarget> CompositorOGL::GetWindowRenderTarget()
+    const {
+  return do_AddRef(mWindowRenderTarget);
 }
 
 already_AddRefed<AsyncReadbackBuffer> CompositorOGL::CreateAsyncReadbackBuffer(
@@ -765,6 +786,7 @@ void CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
 
 #ifdef MOZ_WIDGET_ANDROID
   java::GeckoSurfaceTexture::DestroyUnused((int64_t)mGLContext.get());
+  mGLContext->MakeCurrent();  // DestroyUnused can change the current context!
 #endif
 
   // Default blend function implements "OVER"
@@ -784,10 +806,11 @@ void CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
 
 #if defined(MOZ_WIDGET_ANDROID)
   if ((mSurfaceOrigin.x > 0) || (mSurfaceOrigin.y > 0)) {
-    mGLContext->fClearColor(gfxPrefs::CompositorOverrideClearColorR(),
-                            gfxPrefs::CompositorOverrideClearColorG(),
-                            gfxPrefs::CompositorOverrideClearColorB(),
-                            gfxPrefs::CompositorOverrideClearColorA());
+    mGLContext->fClearColor(
+        StaticPrefs::gfx_compositor_override_clear_color_r(),
+        StaticPrefs::gfx_compositor_override_clear_color_g(),
+        StaticPrefs::gfx_compositor_override_clear_color_b(),
+        StaticPrefs::gfx_compositor_override_clear_color_a());
   } else {
     mGLContext->fClearColor(mClearColor.r, mClearColor.g, mClearColor.b,
                             mClearColor.a);
@@ -1211,8 +1234,8 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
   // Only apply DEAA to quads that have been transformed such that aliasing
   // could be visible
-  bool bEnableAA =
-      gfxPrefs::LayersDEAAEnabled() && !aTransform.Is2DIntegerTranslation();
+  bool bEnableAA = StaticPrefs::layers_deaa_enabled() &&
+                   !aTransform.Is2DIntegerTranslation();
 
   bool colorMatrix = aEffectChain.mSecondaryEffects[EffectTypes::COLOR_MATRIX];
   ShaderConfigOGL config =
@@ -1473,6 +1496,7 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
 
       program->SetNV12TextureUnits(Y, CbCr);
       program->SetTextureTransform(Matrix4x4());
+      program->SetYUVColorSpace(effectNV12->mYUVColorSpace);
 
       if (maskType != MaskType::MaskNone) {
         BindMaskForProgram(program, sourceMask, LOCAL_GL_TEXTURE2,
@@ -1526,7 +1550,7 @@ void CompositorOGL::DrawGeometry(const Geometry& aGeometry,
       BindAndDrawGeometry(program, aGeometry);
     } break;
     case EffectTypes::COMPONENT_ALPHA: {
-      MOZ_ASSERT(gfxPrefs::ComponentAlphaEnabled());
+      MOZ_ASSERT(StaticPrefs::layers_componentalpha_enabled());
       MOZ_ASSERT(blendMode == gfx::CompositionOp::OP_OVER,
                  "Can't support blend modes with component alpha!");
       EffectComponentAlpha* effectComponentAlpha =
@@ -1950,7 +1974,7 @@ GLuint CompositorOGL::GetTemporaryTexture(GLenum aTarget, GLenum aUnit) {
 }
 
 bool CompositorOGL::SupportsTextureDirectMapping() {
-  if (!gfxPrefs::AllowTextureDirectMapping()) {
+  if (!StaticPrefs::gfx_allow_texture_direct_mapping()) {
     return false;
   }
 
@@ -2004,7 +2028,25 @@ void PerUnitTexturePoolOGL::DestroyTextures() {
 }
 
 bool CompositorOGL::SupportsLayerGeometry() const {
-  return gfxPrefs::OGLLayerGeometry();
+  return StaticPrefs::layers_geometry_opengl_enabled();
+}
+
+void CompositorOGL::RegisterTextureSource(TextureSource* aTextureSource) {
+#ifdef MOZ_WIDGET_GTK
+  if (mDestroyed) {
+    return;
+  }
+  mRegisteredTextureSources.insert(aTextureSource);
+#endif
+}
+
+void CompositorOGL::UnregisterTextureSource(TextureSource* aTextureSource) {
+#ifdef MOZ_WIDGET_GTK
+  if (mDestroyed) {
+    return;
+  }
+  mRegisteredTextureSources.erase(aTextureSource);
+#endif
 }
 
 }  // namespace layers

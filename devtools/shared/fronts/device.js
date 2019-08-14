@@ -3,19 +3,23 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {Cu} = require("chrome");
-const {deviceSpec} = require("devtools/shared/specs/device");
-const protocol = require("devtools/shared/protocol");
+const { Cu } = require("chrome");
+const { deviceSpec } = require("devtools/shared/specs/device");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
 const defer = require("devtools/shared/defer");
 
-const DeviceFront = protocol.FrontClassWithSpec(deviceSpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = form.deviceActor;
-    this.manage(this);
-  },
+class DeviceFront extends FrontClassWithSpec(deviceSpec) {
+  constructor(client) {
+    super(client);
 
-  screenshotToBlob: function() {
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "deviceActor";
+  }
+
+  screenshotToBlob() {
     return this.screenshotToDataURL().then(longstr => {
       return longstr.string().then(dataURL => {
         const deferred = defer();
@@ -33,7 +37,8 @@ const DeviceFront = protocol.FrontClassWithSpec(deviceSpec, {
         return deferred.promise;
       });
     });
-  },
-});
+  }
+}
 
 exports.DeviceFront = DeviceFront;
+registerFront(DeviceFront);

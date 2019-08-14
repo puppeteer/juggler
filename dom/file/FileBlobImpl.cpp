@@ -19,75 +19,98 @@ namespace mozilla {
 namespace dom {
 
 FileBlobImpl::FileBlobImpl(nsIFile* aFile)
-    : BaseBlobImpl(EmptyString(), EmptyString(), UINT64_MAX, INT64_MAX),
+    : BaseBlobImpl(NS_LITERAL_STRING("FileBlobImpl"), EmptyString(),
+                   EmptyString(), UINT64_MAX, INT64_MAX),
       mFile(aFile),
-      mWholeFile(true),
-      mFileId(-1) {
+      mFileId(-1),
+      mWholeFile(true) {
   MOZ_ASSERT(mFile, "must have file");
   MOZ_ASSERT(XRE_IsParentProcess());
   // Lazily get the content type and size
   mContentType.SetIsVoid(true);
+  mMozFullPath.SetIsVoid(true);
   mFile->GetLeafName(mName);
 }
 
 FileBlobImpl::FileBlobImpl(const nsAString& aName,
                            const nsAString& aContentType, uint64_t aLength,
                            nsIFile* aFile)
-    : BaseBlobImpl(aName, aContentType, aLength, UINT64_MAX),
+    : BaseBlobImpl(NS_LITERAL_STRING("FileBlobImpl"), aName, aContentType,
+                   aLength, UINT64_MAX),
       mFile(aFile),
-      mWholeFile(true),
-      mFileId(-1) {
+      mFileId(-1),
+      mWholeFile(true) {
   MOZ_ASSERT(mFile, "must have file");
   MOZ_ASSERT(XRE_IsParentProcess());
+  mMozFullPath.SetIsVoid(true);
 }
 
 FileBlobImpl::FileBlobImpl(const nsAString& aName,
                            const nsAString& aContentType, uint64_t aLength,
                            nsIFile* aFile, int64_t aLastModificationDate)
-    : BaseBlobImpl(aName, aContentType, aLength, aLastModificationDate),
+    : BaseBlobImpl(NS_LITERAL_STRING("FileBlobImpl"), aName, aContentType,
+                   aLength, aLastModificationDate),
       mFile(aFile),
-      mWholeFile(true),
-      mFileId(-1) {
+      mFileId(-1),
+      mWholeFile(true) {
   MOZ_ASSERT(mFile, "must have file");
   MOZ_ASSERT(XRE_IsParentProcess());
+  mMozFullPath.SetIsVoid(true);
 }
 
 FileBlobImpl::FileBlobImpl(nsIFile* aFile, const nsAString& aName,
-                           const nsAString& aContentType)
-    : BaseBlobImpl(aName, aContentType, UINT64_MAX, INT64_MAX),
+                           const nsAString& aContentType,
+                           const nsAString& aBlobImplType)
+    : BaseBlobImpl(aBlobImplType, aName, aContentType, UINT64_MAX, INT64_MAX),
       mFile(aFile),
-      mWholeFile(true),
-      mFileId(-1) {
+      mFileId(-1),
+      mWholeFile(true) {
   MOZ_ASSERT(mFile, "must have file");
   MOZ_ASSERT(XRE_IsParentProcess());
   if (aContentType.IsEmpty()) {
     // Lazily get the content type and size
     mContentType.SetIsVoid(true);
   }
+
+  mMozFullPath.SetIsVoid(true);
 }
 
 FileBlobImpl::FileBlobImpl(const FileBlobImpl* aOther, uint64_t aStart,
                            uint64_t aLength, const nsAString& aContentType)
-    : BaseBlobImpl(aContentType, aOther->mStart + aStart, aLength),
+    : BaseBlobImpl(NS_LITERAL_STRING("FileBlobImpl"), aContentType,
+                   aOther->mStart + aStart, aLength),
       mFile(aOther->mFile),
-      mWholeFile(false),
-      mFileId(-1) {
+      mFileId(-1),
+      mWholeFile(false) {
   MOZ_ASSERT(mFile, "must have file");
   MOZ_ASSERT(XRE_IsParentProcess());
   mImmutable = aOther->mImmutable;
+  mMozFullPath = aOther->mMozFullPath;
 }
 
 already_AddRefed<BlobImpl> FileBlobImpl::CreateSlice(
     uint64_t aStart, uint64_t aLength, const nsAString& aContentType,
     ErrorResult& aRv) {
-  RefPtr<BlobImpl> impl = new FileBlobImpl(this, aStart, aLength, aContentType);
+  RefPtr<FileBlobImpl> impl =
+      new FileBlobImpl(this, aStart, aLength, aContentType);
   return impl.forget();
 }
 
 void FileBlobImpl::GetMozFullPathInternal(nsAString& aFilename,
-                                          ErrorResult& aRv) const {
+                                          ErrorResult& aRv) {
   MOZ_ASSERT(mIsFile, "Should only be called on files");
+
+  if (!mMozFullPath.IsVoid()) {
+    aFilename = mMozFullPath;
+    return;
+  }
+
   aRv = mFile->GetPath(aFilename);
+  if (NS_WARN_IF(aRv.Failed())) {
+    return;
+  }
+
+  mMozFullPath = aFilename;
 }
 
 uint64_t FileBlobImpl::GetSize(ErrorResult& aRv) {
@@ -198,10 +221,6 @@ int64_t FileBlobImpl::GetLastModified(ErrorResult& aRv) {
   }
 
   return mLastModificationDate;
-}
-
-void FileBlobImpl::SetLastModified(int64_t aLastModified) {
-  MOZ_CRASH("SetLastModified of a real file is not allowed!");
 }
 
 const uint32_t sFileStreamFlags =

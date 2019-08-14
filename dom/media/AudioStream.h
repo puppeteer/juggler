@@ -4,23 +4,24 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #if !defined(AudioStream_h_)
-#define AudioStream_h_
+#  define AudioStream_h_
 
-#include "AudioSampleFormat.h"
-#include "CubebUtils.h"
-#include "MediaInfo.h"
-#include "mozilla/Monitor.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/UniquePtr.h"
-#include "nsAutoPtr.h"
-#include "nsCOMPtr.h"
-#include "nsThreadUtils.h"
-#include "soundtouch/SoundTouchFactory.h"
+#  include "AudioSampleFormat.h"
+#  include "CubebUtils.h"
+#  include "MediaInfo.h"
+#  include "mozilla/Monitor.h"
+#  include "mozilla/RefPtr.h"
+#  include "mozilla/TimeStamp.h"
+#  include "mozilla/UniquePtr.h"
+#  include "nsAutoPtr.h"
+#  include "nsCOMPtr.h"
+#  include "nsThreadUtils.h"
+#  include "soundtouch/SoundTouchFactory.h"
+#  include "WavDumper.h"
 
-#if defined(XP_WIN)
-#include "mozilla/audio/AudioNotificationReceiver.h"
-#endif
+#  if defined(XP_WIN)
+#    include "mozilla/audio/AudioNotificationReceiver.h"
+#  endif
 
 namespace mozilla {
 
@@ -33,7 +34,6 @@ struct CubebDestroyPolicy {
 class AudioStream;
 class FrameHistory;
 class AudioConfig;
-class AudioConverter;
 
 class AudioClock {
  public:
@@ -93,14 +93,16 @@ class AudioClock {
  */
 class AudioBufferCursor {
  public:
-  AudioBufferCursor(AudioDataValue* aPtr, uint32_t aChannels, uint32_t aFrames)
-      : mPtr(aPtr), mChannels(aChannels), mFrames(aFrames) {}
+  AudioBufferCursor(Span<AudioDataValue> aSpan, uint32_t aChannels,
+                    uint32_t aFrames)
+      : mChannels(aChannels), mSpan(aSpan), mFrames(aFrames) {}
 
   // Advance the cursor to account for frames that are consumed.
   uint32_t Advance(uint32_t aFrames) {
+    MOZ_DIAGNOSTIC_ASSERT(Contains(aFrames));
     MOZ_ASSERT(mFrames >= aFrames);
     mFrames -= aFrames;
-    mPtr += mChannels * aFrames;
+    mOffset += mChannels * aFrames;
     return aFrames;
   }
 
@@ -108,11 +110,20 @@ class AudioBufferCursor {
   uint32_t Available() const { return mFrames; }
 
   // Return a pointer where read/write should begin.
-  AudioDataValue* Ptr() const { return mPtr; }
+  AudioDataValue* Ptr() const {
+    MOZ_DIAGNOSTIC_ASSERT(mOffset <= mSpan.Length());
+    return mSpan.Elements() + mOffset;
+  }
 
  protected:
-  AudioDataValue* mPtr;
+  bool Contains(uint32_t aFrames) const {
+    return mSpan.Length() >= mOffset + mChannels * aFrames;
+  }
   const uint32_t mChannels;
+
+ private:
+  const Span<AudioDataValue> mSpan;
+  size_t mOffset = 0;
   uint32_t mFrames;
 };
 
@@ -122,16 +133,19 @@ class AudioBufferCursor {
  */
 class AudioBufferWriter : private AudioBufferCursor {
  public:
-  AudioBufferWriter(AudioDataValue* aPtr, uint32_t aChannels, uint32_t aFrames)
-      : AudioBufferCursor(aPtr, aChannels, aFrames) {}
+  AudioBufferWriter(Span<AudioDataValue> aSpan, uint32_t aChannels,
+                    uint32_t aFrames)
+      : AudioBufferCursor(aSpan, aChannels, aFrames) {}
 
   uint32_t WriteZeros(uint32_t aFrames) {
-    memset(mPtr, 0, sizeof(AudioDataValue) * mChannels * aFrames);
+    MOZ_DIAGNOSTIC_ASSERT(Contains(aFrames));
+    memset(Ptr(), 0, sizeof(AudioDataValue) * mChannels * aFrames);
     return Advance(aFrames);
   }
 
   uint32_t Write(const AudioDataValue* aPtr, uint32_t aFrames) {
-    memcpy(mPtr, aPtr, sizeof(AudioDataValue) * mChannels * aFrames);
+    MOZ_DIAGNOSTIC_ASSERT(Contains(aFrames));
+    memcpy(Ptr(), aPtr, sizeof(AudioDataValue) * mChannels * aFrames);
     return Advance(aFrames);
   }
 
@@ -142,7 +156,8 @@ class AudioBufferWriter : private AudioBufferCursor {
   // return: The number of frames actually written by the function.
   template <typename Function>
   uint32_t Write(const Function& aFunction, uint32_t aFrames) {
-    return Advance(aFunction(mPtr, aFrames));
+    MOZ_DIAGNOSTIC_ASSERT(Contains(aFrames));
+    return Advance(aFunction(Ptr(), aFrames));
   }
 
   using AudioBufferCursor::Available;
@@ -153,9 +168,9 @@ class AudioBufferWriter : private AudioBufferCursor {
 // GetPosition, GetPositionInFrames, SetVolume, and Get{Rate,Channels},
 // SetMicrophoneActive is thread-safe without external synchronization.
 class AudioStream final
-#if defined(XP_WIN)
+#  if defined(XP_WIN)
     : public audio::DeviceChangeListener
-#endif
+#  endif
 {
   virtual ~AudioStream();
 
@@ -188,7 +203,7 @@ class AudioStream final
     virtual void Drained() = 0;
 
    protected:
-    virtual ~DataSource() {}
+    virtual ~DataSource() = default;
   };
 
   explicit AudioStream(DataSource& aSource);
@@ -219,10 +234,10 @@ class AudioStream final
   // Resume audio playback.
   void Resume();
 
-#if defined(XP_WIN)
+#  if defined(XP_WIN)
   // Reset stream to the default device.
   void ResetDefaultDevice() override;
-#endif
+#  endif
 
   // Return the position in microseconds of the audio frame being played by
   // the audio hardware, compensated for playback rate change. Thread-safe.
@@ -294,8 +309,7 @@ class AudioStream final
   AudioClock mAudioClock;
   soundtouch::SoundTouch* mTimeStretcher;
 
-  // Output file for dumping audio
-  FILE* mDumpFile;
+  WavDumper mDumpFile;
 
   // Owning reference to a cubeb_stream.
   UniquePtr<cubeb_stream, CubebDestroyPolicy> mCubebStream;

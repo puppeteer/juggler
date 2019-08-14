@@ -1,3 +1,4 @@
+from __future__ import print_function
 import argparse
 import os
 import sys
@@ -5,10 +6,9 @@ from collections import OrderedDict
 from distutils.spawn import find_executable
 from datetime import timedelta
 
-import config
-import wpttest
-import formatters
-
+from . import config
+from . import wpttest
+from .formatters import chromium, wptreport, wptscreenshot
 
 def abs_path(path):
     return os.path.abspath(os.path.expanduser(path))
@@ -29,7 +29,7 @@ def require_arg(kwargs, name, value_func=None):
         value_func = lambda x: x is not None
 
     if name not in kwargs or not value_func(kwargs[name]):
-        print >> sys.stderr, "Missing required argument %s" % name
+        print("Missing required argument %s" % name, file=sys.stderr)
         sys.exit(1)
 
 
@@ -47,12 +47,14 @@ def create_parser(product_choices=None):
 
 TEST is either the full path to a test file to run, or the URL of a test excluding
 scheme host and port.""")
-    parser.add_argument("--manifest-update", action="store_true", default=True,
+    parser.add_argument("--manifest-update", action="store_true", default=None,
                         help="Regenerate the test manifest.")
     parser.add_argument("--no-manifest-update", action="store_false", dest="manifest_update",
                         help="Prevent regeneration of the test manifest.")
     parser.add_argument("--manifest-download", action="store_true", default=None,
                         help="Attempt to download a preexisting manifest when updating.")
+    parser.add_argument("--no-manifest-download", action="store_false", dest="manifest_download",
+                        help="Prevent download of the test manifest.")
 
     parser.add_argument("--timeout-multiplier", action="store", type=float, default=None,
                         help="Multiplier relative to standard test timeout to use")
@@ -137,6 +139,11 @@ scheme host and port.""")
     test_selection_group.add_argument("--tag", action="append", dest="tags",
                                       help="Labels applied to tests to include in the run. "
                                            "Labels starting dir: are equivalent to top-level directories.")
+    test_selection_group.add_argument("--default-exclude", action="store_true",
+                                      default=False,
+                                      help="Only run the tests explicitly given in arguments. "
+                                           "No tests will run if the list is empty, and the "
+                                           "program will exit with status code 0.")
 
     debugging_group = parser.add_argument_group("Debugging")
     debugging_group.add_argument('--debugger', const="__default__", nargs="?",
@@ -224,7 +231,7 @@ scheme host and port.""")
                                 help="Total number of chunks to use")
     chunking_group.add_argument("--this-chunk", action="store", type=int, default=1,
                                 help="Chunk number to run")
-    chunking_group.add_argument("--chunk-type", action="store", choices=["none", "equal_time", "hash", "dir_hash"],
+    chunking_group.add_argument("--chunk-type", action="store", choices=["none", "hash", "dir_hash"],
                                 default=None, help="Chunking type to use")
 
     ssl_group = parser.add_argument_group("SSL/TLS")
@@ -249,8 +256,12 @@ scheme host and port.""")
                              help="Path to the folder containing browser prefs")
     gecko_group.add_argument("--disable-e10s", dest="gecko_e10s", action="store_false", default=True,
                              help="Run tests without electrolysis preferences")
+    gecko_group.add_argument("--enable-webrender", dest="enable_webrender", action="store_true", default=False,
+                             help="Enable the WebRender compositor in Gecko.")
     gecko_group.add_argument("--stackfix-dir", dest="stackfix_dir", action="store",
                              help="Path to directory containing assertion stack fixing scripts")
+    gecko_group.add_argument("--lsan-dir", dest="lsan_dir", action="store",
+                             help="Path to directory containing LSAN suppressions file")
     gecko_group.add_argument("--setpref", dest="extra_prefs", action='append',
                              default=[], metavar="PREF=VALUE",
                              help="Defines an extra user preference (overrides those in prefs_root)")
@@ -266,7 +277,7 @@ scheme host and port.""")
     gecko_group.add_argument("--reftest-external", dest="reftest_internal", action="store_false",
                              help="Disable reftest runner implemented inside Marionette")
     gecko_group.add_argument("--reftest-screenshot", dest="reftest_screenshot", action="store",
-                             choices=["always", "fail", "unexpected"], default="unexpected",
+                             choices=["always", "fail", "unexpected"], default=None,
                              help="With --reftest-internal, when to take a screenshot")
     gecko_group.add_argument("--chaos", dest="chaos_mode_flags", action="store",
                              nargs="?", const=0xFFFFFFFF, type=int,
@@ -305,6 +316,10 @@ scheme host and port.""")
                              help="Number of seconds to wait for Sauce "
                                   "Connect tunnel to be available before "
                                   "aborting")
+    sauce_group.add_argument("--sauce-connect-arg", action="append",
+                             default=[], dest="sauce_connect_args",
+                             help="Command-line argument to forward to the "
+                                  "Sauce Connect binary (repeatable)")
 
     webkit_group = parser.add_argument_group("WebKit-specific")
     webkit_group.add_argument("--webkit-port", dest="webkit_port",
@@ -314,7 +329,17 @@ scheme host and port.""")
                         help="List of URLs for tests to run, or paths including tests to run. "
                              "(equivalent to --include)")
 
-    commandline.log_formatters["wptreport"] = (formatters.WptreportFormatter, "wptreport format")
+    def screenshot_api_wrapper(formatter, api):
+        formatter.api = api
+        return formatter
+
+    commandline.fmt_options["api"] = (screenshot_api_wrapper,
+                                      "Cache API (default: %s)" % wptscreenshot.DEFAULT_API,
+                                      {"wptscreenshot"}, "store")
+
+    commandline.log_formatters["chromium"] = (chromium.ChromiumFormatter, "Chromium Layout Tests format")
+    commandline.log_formatters["wptreport"] = (wptreport.WptreportFormatter, "wptreport format")
+    commandline.log_formatters["wptscreenshot"] = (wptscreenshot.WptscreenshotFormatter, "wpt.fyi screenshots")
 
     commandline.add_logging_group(parser)
     return parser
@@ -406,7 +431,7 @@ def check_paths(kwargs):
     for test_paths in kwargs["test_paths"].itervalues():
         if not ("tests_path" in test_paths and
                 "metadata_path" in test_paths):
-            print "Fatal: must specify both a test path and metadata path"
+            print("Fatal: must specify both a test path and metadata path")
             sys.exit(1)
         if "manifest_path" not in test_paths:
             test_paths["manifest_path"] = os.path.join(test_paths["metadata_path"],
@@ -420,11 +445,11 @@ def check_paths(kwargs):
                 path = os.path.dirname(path)
 
             if not os.path.exists(path):
-                print "Fatal: %s path %s does not exist" % (name, path)
+                print("Fatal: %s path %s does not exist" % (name, path))
                 sys.exit(1)
 
             if not os.path.isdir(path):
-                print "Fatal: %s path %s is not a directory" % (name, path)
+                print("Fatal: %s path %s is not a directory" % (name, path))
                 sys.exit(1)
 
 
@@ -433,6 +458,9 @@ def check_args(kwargs):
 
     if kwargs["product"] is None:
         kwargs["product"] = "firefox"
+
+    if kwargs["manifest_update"] is None:
+        kwargs["manifest_update"] = True
 
     if "sauce" in kwargs["product"]:
         kwargs["pause_after_test"] = False
@@ -474,7 +502,7 @@ def check_args(kwargs):
 
     if kwargs["binary"] is not None:
         if not os.path.exists(kwargs["binary"]):
-            print >> sys.stderr, "Binary path %s does not exist" % kwargs["binary"]
+            print("Binary path %s does not exist" % kwargs["binary"], file=sys.stderr)
             sys.exit(1)
 
     if kwargs["ssl_type"] is None:
@@ -493,14 +521,14 @@ def check_args(kwargs):
     elif kwargs["ssl_type"] == "openssl":
         path = exe_path(kwargs["openssl_binary"])
         if path is None:
-            print >> sys.stderr, "openssl-binary argument missing or not a valid executable"
+            print("openssl-binary argument missing or not a valid executable", file=sys.stderr)
             sys.exit(1)
         kwargs["openssl_binary"] = path
 
     if kwargs["ssl_type"] != "none" and kwargs["product"] == "firefox" and kwargs["certutil_binary"]:
         path = exe_path(kwargs["certutil_binary"])
         if path is None:
-            print >> sys.stderr, "certutil-binary argument missing or not a valid executable"
+            print("certutil-binary argument missing or not a valid executable", file=sys.stderr)
             sys.exit(1)
         kwargs["certutil_binary"] = path
 
@@ -510,13 +538,19 @@ def check_args(kwargs):
             kwargs['extra_prefs'] = [kwargs['extra_prefs']]
         missing = any('=' not in prefarg for prefarg in kwargs['extra_prefs'])
         if missing:
-            print >> sys.stderr, "Preferences via --setpref must be in key=value format"
+            print("Preferences via --setpref must be in key=value format", file=sys.stderr)
             sys.exit(1)
         kwargs['extra_prefs'] = [tuple(prefarg.split('=', 1)) for prefarg in
                                  kwargs['extra_prefs']]
 
     if kwargs["reftest_internal"] is None:
         kwargs["reftest_internal"] = True
+
+    if kwargs["lsan_dir"] is None:
+        kwargs["lsan_dir"] = kwargs["prefs_root"]
+
+    if kwargs["reftest_screenshot"] is None:
+        kwargs["reftest_screenshot"] = "unexpected"
 
     return kwargs
 
@@ -531,7 +565,7 @@ def check_args_update(kwargs):
 
     for item in kwargs["run_log"]:
         if os.path.isdir(item):
-            print >> sys.stderr, "Log file %s is a directory" % item
+            print("Log file %s is a directory" % item, file=sys.stderr)
             sys.exit(1)
 
     return kwargs
@@ -570,8 +604,8 @@ def create_parser_update(product_choices=None):
                         help="Don't create a VCS commit containing the changes.")
     parser.add_argument("--sync", dest="sync", action="store_true", default=False,
                         help="Sync the tests with the latest from upstream (implies --patch)")
-    parser.add_argument("--ignore-existing", action="store_true",
-                        help="When updating test results only consider results from the logfiles provided, not existing expectations.")
+    parser.add_argument("--full", action="store_true", default=False,
+                        help=("For all tests that are updated, remove any existing conditions and missing subtests"))
     parser.add_argument("--stability", nargs="?", action="store", const="unstable", default=None,
         help=("Reason for disabling tests. When updating test results, disable tests that have "
               "inconsistent results across many runs with the given reason."))

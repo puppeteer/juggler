@@ -13,6 +13,7 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
@@ -21,10 +22,9 @@
 #include "nsGkAtoms.h"
 #include "nsAtom.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIFrame.h"
 #include "nsINode.h"
-#include "nsIPresShell.h"
 #include "nsISelectionController.h"
 #include "nsISupports.h"
 #include "nsIWeakReferenceUtils.h"
@@ -305,7 +305,7 @@ bool IMEContentObserver::InitWithEditor(nsPresContext* aPresContext,
     return false;
   }
 
-  nsIPresShell* presShell = aPresContext->PresShell();
+  PresShell* presShell = aPresContext->GetPresShell();
 
   // get selection and root content
   nsCOMPtr<nsISelectionController> selCon;
@@ -318,7 +318,7 @@ bool IMEContentObserver::InitWithEditor(nsPresContext* aPresContext,
     frame->GetSelectionController(aPresContext, getter_AddRefs(selCon));
   } else {
     // mEditableNode is a document
-    selCon = do_QueryInterface(presShell);
+    selCon = presShell;
   }
 
   if (NS_WARN_IF(!selCon)) {
@@ -448,7 +448,7 @@ void IMEContentObserver::ObserveEditableNode() {
     mRootContent->AddMutationObserver(this);
     // If it's in a document (should be so), we can use document observer to
     // reduce redundant computation of text change offsets.
-    nsIDocument* doc = mRootContent->GetComposedDoc();
+    Document* doc = mRootContent->GetComposedDoc();
     if (doc) {
       RefPtr<DocumentObserver> documentObserver = mDocumentObserver;
       documentObserver->Observe(doc);
@@ -835,8 +835,8 @@ bool IMEContentObserver::OnMouseButtonEvent(nsPresContext* aPresContext,
       charAtPt.mRefPoint.ToUnknownPoint());
   notification.mMouseButtonEventData.mCharRect.Set(
       charAtPt.mReply.mRect.ToUnknownRect());
-  notification.mMouseButtonEventData.mButton = aMouseEvent->button;
-  notification.mMouseButtonEventData.mButtons = aMouseEvent->buttons;
+  notification.mMouseButtonEventData.mButton = aMouseEvent->mButton;
+  notification.mMouseButtonEventData.mButtons = aMouseEvent->mButtons;
   notification.mMouseButtonEventData.mModifiers = aMouseEvent->mModifiers;
 
   nsresult rv = IMEStateManager::NotifyIME(notification, mWidget);
@@ -1088,8 +1088,7 @@ void IMEContentObserver::ContentRemoved(nsIContent* aChild,
 void IMEContentObserver::AttributeWillChange(dom::Element* aElement,
                                              int32_t aNameSpaceID,
                                              nsAtom* aAttribute,
-                                             int32_t aModType,
-                                             const nsAttrValue* aNewValue) {
+                                             int32_t aModType) {
   if (!NeedsTextChangeNotification()) {
     return;
   }
@@ -1461,7 +1460,7 @@ bool IMEContentObserver::IsReflowLocked() const {
   if (NS_WARN_IF(!presContext)) {
     return false;
   }
-  nsIPresShell* presShell = presContext->GetPresShell();
+  PresShell* presShell = presContext->GetPresShell();
   if (NS_WARN_IF(!presShell)) {
     return false;
   }
@@ -1551,7 +1550,7 @@ void IMEContentObserver::FlushMergeableNotifications() {
            this));
 
   // If contents in selection range is modified, the selection range still
-  // has removed node from the tree.  In such case, nsContentIterator won't
+  // has removed node from the tree.  In such case, ContentIterator won't
   // work well.  Therefore, we shouldn't use AddScriptRunnder() here since
   // it may kick runnable event immediately after DOM tree is changed but
   // the selection range isn't modified yet.
@@ -1814,9 +1813,15 @@ void IMEContentObserver::IMENotificationSender::SendFocusSet() {
 
   observer->mIMEHasFocus = true;
   // Initialize selection cache with the first selection data.
+#ifdef XP_MACOSX
+  // We need to flush layout only on macOS because character coordinates are
+  // cached by cocoa with this call, but we don't have a way to update them
+  // after that.  Therefore, we need the latest layout information right now.
+  observer->UpdateSelectionCache(true);
+#else
   // We avoid flushing for focus in the general case.
   observer->UpdateSelectionCache(false);
-
+#endif  // #ifdef XP_MACOSX #else
   MOZ_LOG(sIMECOLog, LogLevel::Info,
           ("0x%p IMEContentObserver::IMENotificationSender::"
            "SendFocusSet(), sending NOTIFY_IME_OF_FOCUS...",
@@ -2103,12 +2108,12 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(IMEContentObserver::DocumentObserver)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(IMEContentObserver::DocumentObserver)
 
-void IMEContentObserver::DocumentObserver::Observe(nsIDocument* aDocument) {
+void IMEContentObserver::DocumentObserver::Observe(Document* aDocument) {
   MOZ_ASSERT(aDocument);
 
   // Guarantee that aDocument won't be destroyed during a call of
   // StopObserving().
-  RefPtr<nsIDocument> newDocument = aDocument;
+  RefPtr<Document> newDocument = aDocument;
 
   StopObserving();
 
@@ -2125,7 +2130,7 @@ void IMEContentObserver::DocumentObserver::StopObserving() {
   RefPtr<IMEContentObserver> observer = mIMEContentObserver.forget();
 
   // Stop observing the document first.
-  RefPtr<nsIDocument> document = mDocument.forget();
+  RefPtr<Document> document = mDocument.forget();
   document->RemoveObserver(this);
 
   // Notify IMEContentObserver of ending of document updates if this already
@@ -2144,7 +2149,7 @@ void IMEContentObserver::DocumentObserver::Destroy() {
   mIMEContentObserver = nullptr;
 }
 
-void IMEContentObserver::DocumentObserver::BeginUpdate(nsIDocument* aDocument) {
+void IMEContentObserver::DocumentObserver::BeginUpdate(Document* aDocument) {
   if (NS_WARN_IF(Destroyed()) || NS_WARN_IF(!IsObserving())) {
     return;
   }
@@ -2152,7 +2157,7 @@ void IMEContentObserver::DocumentObserver::BeginUpdate(nsIDocument* aDocument) {
   mIMEContentObserver->BeginDocumentUpdate();
 }
 
-void IMEContentObserver::DocumentObserver::EndUpdate(nsIDocument* aDocument) {
+void IMEContentObserver::DocumentObserver::EndUpdate(Document* aDocument) {
   if (NS_WARN_IF(Destroyed()) || NS_WARN_IF(!IsObserving()) ||
       NS_WARN_IF(!IsUpdating())) {
     return;

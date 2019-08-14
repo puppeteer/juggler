@@ -11,39 +11,69 @@ var EXPORTED_SYMBOLS = ["AddonTestUtils", "MockAsyncShutdown"];
 
 const CERTDB_CONTRACTID = "@mozilla.org/security/x509certdb;1";
 
-Cu.importGlobalProperties(["fetch", "TextEncoder"]);
+Cu.importGlobalProperties(["fetch"]);
 
-ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm");
-ChromeUtils.import("resource://gre/modules/FileUtils.jsm");
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Timer.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { AsyncShutdown } = ChromeUtils.import(
+  "resource://gre/modules/AsyncShutdown.jsm"
+);
+const { FileUtils } = ChromeUtils.import(
+  "resource://gre/modules/FileUtils.jsm"
+);
+const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { setTimeout } = ChromeUtils.import("resource://gre/modules/Timer.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
-const {EventEmitter} = ChromeUtils.import("resource://gre/modules/EventEmitter.jsm", {});
-const {OS} = ChromeUtils.import("resource://gre/modules/osfile.jsm", {});
+const { EventEmitter } = ChromeUtils.import(
+  "resource://gre/modules/EventEmitter.jsm"
+);
+const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
 
-ChromeUtils.defineModuleGetter(this, "AMTelemetry",
-                               "resource://gre/modules/AddonManager.jsm");
-ChromeUtils.defineModuleGetter(this, "ExtensionTestCommon",
-                               "resource://testing-common/ExtensionTestCommon.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "AMTelemetry",
+  "resource://gre/modules/AddonManager.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "ExtensionTestCommon",
+  "resource://testing-common/ExtensionTestCommon.jsm"
+);
 XPCOMUtils.defineLazyGetter(this, "Management", () => {
-  let {Management} = ChromeUtils.import("resource://gre/modules/Extension.jsm", {});
+  let { Management } = ChromeUtils.import(
+    "resource://gre/modules/Extension.jsm",
+    null
+  );
   return Management;
 });
 
-ChromeUtils.defineModuleGetter(this, "FileTestUtils",
-                               "resource://testing-common/FileTestUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "HttpServer",
-                               "resource://testing-common/httpd.js");
-ChromeUtils.defineModuleGetter(this, "InstallRDF",
-                               "resource://gre/modules/addons/RDFManifestConverter.jsm");
-ChromeUtils.defineModuleGetter(this, "MockRegistrar",
-                               "resource://testing-common/MockRegistrar.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "FileTestUtils",
+  "resource://testing-common/FileTestUtils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "HttpServer",
+  "resource://testing-common/httpd.js"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "MockRegistrar",
+  "resource://testing-common/MockRegistrar.jsm"
+);
 
 XPCOMUtils.defineLazyServiceGetters(this, {
-  aomStartup: ["@mozilla.org/addons/addon-manager-startup;1", "amIAddonManagerStartup"],
-  proxyService: ["@mozilla.org/network/protocol-proxy-service;1", "nsIProtocolProxyService"],
+  aomStartup: [
+    "@mozilla.org/addons/addon-manager-startup;1",
+    "amIAddonManagerStartup",
+  ],
+  proxyService: [
+    "@mozilla.org/network/protocol-proxy-service;1",
+    "nsIProtocolProxyService",
+  ],
   uuidGen: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
 });
 
@@ -53,32 +83,44 @@ XPCOMUtils.defineLazyGetter(this, "AppInfo", () => {
   return AppInfo;
 });
 
-const PREF_DISABLE_SECURITY = ("security.turn_off_all_security_so_that_" +
-                               "viruses_can_take_over_this_computer");
+const PREF_DISABLE_SECURITY =
+  "security.turn_off_all_security_so_that_" +
+  "viruses_can_take_over_this_computer";
 
 const ArrayBufferInputStream = Components.Constructor(
   "@mozilla.org/io/arraybuffer-input-stream;1",
-  "nsIArrayBufferInputStream", "setData");
+  "nsIArrayBufferInputStream",
+  "setData"
+);
 
 const nsFile = Components.Constructor(
   "@mozilla.org/file/local;1",
-  "nsIFile", "initWithPath");
+  "nsIFile",
+  "initWithPath"
+);
 
 const ZipReader = Components.Constructor(
   "@mozilla.org/libjar/zip-reader;1",
-  "nsIZipReader", "open");
+  "nsIZipReader",
+  "open"
+);
 
 const ZipWriter = Components.Constructor(
   "@mozilla.org/zipwriter;1",
-  "nsIZipWriter", "open");
+  "nsIZipWriter",
+  "open"
+);
 
 function isRegExp(val) {
   return val && typeof val === "object" && typeof val.test === "function";
 }
 
 // We need some internal bits of AddonManager
-var AMscope = ChromeUtils.import("resource://gre/modules/AddonManager.jsm", {});
-var {AddonManager, AddonManagerPrivate} = AMscope;
+var AMscope = ChromeUtils.import(
+  "resource://gre/modules/AddonManager.jsm",
+  null
+);
+var { AddonManager, AddonManagerPrivate } = AMscope;
 
 class MockBarrier {
   constructor(name) {
@@ -87,12 +129,12 @@ class MockBarrier {
   }
 
   addBlocker(name, blocker, options) {
-    this.blockers.push({name, blocker, options});
+    this.blockers.push({ name, blocker, options });
   }
 
   async trigger() {
     await Promise.all(
-      this.blockers.map(async ({blocker, name}) => {
+      this.blockers.map(async ({ blocker, name }) => {
         try {
           if (typeof blocker == "function") {
             await blocker();
@@ -101,9 +143,14 @@ class MockBarrier {
           }
         } catch (e) {
           Cu.reportError(e);
-          dump(`Shutdown blocker '${name}' for ${this.name} threw error: ${e} :: ${e.stack}\n`);
+          dump(
+            `Shutdown blocker '${name}' for ${this.name} threw error: ${e} :: ${
+              e.stack
+            }\n`
+          );
         }
-      }));
+      })
+    );
 
     this.blockers = [];
   }
@@ -136,7 +183,10 @@ class MockBlocklist {
       }
     }
 
-    this._xpidb = ChromeUtils.import("resource://gre/modules/addons/XPIDatabase.jsm", null);
+    this._xpidb = ChromeUtils.import(
+      "resource://gre/modules/addons/XPIDatabase.jsm",
+      null
+    );
   }
 
   get contractID() {
@@ -145,7 +195,11 @@ class MockBlocklist {
 
   _reLazifyService() {
     XPCOMUtils.defineLazyServiceGetter(Services, "blocklist", this.contractID);
-    ChromeUtils.defineModuleGetter(this._xpidb, "Blocklist", "resource://gre/modules/Blocklist.jsm");
+    ChromeUtils.defineModuleGetter(
+      this._xpidb,
+      "Blocklist",
+      "resource://gre/modules/Blocklist.jsm"
+    );
   }
 
   register() {
@@ -161,11 +215,17 @@ class MockBlocklist {
 
   async getAddonBlocklistState(addon, appVersion, toolkitVersion) {
     await new Promise(r => setTimeout(r, 150));
-    return this.addons.get(addon.id) || Ci.nsIBlocklistService.STATE_NOT_BLOCKED;
+    return (
+      this.addons.get(addon.id) || Ci.nsIBlocklistService.STATE_NOT_BLOCKED
+    );
   }
 
   async getAddonBlocklistEntry(addon, appVersion, toolkitVersion) {
-    let state = await this.getAddonBlocklistState(addon, appVersion, toolkitVersion);
+    let state = await this.getAddonBlocklistState(
+      addon,
+      appVersion,
+      toolkitVersion
+    );
     if (state != Ci.nsIBlocklistService.STATE_NOT_BLOCKED) {
       return {
         state,
@@ -181,45 +241,9 @@ class MockBlocklist {
   }
 }
 
-MockBlocklist.prototype.QueryInterface = ChromeUtils.generateQI(["nsIBlocklistService"]);
-
-
-/**
- * Escapes any occurrences of &, ", < or > with XML entities.
- *
- * @param {string} str
- *        The string to escape.
- * @return {string} The escaped string.
- */
-function escapeXML(str) {
-  let replacements = {"&": "&amp;", '"': "&quot;", "'": "&apos;", "<": "&lt;", ">": "&gt;"};
-  return String(str).replace(/[&"''<>]/g, m => replacements[m]);
-}
-
-/**
- * A tagged template function which escapes any XML metacharacters in
- * interpolated values.
- *
- * @param {Array<string>} strings
- *        An array of literal strings extracted from the templates.
- * @param {Array} values
- *        An array of interpolated values extracted from the template.
- * @returns {string}
- *        The result of the escaped values interpolated with the literal
- *        strings.
- */
-function escaped(strings, ...values) {
-  let result = [];
-
-  for (let [i, string] of strings.entries()) {
-    result.push(string);
-    if (i < values.length)
-      result.push(escapeXML(values[i]));
-  }
-
-  return result.join("");
-}
-
+MockBlocklist.prototype.QueryInterface = ChromeUtils.generateQI([
+  "nsIBlocklistService",
+]);
 
 class AddonsList {
   constructor(file) {
@@ -245,8 +269,12 @@ class AddonsList {
           } catch (e) {
             file = new nsFile(addon.path);
           }
-        } else {
+        } else if (addon.path) {
           file = new nsFile(addon.path);
+        }
+
+        if (!file) {
+          continue;
         }
 
         this.xpis.push(file);
@@ -272,13 +300,18 @@ class AddonsList {
     xpiPath.append(`${id}.xpi`);
 
     return this[type].some(file => {
-      if (!file.exists())
-        throw new Error(`Non-existent path found in addonStartup.json: ${file.path}`);
+      if (!file.exists()) {
+        throw new Error(
+          `Non-existent path found in addonStartup.json: ${file.path}`
+        );
+      }
 
-      if (file.isDirectory())
+      if (file.isDirectory()) {
         return file.equals(path);
-      if (file.isFile())
+      }
+      if (file.isFile()) {
         return file.equals(xpiPath);
+      }
       return false;
     });
   }
@@ -298,6 +331,7 @@ var AddonTestUtils = {
   appInfo: null,
   addonStartup: null,
   collectedTelemetryEvents: [],
+  testScope: null,
   testUnpacked: false,
   useRealCertChecks: false,
   usePrivilegedSignatures: true,
@@ -309,7 +343,7 @@ var AddonTestUtils = {
     }
   },
 
-  init(testScope) {
+  init(testScope, enableLogging = true) {
     if (this.testScope === testScope) {
       return;
     }
@@ -333,15 +367,22 @@ var AddonTestUtils = {
     // Create a replacement app directory for the tests.
     const appDirForAddons = this.profileDir.clone();
     appDirForAddons.append("appdir-addons");
-    appDirForAddons.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    appDirForAddons.create(
+      Ci.nsIFile.DIRECTORY_TYPE,
+      FileUtils.PERMS_DIRECTORY
+    );
     this.registerDirectory("XREAddonAppDir", appDirForAddons);
 
-
-    // Enable more extensive EM logging
-    Services.prefs.setBoolPref("extensions.logging.enabled", true);
+    // Enable more extensive EM logging.
+    if (enableLogging) {
+      Services.prefs.setBoolPref("extensions.logging.enabled", true);
+    }
 
     // By default only load extensions from the profile install location
-    Services.prefs.setIntPref("extensions.enabledScopes", AddonManager.SCOPE_PROFILE);
+    Services.prefs.setIntPref(
+      "extensions.enabledScopes",
+      AddonManager.SCOPE_PROFILE
+    );
 
     // By default don't disable add-ons from any scope
     Services.prefs.setIntPref("extensions.autoDisableScopes", 0);
@@ -353,36 +394,48 @@ var AddonTestUtils = {
     Services.prefs.setBoolPref("extensions.getAddons.cache.enabled", false);
 
     // Point update checks to the local machine for fast failures
-    Services.prefs.setCharPref("extensions.update.url", "http://127.0.0.1/updateURL");
-    Services.prefs.setCharPref("extensions.update.background.url", "http://127.0.0.1/updateBackgroundURL");
-    Services.prefs.setCharPref("extensions.blocklist.url", "http://127.0.0.1/blocklistURL");
-    Services.prefs.setCharPref("services.settings.server", "http://localhost/dummy-kinto/v1");
+    Services.prefs.setCharPref(
+      "extensions.update.url",
+      "http://127.0.0.1/updateURL"
+    );
+    Services.prefs.setCharPref(
+      "extensions.update.background.url",
+      "http://127.0.0.1/updateBackgroundURL"
+    );
+    Services.prefs.setCharPref(
+      "extensions.blocklist.url",
+      "http://127.0.0.1/blocklistURL"
+    );
+    Services.prefs.setCharPref(
+      "services.settings.server",
+      "http://localhost/dummy-kinto/v1"
+    );
 
     // By default ignore bundled add-ons
     Services.prefs.setBoolPref("extensions.installDistroAddons", false);
 
-    // By default don't check for hotfixes
-    Services.prefs.setCharPref("extensions.hotfix.id", "");
-
     // Ensure signature checks are enabled by default
     Services.prefs.setBoolPref("xpinstall.signatures.required", true);
-
 
     // Write out an empty blocklist.xml file to the profile to ensure nothing
     // is blocklisted by default
     var blockFile = OS.Path.join(this.profileDir.path, "blocklist.xml");
 
-    var data = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
-               "<blocklist xmlns=\"http://www.mozilla.org/2006/addons-blocklist\">\n" +
-               "</blocklist>\n";
+    var data =
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<blocklist xmlns="http://www.mozilla.org/2006/addons-blocklist">\n' +
+      "</blocklist>\n";
 
-    this.awaitPromise(OS.File.writeAtomic(blockFile, new TextEncoder().encode(data)));
-
+    this.awaitPromise(
+      OS.File.writeAtomic(blockFile, new TextEncoder().encode(data))
+    );
 
     // Make sure that a given path does not exist
     function pathShouldntExist(file) {
       if (file.exists()) {
-        throw new Error(`Test cleanup: path ${file.path} exists when it should not`);
+        throw new Error(
+          `Test cleanup: path ${file.path} exists when it should not`
+        );
       }
     }
 
@@ -393,8 +446,10 @@ var AddonTestUtils = {
       {
         // FileTestUtils lazily creates a directory to hold the temporary files
         // it creates. If that directory exists, ignore it.
-        let {value} = Object.getOwnPropertyDescriptor(FileTestUtils,
-                                                      "_globalTemporaryDirectory");
+        let { value } = Object.getOwnPropertyDescriptor(
+          FileTestUtils,
+          "_globalTemporaryDirectory"
+        );
         if (value) {
           ignoreEntries.add(value.leafName);
         }
@@ -402,13 +457,16 @@ var AddonTestUtils = {
 
       // Check that the temporary directory is empty
       var entries = [];
-      for (let {leafName} of this.iterDirectory(this.tempDir)) {
+      for (let { leafName } of this.iterDirectory(this.tempDir)) {
         if (!ignoreEntries.has(leafName)) {
           entries.push(leafName);
         }
       }
-      if (entries.length)
-        throw new Error(`Found unexpected files in temporary directory: ${entries.join(", ")}`);
+      if (entries.length) {
+        throw new Error(
+          `Found unexpected files in temporary directory: ${entries.join(", ")}`
+        );
+      }
 
       try {
         appDirForAddons.remove(true);
@@ -450,9 +508,16 @@ var AddonTestUtils = {
 
     this.tempDir = FileUtils.getDir("TmpD", []);
     this.tempDir.append("addons-mochitest");
-    this.tempDir.createUnique(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+    this.tempDir.createUnique(
+      Ci.nsIFile.DIRECTORY_TYPE,
+      FileUtils.PERMS_DIRECTORY
+    );
 
     testScope.registerCleanupFunction(() => {
+      // Defer testScope cleanup until the last cleanup function has run.
+      testScope.registerCleanupFunction(() => {
+        this.testScope = null;
+      });
       this.cleanupTempXPIs();
       try {
         this.tempDir.remove(true);
@@ -470,7 +535,7 @@ var AddonTestUtils = {
    * @param {nsIFile} dir
    *        Directory to iterate.
    */
-  * iterDirectory(dir) {
+  *iterDirectory(dir) {
     let dirEnum;
     try {
       dirEnum = dir.directoryEntries;
@@ -506,7 +571,7 @@ var AddonTestUtils = {
    * @returns {HttpServer}
    *        The HTTP server instance.
    */
-  createHttpServer({port = -1, hosts} = {}) {
+  createHttpServer({ port = -1, hosts } = {}) {
     let server = new HttpServer();
     server.start(port);
 
@@ -520,7 +585,16 @@ var AddonTestUtils = {
       }
 
       const proxyFilter = {
-        proxyInfo: proxyService.newProxyInfo("http", serverHost, serverPort, 0, 4096, null),
+        proxyInfo: proxyService.newProxyInfo(
+          "http",
+          serverHost,
+          serverPort,
+          "",
+          "",
+          0,
+          4096,
+          null
+        ),
 
         applyFilter(service, channel, defaultProxyInfo, callback) {
           if (hosts.has(channel.URI.host)) {
@@ -584,23 +658,33 @@ var AddonTestUtils = {
     let done = false;
     let result;
     let error;
-    promise.then(
-      val => { result = val; },
-      err => { error = err; }
-    ).then(() => {
-      done = true;
-    });
+    promise
+      .then(
+        val => {
+          result = val;
+        },
+        err => {
+          error = err;
+        }
+      )
+      .then(() => {
+        done = true;
+      });
 
     Services.tm.spinEventLoopUntil(() => done);
 
-    if (error !== undefined)
+    if (error !== undefined) {
       throw error;
+    }
     return result;
   },
 
   createAppInfo(ID, name, version, platformVersion = "1.0") {
     AppInfo.updateAppInfo({
-      ID, name, version, platformVersion,
+      ID,
+      name,
+      version,
+      platformVersion,
       crashReporter: true,
       extraProps: {
         browserTabsRemoteAutostart: false,
@@ -611,14 +695,10 @@ var AddonTestUtils = {
 
   getManifestURI(file) {
     if (file.isDirectory()) {
-      file.append("install.rdf");
+      file.leafName = "manifest.json";
       if (file.exists()) {
         return NetUtil.newURI(file);
       }
-
-      file.leafName = "manifest.json";
-      if (file.exists())
-        return NetUtil.newURI(file);
 
       throw new Error("No manifest file present");
     }
@@ -626,10 +706,6 @@ var AddonTestUtils = {
     let zip = ZipReader(file);
     try {
       let uri = NetUtil.newURI(file);
-
-      if (zip.hasEntry("install.rdf")) {
-        return NetUtil.newURI(`jar:${uri.spec}!/install.rdf`);
-      }
 
       if (zip.hasEntry("manifest.json")) {
         return NetUtil.newURI(`jar:${uri.spec}!/manifest.json`);
@@ -647,12 +723,6 @@ var AddonTestUtils = {
 
   async getIDFromManifest(manifestURI) {
     let body = await fetch(manifestURI.spec);
-
-    if (manifestURI.spec.endsWith(".rdf")) {
-      let manifest = InstallRDF.loadFromBuffer(await body.arrayBuffer()).decode();
-      return manifest.id;
-    }
-
     let manifest = await body.json();
     try {
       return manifest.applications.gecko.id;
@@ -665,8 +735,11 @@ var AddonTestUtils = {
 
   overrideCertDB() {
     let verifyCert = async (file, result, cert, callback) => {
-      if (result == Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED &&
-          !this.useRealCertChecks && callback.wrappedJSObject) {
+      if (
+        result == Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED &&
+        !this.useRealCertChecks &&
+        callback.wrappedJSObject
+      ) {
         // Bypassing XPConnect allows us to create a fake x509 certificate from JS
         callback = callback.wrappedJSObject;
 
@@ -681,10 +754,12 @@ var AddonTestUtils = {
             }
           }
 
-          let fakeCert = {commonName: id};
+          let fakeCert = { commonName: id };
           if (this.usePrivilegedSignatures) {
-            let privileged = typeof this.usePrivilegedSignatures == "function" ?
-                             this.usePrivilegedSignatures(id) : this.usePrivilegedSignatures;
+            let privileged =
+              typeof this.usePrivilegedSignatures == "function"
+                ? this.usePrivilegedSignatures(id)
+                : this.usePrivilegedSignatures;
             if (privileged === "system") {
               fakeCert.organizationalUnit = "Mozilla Components";
             } else if (privileged) {
@@ -697,8 +772,13 @@ var AddonTestUtils = {
           // If there is any error then just pass along the original results
         } finally {
           // Make sure to close the open zip file or it will be locked.
-          if (file.isFile())
-            Services.obs.notifyObservers(file, "flush-cache-entry", "cert-override");
+          if (file.isFile()) {
+            Services.obs.notifyObservers(
+              file,
+              "flush-cache-entry",
+              "cert-override"
+            );
+          }
         }
       }
 
@@ -707,23 +787,32 @@ var AddonTestUtils = {
 
     let FakeCertDB = {
       init() {
-        for (let property of Object.keys(this._genuine.QueryInterface(Ci.nsIX509CertDB))) {
-          if (property in this)
+        for (let property of Object.keys(
+          this._genuine.QueryInterface(Ci.nsIX509CertDB)
+        )) {
+          if (property in this) {
             continue;
+          }
 
-          if (typeof this._genuine[property] == "function")
+          if (typeof this._genuine[property] == "function") {
             this[property] = this._genuine[property].bind(this._genuine);
+          }
         }
       },
 
       openSignedAppFileAsync(root, file, callback) {
         // First try calling the real cert DB
-        this._genuine.openSignedAppFileAsync(root, file, (result, zipReader, cert) => {
-          verifyCert(file.clone(), result, cert, callback)
-            .then(([callback, result, cert]) => {
-              callback.openSignedAppFileFinished(result, zipReader, cert);
-            });
-        });
+        this._genuine.openSignedAppFileAsync(
+          root,
+          file,
+          (result, zipReader, cert) => {
+            verifyCert(file.clone(), result, cert, callback).then(
+              ([callback, result, cert]) => {
+                callback.openSignedAppFileFinished(result, zipReader, cert);
+              }
+            );
+          }
+        );
       },
 
       QueryInterface: ChromeUtils.generateQI([Ci.nsIX509CertDB]),
@@ -755,6 +844,87 @@ var AddonTestUtils = {
   },
 
   /**
+   * Load the data from the specified files into the *real* blocklist providers.
+   * Loads using loadBlocklistRawData, which will treat this as an update.
+   *
+   * @param {nsIFile} dir
+   *        The directory in which the files live.
+   * @param {string} prefix
+   *        a prefix for the files which ought to be loaded.
+   *        This method will suffix -extensions.json and -plugins.json
+   *        to the prefix it is given, and attempt to load both.
+   *        Insofar as either exists, their data will be dumped into
+   *        the respective store, and the respective update handlers
+   *        will be called.
+   */
+  async loadBlocklistData(dir, prefix) {
+    let loadedData = {};
+    for (let fileSuffix of ["extensions", "plugins"]) {
+      const fileName = `${prefix}-${fileSuffix}.json`;
+      let jsonStr = await OS.File.read(OS.Path.join(dir.path, fileName), {
+        encoding: "UTF-8",
+      }).catch(() => {});
+      if (!jsonStr) {
+        continue;
+      }
+      this.info(`Loaded ${fileName}`);
+
+      loadedData[fileSuffix] = JSON.parse(jsonStr);
+    }
+    return this.loadBlocklistRawData(loadedData);
+  },
+
+  /**
+   * Load the following data into the *real* blocklist providers.
+   * While `overrideBlocklist` replaces the blocklist entirely with a mock
+   * that returns dummy data, this method instead loads data into the actual
+   * blocklist, fires update methods as would happen if this data came from
+   * an actual blocklist update, etc.
+   *
+   * @param {object} data
+   *        The data to load.
+   */
+  async loadBlocklistRawData(data) {
+    const bsPass = ChromeUtils.import(
+      "resource://gre/modules/Blocklist.jsm",
+      null
+    );
+    const blocklistMapping = {
+      extensions: bsPass.ExtensionBlocklistRS,
+      plugins: bsPass.PluginBlocklistRS,
+    };
+
+    for (const [dataProp, blocklistObj] of Object.entries(blocklistMapping)) {
+      let newData = data[dataProp];
+      if (!newData) {
+        continue;
+      }
+      if (!Array.isArray(newData)) {
+        throw new Error(
+          "Expected an array of new items to put in the " +
+            dataProp +
+            " blocklist!"
+        );
+      }
+      for (let item of newData) {
+        if (!item.id) {
+          item.id = uuidGen.generateUUID().number.slice(1, -1);
+        }
+        if (!item.last_modified) {
+          item.last_modified = Date.now();
+        }
+      }
+      blocklistObj.ensureInitialized();
+      let collection = await blocklistObj._client.openCollection();
+      await collection.clear();
+      await collection.loadDump(newData);
+      // We manually call _onUpdate... which is evil, but at the moment kinto doesn't have
+      // a better abstraction unless you want to mock your own http server to do the update.
+      await blocklistObj._onUpdate();
+    }
+  },
+
+  /**
    * Starts up the add-on manager as if it was started by the application.
    *
    * @param {string} [newVersion]
@@ -762,53 +932,76 @@ var AddonTestUtils = {
    *        before the AddonManager is started.
    */
   async promiseStartupManager(newVersion) {
-    if (this.addonIntegrationService)
-      throw new Error("Attempting to startup manager that was already started.");
-
+    if (this.addonIntegrationService) {
+      throw new Error(
+        "Attempting to startup manager that was already started."
+      );
+    }
 
     if (newVersion) {
       this.appInfo.version = newVersion;
       if (Cu.isModuleLoaded("resource://gre/modules/Blocklist.jsm")) {
-        let bsPassBlocklist = ChromeUtils.import("resource://gre/modules/Blocklist.jsm", {});
-        Object.defineProperty(bsPassBlocklist, "gAppVersion", {value: newVersion});
+        let bsPassBlocklist = ChromeUtils.import(
+          "resource://gre/modules/Blocklist.jsm",
+          null
+        );
+        Object.defineProperty(bsPassBlocklist, "gAppVersion", {
+          value: newVersion,
+        });
       }
     }
 
-    let XPIScope = ChromeUtils.import("resource://gre/modules/addons/XPIProvider.jsm", null);
+    let XPIScope = ChromeUtils.import(
+      "resource://gre/modules/addons/XPIProvider.jsm",
+      null
+    );
     XPIScope.AsyncShutdown = MockAsyncShutdown;
 
-    XPIScope.XPIInternal.BootstrapScope.prototype
-      ._beforeCallBootstrapMethod = (method, params, reason) => {
+    XPIScope.XPIInternal.BootstrapScope.prototype._beforeCallBootstrapMethod = (
+      method,
+      params,
+      reason
+    ) => {
+      try {
+        this.emit("bootstrap-method", { method, params, reason });
+      } catch (e) {
         try {
-          this.emit("bootstrap-method", {method, params, reason});
+          this.testScope.do_throw(e);
         } catch (e) {
-          try {
-            this.testScope.do_throw(e);
-          } catch (e) {
-            // Le sigh.
-          }
+          // Le sigh.
         }
-      };
+      }
+    };
 
-    this.addonIntegrationService = Cc["@mozilla.org/addons/integration;1"]
-          .getService(Ci.nsIObserver);
+    this.addonIntegrationService = Cc[
+      "@mozilla.org/addons/integration;1"
+    ].getService(Ci.nsIObserver);
 
     this.addonIntegrationService.observe(null, "addons-startup", null);
 
     this.emit("addon-manager-started");
 
+    await Promise.all(XPIScope.XPIProvider.startupPromises);
+
     // Load the add-ons list as it was after extension registration
     await this.loadAddonsList(true);
 
     // Wait for all add-ons to finish starting up before resolving.
-    const {XPIProvider} = ChromeUtils.import("resource://gre/modules/addons/XPIProvider.jsm", null);
-    await Promise.all(Array.from(XPIProvider.activeAddons,
-                                 addon => addon.startupPromise));
+    const { XPIProvider } = ChromeUtils.import(
+      "resource://gre/modules/addons/XPIProvider.jsm"
+    );
+    await Promise.all(
+      Array.from(
+        XPIProvider.activeAddons.values(),
+        addon => addon.startupPromise
+      )
+    );
   },
 
   async promiseShutdownManager(clearOverrides = true) {
-    if (!this.addonIntegrationService)
+    if (!this.addonIntegrationService) {
       return false;
+    }
 
     if (this.overrideEntry && clearOverrides) {
       this.overrideEntry.destruct();
@@ -838,7 +1031,10 @@ var AddonTestUtils = {
 
     // Force the XPIProvider provider to reload to better
     // simulate real-world usage.
-    let XPIscope = ChromeUtils.import("resource://gre/modules/addons/XPIProvider.jsm", {});
+    let XPIscope = ChromeUtils.import(
+      "resource://gre/modules/addons/XPIProvider.jsm",
+      null
+    );
     // This would be cleaner if I could get it as the rejection reason from
     // the AddonManagerInternal.shutdown() promise
     let shutdownError = XPIscope.XPIDatabase._saveError;
@@ -848,12 +1044,19 @@ var AddonTestUtils = {
     Cu.unload("resource://gre/modules/addons/XPIDatabase.jsm");
     Cu.unload("resource://gre/modules/addons/XPIInstall.jsm");
 
-    let ExtensionScope = ChromeUtils.import("resource://gre/modules/Extension.jsm", null);
-    ChromeUtils.defineModuleGetter(ExtensionScope, "XPIProvider",
-                                   "resource://gre/modules/addons/XPIProvider.jsm");
+    let ExtensionScope = ChromeUtils.import(
+      "resource://gre/modules/Extension.jsm",
+      null
+    );
+    ChromeUtils.defineModuleGetter(
+      ExtensionScope,
+      "XPIProvider",
+      "resource://gre/modules/addons/XPIProvider.jsm"
+    );
 
-    if (shutdownError)
+    if (shutdownError) {
       throw shutdownError;
+    }
 
     return true;
   },
@@ -874,129 +1077,15 @@ var AddonTestUtils = {
 
   async loadAddonsList(flush = false) {
     if (flush) {
-      let XPIScope = ChromeUtils.import("resource://gre/modules/addons/XPIProvider.jsm", {});
+      let XPIScope = ChromeUtils.import(
+        "resource://gre/modules/addons/XPIProvider.jsm",
+        null
+      );
       XPIScope.XPIStates.save();
       await XPIScope.XPIStates._jsonFile._save();
     }
 
     this.addonsList = new AddonsList(this.addonStartup);
-  },
-
-  /**
-   * Creates an update.rdf structure as a string using for the update data passed.
-   *
-   * @param {Object} data
-   *        The update data as a JS object. Each property name is an add-on ID,
-   *        the property value is an array of each version of the add-on. Each
-   *        array value is a JS object containing the data for the version, at
-   *        minimum a "version" and "targetApplications" property should be
-   *        included to create a functional update manifest.
-   * @return {string} The update.rdf structure as a string.
-   */
-  createUpdateRDF(data) {
-    var rdf = '<?xml version="1.0"?>\n';
-    rdf += '<RDF xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#"\n' +
-           '     xmlns:em="http://www.mozilla.org/2004/em-rdf#">\n';
-
-    for (let addon in data) {
-      rdf += escaped`  <Description about="urn:mozilla:extension:${addon}"><em:updates><Seq>\n`;
-
-      for (let versionData of data[addon]) {
-        rdf += "    <li><Description>\n";
-        rdf += this._writeProps(versionData, ["version"],
-                                `      `);
-        for (let app of versionData.targetApplications || []) {
-          rdf += "      <em:targetApplication><Description>\n";
-          rdf += this._writeProps(app, ["id", "minVersion", "maxVersion", "updateLink", "updateHash"],
-                                  `        `);
-          rdf += "      </Description></em:targetApplication>\n";
-        }
-        rdf += "    </Description></li>\n";
-      }
-      rdf += "  </Seq></em:updates></Description>\n";
-    }
-    rdf += "</RDF>\n";
-
-    return rdf;
-  },
-
-  _writeProps(obj, props, indent = "  ") {
-    let items = [];
-    for (let prop of props) {
-      if (obj[prop] !== undefined)
-        items.push(escaped`${indent}<em:${prop}>${obj[prop]}</em:${prop}>\n`);
-    }
-    return items.join("");
-  },
-
-  _writeArrayProps(obj, props, indent = "  ") {
-    let items = [];
-    for (let prop of props) {
-      for (let val of obj[prop] || [])
-        items.push(escaped`${indent}<em:${prop}>${val}</em:${prop}>\n`);
-    }
-    return items.join("");
-  },
-
-  _writeLocaleStrings(data) {
-    let items = [];
-
-    items.push(this._writeProps(data, ["name", "description", "creator", "homepageURL"]));
-    items.push(this._writeArrayProps(data, ["developer", "translator", "contributor"]));
-
-    return items.join("");
-  },
-
-  createInstallRDF(data) {
-    let defaults = {
-      bootstrap: true,
-      version: "1.0",
-      name: `Test Extension ${data.id}`,
-      targetApplications: [
-        {
-          "id": "xpcshell@tests.mozilla.org",
-          "minVersion": "1",
-          "maxVersion": "64.*",
-        },
-      ],
-    };
-
-    var rdf = '<?xml version="1.0"?>\n';
-    rdf += '<RDF xmlns="http://www.w3.org/1999/02/22-rdf-syntax-ns#"\n' +
-           '     xmlns:em="http://www.mozilla.org/2004/em-rdf#">\n';
-
-    rdf += '<Description about="urn:mozilla:install-manifest">\n';
-
-    data = Object.assign({}, defaults, data);
-
-    let props = ["id", "version", "type", "internalName", "updateURL",
-                 "optionsURL", "optionsType", "aboutURL", "iconURL",
-                 "skinnable", "bootstrap", "strictCompatibility"];
-    rdf += this._writeProps(data, props);
-
-    rdf += this._writeLocaleStrings(data);
-
-    for (let platform of data.targetPlatforms || [])
-      rdf += escaped`<em:targetPlatform>${platform}</em:targetPlatform>\n`;
-
-    for (let app of data.targetApplications || []) {
-      rdf += "<em:targetApplication><Description>\n";
-      rdf += this._writeProps(app, ["id", "minVersion", "maxVersion"]);
-      rdf += "</Description></em:targetApplication>\n";
-    }
-
-    for (let localized of data.localized || []) {
-      rdf += "<em:localized><Description>\n";
-      rdf += this._writeArrayProps(localized, ["locale"]);
-      rdf += this._writeLocaleStrings(localized);
-      rdf += "</Description></em:localized>\n";
-    }
-
-    for (let dep of data.dependencies || [])
-      rdf += escaped`<em:dependency><Description em:id="${dep}"/></em:dependency>\n`;
-
-    rdf += "</Description>\n</RDF>\n";
-    return rdf;
   },
 
   /**
@@ -1008,11 +1097,21 @@ var AddonTestUtils = {
    */
   recursiveMakeDir(path) {
     let paths = [];
-    for (let lastPath; path != lastPath; lastPath = path, path = OS.Path.dirname(path))
+    for (
+      let lastPath;
+      path != lastPath;
+      lastPath = path, path = OS.Path.dirname(path)
+    ) {
       paths.push(path);
+    }
 
-    return Promise.all(paths.reverse().map(path =>
-      OS.File.makeDir(path, {ignoreExisting: true}).catch(() => {})));
+    return Promise.all(
+      paths
+        .reverse()
+        .map(path =>
+          OS.File.makeDir(path, { ignoreExisting: true }).catch(() => {})
+        )
+    );
   },
 
   /**
@@ -1027,22 +1126,36 @@ var AddonTestUtils = {
    *        Additional flags to open the file with.
    */
   writeFilesToZip(zipFile, files, flags = 0) {
-    if (typeof zipFile == "string")
+    if (typeof zipFile == "string") {
       zipFile = nsFile(zipFile);
+    }
 
-    var zipW = ZipWriter(zipFile, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | flags);
+    var zipW = ZipWriter(
+      zipFile,
+      FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | flags
+    );
 
     for (let [path, data] of Object.entries(files)) {
-      if (typeof data === "object" && ChromeUtils.getClassName(data) === "Object")
+      if (
+        typeof data === "object" &&
+        ChromeUtils.getClassName(data) === "Object"
+      ) {
         data = JSON.stringify(data);
-      if (!(data instanceof ArrayBuffer))
+      }
+      if (!(data instanceof ArrayBuffer)) {
         data = new TextEncoder("utf-8").encode(data).buffer;
+      }
 
       let stream = ArrayBufferInputStream(data, 0, data.byteLength);
 
       // Note these files are being created in the XPI archive with date "0" which is 1970-01-01.
-      zipW.addEntryStream(path, 0, Ci.nsIZipWriter.COMPRESSION_NONE,
-                          stream, false);
+      zipW.addEntryStream(
+        path,
+        0,
+        Ci.nsIZipWriter.COMPRESSION_NONE,
+        stream,
+        false
+      );
     }
 
     zipW.close();
@@ -1067,13 +1180,18 @@ var AddonTestUtils = {
       let dirPath = dir;
       for (let subDir of path) {
         dirPath = OS.Path.join(dirPath, subDir);
-        await OS.File.makeDir(dirPath, {ignoreExisting: true});
+        await OS.File.makeDir(dirPath, { ignoreExisting: true });
       }
 
-      if (typeof data == "object" && ChromeUtils.getClassName(data) == "Object")
+      if (
+        typeof data == "object" &&
+        ChromeUtils.getClassName(data) == "Object"
+      ) {
         data = JSON.stringify(data);
-      if (typeof data == "string")
+      }
+      if (typeof data == "string") {
         data = new TextEncoder("utf-8").encode(data);
+      }
 
       await OS.File.writeAtomic(OS.Path.join(dirPath, leafName), data);
     }
@@ -1082,9 +1200,6 @@ var AddonTestUtils = {
   },
 
   promiseWriteFilesToExtension(dir, id, files, unpacked = this.testUnpacked) {
-    if (typeof files["install.rdf"] === "object")
-      files["install.rdf"] = this.createInstallRDF(files["install.rdf"]);
-
     if (unpacked) {
       let path = OS.Path.join(dir, id);
 
@@ -1118,9 +1233,6 @@ var AddonTestUtils = {
    */
   createTempXPIFile(files) {
     let file = this.allocTempXPIFile();
-    if (typeof files["install.rdf"] === "object")
-      files["install.rdf"] = this.createInstallRDF(files["install.rdf"]);
-
     this.writeFilesToZip(file.path, files);
     return file;
   },
@@ -1190,7 +1302,12 @@ var AddonTestUtils = {
    *        A file pointing to the installed location of the XPI file or
    *        unpacked directory.
    */
-  async manuallyInstall(xpiFile, installLocation = this.profileExtensions, id = null, unpacked = this.testUnpacked) {
+  async manuallyInstall(
+    xpiFile,
+    installLocation = this.profileExtensions,
+    id = null,
+    unpacked = this.testUnpacked
+  ) {
     if (id == null) {
       id = await this.getIDFromExtension(xpiFile);
     }
@@ -1203,15 +1320,22 @@ var AddonTestUtils = {
       let zip = ZipReader(xpiFile);
       for (let entry of zip.findEntries(null)) {
         let target = dir.clone();
-        for (let part of entry.split("/"))
+        for (let part of entry.split("/")) {
           target.append(part);
-        if (!target.parent.exists())
-          target.parent.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
+        }
+        if (!target.parent.exists()) {
+          target.parent.create(
+            Ci.nsIFile.DIRECTORY_TYPE,
+            FileUtils.PERMS_DIRECTORY
+          );
+        }
         try {
           zip.extract(entry, target);
         } catch (e) {
-          if (e.result != Cr.NS_ERROR_FILE_DIR_NOT_EMPTY &&
-              !(target.exists() && target.isDirectory())) {
+          if (
+            e.result != Cr.NS_ERROR_FILE_DIR_NOT_EMPTY &&
+            !(target.exists() && target.isDirectory())
+          ) {
             throw e;
           }
         }
@@ -1245,8 +1369,9 @@ var AddonTestUtils = {
 
     // In reality because the app is restarted a flush isn't necessary for XPIs
     // removed outside the app, but for testing we must flush manually.
-    if (file.isFile())
+    if (file.isFile()) {
       Services.obs.notifyObservers(file, "flush-cache-entry");
+    }
 
     file.remove(true);
   },
@@ -1268,17 +1393,17 @@ var AddonTestUtils = {
    */
   getFileForAddon(dir, id, unpacked = this.testUnpacked) {
     dir = dir.clone();
-    if (unpacked)
+    if (unpacked) {
       dir.append(id);
-    else
+    } else {
       dir.append(`${id}.xpi`);
+    }
     return dir;
   },
 
   /**
    * Sets the last modified time of the extension, usually to trigger an update
-   * of its metadata. If the extension is unpacked, this function assumes that
-   * the extension contains only the install.rdf file.
+   * of its metadata.
    *
    * @param {nsIFile} ext A file pointing to either the packed extension or its unpacked directory.
    * @param {number} time The time to which we set the lastModifiedTime of the extension
@@ -1288,8 +1413,9 @@ var AddonTestUtils = {
   setExtensionModifiedTime(ext, time) {
     ext.lastModifiedTime = time;
     if (ext.isDirectory()) {
-      for (let file of this.iterDirectory(ext))
+      for (let file of this.iterDirectory(ext)) {
         this.setExtensionModifiedTime(file, time);
+      }
     }
   },
 
@@ -1302,8 +1428,9 @@ var AddonTestUtils = {
         return this.promiseSetExtensionModifiedTime(entry.path, time);
       });
     } catch (ex) {
-      if (ex instanceof OS.File.Error)
+      if (ex instanceof OS.File.Error) {
         return;
+      }
       throw ex;
     } finally {
       iterator.close().catch(() => {});
@@ -1314,8 +1441,9 @@ var AddonTestUtils = {
     var dirProvider = {
       getFile(prop, persistent) {
         persistent.value = false;
-        if (prop == key)
+        if (prop == key) {
           return dir.clone();
+        }
         return null;
       },
 
@@ -1414,16 +1542,29 @@ var AddonTestUtils = {
    * @returns {Promise}
    *        Resolves when the install has completed.
    */
-  async promiseInstallFile(file, ignoreIncompatible = false, installTelemetryInfo) {
-    let install = await AddonManager.getInstallForFile(file, null, installTelemetryInfo);
-    if (!install)
+  async promiseInstallFile(
+    file,
+    ignoreIncompatible = false,
+    installTelemetryInfo
+  ) {
+    let install = await AddonManager.getInstallForFile(
+      file,
+      null,
+      installTelemetryInfo
+    );
+    if (!install) {
       throw new Error(`No AddonInstall created for ${file.path}`);
+    }
 
-    if (install.state != AddonManager.STATE_DOWNLOADED)
-      throw new Error(`Expected file to be downloaded for install of ${file.path}`);
+    if (install.state != AddonManager.STATE_DOWNLOADED) {
+      throw new Error(
+        `Expected file to be downloaded for install of ${file.path}`
+      );
+    }
 
-    if (ignoreIncompatible && install.addon.appDisabled)
+    if (ignoreIncompatible && install.addon.appDisabled) {
       return null;
+    }
 
     await install.install();
     return install;
@@ -1441,9 +1582,11 @@ var AddonTestUtils = {
    *        Resolves when the installs have completed.
    */
   promiseInstallAllFiles(files, ignoreIncompatible = false) {
-    return Promise.all(Array.from(
-      files,
-      file => this.promiseInstallFile(file, ignoreIncompatible)));
+    return Promise.all(
+      Array.from(files, file =>
+        this.promiseInstallFile(file, ignoreIncompatible)
+      )
+    );
   },
 
   promiseCompleteAllInstalls(installs) {
@@ -1469,53 +1612,61 @@ var AddonTestUtils = {
    *                     the update reason.
    * @return {Promise<object>} an object containing information about the update.
    */
-  promiseFindAddonUpdates(addon, reason = AddonTestUtils.updateReason, ...args) {
+  promiseFindAddonUpdates(
+    addon,
+    reason = AddonTestUtils.updateReason,
+    ...args
+  ) {
     let equal = this.testScope.equal;
     return new Promise((resolve, reject) => {
       let result = {};
-      addon.findUpdates({
-        onNoCompatibilityUpdateAvailable(addon2) {
-          if ("compatibilityUpdate" in result) {
-            throw new Error("Saw multiple compatibility update events");
-          }
-          equal(addon, addon2, "onNoCompatibilityUpdateAvailable");
-          result.compatibilityUpdate = false;
-        },
+      addon.findUpdates(
+        {
+          onNoCompatibilityUpdateAvailable(addon2) {
+            if ("compatibilityUpdate" in result) {
+              throw new Error("Saw multiple compatibility update events");
+            }
+            equal(addon, addon2, "onNoCompatibilityUpdateAvailable");
+            result.compatibilityUpdate = false;
+          },
 
-        onCompatibilityUpdateAvailable(addon2) {
-          if ("compatibilityUpdate" in result) {
-            throw new Error("Saw multiple compatibility update events");
-          }
-          equal(addon, addon2, "onCompatibilityUpdateAvailable");
-          result.compatibilityUpdate = true;
-        },
+          onCompatibilityUpdateAvailable(addon2) {
+            if ("compatibilityUpdate" in result) {
+              throw new Error("Saw multiple compatibility update events");
+            }
+            equal(addon, addon2, "onCompatibilityUpdateAvailable");
+            result.compatibilityUpdate = true;
+          },
 
-        onNoUpdateAvailable(addon2) {
-          if ("updateAvailable" in result) {
-            throw new Error("Saw multiple update available events");
-          }
-          equal(addon, addon2, "onNoUpdateAvailable");
-          result.updateAvailable = false;
-        },
+          onNoUpdateAvailable(addon2) {
+            if ("updateAvailable" in result) {
+              throw new Error("Saw multiple update available events");
+            }
+            equal(addon, addon2, "onNoUpdateAvailable");
+            result.updateAvailable = false;
+          },
 
-        onUpdateAvailable(addon2, install) {
-          if ("updateAvailable" in result) {
-            throw new Error("Saw multiple update available events");
-          }
-          equal(addon, addon2, "onUpdateAvailable");
-          result.updateAvailable = install;
-        },
+          onUpdateAvailable(addon2, install) {
+            if ("updateAvailable" in result) {
+              throw new Error("Saw multiple update available events");
+            }
+            equal(addon, addon2, "onUpdateAvailable");
+            result.updateAvailable = install;
+          },
 
-        onUpdateFinished(addon2, error) {
-          equal(addon, addon2, "onUpdateFinished");
-          if (error == AddonManager.UPDATE_STATUS_NO_ERROR) {
-            resolve(result);
-          } else {
-            result.error = error;
-            reject(result);
-          }
+          onUpdateFinished(addon2, error) {
+            equal(addon, addon2, "onUpdateFinished");
+            if (error == AddonManager.UPDATE_STATUS_NO_ERROR) {
+              resolve(result);
+            } else {
+              result.error = error;
+              reject(result);
+            }
+          },
         },
-      }, reason, ...args);
+        reason,
+        ...args
+      );
     });
   },
 
@@ -1526,8 +1677,7 @@ var AddonTestUtils = {
    *
    * @param {function} task
    *        The task to run while monitoring console output. May be
-   *        either a generator function, per Task.jsm, or an ordinary
-   *        function which returns promose.
+   *        an async function, or an ordinary function which returns a promose.
    * @return {Promise<[Array<nsIConsoleMessage>, *]>}
    *        Resolves to an object containing a `messages` property, with
    *        the array of console messages emitted during the execution
@@ -1537,7 +1687,8 @@ var AddonTestUtils = {
   async promiseConsoleOutput(task) {
     const DONE = "=== xpcshell test console listener done ===";
 
-    let listener, messages = [];
+    let listener,
+      messages = [];
     let awaitListener = new Promise(resolve => {
       listener = msg => {
         if (msg == DONE) {
@@ -1556,7 +1707,7 @@ var AddonTestUtils = {
       Services.console.logStringMessage(DONE);
       await awaitListener;
 
-      return {messages, result};
+      return { messages, result };
     } finally {
       Services.console.unregisterListener(listener);
     }
@@ -1595,7 +1746,10 @@ var AddonTestUtils = {
    *        If true, the `messages` array must not contain any messages
    *        which are not matched by the given `expected` patterns.
    */
-  checkMessages(messages, {expected = [], forbidden = [], forbidUnexpected = false}) {
+  checkMessages(
+    messages,
+    { expected = [], forbidden = [], forbidUnexpected = false }
+  ) {
     function msgMatches(msg, expectedMsg) {
       for (let [prop, pattern] of Object.entries(expectedMsg)) {
         if (isRegExp(pattern) && typeof msg[prop] === "string") {
@@ -1624,7 +1778,10 @@ var AddonTestUtils = {
       }
     }
     for (let pat of expected.slice(i)) {
-      this.testScope.ok(false, `Did not get expected console message: ${uneval(pat)}`);
+      this.testScope.ok(
+        false,
+        `Did not get expected console message: ${uneval(pat)}`
+      );
     }
   },
 
@@ -1646,6 +1803,51 @@ var AddonTestUtils = {
         }
       });
     });
+  },
+
+  /**
+   * Wait until an extension with a search provider has been loaded.
+   * This should be called after the extension has started, but before shutdown.
+   *
+   * @param {object} extension
+   *        The return value of ExtensionTestUtils.loadExtension.
+   *        For browser tests, see mochitest/tests/SimpleTest/ExtensionTestUtils.js
+   *        For xpcshell tests, see toolkit/components/extensions/ExtensionXPCShellUtils.jsm
+   * @param {object} [options]
+   *        Optional options.
+   * @param {boolean} [options.expectPending = false]
+   *        Whether to expect the search provider to still be starting up.
+   */
+  async waitForSearchProviderStartup(
+    extension,
+    { expectPending = false } = {}
+  ) {
+    // In xpcshell tests, equal/ok are defined in the global scope.
+    let { equal, ok } = this.testScope;
+    if (!equal || !ok) {
+      // In mochitests, these are available via Assert.jsm.
+      let { Assert } = this.testScope;
+      equal = Assert.equal.bind(Assert);
+      ok = Assert.ok.bind(Assert);
+    }
+
+    equal(
+      extension.state,
+      "running",
+      "Search provider extension should be running"
+    );
+    ok(extension.id, "Extension ID of search provider should be set");
+
+    // The map of promises from browser/components/extensions/parent/ext-chrome-settings-overrides.js
+    let { pendingSearchSetupTasks } = Management.global;
+    let searchStartupPromise = pendingSearchSetupTasks.get(extension.id);
+    if (expectPending) {
+      ok(
+        searchStartupPromise,
+        "Search provider registration should be in progress"
+      );
+    }
+    return searchStartupPromise;
   },
 
   /**
@@ -1675,11 +1877,16 @@ var AddonTestUtils = {
     this.tempXPIs.push(file);
 
     let manifest = Services.io.newFileURI(file);
-    await OS.File.writeAtomic(file.path,
-      new TextEncoder().encode(JSON.stringify(data)));
+    await OS.File.writeAtomic(
+      file.path,
+      new TextEncoder().encode(JSON.stringify(data))
+    );
     this.overrideEntry = aomStartup.registerChrome(manifest, [
-      ["override", "chrome://browser/content/built_in_addons.json",
-       Services.io.newFileURI(file).spec],
+      [
+        "override",
+        "chrome://browser/content/built_in_addons.json",
+        Services.io.newFileURI(file).spec,
+      ],
     ]);
     Services.prefs.setBoolPref(PREF_DISABLE_SECURITY, prevPrefVal);
   },
@@ -1692,12 +1899,15 @@ var AddonTestUtils = {
    */
   hookAMTelemetryEvents() {
     let originalRecordEvent = AMTelemetry.recordEvent;
-    AMTelemetry.recordEvent = (event) => {
+    AMTelemetry.recordEvent = event => {
       this.collectedTelemetryEvents.push(event);
     };
     this.testScope.registerCleanupFunction(() => {
-      this.testScope.Assert.deepEqual([], this.collectedTelemetryEvents,
-                       "No unexamined telemetry events after test is finished");
+      this.testScope.Assert.deepEqual(
+        [],
+        this.collectedTelemetryEvents,
+        "No unexamined telemetry events after test is finished"
+      );
       AMTelemetry.recordEvent = originalRecordEvent;
     });
   },
@@ -1716,8 +1926,9 @@ var AddonTestUtils = {
 };
 
 for (let [key, val] of Object.entries(AddonTestUtils)) {
-  if (typeof val == "function")
+  if (typeof val == "function") {
     AddonTestUtils[key] = val.bind(AddonTestUtils);
+  }
 }
 
 EventEmitter.decorate(AddonTestUtils);

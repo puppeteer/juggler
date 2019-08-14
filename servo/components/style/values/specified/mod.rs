@@ -11,17 +11,18 @@ use super::computed::{Context, ToComputedValue};
 use super::generics::grid::{GridLine as GenericGridLine, TrackBreadth as GenericTrackBreadth};
 use super::generics::grid::{TrackList as GenericTrackList, TrackSize as GenericTrackSize};
 use super::generics::transform::IsParallelTo;
-use super::generics::{GreaterThanOrEqualToOne, NonNegative};
-use super::{Auto, CSSFloat, CSSInteger, Either};
+use super::generics::{self, GreaterThanOrEqualToOne, NonNegative};
+use super::{Auto, CSSFloat, CSSInteger, Either, None_};
 use crate::context::QuirksMode;
 use crate::parser::{Parse, ParserContext};
 use crate::values::serialize_atom_identifier;
 use crate::values::specified::calc::CalcNode;
-use crate::{Atom, Namespace, Prefix};
+use crate::{Atom, Namespace, Prefix, Zero};
 use cssparser::{Parser, Token};
 use num_traits::One;
 use std::f32;
 use std::fmt::{self, Write};
+use std::ops::Add;
 use style_traits::values::specified::AllowedNumericType;
 use style_traits::{CssWriter, ParseError, SpecifiedValueInfo, StyleParseErrorKind, ToCss};
 
@@ -36,12 +37,14 @@ pub use self::border::{BorderCornerRadius, BorderImageSlice, BorderImageWidth};
 pub use self::border::{BorderImageRepeat, BorderImageSideWidth};
 pub use self::border::{BorderRadius, BorderSideWidth, BorderSpacing, BorderStyle};
 pub use self::box_::{AnimationIterationCount, AnimationName, Contain, Display};
-pub use self::box_::{Appearance, BreakBetween, BreakWithin, Clear, Float};
+pub use self::box_::{Appearance, BreakBetween, BreakWithin};
+pub use self::box_::{Clear, Float, Overflow, OverflowAnchor};
 pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective, Resize};
-pub use self::box_::{ScrollSnapType, TouchAction, TransitionProperty, VerticalAlign, WillChange};
-pub use self::color::{Color, ColorPropertyValue, RGBAColor};
+pub use self::box_::{ScrollSnapAlign, ScrollSnapAxis, ScrollSnapStrictness, ScrollSnapType};
+pub use self::box_::{TouchAction, TransitionProperty, VerticalAlign, WillChange};
+pub use self::color::{Color, ColorOrAuto, ColorPropertyValue};
 pub use self::column::ColumnCount;
-pub use self::counters::{Content, ContentItem, CounterIncrement, CounterReset};
+pub use self::counters::{Content, ContentItem, CounterIncrement, CounterSetOrReset};
 pub use self::easing::TimingFunction;
 pub use self::effects::{BoxShadow, Filter, SimpleShadow};
 pub use self::flex::FlexBasis;
@@ -51,40 +54,40 @@ pub use self::font::{FontSize, FontSizeAdjust, FontStretch, FontSynthesis};
 pub use self::font::{FontVariantAlternates, FontWeight};
 pub use self::font::{FontVariantEastAsian, FontVariationSettings};
 pub use self::font::{MozScriptLevel, MozScriptMinSize, MozScriptSizeMultiplier, XLang, XTextZoom};
-#[cfg(feature = "gecko")]
-pub use self::gecko::ScrollSnapPoint;
 pub use self::image::{ColorStop, EndingShape as GradientEndingShape, Gradient};
 pub use self::image::{GradientItem, GradientKind, Image, ImageLayer, MozImageRect};
-pub use self::length::{AbsoluteLength, CalcLengthOrPercentage, CharacterWidth};
-pub use self::length::{FontRelativeLength, Length, LengthOrNumber};
-pub use self::length::{LengthOrPercentage, LengthOrPercentageOrAuto};
-pub use self::length::{LengthOrPercentageOrNone, MaxLength, MozLength};
+pub use self::length::{AbsoluteLength, CalcLengthPercentage, CharacterWidth};
+pub use self::length::{FontRelativeLength, Length, LengthOrNumber, NonNegativeLengthOrNumber};
+pub use self::length::{LengthOrAuto, LengthPercentage, LengthPercentageOrAuto};
+pub use self::length::{MaxSize, Size};
 pub use self::length::{NoCalcLength, ViewportPercentageLength};
-pub use self::length::{NonNegativeLengthOrPercentage, NonNegativeLengthOrPercentageOrAuto};
+pub use self::length::{NonNegativeLengthPercentage, NonNegativeLengthPercentageOrAuto};
 #[cfg(feature = "gecko")]
 pub use self::list::ListStyleType;
+pub use self::list::MozListReversed;
 pub use self::list::{QuotePair, Quotes};
-pub use self::motion::OffsetPath;
+pub use self::motion::{OffsetPath, OffsetRotate};
 pub use self::outline::OutlineStyle;
 pub use self::percentage::Percentage;
 pub use self::position::{GridAutoFlow, GridTemplateAreas, Position};
 pub use self::position::{PositionComponent, ZIndex};
-pub use self::rect::LengthOrNumberRect;
+pub use self::rect::NonNegativeLengthOrNumberRect;
 pub use self::resolution::Resolution;
 pub use self::svg::MozContextProperties;
-pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind};
+pub use self::svg::{SVGLength, SVGOpacity, SVGPaint};
 pub use self::svg::{SVGPaintOrder, SVGStrokeDashArray, SVGWidth};
 pub use self::svg_path::SVGPathData;
 pub use self::table::XSpan;
-pub use self::text::{InitialLetter, LetterSpacing, LineHeight, MozTabSize, TextAlign};
-pub use self::text::{OverflowWrap, TextEmphasisPosition, TextEmphasisStyle};
+pub use self::text::{InitialLetter, LetterSpacing, LineBreak, LineHeight, TextAlign};
+pub use self::text::{OverflowWrap, TextEmphasisPosition, TextEmphasisStyle, WordBreak};
 pub use self::text::{TextAlignKeyword, TextDecorationLine, TextOverflow, WordSpacing};
+pub use self::text::{TextDecorationSkipInk, TextTransform};
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, Transform};
 pub use self::transform::{TransformOrigin, TransformStyle, Translate};
 #[cfg(feature = "gecko")]
 pub use self::ui::CursorImage;
-pub use self::ui::{ColorOrAuto, Cursor, MozForceBrokenImageIcon, UserSelect};
+pub use self::ui::{Cursor, MozForceBrokenImageIcon, UserSelect};
 pub use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 
 #[cfg(feature = "gecko")]
@@ -138,7 +141,7 @@ fn parse_number_with_clamping_mode<'i, 't>(
             return Ok(Number {
                 value: value.min(f32::MAX).max(f32::MIN),
                 calc_clamping_mode: None,
-            })
+            });
         },
         Token::Function(ref name) if name.eq_ignore_ascii_case("calc") => {},
         ref t => return Err(location.new_unexpected_token_error(t.clone())),
@@ -155,7 +158,7 @@ fn parse_number_with_clamping_mode<'i, 't>(
 /// A CSS `<number>` specified value.
 ///
 /// https://drafts.csswg.org/css-values-3/#number-value
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd, ToShmem)]
 pub struct Number {
     /// The numeric value itself.
     value: CSSFloat,
@@ -269,6 +272,26 @@ impl IsParallelTo for (Number, Number, Number) {
 
 impl SpecifiedValueInfo for Number {}
 
+impl Add for Number {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self::new(self.get() + other.get())
+    }
+}
+
+impl Zero for Number {
+    #[inline]
+    fn zero() -> Self {
+        Self::new(0.)
+    }
+
+    #[inline]
+    fn is_zero(&self) -> bool {
+        self.get() == 0.
+    }
+}
+
 impl From<Number> for f32 {
     #[inline]
     fn from(n: Number) -> Self {
@@ -319,10 +342,8 @@ impl Parse for GreaterThanOrEqualToOneNumber {
 /// <number> | <percentage>
 ///
 /// Accepts only non-negative numbers.
-///
-/// FIXME(emilio): Should probably use Either.
 #[allow(missing_docs)]
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToCss)]
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToCss, ToShmem)]
 pub enum NumberOrPercentage {
     Percentage(Percentage),
     Number(Number),
@@ -359,8 +380,32 @@ impl Parse for NumberOrPercentage {
     }
 }
 
+/// A non-negative <number> | <percentage>.
+pub type NonNegativeNumberOrPercentage = NonNegative<NumberOrPercentage>;
+
+impl NonNegativeNumberOrPercentage {
+    /// Returns the `100%` value.
+    #[inline]
+    pub fn hundred_percent() -> Self {
+        NonNegative(NumberOrPercentage::Percentage(Percentage::hundred()))
+    }
+}
+
+impl Parse for NonNegativeNumberOrPercentage {
+    fn parse<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+    ) -> Result<Self, ParseError<'i>> {
+        Ok(NonNegative(NumberOrPercentage::parse_non_negative(
+            context, input,
+        )?))
+    }
+}
+
 #[allow(missing_docs)]
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd, SpecifiedValueInfo, ToCss)]
+#[derive(
+    Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd, SpecifiedValueInfo, ToCss, ToShmem,
+)]
 pub struct Opacity(Number);
 
 impl Parse for Opacity {
@@ -396,10 +441,22 @@ impl ToComputedValue for Opacity {
 /// A specified `<integer>`, optionally coming from a `calc()` expression.
 ///
 /// <https://drafts.csswg.org/css-values/#integers>
-#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, PartialOrd, ToShmem)]
 pub struct Integer {
     value: CSSInteger,
     was_calc: bool,
+}
+
+impl Zero for Integer {
+    #[inline]
+    fn zero() -> Self {
+        Self::new(0)
+    }
+
+    #[inline]
+    fn is_zero(&self) -> bool {
+        self.value() == 0
+    }
 }
 
 impl One for Integer {
@@ -540,119 +597,31 @@ impl Parse for PositiveInteger {
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
-        Integer::parse_positive(context, input).map(GreaterThanOrEqualToOne::<Integer>)
+        Integer::parse_positive(context, input).map(GreaterThanOrEqualToOne)
     }
 }
 
+/// A specified positive `<integer>` value or `none`.
+pub type PositiveIntegerOrNone = Either<PositiveInteger, None_>;
+
 /// The specified value of a grid `<track-breadth>`
-pub type TrackBreadth = GenericTrackBreadth<LengthOrPercentage>;
+pub type TrackBreadth = GenericTrackBreadth<LengthPercentage>;
 
 /// The specified value of a grid `<track-size>`
-pub type TrackSize = GenericTrackSize<LengthOrPercentage>;
+pub type TrackSize = GenericTrackSize<LengthPercentage>;
 
 /// The specified value of a grid `<track-list>`
 /// (could also be `<auto-track-list>` or `<explicit-track-list>`)
-pub type TrackList = GenericTrackList<LengthOrPercentage, Integer>;
+pub type TrackList = GenericTrackList<LengthPercentage, Integer>;
 
 /// The specified value of a `<grid-line>`.
 pub type GridLine = GenericGridLine<Integer>;
 
 /// `<grid-template-rows> | <grid-template-columns>`
-pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage, Integer>;
+pub type GridTemplateComponent = GenericGridTemplateComponent<LengthPercentage, Integer>;
 
-#[derive(Clone, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo)]
-/// rect(<top>, <left>, <bottom>, <right>) used by clip and image-region
-#[css(function = "rect")]
-pub struct ClipRect {
-    /// <top> (<length> | <auto>)
-    pub top: Option<Length>,
-    /// <right> (<length> | <auto>)
-    pub right: Option<Length>,
-    /// <bottom> (<length> | <auto>)
-    pub bottom: Option<Length>,
-    /// <left> (<length> | <auto>)
-    pub left: Option<Length>,
-}
-
-impl ToCss for ClipRect {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        dest.write_str("rect(")?;
-
-        if let Some(ref top) = self.top {
-            top.to_css(dest)?;
-            dest.write_str(", ")?;
-        } else {
-            dest.write_str("auto, ")?;
-        }
-
-        if let Some(ref right) = self.right {
-            right.to_css(dest)?;
-            dest.write_str(", ")?;
-        } else {
-            dest.write_str("auto, ")?;
-        }
-
-        if let Some(ref bottom) = self.bottom {
-            bottom.to_css(dest)?;
-            dest.write_str(", ")?;
-        } else {
-            dest.write_str("auto, ")?;
-        }
-
-        if let Some(ref left) = self.left {
-            left.to_css(dest)?;
-        } else {
-            dest.write_str("auto")?;
-        }
-
-        dest.write_str(")")?;
-        Ok(())
-    }
-}
-
-impl ToComputedValue for ClipRect {
-    type ComputedValue = super::computed::ClipRect;
-
-    #[inline]
-    fn to_computed_value(&self, context: &Context) -> super::computed::ClipRect {
-        super::computed::ClipRect {
-            top: self.top.as_ref().map(|top| top.to_computed_value(context)),
-            right: self
-                .right
-                .as_ref()
-                .map(|right| right.to_computed_value(context)),
-            bottom: self
-                .bottom
-                .as_ref()
-                .map(|bottom| bottom.to_computed_value(context)),
-            left: self
-                .left
-                .as_ref()
-                .map(|left| left.to_computed_value(context)),
-        }
-    }
-
-    #[inline]
-    fn from_computed_value(computed: &super::computed::ClipRect) -> Self {
-        ClipRect {
-            top: computed
-                .top
-                .map(|top| ToComputedValue::from_computed_value(&top)),
-            right: computed
-                .right
-                .map(|right| ToComputedValue::from_computed_value(&right)),
-            bottom: computed
-                .bottom
-                .map(|bottom| ToComputedValue::from_computed_value(&bottom)),
-            left: computed
-                .left
-                .map(|left| ToComputedValue::from_computed_value(&left)),
-        }
-    }
-}
+/// rect(...)
+pub type ClipRect = generics::ClipRect<LengthOrAuto>;
 
 impl Parse for ClipRect {
     fn parse<'i, 't>(
@@ -670,24 +639,15 @@ impl ClipRect {
         input: &mut Parser<'i, 't>,
         allow_quirks: AllowQuirks,
     ) -> Result<Self, ParseError<'i>> {
-        use crate::values::specified::Length;
+        input.expect_function_matching("rect")?;
 
         fn parse_argument<'i, 't>(
             context: &ParserContext,
             input: &mut Parser<'i, 't>,
             allow_quirks: AllowQuirks,
-        ) -> Result<Option<Length>, ParseError<'i>> {
-            if input
-                .try(|input| input.expect_ident_matching("auto"))
-                .is_ok()
-            {
-                Ok(None)
-            } else {
-                Length::parse_quirky(context, input, allow_quirks).map(Some)
-            }
+        ) -> Result<LengthOrAuto, ParseError<'i>> {
+            LengthOrAuto::parse_quirky(context, input, allow_quirks)
         }
-
-        input.expect_function_matching("rect")?;
 
         input.parse_nested_block(|input| {
             let top = parse_argument(context, input, allow_quirks)?;
@@ -706,11 +666,12 @@ impl ClipRect {
                 bottom = parse_argument(context, input, allow_quirks)?;
                 left = parse_argument(context, input, allow_quirks)?;
             }
+
             Ok(ClipRect {
-                top: top,
-                right: right,
-                bottom: bottom,
-                left: left,
+                top,
+                right,
+                bottom,
+                left,
             })
         })
     }
@@ -737,23 +698,39 @@ impl ClipRectOrAuto {
 /// Whether quirks are allowed in this context.
 #[derive(Clone, Copy, PartialEq)]
 pub enum AllowQuirks {
-    /// Quirks are allowed.
-    Yes,
     /// Quirks are not allowed.
     No,
+    /// Quirks are allowed, in quirks mode.
+    Yes,
+    /// Quirks are always allowed, used for SVG lengths.
+    Always,
 }
 
 impl AllowQuirks {
     /// Returns `true` if quirks are allowed in this context.
     pub fn allowed(self, quirks_mode: QuirksMode) -> bool {
-        self == AllowQuirks::Yes && quirks_mode == QuirksMode::Quirks
+        match self {
+            AllowQuirks::Always => true,
+            AllowQuirks::No => false,
+            AllowQuirks::Yes => quirks_mode == QuirksMode::Quirks,
+        }
     }
 }
 
 /// An attr(...) rule
 ///
 /// `[namespace? `|`]? ident`
-#[derive(Clone, Debug, Eq, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToResolvedValue,
+    ToShmem,
+)]
 #[css(function)]
 pub struct Attr {
     /// Optional namespace prefix and URL.
@@ -808,7 +785,7 @@ impl Attr {
                             Some(ns) => ns,
                             None => {
                                 return Err(location
-                                    .new_custom_error(StyleParseErrorKind::UnspecifiedError))
+                                    .new_custom_error(StyleParseErrorKind::UnspecifiedError));
                             },
                         };
                         Some((prefix, ns))

@@ -8,9 +8,8 @@ package org.mozilla.geckoview;
 
 import org.mozilla.gecko.annotation.WrapForJNI;
 
+import android.support.annotation.AnyThread;
 import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-
 import android.support.v4.util.ArrayMap;
 
 import java.nio.ByteBuffer;
@@ -22,6 +21,7 @@ import java.util.Map;
  * This is an abstract base class for HTTP request and response types.
  */
 @WrapForJNI
+@AnyThread
 public abstract class WebMessage {
 
     /**
@@ -34,21 +34,9 @@ public abstract class WebMessage {
      */
     public final @NonNull Map<String, String> headers;
 
-    /**
-     * The body of the request or response. Must be a directly-allocated ByteBuffer.
-     * May be null.
-     */
-    public final @Nullable ByteBuffer body;
-
     protected WebMessage(final @NonNull Builder builder) {
         uri = builder.mUri;
         headers = Collections.unmodifiableMap(builder.mHeaders);
-
-        if (builder.mBody != null) {
-            body = builder.mBody.asReadOnlyBuffer();
-        } else {
-            body = null;
-        }
     }
 
     // This is only used via JNI.
@@ -68,6 +56,7 @@ public abstract class WebMessage {
     /**
      * This is a Builder used by subclasses of {@link WebMessage}.
      */
+    @AnyThread
     public static abstract class Builder {
         /* package */ String mUri;
         /* package */ Map<String, String> mHeaders = new ArrayMap<>();
@@ -125,21 +114,6 @@ public abstract class WebMessage {
                 mHeaders.put(key, value);
             }
 
-            return this;
-        }
-
-        /**
-         * Set the body.
-         *
-         * @param buffer A {@link ByteBuffer} with the data.
-         *               Must be allocated directly via {@link ByteBuffer#allocateDirect(int)}.
-         * @return This Builder instance.
-         */
-        public @NonNull Builder body(final @Nullable ByteBuffer buffer) {
-            if (buffer != null && !buffer.isDirect()) {
-                throw new IllegalArgumentException("body must be directly allocated");
-            }
-            mBody = buffer;
             return this;
         }
     }

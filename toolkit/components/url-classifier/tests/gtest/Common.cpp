@@ -6,12 +6,17 @@
 #include "nsIThread.h"
 #include "nsThreadUtils.h"
 #include "nsUrlClassifierUtils.h"
+#include "mozilla/Components.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla;
 using namespace mozilla::safebrowsing;
 
 #define GTEST_SAFEBROWSING_DIR NS_LITERAL_CSTRING("safebrowsing")
 #define GTEST_TABLE NS_LITERAL_CSTRING("gtest-malware-proto")
+
+typedef nsCString _Prefix;
+typedef nsTArray<_Prefix> _PrefixArray;
 
 template <typename Function>
 void RunTestInNewThread(Function&& aFunction) {
@@ -89,15 +94,10 @@ void ApplyUpdate(TableUpdateArray& updates) {
   RefPtr<Classifier> classifier = new Classifier();
   classifier->Open(*file);
 
-  {
-    // Force nsIUrlClassifierUtils loading on main thread
-    // because nsIUrlClassifierDBService will not run in advance
-    // in gtest.
-    nsresult rv;
-    nsCOMPtr<nsIUrlClassifierUtils> dummy =
-        do_GetService(NS_URLCLASSIFIERUTILS_CONTRACTID, &rv);
-    ASSERT_TRUE(NS_SUCCEEDED(rv));
-  }
+  // Force nsUrlClassifierUtils loading on main thread
+  // because nsIUrlClassifierDBService will not run in advance
+  // in gtest.
+  nsUrlClassifierUtils::GetInstance();
 
   SyncApplyUpdates(classifier, updates);
 }
@@ -148,6 +148,59 @@ nsCString GeneratePrefix(const nsCString& aFragment, uint8_t aLength) {
   nsCString hash;
   hash.Assign((const char*)complete.buf, aLength);
   return hash;
+}
+
+void SetupPrefixMap(const _PrefixArray& array, PrefixStringMap& map) {
+  map.Clear();
+
+  // Buckets are keyed by prefix length and contain an array of
+  // all prefixes of that length.
+  nsClassHashtable<nsUint32HashKey, _PrefixArray> table;
+
+  for (uint32_t i = 0; i < array.Length(); i++) {
+    _PrefixArray* prefixes = table.Get(array[i].Length());
+    if (!prefixes) {
+      prefixes = new _PrefixArray();
+      table.Put(array[i].Length(), prefixes);
+    }
+
+    prefixes->AppendElement(array[i]);
+  }
+
+  // The resulting map entries will be a concatenation of all
+  // prefix data for the prefixes of a given size.
+  for (auto iter = table.Iter(); !iter.Done(); iter.Next()) {
+    uint32_t size = iter.Key();
+    uint32_t count = iter.Data()->Length();
+
+    _Prefix* str = new _Prefix();
+    str->SetLength(size * count);
+
+    char* dst = str->BeginWriting();
+
+    iter.Data()->Sort();
+    for (uint32_t i = 0; i < count; i++) {
+      memcpy(dst, iter.Data()->ElementAt(i).get(), size);
+      dst += size;
+    }
+
+    map.Put(size, str);
+  }
+}
+
+void CheckContent(LookupCacheV4* cache, const _PrefixArray& array) {
+  PrefixStringMap vlPSetMap;
+  cache->GetPrefixes(vlPSetMap);
+
+  PrefixStringMap expected;
+  SetupPrefixMap(array, expected);
+
+  for (auto iter = vlPSetMap.Iter(); !iter.Done(); iter.Next()) {
+    nsCString* expectedPrefix = expected.Get(iter.Key());
+    nsCString* resultPrefix = iter.Data();
+
+    ASSERT_TRUE(resultPrefix->Equals(*expectedPrefix));
+  }
 }
 
 static nsresult BuildCache(LookupCacheV2* cache,

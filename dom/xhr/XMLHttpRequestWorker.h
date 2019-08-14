@@ -63,6 +63,8 @@ class XMLHttpRequestWorker final : public XMLHttpRequest {
   bool mMozAnon;
   bool mMozSystem;
 
+  nsString mMimeTypeOverride;
+
  public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(XMLHttpRequestWorker,
@@ -176,11 +178,11 @@ class XMLHttpRequestWorker final : public XMLHttpRequest {
   virtual void GetResponseText(DOMString& aResponseText,
                                ErrorResult& aRv) override;
 
-  virtual nsIDocument* GetResponseXML(ErrorResult& aRv) override {
+  virtual Document* GetResponseXML(ErrorResult& aRv) override {
     MOZ_CRASH("This method should not be called.");
   }
 
-  virtual void GetInterface(JSContext* aCx, nsIJSID* aIID,
+  virtual void GetInterface(JSContext* aCx, JS::Handle<JS::Value> aIID,
                             JS::MutableHandle<JS::Value> aRetval,
                             ErrorResult& aRv) override {
     aRv.Throw(NS_ERROR_FAILURE);

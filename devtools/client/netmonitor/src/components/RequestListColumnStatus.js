@@ -4,15 +4,16 @@
 
 "use strict";
 
-const { Component, createFactory } = require("devtools/client/shared/vendor/react");
+const {
+  Component,
+  createFactory,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 // Components
 
 const StatusCode = createFactory(require("./StatusCode"));
-
-const { div } = dom;
 
 class RequestListColumnStatus extends Component {
   static get propTypes() {
@@ -24,12 +25,12 @@ class RequestListColumnStatus extends Component {
   render() {
     const { item } = this.props;
 
-    return (
-      div({
+    return dom.td(
+      {
         className: "requests-list-column requests-list-status",
       },
-      StatusCode({ item }),
-    ));
+      StatusCode({ item })
+    );
   }
 }
 

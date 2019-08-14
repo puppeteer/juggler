@@ -22,12 +22,13 @@
 #include "nsIController.h"
 #include "xpcpublic.h"
 #include "nsCycleCollectionParticipant.h"
-#include "mozilla/dom/TabParent.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/HTMLTextAreaElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
+#include "mozilla/dom/JSWindowActorService.h"
 
 #ifdef MOZ_XUL
-#include "nsXULElement.h"
+#  include "nsXULElement.h"
 #endif
 
 using namespace mozilla;
@@ -35,21 +36,15 @@ using namespace mozilla::dom;
 
 nsWindowRoot::nsWindowRoot(nsPIDOMWindowOuter* aWindow) {
   mWindow = aWindow;
-
-  // Keyboard indicators are not shown on Mac by default.
-#if defined(XP_MACOSX)
-  mShowAccelerators = false;
-  mShowFocusRings = false;
-#else
-  mShowAccelerators = true;
-  mShowFocusRings = true;
-#endif
+  mShowFocusRings = StaticPrefs::browser_display_show_focus_rings();
 }
 
 nsWindowRoot::~nsWindowRoot() {
   if (mListenerManager) {
     mListenerManager->Disconnect();
   }
+
+  JSWindowActorService::UnregisterWindowRoot(this);
 }
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsWindowRoot, mWindow, mListenerManager,
@@ -106,8 +101,8 @@ nsresult nsWindowRoot::PostHandleEvent(EventChainPostVisitor& aVisitor) {
   return NS_OK;
 }
 
-nsPIDOMWindowOuter* nsWindowRoot::GetOwnerGlobalForBindings() {
-  return GetWindow();
+nsPIDOMWindowOuter* nsWindowRoot::GetOwnerGlobalForBindingsInternal() {
+  return mWindow;
 }
 
 nsIGlobalObject* nsWindowRoot::GetOwnerGlobal() const {
@@ -210,7 +205,7 @@ nsresult nsWindowRoot::GetControllerForCommand(const char* aCommand,
 
 void nsWindowRoot::GetEnabledDisabledCommandsForControllers(
     nsIControllers* aControllers,
-    nsTHashtable<nsCharPtrHashKey>& aCommandsHandled,
+    nsTHashtable<nsCStringHashKey>& aCommandsHandled,
     nsTArray<nsCString>& aEnabledCommands,
     nsTArray<nsCString>& aDisabledCommands) {
   uint32_t controllerCount;
@@ -222,21 +217,20 @@ void nsWindowRoot::GetEnabledDisabledCommandsForControllers(
     nsCOMPtr<nsICommandController> commandController(
         do_QueryInterface(controller));
     if (commandController) {
-      uint32_t commandsCount;
-      char** commands;
-      if (NS_SUCCEEDED(commandController->GetSupportedCommands(&commandsCount,
-                                                               &commands))) {
-        for (uint32_t e = 0; e < commandsCount; e++) {
+      // All of our default command controllers have 20-60 commands.  Let's just
+      // leave enough space here for all of them so we probably don't need to
+      // heap-allocate.
+      AutoTArray<nsCString, 64> commands;
+      if (NS_SUCCEEDED(commandController->GetSupportedCommands(commands))) {
+        for (auto& commandStr : commands) {
           // Use a hash to determine which commands have already been handled by
           // earlier controllers, as the earlier controller's result should get
           // priority.
-          if (aCommandsHandled.EnsureInserted(commands[e])) {
+          if (aCommandsHandled.EnsureInserted(commandStr)) {
             // We inserted a new entry into aCommandsHandled.
             bool enabled = false;
-            controller->IsCommandEnabled(commands[e], &enabled);
+            controller->IsCommandEnabled(commandStr.get(), &enabled);
 
-            const nsDependentCSubstring commandStr(commands[e],
-                                                   strlen(commands[e]));
             if (enabled) {
               aEnabledCommands.AppendElement(commandStr);
             } else {
@@ -244,8 +238,6 @@ void nsWindowRoot::GetEnabledDisabledCommandsForControllers(
             }
           }
         }
-
-        NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(commandsCount, commands);
       }
     }
   }
@@ -254,7 +246,7 @@ void nsWindowRoot::GetEnabledDisabledCommandsForControllers(
 void nsWindowRoot::GetEnabledDisabledCommands(
     nsTArray<nsCString>& aEnabledCommands,
     nsTArray<nsCString>& aDisabledCommands) {
-  nsTHashtable<nsCharPtrHashKey> commandsHandled;
+  nsTHashtable<nsCStringHashKey> commandsHandled;
 
   nsCOMPtr<nsIControllers> controllers;
   GetControllers(false, getter_AddRefs(controllers));
@@ -297,31 +289,29 @@ JSObject* nsWindowRoot::WrapObject(JSContext* aCx,
   return mozilla::dom::WindowRoot_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-void nsWindowRoot::AddBrowser(mozilla::dom::TabParent* aBrowser) {
-  nsWeakPtr weakBrowser =
-      do_GetWeakReference(static_cast<nsITabParent*>(aBrowser));
+void nsWindowRoot::AddBrowser(nsIRemoteTab* aBrowser) {
+  nsWeakPtr weakBrowser = do_GetWeakReference(aBrowser);
   mWeakBrowsers.PutEntry(weakBrowser);
 }
 
-void nsWindowRoot::RemoveBrowser(mozilla::dom::TabParent* aBrowser) {
-  nsWeakPtr weakBrowser =
-      do_GetWeakReference(static_cast<nsITabParent*>(aBrowser));
+void nsWindowRoot::RemoveBrowser(nsIRemoteTab* aBrowser) {
+  nsWeakPtr weakBrowser = do_GetWeakReference(aBrowser);
   mWeakBrowsers.RemoveEntry(weakBrowser);
 }
 
 void nsWindowRoot::EnumerateBrowsers(BrowserEnumerator aEnumFunc, void* aArg) {
   // Collect strong references to all browsers in a separate array in
   // case aEnumFunc alters mWeakBrowsers.
-  nsTArray<RefPtr<TabParent>> tabParents;
+  nsTArray<nsCOMPtr<nsIRemoteTab>> remoteTabs;
   for (auto iter = mWeakBrowsers.ConstIter(); !iter.Done(); iter.Next()) {
-    nsCOMPtr<nsITabParent> tabParent(do_QueryReferent(iter.Get()->GetKey()));
-    if (TabParent* tab = TabParent::GetFrom(tabParent)) {
-      tabParents.AppendElement(tab);
+    nsCOMPtr<nsIRemoteTab> remoteTab(do_QueryReferent(iter.Get()->GetKey()));
+    if (remoteTab) {
+      remoteTabs.AppendElement(remoteTab);
     }
   }
 
-  for (uint32_t i = 0; i < tabParents.Length(); ++i) {
-    aEnumFunc(tabParents[i], aArg);
+  for (uint32_t i = 0; i < remoteTabs.Length(); ++i) {
+    aEnumFunc(remoteTabs[i], aArg);
   }
 }
 
@@ -329,5 +319,11 @@ void nsWindowRoot::EnumerateBrowsers(BrowserEnumerator aEnumFunc, void* aArg) {
 
 already_AddRefed<EventTarget> NS_NewWindowRoot(nsPIDOMWindowOuter* aWindow) {
   nsCOMPtr<EventTarget> result = new nsWindowRoot(aWindow);
+
+  RefPtr<JSWindowActorService> wasvc = JSWindowActorService::GetSingleton();
+  if (wasvc) {
+    wasvc->RegisterWindowRoot(result);
+  }
+
   return result.forget();
 }

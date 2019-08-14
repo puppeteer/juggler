@@ -8,6 +8,9 @@
 
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/UniquePtr.h"
+#include "nsBaseChannel.h"
+#include "nsIChildChannel.h"
+#include "mozilla/net/PSimpleChannelChild.h"
 #include "nsCOMPtr.h"
 
 class nsIChannel;
@@ -64,6 +67,36 @@ class SimpleChannelCallbacksImpl final : public SimpleChannelCallbacks {
   RefPtr<T> mContext;
 };
 
+class SimpleChannel : public nsBaseChannel {
+ public:
+  explicit SimpleChannel(UniquePtr<SimpleChannelCallbacks>&& aCallbacks);
+
+ protected:
+  virtual ~SimpleChannel() = default;
+
+  virtual nsresult OpenContentStream(bool async, nsIInputStream** streamOut,
+                                     nsIChannel** channel) override;
+
+  virtual nsresult BeginAsyncRead(nsIStreamListener* listener,
+                                  nsIRequest** request) override;
+
+ private:
+  UniquePtr<SimpleChannelCallbacks> mCallbacks;
+};
+
+class SimpleChannelChild final : public SimpleChannel,
+                                 public nsIChildChannel,
+                                 public PSimpleChannelChild {
+ public:
+  explicit SimpleChannelChild(UniquePtr<SimpleChannelCallbacks>&& aCallbacks);
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSICHILDCHANNEL
+
+ private:
+  virtual ~SimpleChannelChild() = default;
+};
+
 already_AddRefed<nsIChannel> NS_NewSimpleChannelInternal(
     nsIURI* aURI, nsILoadInfo* aLoadInfo,
     UniquePtr<SimpleChannelCallbacks>&& aCallbacks);
@@ -73,8 +106,8 @@ already_AddRefed<nsIChannel> NS_NewSimpleChannelInternal(
 
 /**
  * Creates a simple channel which wraps an input stream created by the given
- * callbacks. The callbacks are not called until the underlying AsyncOpen2 or
- * Open2 methods are called, and correspond to the nsBaseChannel::StartAsyncRead
+ * callbacks. The callbacks are not called until the underlying AsyncOpen or
+ * Open methods are called, and correspond to the nsBaseChannel::StartAsyncRead
  * and nsBaseChannel::OpenContentStream methods of the same names.
  *
  * The last two arguments of each callback are the created channel instance,

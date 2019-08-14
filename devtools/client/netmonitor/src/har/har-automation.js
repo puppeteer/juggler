@@ -16,8 +16,7 @@ const prefDomain = "devtools.netmonitor.har.";
 
 // Helper tracer. Should be generic sharable by other modules (bug 1171927)
 const trace = {
-  log: function(...args) {
-  },
+  log: function(...args) {},
 };
 
 /**
@@ -45,7 +44,7 @@ HarAutomation.prototype = {
     this.toolbox = toolbox;
 
     const target = toolbox.target;
-    this.startMonitoring(target.client, target.form);
+    this.startMonitoring(target.client);
   },
 
   destroy: function() {
@@ -60,17 +59,12 @@ HarAutomation.prototype = {
 
   // Automation
 
-  startMonitoring: function(client, tabGrip, callback) {
+  startMonitoring: function(client, callback) {
     if (!client) {
       return;
     }
 
-    if (!tabGrip) {
-      return;
-    }
-
     this.debuggerClient = client;
-    this.targetFront = this.toolbox.target.activeTab;
     this.webConsoleClient = this.toolbox.target.activeConsole;
 
     this.tabWatcher = new TabWatcher(this.toolbox, this);
@@ -117,8 +111,9 @@ HarAutomation.prototype = {
   },
 
   autoExport: function() {
-    const autoExport = Services.prefs.getBoolPref(prefDomain +
-      "enableAutoExportToFile");
+    const autoExport = Services.prefs.getBoolPref(
+      prefDomain + "enableAutoExportToFile"
+    );
 
     if (!autoExport) {
       return Promise.resolve();
@@ -140,8 +135,9 @@ HarAutomation.prototype = {
    */
   triggerExport: function(data) {
     if (!data.fileName) {
-      data.fileName = Services.prefs.getCharPref(prefDomain +
-        "defaultFileName");
+      data.fileName = Services.prefs.getCharPref(
+        prefDomain + "defaultFileName"
+      );
     }
 
     return this.executeExport(data);
@@ -162,8 +158,7 @@ HarAutomation.prototype = {
    */
   executeExport: function(data) {
     const items = this.collector.getItems();
-    const form = this.toolbox.target.form;
-    const title = form.title || form.url;
+    const { title } = this.toolbox.target;
 
     const options = {
       requestData: null,
@@ -261,11 +256,15 @@ TabWatcher.prototype = {
  * Returns target file for exported HAR data.
  */
 function getDefaultTargetFile(options) {
-  const path = options.defaultLogDir ||
+  const path =
+    options.defaultLogDir ||
     Services.prefs.getCharPref("devtools.netmonitor.har.defaultLogDir");
   const folder = HarUtils.getLocalDirectory(path);
-  const fileName = HarUtils.getHarFileName(options.defaultFileName,
-    options.jsonp, options.compress);
+  const fileName = HarUtils.getHarFileName(
+    options.defaultFileName,
+    options.jsonp,
+    options.compress
+  );
 
   folder.append(fileName);
   folder.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, parseInt("0666", 8));

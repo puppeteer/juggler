@@ -252,9 +252,8 @@ class DestinationNodeEngine final : public AudioNodeEngine {
         }
       };
 
-      aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-          NS_NewRunnableFunction("dom::WebAudioAudibleStateChangedRunnable",
-                                 r));
+      aStream->Graph()->DispatchToMainThreadStableState(NS_NewRunnableFunction(
+          "dom::WebAudioAudibleStateChangedRunnable", r));
     }
 
     if (isInputAudible) {
@@ -337,6 +336,8 @@ AudioDestinationNode::AudioDestinationNode(AudioContext* aContext,
     return;
   }
 
+  // GetParentObject can return nullptr here. This will end up creating another
+  // MediaStreamGraph
   MediaStreamGraph* graph = MediaStreamGraph::GetInstance(
       MediaStreamGraph::AUDIO_THREAD_DRIVER, aContext->GetParentObject(),
       aContext->SampleRate());
@@ -378,6 +379,8 @@ AudioNodeStream* AudioDestinationNode::Stream() {
 
   MOZ_ASSERT(mIsOffline, "Realtime streams are created in constructor");
 
+  // GetParentObject can return nullptr here when the document has been
+  // unlinked.
   MediaStreamGraph* graph = MediaStreamGraph::CreateNonRealtimeInstance(
       context->SampleRate(), context->GetParentObject());
   AudioNodeEngine* engine = new OfflineDestinationNodeEngine(this);
@@ -402,6 +405,8 @@ void AudioDestinationNode::DestroyMediaStream() {
 
   if (!mStream) return;
 
+  Context()->ShutdownWorklet();
+
   mStream->RemoveMainThreadListener(this);
   MediaStreamGraph* graph = mStream->Graph();
   if (graph->IsNonRealtime()) {
@@ -414,8 +419,8 @@ void AudioDestinationNode::NotifyMainThreadStreamFinished() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mStream->IsFinished());
 
-  if (mIsOffline) {
-    AbstractMainThread()->Dispatch(NewRunnableMethod(
+  if (mIsOffline && GetAbstractMainThread()) {
+    GetAbstractMainThread()->Dispatch(NewRunnableMethod(
         "dom::AudioDestinationNode::FireOfflineCompletionEvent", this,
         &AudioDestinationNode::FireOfflineCompletionEvent));
   }

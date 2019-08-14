@@ -1,8 +1,7 @@
 /* verify that certain invalid URIs are not parsed by the resource
    protocol handler */
 
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+"use strict";
 
 const specs = [
   "resource://res-test//",
@@ -30,59 +29,63 @@ const error_specs = [
 var uri = NetUtil.newURI("http://www.example.com");
 var principal = Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
 
-function get_channel(spec)
-{
+function get_channel(spec) {
   var channelURI = NetUtil.newURI(spec);
 
   var channel = NetUtil.newChannel({
     uri: NetUtil.newURI(spec),
     loadingPrincipal: principal,
     securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-    contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER
+    contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER,
   });
 
-  try {
-    channel.asyncOpen2(null);
-    ok(false, "asyncOpen2() of URI: " + spec + "should throw");
-  }
-  catch (e) {
-    // make sure we get the right error code in the exception
-    // ERROR code for NS_ERROR_DOM_BAD_URI is 1012
-    equal(e.code, 1012);
-  }
-
-  try {
-    channel.open2();
-    ok(false, "Open2() of uri: " + spec + "should throw");
-  }
-  catch (e) {
-    // make sure we get the right error code in the exception
-    // ERROR code for NS_ERROR_DOM_BAD_URI is 1012
-    equal(e.code, 1012);
-  }
+  Assert.throws(
+    () => {
+      channel.asyncOpen(null);
+    },
+    /NS_ERROR_DOM_BAD_URI/,
+    `asyncOpen() of uri: ${spec} should throw`
+  );
+  Assert.throws(
+    () => {
+      channel.open();
+    },
+    /NS_ERROR_DOM_BAD_URI/,
+    `Open() of uri: ${spec} should throw`
+  );
 
   return channel;
 }
 
-function check_safe_resolution(spec, rootURI)
-{
+function check_safe_resolution(spec, rootURI) {
   info(`Testing URL "${spec}"`);
 
   let channel = get_channel(spec);
 
-  ok(channel.name.startsWith(rootURI), `URL resolved safely to ${channel.name}`);
-  ok(!/%2f/i.test(channel.name), `URL contains no escaped / characters`);
+  ok(
+    channel.name.startsWith(rootURI),
+    `URL resolved safely to ${channel.name}`
+  );
+  let startOfQuery = channel.name.indexOf("?");
+  if (startOfQuery == -1) {
+    ok(!/%2f/i.test(channel.name), `URL contains no escaped / characters`);
+  } else {
+    // Escaped slashes are allowed in the query or hash part of the URL
+    ok(
+      !channel.name.replace(/\?.*/, "").includes("%2f"),
+      `URL contains no escaped slashes before the query ${channel.name}`
+    );
+  }
 }
 
-function check_resolution_error(spec)
-{
-  try {
-    get_channel(spec);
-    ok(false, "Expected an error");
-  } catch (e) {
-    equal(e.result, Cr.NS_ERROR_MALFORMED_URI,
-          "Expected a malformed URI error");
-  }
+function check_resolution_error(spec) {
+  Assert.throws(
+    () => {
+      get_channel(spec);
+    },
+    /NS_ERROR_MALFORMED_URI/,
+    "Expected a malformed URI error"
+  );
 }
 
 function run_test() {
@@ -90,7 +93,9 @@ function run_test() {
   // to create a temporary resource package to test the standard logic
   // with.
 
-  let resProto = Cc['@mozilla.org/network/protocol;1?name=resource'].getService(Ci.nsIResProtocolHandler);
+  let resProto = Cc["@mozilla.org/network/protocol;1?name=resource"].getService(
+    Ci.nsIResProtocolHandler
+  );
   let rootFile = Services.dirsvc.get("GreD", Ci.nsIFile);
   let rootURI = Services.io.newFileURI(rootFile);
 
@@ -109,7 +114,10 @@ function run_test() {
 
   for (var spec of specs) {
     check_safe_resolution(spec, rootURI.spec);
-    check_safe_resolution(spec.replace("res-test", "res-inexistent"), inexistentURI.spec);
+    check_safe_resolution(
+      spec.replace("res-test", "res-inexistent"),
+      inexistentURI.spec
+    );
     check_safe_resolution(spec.replace("res-test", ""), baseRoot);
     check_safe_resolution(spec.replace("res-test", "gre"), greRoot);
   }

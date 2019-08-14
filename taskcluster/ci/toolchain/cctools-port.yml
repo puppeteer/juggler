@@ -1,0 +1,21 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
+job-defaults:
+    description: "cctools-port toolchain build"
+    worker-type: b-linux
+    worker:
+        max-run-time: 1800
+    run:
+        resources:
+            - 'taskcluster/scripts/misc/tooltool-download.sh'
+
+linux64-cctools-port:
+    treeherder:
+        symbol: TL(cctools)
+    run:
+        script: build-cctools-port.sh
+        toolchain-artifact: public/build/cctools.tar.xz
+    toolchains:
+        - linux64-clang-8

@@ -21,6 +21,7 @@
 #include "ds/Sort.h"
 #include "gc/FreeOp.h"
 #include "js/CharacterEncoding.h"
+#include "js/PropertySpec.h"
 #include "js/RootingAPI.h"
 #include "js/StableStringChars.h"
 #include "js/TypeDecls.h"
@@ -77,7 +78,7 @@ static const JSFunctionSpec numberFormat_methods[] = {
     JS_FN(js_toSource_str, numberFormat_toSource, 0, 0), JS_FS_END};
 
 static const JSPropertySpec numberFormat_properties[] = {
-    JS_SELF_HOSTED_GET("format", "Intl_NumberFormat_format_get", 0),
+    JS_SELF_HOSTED_GET("format", "$Intl_NumberFormat_format_get", 0),
     JS_STRING_SYM_PS(toStringTag, "Object", JSPROP_READONLY), JS_PS_END};
 
 /**
@@ -90,7 +91,7 @@ static bool NumberFormat(JSContext* cx, const CallArgs& args, bool construct) {
 
   // Step 2 (Inlined 9.1.14, OrdinaryCreateFromConstructor).
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Null, &proto)) {
     return false;
   }
 
@@ -493,6 +494,24 @@ static FieldType GetFieldTypeForNumberField(UNumberFormatFields fieldName,
           "formatted number, even though UNUM_SCIENTIFIC "
           "and scientific notation were never requested");
       break;
+
+#ifndef U_HIDE_DRAFT_API
+#  if U_ICU_VERSION_MAJOR_NUM >= 64
+    case UNUM_MEASURE_UNIT_FIELD:
+      MOZ_ASSERT_UNREACHABLE(
+          "unexpected measure unit field found, even though "
+          "we don't use any user-defined patterns that "
+          "would require a measure unit field");
+      break;
+
+    case UNUM_COMPACT_FIELD:
+      MOZ_ASSERT_UNREACHABLE(
+          "unexpected compact field found, even though "
+          "we don't use any user-defined patterns that "
+          "would require a compact number notation");
+      break;
+#  endif
+#endif
 
 #ifndef U_HIDE_DEPRECATED_API
     case UNUM_FIELD_COUNT:

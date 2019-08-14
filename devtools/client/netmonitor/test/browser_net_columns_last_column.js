@@ -4,14 +4,21 @@
 "use strict";
 
 /**
- * Tests that last visible column can't be hidden
+ * Tests that last visible column can't be hidden. Note that the column
+ * header is visible only if there are requests in the list.
  */
 
 add_task(async function() {
-  const { monitor } = await initNetMonitor(SIMPLE_URL);
+  const { monitor, tab } = await initNetMonitor(SIMPLE_URL);
   info("Starting test... ");
 
-  const { document, store, parent } = monitor.panelWin;
+  const { document, store, windowRequire } = monitor.panelWin;
+  const Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
+  store.dispatch(Actions.batchEnable(false));
+
+  const wait = waitForNetworkEvents(monitor, 1);
+  tab.linkedBrowser.reload();
+  await wait;
 
   const initialColumns = store.getState().ui.columns;
   for (const column in initialColumns) {
@@ -41,11 +48,15 @@ add_task(async function() {
   await teardown(monitor);
 
   async function testLastMenuItem(column) {
-    EventUtils.sendMouseEvent({ type: "contextmenu" },
-      document.querySelector(`#requests-list-${column}-button`));
+    EventUtils.sendMouseEvent(
+      { type: "contextmenu" },
+      document.querySelector(`#requests-list-${column}-button`)
+    );
 
-    const menuItem =
-      parent.document.querySelector(`#request-list-header-${column}-toggle`);
+    const menuItem = getContextMenuItem(
+      monitor,
+      `request-list-header-${column}-toggle`
+    );
     ok(menuItem.disabled, "Last visible column menu item should be disabled.");
   }
 });

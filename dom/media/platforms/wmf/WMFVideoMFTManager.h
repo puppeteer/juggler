@@ -5,16 +5,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined(WMFVideoMFTManager_h_)
-#define WMFVideoMFTManager_h_
+#  define WMFVideoMFTManager_h_
 
-#include "MFTDecoder.h"
-#include "MediaResult.h"
-#include "WMF.h"
-#include "WMFMediaDataDecoder.h"
-#include "mozilla/Atomics.h"
-#include "mozilla/RefPtr.h"
-#include "nsAutoPtr.h"
-#include "mozilla/gfx/Rect.h"
+#  include "MFTDecoder.h"
+#  include "MediaResult.h"
+#  include "WMF.h"
+#  include "WMFMediaDataDecoder.h"
+#  include "mozilla/Atomics.h"
+#  include "mozilla/RefPtr.h"
+#  include "nsAutoPtr.h"
+#  include "mozilla/gfx/Rect.h"
 
 namespace mozilla {
 
@@ -42,17 +42,6 @@ class WMFVideoMFTManager : public MFTManager {
   TrackInfo::TrackType GetType() override { return TrackInfo::kVideoTrack; }
 
   nsCString GetDescriptionName() const override;
-
-  void Flush() override {
-    MFTManager::Flush();
-    mDraining = false;
-    mSamplesCount = 0;
-  }
-
-  void Drain() override {
-    MFTManager::Drain();
-    mDraining = true;
-  }
 
   MediaDataDecoder::ConversionRequired NeedsConversion() const override {
     return mStreamType == H264
@@ -82,16 +71,13 @@ class WMFVideoMFTManager : public MFTManager {
   const gfx::IntSize mImageSize;
   gfx::IntSize mDecodedImageSize;
   uint32_t mVideoStride;
-  YUVColorSpace mYUVColorSpace;
+  Maybe<gfx::YUVColorSpace> mColorSpace;
 
   RefPtr<layers::ImageContainer> mImageContainer;
   RefPtr<layers::KnowsCompositor> mKnowsCompositor;
   nsAutoPtr<DXVA2Manager> mDXVA2Manager;
 
   media::TimeUnit mLastDuration;
-  media::TimeUnit mLastTime;
-  bool mDraining = false;
-  int64_t mSamplesCount = 0;
 
   bool mDXVAEnabled;
   bool mUseHwAccel;

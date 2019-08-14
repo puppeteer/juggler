@@ -11,26 +11,18 @@
 
 using namespace mozilla;
 
-template<typename T>
-class AutoBuffer
-{
-public:
-  explicit AutoBuffer(size_t aLength)
-  {
-    mStorage = new T[aLength];
-  }
-  ~AutoBuffer() {
-    delete [] mStorage;
-  }
-  T* Get() {
-    return mStorage;
-  }
-private:
+template <typename T>
+class AutoBuffer {
+ public:
+  explicit AutoBuffer(size_t aLength) { mStorage = new T[aLength]; }
+  ~AutoBuffer() { delete[] mStorage; }
+  T* Get() { return mStorage; }
+
+ private:
   T* mStorage;
 };
 
-int16_t Sequence(int16_t* aBuffer, uint32_t aSize, uint32_t aStart = 0)
-{
+int16_t Sequence(int16_t* aBuffer, uint32_t aSize, uint32_t aStart = 0) {
   uint32_t i;
   for (i = 0; i < aSize; i++) {
     aBuffer[i] = aStart + i;
@@ -38,26 +30,23 @@ int16_t Sequence(int16_t* aBuffer, uint32_t aSize, uint32_t aStart = 0)
   return aStart + i;
 }
 
-void IsSequence(std::unique_ptr<int16_t[]> aBuffer, uint32_t aSize, uint32_t aStart = 0)
-{
+void IsSequence(std::unique_ptr<int16_t[]> aBuffer, uint32_t aSize,
+                uint32_t aStart = 0) {
   for (uint32_t i = 0; i < aSize; i++) {
-    ASSERT_TRUE(aBuffer[i] == static_cast<int64_t>(aStart + i)) <<
-      "Buffer is not a sequence at offset " << i << std::endl;
+    ASSERT_TRUE(aBuffer[i] == static_cast<int64_t>(aStart + i))
+    << "Buffer is not a sequence at offset " << i << std::endl;
   }
   // Buffer is a sequence.
 }
 
-void Zero(std::unique_ptr<int16_t[]> aBuffer, uint32_t aSize)
-{
+void Zero(std::unique_ptr<int16_t[]> aBuffer, uint32_t aSize) {
   for (uint32_t i = 0; i < aSize; i++) {
-    ASSERT_TRUE(aBuffer[i] == 0) <<
-      "Buffer is not null at offset " << i << std::endl;
+    ASSERT_TRUE(aBuffer[i] == 0)
+    << "Buffer is not null at offset " << i << std::endl;
   }
 }
 
-double sine(uint32_t aPhase) {
-  return sin(aPhase * 2 * M_PI * 440 / 44100);
-}
+double sine(uint32_t aPhase) { return sin(aPhase * 2 * M_PI * 440 / 44100); }
 
 TEST(AudioPacketizer, Test)
 {

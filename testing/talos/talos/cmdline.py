@@ -80,13 +80,13 @@ def create_parser(mach_interface=False):
     add_arg("--userReady", action='store_true', dest="userready",
             help="Also report the user ready value in supported tests")
     add_arg('--spsProfile', action="store_true", dest="gecko_profile",
-            help="(Deprecated - Use --geckoProfile instead.) Profile the "
+            help="(Deprecated - Use --gecko-profile instead.) Profile the "
                  "run and output the results in $MOZ_UPLOAD_DIR.")
     add_arg('--spsProfileInterval', dest='gecko_profile_interval', type=float,
-            help="(Deprecated - Use --geckoProfileInterval instead.) How "
+            help="(Deprecated - Use --gecko-profile-interval instead.) How "
                  "frequently to take samples (ms)")
     add_arg('--spsProfileEntries', dest="gecko_profile_entries", type=int,
-            help="(Deprecated - Use --geckoProfileEntries instead.) How "
+            help="(Deprecated - Use --gecko-profile-entries instead.) How "
                  "many samples to take with the profiler")
     add_arg('--geckoProfile', action="store_true", dest="gecko_profile",
             help=argparse.SUPPRESS)
@@ -96,9 +96,10 @@ def create_parser(mach_interface=False):
             help=argparse.SUPPRESS)
     add_arg('--gecko-profile', action="store_true", dest="gecko_profile",
             help="Profile the run and output the results in $MOZ_UPLOAD_DIR. "
-                 "After talos is finished, perf-html.io will be launched in Firefox so you "
-                 "can analyze the local profiles. To disable auto-launching of perf-html.io "
-                 "set the DISABLE_PROFILE_LAUNCH=1 env var.")
+                 "After talos is finished, profiler.firefox.com will be launched in "
+                 "Firefox so you can analyze the local profiles. To disable "
+                 "auto-launching of profiler.firefox.com set the "
+                 "DISABLE_PROFILE_LAUNCH=1 env var.")
     add_arg('--gecko-profile-interval', dest='gecko_profile_interval', type=float,
             help="How frequently to take samples (ms)")
     add_arg('--gecko-profile-entries', dest="gecko_profile_entries", type=int,
@@ -121,11 +122,6 @@ def create_parser(mach_interface=False):
     add_arg('--setpref', action='append', default=[], dest="extraPrefs",
             metavar="PREF=VALUE",
             help="defines an extra user preference")
-    add_arg('--mitmproxy',
-            help='Test uses mitmproxy to serve the pages, specify the '
-                 'path and name of the mitmdump file to playback')
-    add_arg('--mitmdumpPath',
-            help="Path to mitmproxy's mitmdump playback tool")
     add_arg("--firstNonBlankPaint", action='store_true', dest="fnbpaint",
             help="Wait for firstNonBlankPaint event before recording the time")
     add_arg('--webServer', dest='webserver',
@@ -186,6 +182,8 @@ def create_parser(mach_interface=False):
             help='Remove any existing ccov gcda output files after browser'
                  ' initialization but before starting the tests. NOTE:'
                  ' Currently only supported in production.')
+    add_arg('--enable-webrender', action="store_true", default=False,
+            help="Enable the WebRender compositor in Gecko.")
 
     add_logging_group(parser)
     return parser

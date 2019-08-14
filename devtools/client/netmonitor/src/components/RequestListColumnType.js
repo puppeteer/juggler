@@ -9,8 +9,6 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { getAbbreviatedMimeType } = require("../utils/request-utils");
 
-const { div } = dom;
-
 class RequestListColumnType extends Component {
   static get propTypes() {
     return {
@@ -30,13 +28,12 @@ class RequestListColumnType extends Component {
       abbrevType = getAbbreviatedMimeType(mimeType);
     }
 
-    return (
-      div({
+    return dom.td(
+      {
         className: "requests-list-column requests-list-type",
         title: mimeType,
       },
-        abbrevType
-      )
+      abbrevType
     );
   }
 }

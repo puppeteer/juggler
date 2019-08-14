@@ -9,6 +9,8 @@
 ## These are short descriptions for individual policies, to be displayed
 ## in the documentation section in about:policies.
 
+policy-3rdparty = Set policies that WebExtensions can access via chrome.storage.managed.
+
 policy-AppUpdateURL = Set custom app update URL.
 
 policy-Authentication = Configure integrated authentication for websites that support it.
@@ -23,9 +25,13 @@ policy-BlockAboutSupport = Block access to the about:support page.
 
 policy-Bookmarks = Create bookmarks in the Bookmarks toolbar, Bookmarks menu, or a specified folder inside them.
 
+policy-CaptivePortal = Enable or disable captive portal support.
+
 policy-CertificatesDescription = Add certificates or use built-in certificates.
 
 policy-Cookies = Allow or deny websites to set cookies.
+
+policy-DefaultDownloadDirectory = Set the default download directory.
 
 policy-DisableAppUpdate = Prevent the browser from updating.
 
@@ -74,6 +80,8 @@ policy-DNSOverHTTPS = Configure DNS over HTTPS.
 
 policy-DontCheckDefaultBrowser = Disable check for default browser on startup.
 
+policy-DownloadDirectory = Set and lock the download directory.
+
 # “lock” means that the user won’t be able to change this setting
 policy-EnableTrackingProtection = Enable or disable Content Blocking and optionally lock it.
 
@@ -81,6 +89,12 @@ policy-EnableTrackingProtection = Enable or disable Content Blocking and optiona
 # takes 3 keys (“Install”, ”Uninstall”, ”Locked”), you can either keep them in
 # English or translate them as verbs.
 policy-Extensions = Install, uninstall or lock extensions. The Install option takes URLs or paths as parameters. The Uninstall and Locked options take extension IDs.
+
+policy-ExtensionSettings = Manage all aspects of extension installation.
+
+policy-ExtensionUpdate = Enable or disable automatic extension updates.
+
+policy-FirefoxHome = Configure Firefox Home.
 
 policy-FlashPlugin = Allow or deny usage of the Flash plugin.
 
@@ -90,6 +104,12 @@ policy-HardwareAcceleration = If false, turn off hardware acceleration.
 policy-Homepage = Set and optionally lock the homepage.
 
 policy-InstallAddonsPermission = Allow certain websites to install add-ons.
+
+policy-LocalFileLinks = Allow specific websites to link to local files.
+
+policy-NetworkPrediction = Enable or disable network prediction (DNS prefetching).
+
+policy-NewTabPage = Enable or disable the New Tab page.
 
 policy-NoDefaultBookmarks = Disable creation of the default bookmarks bundled with { -brand-short-name }, and the Smart Bookmarks (Most Visited, Recent Tags). Note: this policy is only effective if used before the first run of the profile.
 
@@ -103,18 +123,30 @@ policy-Permissions = Configure permissions for camera, microphone, location and 
 
 policy-PopupBlocking = Allow certain websites to display popups by default.
 
+policy-Preferences = Set and lock the value for a subset of preferences.
+
+policy-PromptForDownloadLocation = Ask where to save files when downloading.
+
 policy-Proxy = Configure proxy settings.
 
 policy-RequestedLocales = Set the list of requested locales for the application in order of preference.
 
-policy-SanitizeOnShutdown = Clear all navigation data on shutdown.
+policy-SanitizeOnShutdown2 = Clear navigation data on shutdown.
 
 policy-SearchBar = Set the default location of the search bar. The user is still allowed to customize it.
 
 policy-SearchEngines = Configure search engine settings. This policy is only available on the Extended Support Release (ESR) version.
 
+policy-SearchSuggestEnabled = Enable or disable search suggestions.
+
 # For more information, see https://developer.mozilla.org/en-US/docs/Mozilla/Projects/NSS/PKCS11/Module_Installation
 policy-SecurityDevices = Install PKCS #11 modules.
+
+policy-SSLVersionMax = Set the maximum SSL version.
+
+policy-SSLVersionMin = Set the minimum SSL version.
+
+policy-SupportMenu = Add a custom support menu item to the help menu.
 
 # “format” refers to the format used for the value of this policy.
 policy-WebsiteFilter = Block websites from being visited. See documentation for more details on the format.

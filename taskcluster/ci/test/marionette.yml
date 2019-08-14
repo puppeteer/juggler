@@ -1,3 +1,7 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
 job-defaults:
     suite: marionette
     mozharness:
@@ -9,7 +13,7 @@ job-defaults:
             by-test-platform:
                 android-em.*:
                     - android/android_common.py
-                    - android/androidarm_4_3.py
+                    - android/androidx86_7_0-old.py
                 macosx.*:
                     - marionette/prod_config.py
                     - marionette/mac_taskcluster_config.py
@@ -18,32 +22,28 @@ job-defaults:
                 default:
                     - marionette/prod_config.py
                     - remove_executables.py
+    run-on-projects:
+        by-test-platform:
+            windows10-aarch64/opt: ['try', 'mozilla-central']
+            default: built-projects
+    tier:
+        by-test-platform:
+            windows10-aarch64.*: 2
+            default: default
 
 marionette:
     description: "Marionette unittest run"
     treeherder-symbol: Mn
-    max-run-time:
-        by-test-platform:
-            android-em.*: 3600
-            default: 5400
-    instance-size:
-        by-test-platform:
-            android-em.*: xlarge
-            default: default
-    tier:
-        by-test-platform:
-            android-em.*: 2
-            default: default
-    chunks:
-        by-test-platform:
-            android-em.*: 10
-            default: 1
+    max-run-time: 5400
+    instance-size: default
+    chunks: 1
 
 marionette-headless:
     description: "Marionette headless unittest run"
     treeherder-symbol: MnH
     max-run-time: 5400
     instance-size: default
+    tier: 2
     mozharness:
         extra-options:
             - --headless
@@ -60,3 +60,13 @@ marionette-gpu:
         by-test-platform:
             windows10-64.*: virtual-with-gpu
             default: virtual
+
+marionette-media:
+    description: "Marionette DOM media test run"
+    treeherder-symbol: MnM
+    max-run-time: 5400
+    instance-size: default
+    tier: 2
+    mozharness:
+        extra-options:
+            - --test-manifest=stream-tests.ini

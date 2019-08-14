@@ -4,16 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "gc/Verifier.h"
+
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Sprintf.h"
 
 #ifdef MOZ_VALGRIND
-#include <valgrind/memcheck.h>
+#  include <valgrind/memcheck.h>
 #endif
 
 #include "gc/GCInternals.h"
+#include "gc/GCLock.h"
 #include "gc/PublicIterators.h"
+#include "gc/WeakMap.h"
 #include "gc/Zone.h"
 #include "js/HashTable.h"
 #include "vm/JSContext.h"
@@ -25,6 +29,8 @@
 
 using namespace js;
 using namespace js::gc;
+
+using mozilla::DebugOnly;
 
 #ifdef JS_GC_ZEAL
 
@@ -177,9 +183,6 @@ void gc::GCRuntime::startVerifyPreBarriers() {
   }
 
   JSContext* cx = rt->mainContextFromOwnThread();
-  if (temporaryAbortIfWasmGc(cx)) {
-    return;
-  }
 
   if (IsIncrementalGCUnsafe(rt) != AbortReason::None ||
       rt->hasHelperThreadZones()) {
@@ -265,7 +268,7 @@ static bool IsMarkedOrAllocated(TenuredCell* cell) {
   return cell->isMarkedAny();
 }
 
-struct CheckEdgeTracer : public JS::CallbackTracer {
+struct CheckEdgeTracer final : public JS::CallbackTracer {
   VerifyNode* node;
   explicit CheckEdgeTracer(JSRuntime* rt)
       : JS::CallbackTracer(rt), node(nullptr) {}
@@ -405,9 +408,6 @@ void gc::GCRuntime::verifyPreBarriers() {
 }
 
 void gc::VerifyBarriers(JSRuntime* rt, VerifierType type) {
-  if (GCRuntime::temporaryAbortIfWasmGc(rt->mainContextFromOwnThread())) {
-    return;
-  }
   if (type == PreBarrierVerifier) {
     rt->gc.verifyPreBarriers();
   }
@@ -447,7 +447,24 @@ void js::gc::GCRuntime::finishVerifier() {
 
 #endif /* JS_GC_ZEAL */
 
-#if defined(JSGC_HASH_TABLE_CHECKS) || defined(DEBUG)
+#if defined(JS_GC_ZEAL) || defined(DEBUG)
+
+static const char* CellColorName(CellColor color) {
+  switch (color) {
+    case CellColor::White:
+      return "white";
+    case CellColor::Black:
+      return "black";
+    case CellColor::Gray:
+      return "gray";
+    default:
+      MOZ_CRASH("Unexpected cell color");
+  }
+}
+
+static const char* GetCellColorName(Cell* cell) {
+  return CellColorName(GetCellColor(cell));
+}
 
 class HeapCheckTracerBase : public JS::CallbackTracer {
  public:
@@ -495,9 +512,9 @@ HeapCheckTracerBase::HeapCheckTracerBase(JSRuntime* rt,
       rt(rt),
       oom(false),
       parentIndex(-1) {
-#ifdef DEBUG
+#  ifdef DEBUG
   setCheckEdges(false);
-#endif
+#  endif
 }
 
 void HeapCheckTracerBase::onChild(const JS::GCCellPtr& thing) {
@@ -559,16 +576,6 @@ bool HeapCheckTracerBase::traceHeap(AutoTraceSession& session) {
   return !oom;
 }
 
-static const char* GetCellColorName(Cell* cell) {
-  if (cell->isMarkedBlack()) {
-    return "black";
-  }
-  if (cell->isMarkedGray()) {
-    return "gray";
-  }
-  return "white";
-}
-
 void HeapCheckTracerBase::dumpCellInfo(Cell* cell) {
   auto kind = cell->getTraceKind();
   JSObject* obj =
@@ -596,10 +603,6 @@ void HeapCheckTracerBase::dumpCellPath() {
   }
   fprintf(stderr, "  from root %s\n", name);
 }
-
-#endif  // defined(JSGC_HASH_TABLE_CHECKS) || defined(DEBUG)
-
-#ifdef JSGC_HASH_TABLE_CHECKS
 
 class CheckHeapTracer final : public HeapCheckTracerBase {
  public:
@@ -656,10 +659,6 @@ void js::gc::CheckHeapAfterGC(JSRuntime* rt) {
   tracer.check(session);
 }
 
-#endif /* JSGC_HASH_TABLE_CHECKS */
-
-#if defined(JS_GC_ZEAL) || defined(DEBUG)
-
 class CheckGrayMarkingTracer final : public HeapCheckTracerBase {
  public:
   explicit CheckGrayMarkingTracer(JSRuntime* rt);
@@ -689,12 +688,16 @@ void CheckGrayMarkingTracer::checkCell(Cell* cell) {
     fprintf(stderr, "\n");
     dumpCellPath();
 
-#ifdef DEBUG
+#  ifdef DEBUG
+    if (parent->is<JSObject>()) {
+      fprintf(stderr, "\nSource: ");
+      DumpObject(parent->as<JSObject>(), stderr);
+    }
     if (cell->is<JSObject>()) {
-      fprintf(stderr, "\n");
+      fprintf(stderr, "\nTarget: ");
       DumpObject(cell->as<JSObject>(), stderr);
     }
-#endif
+#  endif
   }
 }
 
@@ -718,6 +721,106 @@ JS_FRIEND_API bool js::CheckGrayMarkingState(JSRuntime* rt) {
   CheckGrayMarkingTracer tracer(rt);
 
   return tracer.check(session);
+}
+
+static Zone* GetCellZoneFromAnyThread(Cell* cell) {
+  if (cell->is<JSObject>()) {
+    return cell->as<JSObject>()->zoneFromAnyThread();
+  }
+
+  if (cell->is<JSString>()) {
+    return cell->as<JSString>()->zoneFromAnyThread();
+  }
+
+  return cell->asTenured().zoneFromAnyThread();
+}
+
+static JSObject* MaybeGetDelegate(Cell* cell) {
+  if (!cell->is<JSObject>()) {
+    return nullptr;
+  }
+
+  JSObject* object = cell->as<JSObject>();
+  return js::UncheckedUnwrapWithoutExpose(object);
+}
+
+bool js::gc::CheckWeakMapEntryMarking(const WeakMapBase* map, Cell* key,
+                                      Cell* value) {
+  bool ok = true;
+
+  Zone* zone = map->zone();
+  MOZ_ASSERT(CurrentThreadCanAccessZone(zone));
+  MOZ_ASSERT(zone->isGCMarking());
+
+  JSObject* object = map->memberOf;
+  MOZ_ASSERT_IF(object, object->zone() == zone);
+
+  // Debugger weak maps can have keys in different zones.
+  Zone* keyZone = GetCellZoneFromAnyThread(key);
+  MOZ_ASSERT_IF(!map->allowKeysInOtherZones(),
+                keyZone == zone || keyZone->isAtomsZone());
+
+  Zone* valueZone = GetCellZoneFromAnyThread(value);
+  MOZ_ASSERT(valueZone == zone || valueZone->isAtomsZone());
+
+  CellColor mapColor =
+      map->markColor == MarkColor::Black ? CellColor::Black : CellColor::Gray;
+  if (object && GetCellColor(object) != mapColor) {
+    fprintf(stderr, "WeakMap object is marked differently to the map\n");
+    fprintf(stderr, "(map %p is %s, object %p is %s)\n", map,
+            CellColorName(mapColor), object,
+            CellColorName(GetCellColor(object)));
+    ok = false;
+  }
+
+  CellColor keyColor = GetCellColor(key);
+
+  // Values belonging to other runtimes or in uncollected zones are treated as
+  // black.
+  CellColor valueColor = CellColor::Black;
+  if (value->runtimeFromAnyThread() == zone->runtimeFromAnyThread() &&
+      valueZone->isGCMarking()) {
+    valueColor = GetCellColor(value);
+  }
+
+  if (valueColor < ExpectedWeakMapValueColor(mapColor, keyColor)) {
+    fprintf(stderr, "WeakMap value is less marked than map and key\n");
+    fprintf(stderr, "(map %p is %s, key %p is %s, value %p is %s)\n", map,
+            CellColorName(mapColor), key, CellColorName(keyColor), value,
+            CellColorName(valueColor));
+    ok = false;
+  }
+
+  // Debugger weak maps map have keys in zones that are not or are
+  // no longer collecting. We can't make guarantees about the mark
+  // state of these keys.
+  if (map->allowKeysInOtherZones() &&
+      !(keyZone->isGCMarking() || keyZone->isGCSweeping())) {
+    return ok;
+  }
+
+  JSObject* delegate = MaybeGetDelegate(key);
+  if (!delegate) {
+    return ok;
+  }
+
+  CellColor delegateColor;
+  if (delegate->zone()->isGCMarking() || delegate->zone()->isGCSweeping()) {
+    delegateColor = GetCellColor(delegate);
+  } else {
+    // IsMarked() assumes cells in uncollected zones are marked.
+    delegateColor = CellColor::Black;
+  }
+
+  if (keyColor < ExpectedWeakMapKeyColor(mapColor, delegateColor)) {
+    fprintf(stderr, "WeakMap key is less marked than map and delegate\n");
+    fprintf(stderr, "(map %p is %s, delegate %p is %s, key %p is %s)\n", map,
+            CellColorName(mapColor), delegate, CellColorName(delegateColor),
+            key, CellColorName(keyColor));
+    ok = false;
+  }
+
+  return ok;
 }
 
 #endif  // defined(JS_GC_ZEAL) || defined(DEBUG)

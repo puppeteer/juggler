@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const { Services } = ChromeUtils.import('resource://gre/modules/Services.jsm', {});
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const osPrefs = Cc["@mozilla.org/intl/ospreferences;1"].
   getService(Ci.mozIOSPreferences);
 
@@ -191,7 +191,7 @@ add_test(function test_availableLocales() {
  * This test verifies that all values coming from the pref are sanitized.
  */
 add_test(function test_requestedLocales_sanitize() {
-  Services.prefs.setCharPref(PREF_REQUESTED_LOCALES, "de,2,#$@#,pl,ąó,!a2,DE-at,,;");
+  Services.prefs.setStringPref(PREF_REQUESTED_LOCALES, "de,2,#$@#,pl,ąó,!a2,DE-at,,;");
 
   let locales = localeService.requestedLocales;
   Assert.equal(locales[0], "de");

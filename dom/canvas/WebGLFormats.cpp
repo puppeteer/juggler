@@ -5,7 +5,6 @@
 
 #include "WebGLFormats.h"
 
-#include "gfxPrefs.h"
 #include "GLContext.h"
 #include "GLDefs.h"
 #include "mozilla/gfx/Logging.h"
@@ -671,24 +670,21 @@ bool FormatUsageInfo::IsUnpackValid(
   return true;
 }
 
-void FormatUsageInfo::ResolveMaxSamples(gl::GLContext* gl) {
+void FormatUsageInfo::ResolveMaxSamples(gl::GLContext& gl) const {
+  MOZ_ASSERT(gl.IsCurrent());
   MOZ_ASSERT(!this->maxSamplesKnown);
-  MOZ_ASSERT(this->maxSamples == 0);
-  MOZ_ASSERT(gl->IsCurrent());
-
+  MOZ_ASSERT(!this->maxSamples);
   this->maxSamplesKnown = true;
 
   const GLenum internalFormat = this->format->sizedFormat;
   if (!internalFormat) return;
+  if (!gl.IsSupported(gl::GLFeature::internalformat_query)) return;
 
-  if (!gl->IsSupported(gl::GLFeature::internalformat_query))
-    return;  // Leave it at 0.
-
-  GLint maxSamplesGL = 0;
-  gl->fGetInternalformativ(LOCAL_GL_RENDERBUFFER, internalFormat,
-                           LOCAL_GL_SAMPLES, 1, &maxSamplesGL);
-
-  this->maxSamples = maxSamplesGL;
+  // GL_SAMPLES returns a list in descending order, so ask for just one elem to
+  // get the max.
+  gl.fGetInternalformativ(LOCAL_GL_RENDERBUFFER, internalFormat,
+                          LOCAL_GL_SAMPLES, 1,
+                          reinterpret_cast<GLint*>(&this->maxSamples));
 }
 
 ////////////////////////////////////////
@@ -821,11 +817,13 @@ UniquePtr<FormatUsageAuthority> FormatUsageAuthority::CreateForWebGL1(
   fnSet(EffectiveFormat::Luminance8, false, true);
   fnSet(EffectiveFormat::Alpha8, false, true);
 
-  fnSet(EffectiveFormat::DEPTH_COMPONENT16, true, false);
+  fnSet(EffectiveFormat::DEPTH_COMPONENT16, true, true);
+  fnSet(EffectiveFormat::DEPTH_COMPONENT24, true,
+        true);  // Requires WEBGL_depth_texture.
   fnSet(EffectiveFormat::STENCIL_INDEX8, true, false);
 
   // Added in WebGL 1.0 spec:
-  fnSet(EffectiveFormat::DEPTH24_STENCIL8, true, false);
+  fnSet(EffectiveFormat::DEPTH24_STENCIL8, true, true);
 
   ////////////////////////////////////
   // RB formats
@@ -1051,11 +1049,14 @@ UniquePtr<FormatUsageAuthority> FormatUsageAuthority::CreateForWebGL2(
   fnAllowES3TexFormat(FOO(RGBA32UI), true, false);
 
   // GLES 3.0.4, p133, table 3.14
-  fnAllowES3TexFormat(FOO(DEPTH_COMPONENT16), true, false);
-  fnAllowES3TexFormat(FOO(DEPTH_COMPONENT24), true, false);
-  fnAllowES3TexFormat(FOO(DEPTH_COMPONENT32F), true, false);
-  fnAllowES3TexFormat(FOO(DEPTH24_STENCIL8), true, false);
-  fnAllowES3TexFormat(FOO(DEPTH32F_STENCIL8), true, false);
+  // p151:
+  //   Depth textures and the depth components of depth/stencil textures can be
+  //   treated as `RED` textures during texture filtering and application.
+  fnAllowES3TexFormat(FOO(DEPTH_COMPONENT16), true, true);
+  fnAllowES3TexFormat(FOO(DEPTH_COMPONENT24), true, true);
+  fnAllowES3TexFormat(FOO(DEPTH_COMPONENT32F), true, true);
+  fnAllowES3TexFormat(FOO(DEPTH24_STENCIL8), true, true);
+  fnAllowES3TexFormat(FOO(DEPTH32F_STENCIL8), true, true);
 
 #undef FOO
 
@@ -1118,10 +1119,11 @@ bool FormatUsageAuthority::AreUnpackEnumsValid(GLenum unpackFormat,
 ////////////////////
 
 void FormatUsageAuthority::AllowRBFormat(GLenum sizedFormat,
-                                         const FormatUsageInfo* usage) {
+                                         const FormatUsageInfo* usage,
+                                         const bool expectRenderable) {
   MOZ_ASSERT(!usage->format->compression);
   MOZ_ASSERT(usage->format->sizedFormat);
-  MOZ_ASSERT(usage->IsRenderable());
+  MOZ_ASSERT(usage->IsRenderable() || !expectRenderable);
 
   AlwaysInsert(mRBFormatMap, sizedFormat, usage);
 }

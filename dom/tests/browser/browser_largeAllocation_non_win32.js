@@ -1,5 +1,9 @@
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
-Services.scriptloader.loadSubScript(testDir + "/helper_largeAllocation.js", this);
+/* import-globals-from helper_largeAllocation.js */
+Services.scriptloader.loadSubScript(
+  testDir + "/helper_largeAllocation.js",
+  this
+);
 
 // Force-enabling the Large-Allocation header
 add_task(async function() {
@@ -13,8 +17,8 @@ add_task(async function() {
       ["dom.largeAllocation.forceEnable", true],
       // Increase processCount.webLargeAllocation to avoid any races where
       // processes aren't being cleaned up quickly enough.
-      ["dom.ipc.processCount.webLargeAllocation", 20]
-    ]
+      ["dom.ipc.processCount.webLargeAllocation", 20],
+    ],
   });
 
   await largeAllocSuccessTests();
@@ -31,8 +35,8 @@ add_task(async function() {
       ["dom.largeAllocation.forceEnable", false],
       // Increase processCount.webLargeAllocation to avoid any races where
       // processes aren't being cleaned up quickly enough.
-      ["dom.ipc.processCount.webLargeAllocation", 20]
-    ]
+      ["dom.ipc.processCount.webLargeAllocation", 20],
+    ],
   });
 
   await largeAllocFailTests();

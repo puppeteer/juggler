@@ -286,7 +286,7 @@ interface nsIURIMutator : nsIURISetters
 {
   /**
    * Initalizes the URI by reading IPC URIParams.
-   * See nsIIPCSerializableURI.
+   * See nsIURI.
    */
   [noscript, notxpcom, must_use]
   nsresult deserialize(in const_URIParams_ref aParams);
@@ -334,7 +334,7 @@ NS_MutatorMethod(Method aMethod, Args ...aArgs)
     nsCOMPtr<Interface> target = do_QueryInterface(aMutator, &rv);
     NS_ENSURE_SUCCESS(rv, rv);
     rv = (target->*aMethod)(aArgs...);
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (NS_FAILED(rv)) return rv;
     return NS_OK;
   };
 }
@@ -359,7 +359,6 @@ public:
       return *this;
     }
     mStatus = mMutator->SetSpec(aSpec, nullptr);
-    NS_ENSURE_SUCCESS(mStatus, *this);
     return *this;
   }
   NS_MutateURI& SetScheme(const nsACString& aScheme)
@@ -493,7 +492,6 @@ public:
       return *this;
     }
     mStatus = aFunction(mMutator);
-    NS_ENSURE_SUCCESS(mStatus, *this);
     return *this;
   }
 
@@ -516,7 +514,7 @@ public:
   // Overload for nsIURI to avoid query interface.
   MOZ_MUST_USE nsresult Finalize(nsCOMPtr<nsIURI>& aURI)
   {
-    NS_ENSURE_SUCCESS(mStatus, mStatus);
+    if (NS_FAILED(mStatus)) return mStatus;
     mStatus = mMutator->Finalize(getter_AddRefs(aURI));
     NS_ENSURE_SUCCESS(mStatus, mStatus);
 
@@ -543,7 +541,7 @@ public:
 
   MOZ_MUST_USE nsresult Finalize(nsIURI** aURI)
   {
-    NS_ENSURE_SUCCESS(mStatus, mStatus);
+    if (NS_FAILED(mStatus)) return mStatus;
     mStatus = mMutator->Finalize(aURI);
     NS_ENSURE_SUCCESS(mStatus, mStatus);
 

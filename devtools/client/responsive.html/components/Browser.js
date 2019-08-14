@@ -12,6 +12,8 @@ const { PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
+const { PORTRAIT_PRIMARY, LANDSCAPE_PRIMARY } = require("../constants");
+const Types = require("../types");
 const e10s = require("../utils/e10s");
 const message = require("../utils/message");
 const { getTopLevelWindow } = require("../utils/window");
@@ -27,15 +29,20 @@ class Browser extends PureComponent {
   static get propTypes() {
     return {
       onBrowserMounted: PropTypes.func.isRequired,
+      onChangeViewportOrientation: PropTypes.func.isRequired,
       onContentResize: PropTypes.func.isRequired,
+      onResizeViewport: PropTypes.func.isRequired,
       swapAfterMount: PropTypes.bool.isRequired,
       userContextId: PropTypes.number.isRequired,
+      viewport: PropTypes.shape(Types.viewport).isRequired,
     };
   }
 
   constructor(props) {
     super(props);
     this.onContentResize = this.onContentResize.bind(this);
+    this.onResizeViewport = this.onResizeViewport.bind(this);
+    this.onSetScreenOrientation = this.onSetScreenOrientation.bind(this);
   }
 
   /**
@@ -72,7 +79,7 @@ class Browser extends PureComponent {
     // Notify manager.js that this browser has mounted, so that it can trigger
     // a swap if needed and continue with the rest of its startup.
     await this.browserShown;
-    this.props.onBrowserMounted();
+    this.props.onBrowserMounted(this.browser);
 
     // If we are swapping browsers after mount, wait for the swap to complete
     // and start the frame script after that.
@@ -97,10 +104,29 @@ class Browser extends PureComponent {
     });
   }
 
+  onResizeViewport(msg) {
+    const { onResizeViewport } = this.props;
+    const { width, height } = msg.data;
+    onResizeViewport({
+      width,
+      height,
+    });
+  }
+
+  onSetScreenOrientation(msg) {
+    const { width, height } = msg.data;
+    const { angle, id } = this.props.viewport;
+    const type = height >= width ? PORTRAIT_PRIMARY : LANDSCAPE_PRIMARY;
+
+    this.props.onChangeViewportOrientation(id, type, angle);
+  }
+
   async startFrameScript() {
     const {
       browser,
       onContentResize,
+      onResizeViewport,
+      onSetScreenOrientation,
     } = this;
     const mm = browser.frameLoader.messageManager;
 
@@ -109,6 +135,8 @@ class Browser extends PureComponent {
     // since it still needs to do async work before the content is actually
     // resized to match.
     e10s.on(mm, "OnContentResize", onContentResize);
+    e10s.on(mm, "OnResizeViewport", onResizeViewport);
+    e10s.on(mm, "OnLocationChange", onSetScreenOrientation);
 
     const ready = e10s.once(mm, "ChildScriptReady");
     mm.loadFrameScript(FRAME_SCRIPT, true);
@@ -129,10 +157,14 @@ class Browser extends PureComponent {
     const {
       browser,
       onContentResize,
+      onResizeViewport,
+      onSetScreenOrientation,
     } = this;
     const mm = browser.frameLoader.messageManager;
 
     e10s.off(mm, "OnContentResize", onContentResize);
+    e10s.off(mm, "OnResizeViewport", onResizeViewport);
+    e10s.off(mm, "OnLocationChange", onSetScreenOrientation);
     await e10s.request(mm, "Stop");
     message.post(window, "stop-frame-script:done");
   }
@@ -158,7 +190,7 @@ class Browser extends PureComponent {
           mozbrowser: "true",
           noisolation: "true",
           remote: "true",
-          remotetype: "web",
+          remoteType: "web",
           src: "about:blank",
           usercontextid: userContextId,
           width: "100%",

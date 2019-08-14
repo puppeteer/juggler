@@ -33,8 +33,8 @@ class TimeStamp;
 template <class T>
 class MediaQueue;
 
-class DecodedStream : public media::MediaSink {
-  using media::MediaSink::PlaybackParams;
+class DecodedStream : public MediaSink {
+  using MediaSink::PlaybackParams;
 
  public:
   DecodedStream(AbstractThread* aOwnerThread, AbstractThread* aMainThread,
@@ -47,7 +47,7 @@ class DecodedStream : public media::MediaSink {
   const PlaybackParams& GetPlaybackParams() const override;
   void SetPlaybackParams(const PlaybackParams& aParams) override;
 
-  RefPtr<GenericPromise> OnEnded(TrackType aType) override;
+  RefPtr<EndedPromise> OnEnded(TrackType aType) override;
   media::TimeUnit GetEndTime(TrackType aType) const override;
   media::TimeUnit GetPosition(TimeStamp* aTimeStamp = nullptr) const override;
   bool HasUnplayedFrames(TrackType aType) const override {
@@ -66,20 +66,17 @@ class DecodedStream : public media::MediaSink {
   bool IsStarted() const override;
   bool IsPlaying() const override;
   void Shutdown() override;
-
-  nsCString GetDebugInfo() override;
+  void GetDebugInfo(dom::MediaSinkDebugInfo& aInfo) override;
 
  protected:
   virtual ~DecodedStream();
 
  private:
-  media::TimeUnit FromMicroseconds(int64_t aTime) {
-    return media::TimeUnit::FromMicroseconds(aTime);
-  }
   void DestroyData(UniquePtr<DecodedStreamData>&& aData);
   void SendAudio(double aVolume, bool aIsSameOrigin,
                  const PrincipalHandle& aPrincipalHandle);
   void SendVideo(bool aIsSameOrigin, const PrincipalHandle& aPrincipalHandle);
+  void ResetVideo(const PrincipalHandle& aPrincipalHandle);
   StreamTime SentDuration();
   void SendData();
   void NotifyOutput(int64_t aTime);
@@ -108,8 +105,8 @@ class DecodedStream : public media::MediaSink {
    */
   WatchManager<DecodedStream> mWatchManager;
   UniquePtr<DecodedStreamData> mData;
-  RefPtr<GenericPromise> mAudioEndPromise;
-  RefPtr<GenericPromise> mVideoEndPromise;
+  RefPtr<EndedPromise> mAudioEndedPromise;
+  RefPtr<EndedPromise> mVideoEndedPromise;
 
   Watchable<bool> mPlaying;
   const bool& mSameOrigin;  // valid until Shutdown() is called.

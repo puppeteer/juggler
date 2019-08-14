@@ -61,7 +61,8 @@ XPCCallContext::XPCCallContext(
 
   mTearOff = nullptr;
 
-  JSObject* unwrapped = js::CheckedUnwrap(obj, /* stopAtWindowProxy = */ false);
+  JSObject* unwrapped =
+      js::CheckedUnwrapDynamic(obj, cx, /* stopAtWindowProxy = */ false);
   if (!unwrapped) {
     JS_ReportErrorASCII(mJSContext,
                         "Permission denied to call method on |this|");
@@ -178,7 +179,7 @@ nsresult XPCCallContext::CanCallNow() {
   }
 
   if (!mTearOff) {
-    mTearOff = mWrapper->FindTearOff(mInterface, false, &rv);
+    mTearOff = mWrapper->FindTearOff(mJSContext, mInterface, false, &rv);
     if (!mTearOff || mTearOff->GetInterface() != mInterface) {
       mTearOff = nullptr;
       return NS_FAILED(rv) ? rv : NS_ERROR_UNEXPECTED;

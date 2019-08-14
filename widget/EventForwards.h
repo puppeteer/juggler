@@ -11,6 +11,8 @@
 #include "nsStringFwd.h"
 #include "nsTArray.h"
 
+class nsCommandParams;
+
 /**
  * XXX Following enums should be in BasicEvents.h.  However, currently, it's
  *     impossible to use foward delearation for enum.
@@ -117,19 +119,121 @@ enum CodeNameIndex : CodeNameIndexType {
 
 const nsCString ToString(CodeNameIndex aCodeNameIndex);
 
-#define NS_DEFINE_COMMAND(aName, aCommandStr) , Command##aName
-#define NS_DEFINE_COMMAND_NO_EXEC_COMMAND(aName) , Command##aName
+#define NS_DEFINE_INPUTTYPE(aCPPName, aDOMName) e##aCPPName,
 
-typedef int8_t CommandInt;
-enum Command : CommandInt {
-  CommandDoNothing
+typedef uint8_t EditorInputTypeType;
+enum class EditorInputType : EditorInputTypeType {
+#include "mozilla/InputTypeList.h"
+  // If a DOM input event is synthesized by script, this is used.  Then,
+  // specified input type should be stored as string and use it as .inputType
+  // value.
+  eUnknown,
+};
+
+#undef NS_DEFINE_INPUTTYPE
+
+inline bool ExposesClipboardDataOrDataTransfer(EditorInputType aInputType) {
+  switch (aInputType) {
+    case EditorInputType::eInsertFromPaste:
+    case EditorInputType::eInsertFromPasteAsQuotation:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * IsDataAvailableOnTextEditor() returns true if aInputType on TextEditor
+ * should have non-null InputEvent.data value.
+ */
+inline bool IsDataAvailableOnTextEditor(EditorInputType aInputType) {
+  switch (aInputType) {
+    case EditorInputType::eInsertText:
+    case EditorInputType::eInsertCompositionText:
+    case EditorInputType::eInsertFromComposition:  // Only level 2
+    case EditorInputType::eInsertFromPaste:
+    case EditorInputType::eInsertFromPasteAsQuotation:
+    case EditorInputType::eInsertTranspose:
+    case EditorInputType::eInsertFromDrop:
+    case EditorInputType::eInsertReplacementText:
+    case EditorInputType::eInsertFromYank:
+    case EditorInputType::eFormatSetBlockTextDirection:
+    case EditorInputType::eFormatSetInlineTextDirection:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * IsDataAvailableOnHTMLEditor() returns true if aInputType on HTMLEditor
+ * should have non-null InputEvent.data value.
+ */
+inline bool IsDataAvailableOnHTMLEditor(EditorInputType aInputType) {
+  switch (aInputType) {
+    case EditorInputType::eInsertText:
+    case EditorInputType::eInsertCompositionText:
+    case EditorInputType::eInsertFromComposition:  // Only level 2
+    case EditorInputType::eFormatSetBlockTextDirection:
+    case EditorInputType::eFormatSetInlineTextDirection:
+    case EditorInputType::eInsertLink:
+    case EditorInputType::eFormatBackColor:
+    case EditorInputType::eFormatFontColor:
+    case EditorInputType::eFormatFontName:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * IsDataTransferAvailableOnHTMLEditor() returns true if aInputType on
+ * HTMLEditor should have non-null InputEvent.dataTransfer value.
+ */
+inline bool IsDataTransferAvailableOnHTMLEditor(EditorInputType aInputType) {
+  switch (aInputType) {
+    case EditorInputType::eInsertFromPaste:
+    case EditorInputType::eInsertFromPasteAsQuotation:
+    case EditorInputType::eInsertFromDrop:
+    case EditorInputType::eInsertTranspose:
+    case EditorInputType::eInsertReplacementText:
+    case EditorInputType::eInsertFromYank:
+      return true;
+    default:
+      return false;
+  }
+}
+
+#define NS_DEFINE_COMMAND(aName, aCommandStr) , aName
+#define NS_DEFINE_COMMAND_WITH_PARAM(aName, aCommandStr, aParam) , aName
+#define NS_DEFINE_COMMAND_NO_EXEC_COMMAND(aName) , aName
+
+typedef uint8_t CommandInt;
+enum class Command : CommandInt {
+  DoNothing
 
 #include "mozilla/CommandList.h"
 };
 #undef NS_DEFINE_COMMAND
+#undef NS_DEFINE_COMMAND_WITH_PARAM
 #undef NS_DEFINE_COMMAND_NO_EXEC_COMMAND
 
 const char* ToChar(Command aCommand);
+
+/**
+ * Return a command value for aCommandName.
+ * XXX: Is there a better place to put `Command` related methods instead of
+ *      global scope in `mozilla` namespace?
+ *
+ * @param aCommandName          Should be a XUL command name like "cmd_bold"
+ *                              (case sensitive).
+ * @param aCommandparams        Additional parameter value of aCommandName.
+ *                              Can be nullptr, but if aCommandName requires
+ *                              additional parameter and sets this to nullptr,
+ *                              will return Command::DoNothing with warning.
+ */
+Command GetInternalCommand(const char* aCommandName,
+                           const nsCommandParams* aCommandParams = nullptr);
 
 }  // namespace mozilla
 
@@ -176,6 +280,21 @@ class TextRangeArray;
 
 // FontRange.h
 struct FontRange;
+
+enum MouseButton { eNotPressed = -1, eLeft = 0, eMiddle = 1, eRight = 2 };
+
+enum MouseButtonsFlag {
+  eNoButtons = 0x00,
+  eLeftFlag = 0x01,
+  eRightFlag = 0x02,
+  eMiddleFlag = 0x04,
+  // typicall, "back" button being left side of 5-button
+  // mice, see "buttons" attribute document of DOM3 Events.
+  e4thFlag = 0x08,
+  // typicall, "forward" button being right side of 5-button
+  // mice, see "buttons" attribute document of DOM3 Events.
+  e5thFlag = 0x10
+};
 
 }  // namespace mozilla
 

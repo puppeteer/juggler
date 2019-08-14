@@ -8,39 +8,39 @@
  * Check that setting a breakpoint in a line in a child script works.
  */
 
-add_task(threadClientTest(({ threadClient, debuggee }) => {
-  return new Promise(resolve => {
-    threadClient.addOneTimeListener("paused", function(event, packet) {
-      const source = threadClient.source(packet.frame.where.source);
-      const location = { line: debuggee.line0 + 3 };
+add_task(
+  threadClientTest(({ threadClient, client, debuggee }) => {
+    return new Promise(resolve => {
+      threadClient.once("paused", async function(packet) {
+        const source = await getSourceById(
+          threadClient,
+          packet.frame.where.actor
+        );
+        const location = { sourceUrl: source.url, line: debuggee.line0 + 3 };
 
-      source.setBreakpoint(location).then(function([response, bpClient]) {
-        // actualLocation is not returned when breakpoints don't skip forward.
-        Assert.equal(response.actualLocation, undefined);
+        threadClient.setBreakpoint(location, {});
+        await client.waitForRequestsToSettle();
 
-        threadClient.addOneTimeListener("paused", function(event, packet) {
+        threadClient.once("paused", async function(packet) {
           // Check the return value.
-          Assert.equal(packet.type, "paused");
-          Assert.equal(packet.frame.where.source.actor, source.actor);
+          Assert.equal(packet.frame.where.actor, source.actor);
           Assert.equal(packet.frame.where.line, location.line);
           Assert.equal(packet.why.type, "breakpoint");
-          Assert.equal(packet.why.actors[0], bpClient.actor);
           // Check that the breakpoint worked.
           Assert.equal(debuggee.a, 1);
           Assert.equal(debuggee.b, undefined);
 
           // Remove the breakpoint.
-          bpClient.remove(function(response) {
-            threadClient.resume(resolve);
-          });
+          threadClient.removeBreakpoint(location);
+          await client.waitForRequestsToSettle();
+          threadClient.resume().then(resolve);
         });
 
         // Continue until the breakpoint is hit.
-        threadClient.resume();
+        await threadClient.resume();
       });
-    });
 
-    /* eslint-disable */
+      /* eslint-disable */
     Cu.evalInSandbox(
       "var line0 = Error().lineNumber;\n" +
       "function foo() {\n" + // line0 + 1
@@ -51,6 +51,7 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
       "foo();\n",            // line0 + 6
       debuggee
     );
-    /* eslint-enable */
-  });
-}));
+      /* eslint-enable */
+    });
+  })
+);

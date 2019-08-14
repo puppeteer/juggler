@@ -11,10 +11,11 @@ locally, so they should be limited to changes that do not modify the meaning of
 the graph.
 """
 
-# Note that the translation of `{'task-reference': '..'}` is handled in the
-# optimization phase (since optimization involves dealing with taskIds
-# directly).  Similarly, `{'relative-datestamp': '..'}` is handled at the last
-# possible moment during task creation.
+# Note that the translation of `{'task-reference': '..'}` and
+# `artifact-reference` are handled in the optimization phase (since
+# optimization involves dealing with taskIds directly).  Similarly,
+# `{'relative-datestamp': '..'}` is handled at the last possible moment during
+# task creation.
 
 from __future__ import absolute_import, print_function, unicode_literals
 
@@ -23,11 +24,11 @@ import os
 import re
 
 import jsone
-import yaml
 from slugid import nice as slugid
 from .task import Task
 from .graph import Graph
 from .taskgraph import TaskGraph
+from .util.yaml import load_yaml
 
 here = os.path.abspath(os.path.dirname(__file__))
 logger = logging.getLogger(__name__)
@@ -192,9 +193,7 @@ class apply_jsone_templates(object):
                     'target_tasks': self.target_tasks,
                 }
 
-                template_path = os.path.join(self.template_dir, template + '.yml')
-                with open(template_path) as f:
-                    template = yaml.safe_load(f)
+                template = load_yaml(self.template_dir, template + '.yml')
                 result = jsone.render(template, context) or {}
                 for attr in ('task', 'attributes'):
                     if attr in result:

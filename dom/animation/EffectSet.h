@@ -16,6 +16,7 @@
 #include "nsTHashtable.h"  // For nsTHashtable
 
 class nsPresContext;
+enum class DisplayItemType : uint8_t;
 
 namespace mozilla {
 
@@ -23,7 +24,7 @@ namespace dom {
 class Element;
 }  // namespace dom
 
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 
 // A wrapper around a hashset of AnimationEffect objects to handle
 // storing the set as a property of an element.
@@ -58,12 +59,38 @@ class EffectSet {
   void Traverse(nsCycleCollectionTraversalCallback& aCallback);
 
   static EffectSet* GetEffectSet(const dom::Element* aElement,
-                                 CSSPseudoElementType aPseudoType);
-  static EffectSet* GetEffectSet(const nsIFrame* aFrame);
+                                 PseudoStyleType aPseudoType);
   static EffectSet* GetOrCreateEffectSet(dom::Element* aElement,
-                                         CSSPseudoElementType aPseudoType);
+                                         PseudoStyleType aPseudoType);
+
+  static EffectSet* GetEffectSetForFrame(const nsIFrame* aFrame,
+                                         const nsCSSPropertyIDSet& aProperties);
+  static EffectSet* GetEffectSetForFrame(const nsIFrame* aFrame,
+                                         DisplayItemType aDisplayItemType);
+  // Gets the EffectSet associated with the specified frame's content.
+  //
+  // Typically the specified frame should be a "style frame".
+  //
+  // That is because display:table content:
+  //
+  // - makes a distinction between the primary frame and style frame,
+  // - associates the EffectSet with the style frame's content,
+  // - applies transform animations to the primary frame.
+  //
+  // In such a situation, passing in the primary frame here will return nullptr
+  // despite the fact that it has a transform animation applied to it.
+  //
+  // GetEffectSetForFrame, above, handles this by automatically looking up the
+  // EffectSet on the corresponding style frame when querying transform
+  // properties. Unless you are sure you know what you are doing, you should
+  // try using GetEffectSetForFrame first.
+  //
+  // If you decide to use this, consider documenting why you are sure it is ok
+  // to use this.
+  static EffectSet* GetEffectSetForStyleFrame(const nsIFrame* aStyleFrame);
+
   static void DestroyEffectSet(dom::Element* aElement,
-                               CSSPseudoElementType aPseudoType);
+                               PseudoStyleType aPseudoType);
 
   void AddEffect(dom::KeyframeEffect& aEffect);
   void RemoveEffect(dom::KeyframeEffect& aEffect);
@@ -189,7 +216,7 @@ class EffectSet {
   }
 
  private:
-  static nsAtom* GetEffectSetPropertyAtom(CSSPseudoElementType aPseudoType);
+  static nsAtom* GetEffectSetPropertyAtom(PseudoStyleType aPseudoType);
 
   OwningEffectSet mEffects;
 

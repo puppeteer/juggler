@@ -5,10 +5,11 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DevToolsModules(
+  'constants.js',
   'css-logic.js',
   'custom-element-watcher.js',
   'document-walker.js',
-  'event-parsers.js',
+  'event-collector.js',
   'inspector.js',
   'node.js',
   'utils.js',

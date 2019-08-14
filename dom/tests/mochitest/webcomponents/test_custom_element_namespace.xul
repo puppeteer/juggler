@@ -7,8 +7,7 @@
         onload="runTest();">
   <title>Custom Elements in a XUL document</title>
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
 
   <script type="application/javascript">
   <![CDATA[
@@ -41,6 +40,18 @@
 
     customElements.define("test-html-element", TestHTMLCustomElement);
 
+    class TestHTMLBuiltInElement extends HTMLButtonElement {
+      constructor() {
+        super();
+      }
+
+      get connected() {
+        return true;
+      }
+    }
+
+    customElements.define("html-built-in", TestHTMLBuiltInElement, { extends: "button" });
+
     function checkElement(element, ns, connected, type) {
       is(element.namespaceURI, ns, `${type} should have the correct namespace`);
       if (connected) {
@@ -60,8 +71,8 @@
       element = document.getElementById("xul2");
       checkElement(element, HTML_NS, false, "parsed XUL as HTML");
 
-      element = document.createElement("test-xul-element");
-      checkElement(element, XUL_NS, true, "document.createElement(XUL)");
+      element = document.createXULElement("test-xul-element");
+      checkElement(element, XUL_NS, true, "document.createXULElement(XUL)");
 
       element = document.createXULElement("test-xul-element");
       checkElement(element, XUL_NS, true, "document.createXULElement(XUL)");
@@ -75,14 +86,23 @@
       element = new TestHTMLCustomElement();
       checkElement(element, HTML_NS, true, "instantiated HTML");
 
+      element = new TestHTMLBuiltInElement();
+      checkElement(element, HTML_NS, true, "instantiated HTML");
+
       element = document.getElementById("html1");
       checkElement(element, XUL_NS, false, "parsed HTML as XUL");
 
       element = document.getElementById("html2");
       checkElement(element, HTML_NS, true, "parsed HTML as HTML");
 
-      element = document.createElement("test-html-element");
-      checkElement(element, XUL_NS, false, "document.createElement(HTML)");
+      element = document.getElementById("html3");
+      checkElement(element, HTML_NS, true, "parsed HTML as HTML");
+
+      element = document.getElementById("html4");
+      checkElement(element, HTML_NS, true, "parsed HTML as HTML");
+
+      element = document.createXULElement("test-html-element");
+      checkElement(element, XUL_NS, false, "document.createXULElement(HTML)");
 
       element = document.createXULElement("test-html-element");
       checkElement(element, XUL_NS, false, "document.createXULElement(HTML)");
@@ -100,12 +120,14 @@
 
   <test-xul-element id="xul1"/>
   <test-html-element id="html1"/>
+  <button xmlns="http://www.w3.org/1999/xhtml" is="html-built-in" id="html4">Button</button>
 
   <body xmlns="http://www.w3.org/1999/xhtml">
     <p id="display"></p>
     <div id="content" style="display: none">
       <test-xul-element id="xul2"/>
       <test-html-element id="html2"/>
+      <button is="html-built-in" id="html3">Button</button>
     </div>
     <pre id="test"></pre>
   </body>

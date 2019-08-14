@@ -18,13 +18,16 @@ EXTRA_JS_MODULES += [
     'ExtensionParent.jsm',
     'ExtensionPermissions.jsm',
     'ExtensionPreferencesManager.jsm',
+    'ExtensionProcessScript.jsm',
     'ExtensionSettingsStore.jsm',
+    'ExtensionShortcuts.jsm',
     'ExtensionStorage.jsm',
     'ExtensionStorageIDB.jsm',
     'ExtensionStorageSync.jsm',
     'ExtensionTelemetry.jsm',
     'ExtensionUtils.jsm',
     'FindContent.jsm',
+    'MatchURLFilters.jsm',
     'MessageChannel.jsm',
     'MessageManagerProxy.jsm',
     'NativeManifests.jsm',
@@ -32,10 +35,19 @@ EXTRA_JS_MODULES += [
     'PerformanceCounters.jsm',
     'ProxyScriptContext.jsm',
     'Schemas.jsm',
+    'WebNavigation.jsm',
+    'WebNavigationContent.js',
+    'WebNavigationFrames.jsm',
 ]
 
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != "android":
+    EXTRA_JS_MODULES += [
+        'profiler_get_symbols.js',
+        'ProfilerGetSymbols-worker.js',
+        'ProfilerGetSymbols.jsm',
+    ]
+
 EXTRA_COMPONENTS += [
-    'extension-process-script.js',
     'extensions-toolkit.manifest',
 ]
 

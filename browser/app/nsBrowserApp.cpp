@@ -8,11 +8,11 @@
 #include "application.ini.h"
 #include "mozilla/Bootstrap.h"
 #if defined(XP_WIN)
-#include <windows.h>
-#include <stdlib.h>
+#  include <windows.h>
+#  include <stdlib.h>
 #elif defined(XP_UNIX)
-#include <sys/resource.h>
-#include <unistd.h>
+#  include <sys/resource.h>
+#  include <unistd.h>
 #endif
 
 #include <stdio.h>
@@ -23,13 +23,13 @@
 #include "nsIFile.h"
 
 #ifdef XP_WIN
-#include "LauncherProcessWin.h"
+#  include "LauncherProcessWin.h"
 
-#define XRE_WANT_ENVIRON
-#define strcasecmp _stricmp
-#ifdef MOZ_SANDBOX
-#include "mozilla/sandboxing/SandboxInitialization.h"
-#endif
+#  define XRE_WANT_ENVIRON
+#  define strcasecmp _stricmp
+#  ifdef MOZ_SANDBOX
+#    include "mozilla/sandboxing/SandboxInitialization.h"
+#  endif
 #endif
 #include "BinaryPath.h"
 
@@ -38,14 +38,15 @@
 #include "mozilla/Sprintf.h"
 #include "mozilla/StartupTimeline.h"
 #include "mozilla/WindowsDllBlocklist.h"
+#include "BaseProfiler.h"
 
 #ifdef LIBFUZZER
-#include "FuzzerDefs.h"
+#  include "FuzzerDefs.h"
 #endif
 
 #ifdef MOZ_LINUX_32_SSE2_STARTUP_ERROR
-#include <cpuid.h>
-#include "mozilla/Unused.h"
+#  include <cpuid.h>
+#  include "mozilla/Unused.h"
 
 static bool IsSSE2Available() {
   // The rest of the app has been compiled to assume that SSE2 is present
@@ -84,14 +85,14 @@ __attribute__((constructor)) static void SSE2Check() {
 #endif
 
 #if !defined(MOZ_WIDGET_COCOA) && !defined(MOZ_WIDGET_ANDROID)
-#define MOZ_BROWSER_CAN_BE_CONTENTPROC
-#include "../../ipc/contentproc/plugin-container.cpp"
+#  define MOZ_BROWSER_CAN_BE_CONTENTPROC
+#  include "../../ipc/contentproc/plugin-container.cpp"
 #endif
 
 using namespace mozilla;
 
 #ifdef XP_MACOSX
-#define kOSXResourcesFolder "Resources"
+#  define kOSXResourcesFolder "Resources"
 #endif
 #define kDesktopFolder "browser"
 
@@ -107,9 +108,9 @@ static MOZ_FORMAT_PRINTF(1, 2) void Output(const char* fmt, ...) {
 
   wchar_t wide_msg[2048];
   MultiByteToWideChar(CP_UTF8, 0, msg, -1, wide_msg, _countof(wide_msg));
-#if MOZ_WINCONSOLE
+#  if MOZ_WINCONSOLE
   fwprintf_s(stderr, wide_msg);
-#else
+#  else
   // Linking user32 at load-time interferes with the DLL blocklist (bug 932100).
   // This is a rare codepath, so we can load user32 at run-time instead.
   HMODULE user32 = LoadLibraryW(L"user32.dll");
@@ -122,7 +123,7 @@ static MOZ_FORMAT_PRINTF(1, 2) void Output(const char* fmt, ...) {
     }
     FreeLibrary(user32);
   }
-#endif
+#  endif
 #endif
 
   va_end(ap);
@@ -196,12 +197,10 @@ static int do_main(int argc, char* argv[], char* envp[]) {
       sandboxing::GetInitializedBrokerServices();
   sandboxing::PermissionsService* permissionsService =
       sandboxing::GetPermissionsService();
-#if defined(MOZ_CONTENT_SANDBOX)
   if (!brokerServices) {
     Output("Couldn't initialize the broker services.\n");
     return 255;
   }
-#endif
   config.sandboxBrokerServices = brokerServices;
   config.sandboxPermissionsService = permissionsService;
 #endif
@@ -214,14 +213,14 @@ static int do_main(int argc, char* argv[], char* envp[]) {
   return gBootstrap->XRE_main(argc, argv, config);
 }
 
-static nsresult InitXPCOMGlue() {
+static nsresult InitXPCOMGlue(LibLoadingStrategy aLibLoadingStrategy) {
   UniqueFreePtr<char> exePath = BinaryPath::Get();
   if (!exePath) {
     Output("Couldn't find the application directory.\n");
     return NS_ERROR_FAILURE;
   }
 
-  gBootstrap = mozilla::GetBootstrap(exePath.get());
+  gBootstrap = mozilla::GetBootstrap(exePath.get(), aLibLoadingStrategy);
   if (!gBootstrap) {
     Output("Couldn't load XPCOM.\n");
     return NS_ERROR_FAILURE;
@@ -241,32 +240,35 @@ uint32_t gBlocklistInitFlags = eDllBlocklistInitFlagDefault;
 int main(int argc, char* argv[], char* envp[]) {
   mozilla::TimeStamp start = mozilla::TimeStamp::Now();
 
+  AUTO_BASE_PROFILER_INIT;
+  AUTO_BASE_PROFILER_LABEL("nsBrowserApp main", OTHER);
+
 #ifdef MOZ_BROWSER_CAN_BE_CONTENTPROC
   // We are launching as a content process, delegate to the appropriate
   // main
   if (argc > 1 && IsArg(argv[1], "contentproc")) {
-#ifdef HAS_DLL_BLOCKLIST
+#  ifdef HAS_DLL_BLOCKLIST
     DllBlocklist_Initialize(eDllBlocklistInitFlagIsChildProcess);
-#endif
-#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+#  endif
+#  if defined(XP_WIN) && defined(MOZ_SANDBOX)
     // We need to initialize the sandbox TargetServices before InitXPCOMGlue
     // because we might need the sandbox broker to give access to some files.
     if (IsSandboxedProcess() && !sandboxing::GetInitializedTargetServices()) {
       Output("Failed to initialize the sandbox target services.");
       return 255;
     }
-#endif
+#  endif
 
-    nsresult rv = InitXPCOMGlue();
+    nsresult rv = InitXPCOMGlue(LibLoadingStrategy::NoReadAhead);
     if (NS_FAILED(rv)) {
       return 255;
     }
 
     int result = content_process_main(gBootstrap.get(), argc, argv);
 
-#if defined(DEBUG) && defined(HAS_DLL_BLOCKLIST)
+#  if defined(DEBUG) && defined(HAS_DLL_BLOCKLIST)
     DllBlocklist_Shutdown();
-#endif
+#  endif
 
     // InitXPCOMGlue calls NS_LogInit, so we need to balance it here.
     gBootstrap->NS_LogTerm();
@@ -279,7 +281,7 @@ int main(int argc, char* argv[], char* envp[]) {
   DllBlocklist_Initialize(gBlocklistInitFlags);
 #endif
 
-  nsresult rv = InitXPCOMGlue();
+  nsresult rv = InitXPCOMGlue(LibLoadingStrategy::ReadAhead);
   if (NS_FAILED(rv)) {
     return 255;
   }

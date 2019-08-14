@@ -107,11 +107,8 @@ void a11y::ProxyTextChangeEvent(ProxyAccessible* aTarget, const nsString& aStr,
 void a11y::ProxyShowHideEvent(ProxyAccessible* aTarget,
                               ProxyAccessible* aParent, bool aInsert,
                               bool aFromUser) {
-  SessionAccessibility* sessionAcc =
-      SessionAccessibility::GetInstanceFor(aTarget);
-  if (sessionAcc) {
-    sessionAcc->SendWindowContentChangedEvent(WrapperFor(aParent));
-  }
+  // We rely on the window content changed events to be dispatched
+  // after the viewport cache is refreshed.
 }
 
 void a11y::ProxySelectionEvent(ProxyAccessible*, ProxyAccessible*, uint32_t) {}
@@ -126,7 +123,7 @@ void a11y::ProxyVirtualCursorChangeEvent(
     return;
   }
 
-  SessionAccessibility* sessionAcc =
+  RefPtr<SessionAccessibility> sessionAcc =
       SessionAccessibility::GetInstanceFor(aTarget);
 
   if (!sessionAcc) {
@@ -137,7 +134,8 @@ void a11y::ProxyVirtualCursorChangeEvent(
     if (aReason == nsIAccessiblePivot::REASON_POINT) {
       sessionAcc->SendHoverEnterEvent(WrapperFor(aNewPosition));
     } else {
-      sessionAcc->SendAccessibilityFocusedEvent(WrapperFor(aNewPosition));
+      RefPtr<AccessibleWrap> wrapperForNewPosition = WrapperFor(aNewPosition);
+      sessionAcc->SendAccessibilityFocusedEvent(wrapperForNewPosition);
     }
   }
 
@@ -158,6 +156,18 @@ void a11y::ProxyScrollingEvent(ProxyAccessible* aTarget, uint32_t aEventType,
       sessionAcc->SendScrollingEvent(WrapperFor(aTarget), aScrollX, aScrollY,
                                      aMaxScrollX, aMaxScrollY);
     }
+  }
+}
+
+void a11y::ProxyAnnouncementEvent(ProxyAccessible* aTarget,
+                                  const nsString& aAnnouncement,
+                                  uint16_t aPriority) {
+  SessionAccessibility* sessionAcc =
+      SessionAccessibility::GetInstanceFor(aTarget);
+
+  if (sessionAcc) {
+    sessionAcc->SendAnnouncementEvent(WrapperFor(aTarget), aAnnouncement,
+                                      aPriority);
   }
 }
 

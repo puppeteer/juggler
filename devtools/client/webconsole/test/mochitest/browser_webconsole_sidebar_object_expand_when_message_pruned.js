@@ -7,7 +7,8 @@
 
 "use strict";
 
-const TEST_URI = "data:text/html;charset=utf8," +
+const TEST_URI =
+  "data:text/html;charset=utf8," +
   "<script>console.log({a:1,b:2,c:[3,4,5]});</script>";
 
 add_task(async function() {
@@ -68,8 +69,8 @@ add_task(async function() {
 });
 
 async function showSidebarWithContextMenu(hud, node) {
-  const wrapper = hud.ui.document.querySelector(".webconsole-output-wrapper");
-  const onSidebarShown = waitFor(() => wrapper.querySelector(".sidebar"));
+  const appNode = hud.ui.document.querySelector(".webconsole-app");
+  const onSidebarShown = waitFor(() => appNode.querySelector(".sidebar"));
 
   const contextMenu = await openContextMenu(hud, node);
   const openInSidebar = contextMenu.querySelector("#console-menu-open-sidebar");

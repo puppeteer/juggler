@@ -14,6 +14,11 @@
 #include "nsDebug.h"
 #include "nsTArray.h"
 
+#ifdef IsLoggingEnabled
+// This is defined in the Windows SDK urlmon.h
+#  undef IsLoggingEnabled
+#endif
+
 #define FAULTY_DEFAULT_PROBABILITY 1000
 #define FAULTY_DEFAULT_MUTATION_FACTOR 10
 #define FAULTY_LOG(fmt, args...)                                  \
@@ -32,11 +37,8 @@ namespace ipc {
 class Faulty {
  public:
   // Used as a default argument for the Fuzz|datatype| methods.
-  static const unsigned int sDefaultProbability;
-
-  static unsigned int DefaultProbability(void);
-  static bool Logging(void);
-  static bool IsLoggingEnabled(void) { return sIsLoggingEnabled; }
+  static unsigned int DefaultProbability();
+  static bool IsLoggingEnabled(void);
   static std::vector<uint8_t> GetDataFromIPCMessage(IPC::Message* aMsg);
   static nsresult CreateOutputDirectory(const char* aPathname);
   static nsresult ReadFile(const char* aPathname, nsTArray<nsCString>& aArray);
@@ -45,40 +47,38 @@ class Faulty {
   static Faulty& instance();
 
   // Fuzzing methods for Pickle.
-  void FuzzBool(bool* aValue, unsigned int aProbability = sDefaultProbability);
-  void FuzzChar(char* aValue, unsigned int aProbability = sDefaultProbability);
+  void FuzzBool(bool* aValue, unsigned int aProbability = DefaultProbability());
+  void FuzzChar(char* aValue, unsigned int aProbability = DefaultProbability());
   void FuzzUChar(unsigned char* aValue,
-                 unsigned int aProbability = sDefaultProbability);
+                 unsigned int aProbability = DefaultProbability());
   void FuzzInt16(int16_t* aValue,
-                 unsigned int aProbability = sDefaultProbability);
+                 unsigned int aProbability = DefaultProbability());
   void FuzzUInt16(uint16_t* aValue,
-                  unsigned int aProbability = sDefaultProbability);
-  void FuzzInt(int* aValue, unsigned int aProbability = sDefaultProbability);
+                  unsigned int aProbability = DefaultProbability());
+  void FuzzInt(int* aValue, unsigned int aProbability = DefaultProbability());
   void FuzzUInt32(uint32_t* aValue,
-                  unsigned int aProbability = sDefaultProbability);
-  void FuzzLong(long* aValue, unsigned int aProbability = sDefaultProbability);
+                  unsigned int aProbability = DefaultProbability());
+  void FuzzLong(long* aValue, unsigned int aProbability = DefaultProbability());
   void FuzzULong(unsigned long* aValue,
-                 unsigned int aProbability = sDefaultProbability);
+                 unsigned int aProbability = DefaultProbability());
   void FuzzInt64(int64_t* aValue,
-                 unsigned int aProbability = sDefaultProbability);
+                 unsigned int aProbability = DefaultProbability());
   void FuzzUInt64(uint64_t* aValue,
-                  unsigned int aProbability = sDefaultProbability);
-  void FuzzSize(size_t* aValue,
-                unsigned int aProbability = sDefaultProbability);
+                  unsigned int aProbability = DefaultProbability());
   void FuzzFloat(float* aValue,
-                 unsigned int aProbability = sDefaultProbability);
+                 unsigned int aProbability = DefaultProbability());
   void FuzzDouble(double* aValue,
-                  unsigned int aProbability = sDefaultProbability);
+                  unsigned int aProbability = DefaultProbability());
   void FuzzString(std::string& aValue,
-                  unsigned int aProbability = sDefaultProbability);
+                  unsigned int aProbability = DefaultProbability());
   void FuzzWString(std::wstring& aValue,
-                   unsigned int aProbability = sDefaultProbability);
+                   unsigned int aProbability = DefaultProbability());
   void FuzzBytes(void* aData, int aLength,
-                 unsigned int aProbability = sDefaultProbability);
+                 unsigned int aProbability = DefaultProbability());
 
   // Fuzzing methods for pipe fuzzing.
   void MaybeCollectAndClosePipe(
-      int aPipe, unsigned int aProbability = sDefaultProbability);
+      int aPipe, unsigned int aProbability = DefaultProbability());
 
   // Fuzzing methods for message blob fuzzing.
   void DumpMessage(const char* aChannel, IPC::Message* aMsg,
@@ -86,7 +86,7 @@ class Faulty {
   bool IsMessageNameBlacklisted(const char* aMessageName);
   IPC::Message* MutateIPCMessage(
       const char* aChannel, IPC::Message* aMsg,
-      unsigned int aProbability = sDefaultProbability);
+      unsigned int aProbability = DefaultProbability());
 
   void LogMessage(const char* aChannel, IPC::Message* aMsg);
 
@@ -104,8 +104,6 @@ class Faulty {
   const char* mBlacklistPath;
 
   size_t sMsgCounter;
-
-  static const bool sIsLoggingEnabled;
 
   Faulty();
   DISALLOW_EVIL_CONSTRUCTORS(Faulty);
@@ -125,7 +123,6 @@ class Faulty {
   void MutateULong(unsigned long* aValue);
   void MutateInt64(int64_t* aValue);
   void MutateUInt64(uint64_t* aValue);
-  void MutateSize(size_t* aValue);
   void MutateFloat(float* aValue);
   void MutateDouble(double* aValue);
 };

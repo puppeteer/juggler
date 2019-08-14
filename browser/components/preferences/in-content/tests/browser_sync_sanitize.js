@@ -1,24 +1,27 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
-/* global sinon */
 
 "use strict";
 
-const {UIState} = ChromeUtils.import("resource://services-sync/UIState.jsm", {});
-const {Log} = ChromeUtils.import("resource://gre/modules/Log.jsm", {});
-const {AsyncShutdown} = ChromeUtils.import("resource://gre/modules/AsyncShutdown.jsm", {});
+const { UIState } = ChromeUtils.import("resource://services-sync/UIState.jsm");
+const { Log } = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const { AsyncShutdown } = ChromeUtils.import(
+  "resource://gre/modules/AsyncShutdown.jsm"
+);
 
-const {SyncDisconnect, SyncDisconnectInternal} = ChromeUtils.import("resource://services-sync/SyncDisconnect.jsm", {});
+const { SyncDisconnect, SyncDisconnectInternal } = ChromeUtils.import(
+  "resource://services-sync/SyncDisconnect.jsm",
+  null
+);
 
 var fxAccountsCommon = {};
-ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js", fxAccountsCommon);
+ChromeUtils.import(
+  "resource://gre/modules/FxAccountsCommon.js",
+  fxAccountsCommon
+);
 
 // Use sinon for mocking.
-Services.scriptloader.loadSubScript("resource://testing-common/sinon-2.3.2.js");
-registerCleanupFunction(() => {
-  delete window.sinon; // test fails with this reference left behind.
-});
-
+const { sinon } = ChromeUtils.import("resource://testing-common/Sinon.jsm");
 
 add_task(async function setup() {
   // Sync start-up will interfere with our tests, don't let UIState send UI updates.
@@ -26,7 +29,9 @@ add_task(async function setup() {
   UIState._internal.notifyStateUpdated = () => {};
 
   const origGet = UIState.get;
-  UIState.get = () => { return { status: UIState.STATUS_SIGNED_IN, email: "foo@bar.com" }; };
+  UIState.get = () => {
+    return { status: UIState.STATUS_SIGNED_IN, email: "foo@bar.com" };
+  };
 
   // browser_sync_sanitize uses the sync log, so arrange for that to end up
   // in the test output.
@@ -42,7 +47,7 @@ add_task(async function setup() {
 });
 
 add_task(async function testDisconnectUI() {
-  await runTestWithSanitizeDialog(async (win, sinon) => {
+  await runTestWithSanitizeDialog(async win => {
     let doc = win.document;
     let butDisconnect = doc.getElementById("butDisconnect");
     let butDeleteSync = doc.getElementById("deleteRemoteSyncData");
@@ -51,9 +56,15 @@ add_task(async function testDisconnectUI() {
     // mock both sanitize functions and the fxa signout.
     let spyBrowser = sinon.spy(SyncDisconnectInternal, "doSanitizeBrowserData");
     let spySync = sinon.spy(SyncDisconnectInternal, "doSanitizeSyncData");
-    let spySignout = sinon.spy(SyncDisconnectInternal, "doSyncAndAccountDisconnect");
+    let spySignout = sinon.spy(
+      SyncDisconnectInternal,
+      "doSyncAndAccountDisconnect"
+    );
 
-    Assert.equal(butDisconnect.getAttribute("data-l10n-id"), "sync-disconnect-confirm-disconnect");
+    Assert.equal(
+      butDisconnect.getAttribute("data-l10n-id"),
+      "sync-disconnect-confirm-disconnect"
+    );
 
     // Both checkboxes default to unchecked.
     Assert.ok(!butDeleteSync.checked);
@@ -62,20 +73,32 @@ add_task(async function testDisconnectUI() {
     // Hitting either of the checkboxes should change the text on the disconnect button/
     butDeleteSync.click();
     Assert.ok(butDeleteSync.checked);
-    Assert.equal(butDisconnect.getAttribute("data-l10n-id"), "sync-disconnect-confirm-disconnect-delete");
+    Assert.equal(
+      butDisconnect.getAttribute("data-l10n-id"),
+      "sync-disconnect-confirm-disconnect-delete"
+    );
 
     butDeleteOther.click();
     Assert.ok(butDeleteOther.checked);
-    Assert.equal(butDisconnect.getAttribute("data-l10n-id"), "sync-disconnect-confirm-disconnect-delete");
+    Assert.equal(
+      butDisconnect.getAttribute("data-l10n-id"),
+      "sync-disconnect-confirm-disconnect-delete"
+    );
 
     butDeleteSync.click();
     Assert.ok(!butDeleteSync.checked);
-    Assert.equal(butDisconnect.getAttribute("data-l10n-id"), "sync-disconnect-confirm-disconnect-delete");
+    Assert.equal(
+      butDisconnect.getAttribute("data-l10n-id"),
+      "sync-disconnect-confirm-disconnect-delete"
+    );
 
     butDeleteOther.click();
     Assert.ok(!butDeleteOther.checked);
     // button text should be back to "just disconnect"
-    Assert.equal(butDisconnect.getAttribute("data-l10n-id"), "sync-disconnect-confirm-disconnect");
+    Assert.equal(
+      butDisconnect.getAttribute("data-l10n-id"),
+      "sync-disconnect-confirm-disconnect"
+    );
 
     // Cancel the dialog - ensure it closes without sanitizing anything and
     // without disconnecting FxA.
@@ -85,18 +108,25 @@ add_task(async function testDisconnectUI() {
     info("waiting for dialog to unload");
     await promiseUnloaded;
 
-    Assert.equal(spyBrowser.callCount, 0, "should not have sanitized the browser");
+    Assert.equal(
+      spyBrowser.callCount,
+      0,
+      "should not have sanitized the browser"
+    );
     Assert.equal(spySync.callCount, 0, "should not have sanitized Sync");
     Assert.equal(spySignout.callCount, 0, "should not have signed out of FxA");
   });
 });
 
 add_task(async function testDisconnectNoSanitize() {
-  await runTestWithSanitizeDialog(async (win, sinon) => {
+  await runTestWithSanitizeDialog(async win => {
     let doc = win.document;
     let butDisconnect = doc.getElementById("butDisconnect");
 
-    let spySignout = sinon.spy(SyncDisconnectInternal, "doSyncAndAccountDisconnect");
+    let spySignout = sinon.spy(
+      SyncDisconnectInternal,
+      "doSyncAndAccountDisconnect"
+    );
     let spySync = sinon.spy(SyncDisconnectInternal, "doSanitizeSyncData");
     let spyBrowser = sinon.spy(SyncDisconnectInternal, "doSanitizeBrowserData");
 
@@ -117,27 +147,40 @@ add_task(async function testDisconnectNoSanitize() {
     await promiseUnloaded;
 
     Assert.equal(Weave.Service.lock.callCount, 1, "should have taken the lock");
-    Assert.equal(Weave.Service.unlock.callCount, 1, "should have unlocked at the end");
+    Assert.equal(
+      Weave.Service.unlock.callCount,
+      1,
+      "should have unlocked at the end"
+    );
     Assert.equal(Weave.Service.enabled, true, "sync should be enabled");
     Assert.equal(spySync.callCount, 0, "should not have sanitized sync data");
     Assert.equal(spySignout.callCount, 1, "should have disconnected");
     Assert.equal(spyBrowser.callCount, 0, "should not sanitized browser data");
-    Assert.equal(Weave.Service.startOver.callCount, 1, "should have reset sync");
+    Assert.equal(
+      Weave.Service.startOver.callCount,
+      1,
+      "should have reset sync"
+    );
 
-    Assert.ok(Services.prefs.prefHasUserValue(fxAccountsCommon.PREF_LAST_FXA_USER),
-              "should still have the last-fxa-user pref as we didn't sanitize");
+    Assert.ok(
+      Services.prefs.prefHasUserValue(fxAccountsCommon.PREF_LAST_FXA_USER),
+      "should still have the last-fxa-user pref as we didn't sanitize"
+    );
   });
 });
 
 add_task(async function testSanitizeSync() {
-  await runTestWithSanitizeDialog(async (win, sinon) => {
+  await runTestWithSanitizeDialog(async win => {
     let doc = win.document;
     let butDisconnect = doc.getElementById("butDisconnect");
     let butDeleteSync = doc.getElementById("deleteRemoteSyncData");
 
     SyncDisconnectInternal.lockRetryInterval = 100;
 
-    let spySignout = sinon.spy(SyncDisconnectInternal, "doSyncAndAccountDisconnect");
+    let spySignout = sinon.spy(
+      SyncDisconnectInternal,
+      "doSyncAndAccountDisconnect"
+    );
 
     // mock the "browser" sanitize function - it should not be called by
     // this test.
@@ -181,22 +224,48 @@ add_task(async function testSanitizeSync() {
     info("waiting for dialog to unload");
     await promiseUnloaded;
 
-    Assert.equal(Weave.Service.lock.callCount, 2, "should have tried the lock twice");
-    Assert.equal(Weave.Service.unlock.callCount, 1, "should have unlocked at the end");
+    Assert.equal(
+      Weave.Service.lock.callCount,
+      2,
+      "should have tried the lock twice"
+    );
+    Assert.equal(
+      Weave.Service.unlock.callCount,
+      1,
+      "should have unlocked at the end"
+    );
     Assert.ok(Weave.Service.enabled, "Weave should be enabled");
-    Assert.equal(Weave.Service.errorHandler.resetFileLog.callCount, 1, "should have reset the log");
-    Assert.equal(mockEngine1.wipeClient.callCount, 1, "enabled engine should have been wiped");
-    Assert.equal(mockEngine2.wipeClient.callCount, 0, "disabled engine should not have been wiped");
+    Assert.equal(
+      Weave.Service.errorHandler.resetFileLog.callCount,
+      1,
+      "should have reset the log"
+    );
+    Assert.equal(
+      mockEngine1.wipeClient.callCount,
+      1,
+      "enabled engine should have been wiped"
+    );
+    Assert.equal(
+      mockEngine2.wipeClient.callCount,
+      0,
+      "disabled engine should not have been wiped"
+    );
     Assert.equal(spyBrowser.callCount, 0, "should not sanitize the browser");
     Assert.equal(spySignout.callCount, 1, "should have signed out of FxA");
-    Assert.equal(Weave.Service.startOver.callCount, 1, "should have reset sync");
-    Assert.ok(!Services.prefs.prefHasUserValue(fxAccountsCommon.PREF_LAST_FXA_USER),
-              "should have cleared the last-fxa-user pref as we sanitized");
+    Assert.equal(
+      Weave.Service.startOver.callCount,
+      1,
+      "should have reset sync"
+    );
+    Assert.ok(
+      !Services.prefs.prefHasUserValue(fxAccountsCommon.PREF_LAST_FXA_USER),
+      "should have cleared the last-fxa-user pref as we sanitized"
+    );
   });
 });
 
 add_task(async function testSanitizeBrowser() {
-  await runTestWithSanitizeDialog(async (win, sinon) => {
+  await runTestWithSanitizeDialog(async win => {
     let doc = win.document;
 
     // The dialog should have the main UI visible.
@@ -206,7 +275,10 @@ add_task(async function testSanitizeBrowser() {
     let butDisconnect = doc.getElementById("butDisconnect");
     let butDeleteOther = doc.getElementById("deleteRemoteOtherData");
 
-    let spySignout = sinon.spy(SyncDisconnectInternal, "doSyncAndAccountDisconnect");
+    let spySignout = sinon.spy(
+      SyncDisconnectInternal,
+      "doSyncAndAccountDisconnect"
+    );
 
     // mock both sanitize functions.
     let spyBrowser = sinon.spy(SyncDisconnectInternal, "doSanitizeBrowserData");
@@ -221,18 +293,21 @@ add_task(async function testSanitizeBrowser() {
     Assert.equal(spyBrowser.callCount, 1, "should have sanitized the browser");
     Assert.equal(spySync.callCount, 0, "should not have sanitized Sync");
     Assert.equal(spySignout.callCount, 1, "should have signed out of FxA");
-    Assert.ok(Services.prefs.prefHasUserValue(fxAccountsCommon.PREF_LAST_FXA_USER),
-              "should not have cleared the last-fxa-user pref as we only sanitized non-sync");
+    Assert.ok(
+      Services.prefs.prefHasUserValue(fxAccountsCommon.PREF_LAST_FXA_USER),
+      "should not have cleared the last-fxa-user pref as we only sanitized non-sync"
+    );
   });
 });
 
 add_task(async function testDisconnectAlreadyRunning() {
   // Mock the sanitize process to indicate one is already in progress.
   let resolveExisting;
-  SyncDisconnectInternal.promiseDisconnectFinished =
-    new Promise(resolve => resolveExisting = resolve);
+  SyncDisconnectInternal.promiseDisconnectFinished = new Promise(
+    resolve => (resolveExisting = resolve)
+  );
 
-  await runTestWithSanitizeDialog(async (win, sinon) => {
+  await runTestWithSanitizeDialog(async win => {
     let doc = win.document;
     // The dialog should have "waiting" visible.
     Assert.equal(doc.getElementById("deleteOptionsContent").hidden, true);
@@ -249,24 +324,25 @@ add_task(async function testDisconnectAlreadyRunning() {
 
 async function runTestWithSanitizeDialog(test) {
   // always set the pref which indicates a user has previously signed in.
-  Services.prefs.setStringPref(fxAccountsCommon.PREF_LAST_FXA_USER, "something");
+  Services.prefs.setStringPref(
+    fxAccountsCommon.PREF_LAST_FXA_USER,
+    "something"
+  );
 
-  await openPreferencesViaOpenPreferencesAPI("paneSync", {leaveOpen: true});
+  await openPreferencesViaOpenPreferencesAPI("paneSync", { leaveOpen: true });
 
   let doc = gBrowser.contentDocument;
 
-  let promiseSubDialogLoaded =
-      promiseLoadSubDialog("chrome://browser/content/preferences/in-content/syncDisconnect.xul");
+  let promiseSubDialogLoaded = promiseLoadSubDialog(
+    "chrome://browser/content/preferences/in-content/syncDisconnect.xul"
+  );
   doc.getElementById("fxaUnlinkButton").doCommand();
 
   let win = await promiseSubDialogLoaded;
 
-  let ss = sinon.sandbox.create();
+  await test(win);
 
-  await test(win, ss);
-
-  ss.restore();
+  sinon.restore();
 
   BrowserTestUtils.removeTab(gBrowser.selectedTab);
 }
-

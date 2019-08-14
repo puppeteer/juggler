@@ -19,9 +19,8 @@ module.exports = {
 
     // Rules from the mozilla plugin
     "mozilla/no-aArgs": "error",
-    "mozilla/no-single-arg-cu-import": "error",
     // See bug 1224289.
-    "mozilla/reject-importGlobalProperties": "error",
+    "mozilla/reject-importGlobalProperties": ["error", "everything"],
     // devtools/shared/platform is special; see the README.md in that
     // directory for details.  We reject requires using explicit
     // subdirectories of this directory.

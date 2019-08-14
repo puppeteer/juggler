@@ -97,8 +97,8 @@ interface nsIURIFixup : nsISupports
     /* NB: If adding an extra flag, 4 is free (again) */
 
     /**
-     * Converts an internal URI (e.g. a wyciwyg URI) into one which we can
-     * expose to the user, for example on the URL bar.
+     * Converts an internal URI (e.g. one that has a username and password in
+     * it) into one which we can expose to the user, for example on the URL bar.
      *
      * @param  aURI       The URI to be converted
      * @return nsIURI     The converted, exposable URI
@@ -134,6 +134,17 @@ interface nsIURIFixup : nsISupports
     nsIURIFixupInfo getFixupURIInfo(in AUTF8String aURIText,
                                     in unsigned long aFixupFlags,
                                     [optional] out nsIInputStream aPostData);
+
+    /**
+     * Convert load flags from nsIWebNavigation to URI fixup flags for use in
+     * createFixupURI or getFixupURIInfo.
+     *
+     * @param aURIText       Candidate URI; used for determining whether to
+     *                       allow keyword lookups.
+     * @param aDocShellFlags Load flags from nsIDocShell to convert.
+     */
+    unsigned long webNavigationFlagsToFixupFlags(
+        in AUTF8String aURIText, in unsigned long aDocShellFlags);
 
     /**
      * Converts the specified keyword string into a URI.  Note that it's the

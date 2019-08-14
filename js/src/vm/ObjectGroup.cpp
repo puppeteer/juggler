@@ -19,14 +19,17 @@
 #include "js/CharacterEncoding.h"
 #include "js/UniquePtr.h"
 #include "vm/ArrayObject.h"
+#include "vm/GlobalObject.h"
 #include "vm/JSObject.h"
 #include "vm/RegExpObject.h"
 #include "vm/Shape.h"
 #include "vm/TaggedProto.h"
 
 #include "gc/Marking-inl.h"
+#include "gc/ObjectKind-inl.h"
+#include "vm/JSObject-inl.h"
+#include "vm/NativeObject-inl.h"
 #include "vm/TypeInference-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 
@@ -45,15 +48,16 @@ ObjectGroup::ObjectGroup(const Class* clasp, TaggedProto proto,
 }
 
 void ObjectGroup::finalize(FreeOp* fop) {
-  if (newScriptDontCheckGeneration()) {
-    newScriptDontCheckGeneration()->clear();
+  if (auto newScript = newScriptDontCheckGeneration()) {
+    newScript->clear();
+    fop->delete_(this, newScript, newScript->gcMallocBytes(),
+                 MemoryUse::ObjectGroupAddendum);
   }
-  fop->delete_(newScriptDontCheckGeneration());
-  fop->delete_(maybeUnboxedLayoutDontCheckGeneration());
   if (maybePreliminaryObjectsDontCheckGeneration()) {
     maybePreliminaryObjectsDontCheckGeneration()->clear();
   }
-  fop->delete_(maybePreliminaryObjectsDontCheckGeneration());
+  fop->delete_(this, maybePreliminaryObjectsDontCheckGeneration(),
+               MemoryUse::ObjectGroupAddendum);
 }
 
 void ObjectGroup::setProtoUnchecked(TaggedProto proto) {
@@ -73,16 +77,29 @@ size_t ObjectGroup::sizeOfExcludingThis(
   if (TypeNewScript* newScript = newScriptDontCheckGeneration()) {
     n += newScript->sizeOfIncludingThis(mallocSizeOf);
   }
-  if (UnboxedLayout* layout = maybeUnboxedLayoutDontCheckGeneration()) {
-    n += layout->sizeOfIncludingThis(mallocSizeOf);
-  }
   return n;
+}
+
+static inline size_t AddendumAllocSize(ObjectGroup::AddendumKind kind,
+                                       void* addendum) {
+  if (kind == ObjectGroup::Addendum_NewScript) {
+    auto newScript = static_cast<TypeNewScript*>(addendum);
+    return newScript->gcMallocBytes();
+  }
+  if (kind == ObjectGroup::Addendum_PreliminaryObjects) {
+    return sizeof(PreliminaryObjectArrayWithTemplate);
+  }
+  // Other addendum kinds point to GC memory tracked elsewhere.
+  return 0;
 }
 
 void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
                               bool writeBarrier /* = true */) {
   MOZ_ASSERT(!needsSweep());
   MOZ_ASSERT(kind <= (OBJECT_FLAG_ADDENDUM_MASK >> OBJECT_FLAG_ADDENDUM_SHIFT));
+
+  RemoveCellMemory(this, AddendumAllocSize(addendumKind(), addendum_),
+                   MemoryUse::ObjectGroupAddendum);
 
   if (writeBarrier) {
     // Manually trigger barriers if we are clearing new script or
@@ -106,9 +123,13 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
   flags_ &= ~OBJECT_FLAG_ADDENDUM_MASK;
   flags_ |= kind << OBJECT_FLAG_ADDENDUM_SHIFT;
   addendum_ = addendum;
+
+  AddCellMemory(this, AddendumAllocSize(kind, addendum),
+                MemoryUse::ObjectGroupAddendum);
 }
 
-/* static */ bool ObjectGroup::useSingletonForClone(JSFunction* fun) {
+/* static */
+bool ObjectGroup::useSingletonForClone(JSFunction* fun) {
   if (!fun->isInterpreted()) {
     return false;
   }
@@ -163,9 +184,9 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
   return end - begin <= 100;
 }
 
-/* static */ bool ObjectGroup::useSingletonForNewObject(JSContext* cx,
-                                                        JSScript* script,
-                                                        jsbytecode* pc) {
+/* static */
+bool ObjectGroup::useSingletonForNewObject(JSContext* cx, JSScript* script,
+                                           jsbytecode* pc) {
   /*
    * Make a heuristic guess at a use of JSOP_NEW that the constructed object
    * should have a fresh group. We do this when the NEW is immediately
@@ -198,13 +219,10 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
   return false;
 }
 
-/* static */ bool ObjectGroup::useSingletonForAllocationSite(JSScript* script,
-                                                             jsbytecode* pc,
-                                                             JSProtoKey key) {
-  // The return value of this method can either be tested like a boolean or
-  // passed to a NewObject method.
-  JS_STATIC_ASSERT(GenericObject == 0);
-
+/* static */
+bool ObjectGroup::useSingletonForAllocationSite(JSScript* script,
+                                                jsbytecode* pc,
+                                                JSProtoKey key) {
   /*
    * Objects created outside loops in global and eval scripts should have
    * singleton types. For now this is only done for plain objects, but not
@@ -212,17 +230,17 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
    */
 
   if (script->functionNonDelazifying() && !script->treatAsRunOnce()) {
-    return GenericObject;
+    return false;
   }
 
   if (key != JSProto_Object) {
-    return GenericObject;
+    return false;
   }
 
   // All loops in the script will have a try note indicating their boundary.
 
   if (!script->hasTrynotes()) {
-    return SingletonObject;
+    return true;
   }
 
   uint32_t offset = script->pcToOffset(pc);
@@ -234,39 +252,27 @@ void ObjectGroup::setAddendum(AddendumKind kind, void* addendum,
     }
 
     if (tn.start <= offset && offset < tn.start + tn.length) {
-      return GenericObject;
+      return false;
     }
   }
 
-  return SingletonObject;
-}
-
-/* static */ bool ObjectGroup::useSingletonForAllocationSite(
-    JSScript* script, jsbytecode* pc, const Class* clasp) {
-  return useSingletonForAllocationSite(script, pc,
-                                       JSCLASS_CACHED_PROTO_KEY(clasp));
+  return true;
 }
 
 /////////////////////////////////////////////////////////////////////
 // JSObject
 /////////////////////////////////////////////////////////////////////
 
-bool JSObject::shouldSplicePrototype() {
-  /*
-   * During bootstrapping, if inference is enabled we need to make sure not
-   * to splice a new prototype in for Function.prototype or the global
-   * object if their __proto__ had previously been set to null, as this
-   * will change the prototype for all other objects with the same type.
-   */
-  if (staticPrototype() != nullptr) {
-    return false;
-  }
-  return isSingleton();
+bool GlobalObject::shouldSplicePrototype() {
+  // During bootstrapping, we need to make sure not to splice a new prototype in
+  // for the global object if its __proto__ had previously been set to non-null,
+  // as this will change the prototype for all other objects with the same type.
+  return staticPrototype() == nullptr;
 }
 
-/* static */ bool JSObject::splicePrototype(JSContext* cx, HandleObject obj,
-                                            const Class* clasp,
-                                            Handle<TaggedProto> proto) {
+/* static */
+bool JSObject::splicePrototype(JSContext* cx, HandleObject obj,
+                               Handle<TaggedProto> proto) {
   MOZ_ASSERT(cx->compartment() == obj->compartment());
 
   /*
@@ -278,6 +284,10 @@ bool JSObject::shouldSplicePrototype() {
 
   // Windows may not appear on prototype chains.
   MOZ_ASSERT_IF(proto.isObject(), !IsWindow(proto.toObject()));
+
+#ifdef DEBUG
+  const Class* oldClass = obj->getClass();
+#endif
 
   if (proto.isObject()) {
     RootedObject protoObj(cx, proto.toObject());
@@ -300,13 +310,14 @@ bool JSObject::shouldSplicePrototype() {
     }
   }
 
-  group->setClasp(clasp);
+  MOZ_ASSERT(group->clasp() == oldClass,
+             "splicing a prototype doesn't change a group's class");
   group->setProto(proto);
   return true;
 }
 
-/* static */ ObjectGroup* JSObject::makeLazyGroup(JSContext* cx,
-                                                  HandleObject obj) {
+/* static */
+ObjectGroup* JSObject::makeLazyGroup(JSContext* cx, HandleObject obj) {
   MOZ_ASSERT(obj->hasLazyGroup());
   MOZ_ASSERT(cx->compartment() == obj->compartment());
 
@@ -347,10 +358,10 @@ bool JSObject::shouldSplicePrototype() {
   return group;
 }
 
-/* static */ bool JSObject::setNewGroupUnknown(JSContext* cx,
-                                               ObjectGroupRealm& realm,
-                                               const js::Class* clasp,
-                                               JS::HandleObject obj) {
+/* static */
+bool JSObject::setNewGroupUnknown(JSContext* cx, ObjectGroupRealm& realm,
+                                  const js::Class* clasp,
+                                  JS::HandleObject obj) {
   ObjectGroup::setDefaultNewGroupUnknown(cx, realm, clasp, obj);
   return JSObject::setFlags(cx, obj, BaseShape::NEW_GROUP_UNKNOWN);
 }
@@ -369,7 +380,7 @@ bool JSObject::shouldSplicePrototype() {
  * (though there are only a few of these per realm).
  */
 struct ObjectGroupRealm::NewEntry {
-  ReadBarrieredObjectGroup group;
+  WeakHeapPtrObjectGroup group;
 
   // Note: This pointer is only used for equality and does not need a read
   // barrier.
@@ -384,7 +395,9 @@ struct ObjectGroupRealm::NewEntry {
     JSObject* associated;
 
     Lookup(const Class* clasp, TaggedProto proto, JSObject* associated)
-        : clasp(clasp), proto(proto), associated(associated) {}
+        : clasp(clasp), proto(proto), associated(associated) {
+      MOZ_ASSERT((associated && associated->is<JSFunction>()) == !clasp);
+    }
 
     explicit Lookup(const NewEntry& entry)
         : clasp(entry.group.unbarrieredGet()->clasp()),
@@ -481,10 +494,10 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
   return nullptr;
 }
 
-/* static */ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx,
-                                                       const Class* clasp,
-                                                       TaggedProto proto,
-                                                       JSObject* associated) {
+/* static */
+ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const Class* clasp,
+                                          TaggedProto proto,
+                                          JSObject* associated) {
   MOZ_ASSERT_IF(associated, proto.isObject());
   MOZ_ASSERT_IF(proto.isObject(),
                 cx->isInsideCurrentCompartment(proto.toObject()));
@@ -494,8 +507,8 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
   // unboxed plain object.
   MOZ_ASSERT_IF(!clasp, !!associated);
 
-  if (associated && !associated->is<TypeDescr>()) {
-    MOZ_ASSERT(!clasp);
+  if (associated) {
+    MOZ_ASSERT_IF(!associated->is<TypeDescr>(), !clasp);
     if (associated->is<JSFunction>()) {
       // Canonicalize new functions to use the original one associated with its
       // script.
@@ -508,7 +521,13 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
                          associated->as<JSFunction>().realm() != cx->realm())) {
         associated = nullptr;
       }
-
+    } else if (associated->is<TypeDescr>()) {
+      if (!clasp) {
+        // This can happen when we call Reflect.construct with a TypeDescr as
+        // newTarget argument. We're creating a plain object in this case, so
+        // don't set the TypeDescr on the group.
+        associated = nullptr;
+      }
     } else {
       associated = nullptr;
     }
@@ -567,8 +586,7 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
   if (p) {
     ObjectGroup* group = p->group;
     MOZ_ASSERT_IF(clasp, group->clasp() == clasp);
-    MOZ_ASSERT_IF(!clasp, group->clasp() == &PlainObject::class_ ||
-                              group->clasp() == &UnboxedPlainObject::class_);
+    MOZ_ASSERT_IF(!clasp, group->clasp() == &PlainObject::class_);
     MOZ_ASSERT(group->proto() == proto);
     groups.defaultNewGroupCache.put(group, associated);
     return group;
@@ -631,10 +649,11 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
   return group;
 }
 
-/* static */ ObjectGroup* ObjectGroup::lazySingletonGroup(JSContext* cx,
-                                                          ObjectGroup* oldGroup,
-                                                          const Class* clasp,
-                                                          TaggedProto proto) {
+/* static */
+ObjectGroup* ObjectGroup::lazySingletonGroup(JSContext* cx,
+                                             ObjectGroup* oldGroup,
+                                             const Class* clasp,
+                                             TaggedProto proto) {
   ObjectGroupRealm& realm = oldGroup ? ObjectGroupRealm::get(oldGroup)
                                      : ObjectGroupRealm::getForNewObject(cx);
 
@@ -677,9 +696,11 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
   return group;
 }
 
-/* static */ void ObjectGroup::setDefaultNewGroupUnknown(
-    JSContext* cx, ObjectGroupRealm& realm, const Class* clasp,
-    HandleObject obj) {
+/* static */
+void ObjectGroup::setDefaultNewGroupUnknown(JSContext* cx,
+                                            ObjectGroupRealm& realm,
+                                            const Class* clasp,
+                                            HandleObject obj) {
   // If the object already has a new group, mark that group as unknown.
   ObjectGroupRealm::NewTable* table = realm.defaultNewTable;
   if (table) {
@@ -694,9 +715,9 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
 }
 
 #ifdef DEBUG
-/* static */ bool ObjectGroup::hasDefaultNewGroup(JSObject* proto,
-                                                  const Class* clasp,
-                                                  ObjectGroup* group) {
+/* static */
+bool ObjectGroup::hasDefaultNewGroup(JSObject* proto, const Class* clasp,
+                                     ObjectGroup* group) {
   ObjectGroupRealm::NewTable* table =
       ObjectGroupRealm::get(group).defaultNewTable;
 
@@ -718,17 +739,6 @@ inline const Class* GetClassForProtoKey(JSProtoKey key) {
     case JSProto_Array:
       return &ArrayObject::class_;
 
-    case JSProto_Number:
-      return &NumberObject::class_;
-    case JSProto_Boolean:
-      return &BooleanObject::class_;
-    case JSProto_String:
-      return &StringObject::class_;
-    case JSProto_Symbol:
-      return &SymbolObject::class_;
-    case JSProto_RegExp:
-      return &RegExpObject::class_;
-
     case JSProto_Int8Array:
     case JSProto_Uint8Array:
     case JSProto_Int16Array:
@@ -738,24 +748,18 @@ inline const Class* GetClassForProtoKey(JSProtoKey key) {
     case JSProto_Float32Array:
     case JSProto_Float64Array:
     case JSProto_Uint8ClampedArray:
+    case JSProto_BigInt64Array:
+    case JSProto_BigUint64Array:
       return &TypedArrayObject::classes[key - JSProto_Int8Array];
 
-    case JSProto_ArrayBuffer:
-      return &ArrayBufferObject::class_;
-
-    case JSProto_SharedArrayBuffer:
-      return &SharedArrayBufferObject::class_;
-
-    case JSProto_DataView:
-      return &DataViewObject::class_;
-
     default:
+      // We only expect to see plain objects, arrays, and typed arrays here.
       MOZ_CRASH("Bad proto key");
   }
 }
 
-/* static */ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx,
-                                                       JSProtoKey key) {
+/* static */
+ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, JSProtoKey key) {
   JSObject* proto = nullptr;
   if (key != JSProto_Null) {
     proto = GlobalObject::getOrCreatePrototype(cx, key);
@@ -803,9 +807,9 @@ struct ObjectGroupRealm::ArrayObjectKey : public DefaultHasher<ArrayObjectKey> {
 };
 
 static inline bool NumberTypes(TypeSet::Type a, TypeSet::Type b) {
-  return (a.isPrimitive(JSVAL_TYPE_INT32) ||
-          a.isPrimitive(JSVAL_TYPE_DOUBLE)) &&
-         (b.isPrimitive(JSVAL_TYPE_INT32) || b.isPrimitive(JSVAL_TYPE_DOUBLE));
+  return (a.isPrimitive(ValueType::Int32) ||
+          a.isPrimitive(ValueType::Double)) &&
+         (b.isPrimitive(ValueType::Int32) || b.isPrimitive(ValueType::Double));
 }
 
 /*
@@ -819,11 +823,10 @@ static inline TypeSet::Type GetValueTypeForTable(const Value& v) {
   return type;
 }
 
-/* static */ ArrayObject* ObjectGroup::newArrayObject(JSContext* cx,
-                                                      const Value* vp,
-                                                      size_t length,
-                                                      NewObjectKind newKind,
-                                                      NewArrayKind arrayKind) {
+/* static */
+ArrayObject* ObjectGroup::newArrayObject(JSContext* cx, const Value* vp,
+                                         size_t length, NewObjectKind newKind,
+                                         NewArrayKind arrayKind) {
   MOZ_ASSERT(newKind != SingletonObject);
 
   // If we are making a copy on write array, don't try to adjust the group as
@@ -1032,60 +1035,7 @@ bool js::CombinePlainObjectPropertyTypes(JSContext* cx, JSObject* newObj,
         }
       }
     }
-  } else if (newObj->is<UnboxedPlainObject>()) {
-    const UnboxedLayout& layout = newObj->as<UnboxedPlainObject>().layout();
-    const int32_t* traceList = layout.traceList();
-    if (!traceList) {
-      return true;
-    }
-
-    uint8_t* newData = newObj->as<UnboxedPlainObject>().data();
-    uint8_t* oldData = oldObj->as<UnboxedPlainObject>().data();
-
-    for (; *traceList != -1; traceList++) {
-    }
-    traceList++;
-    for (; *traceList != -1; traceList++) {
-      JSObject* newInnerObj =
-          *reinterpret_cast<JSObject**>(newData + *traceList);
-      JSObject* oldInnerObj =
-          *reinterpret_cast<JSObject**>(oldData + *traceList);
-
-      if (!newInnerObj || !oldInnerObj || SameGroup(oldInnerObj, newInnerObj)) {
-        continue;
-      }
-
-      if (!GiveObjectGroup(cx, newInnerObj, oldInnerObj)) {
-        return false;
-      }
-
-      if (SameGroup(oldInnerObj, newInnerObj)) {
-        continue;
-      }
-
-      if (!GiveObjectGroup(cx, oldInnerObj, newInnerObj)) {
-        return false;
-      }
-
-      if (SameGroup(oldInnerObj, newInnerObj)) {
-        for (size_t i = 1; i < ncompare; i++) {
-          if (compare[i].isObject() &&
-              SameGroup(&compare[i].toObject(), newObj)) {
-            uint8_t* otherData =
-                compare[i].toObject().as<UnboxedPlainObject>().data();
-            JSObject* otherInnerObj =
-                *reinterpret_cast<JSObject**>(otherData + *traceList);
-            if (otherInnerObj && !SameGroup(otherInnerObj, newInnerObj)) {
-              if (!GiveObjectGroup(cx, otherInnerObj, newInnerObj)) {
-                return false;
-              }
-            }
-          }
-        }
-      }
-    }
   }
-
   return true;
 }
 
@@ -1133,8 +1083,8 @@ struct ObjectGroupRealm::PlainObjectKey {
 };
 
 struct ObjectGroupRealm::PlainObjectEntry {
-  ReadBarrieredObjectGroup group;
-  ReadBarrieredShape shape;
+  WeakHeapPtrObjectGroup group;
+  WeakHeapPtrShape shape;
   TypeSet::Type* types;
 
   bool needsSweep(unsigned nproperties) {
@@ -1202,10 +1152,10 @@ PlainObject* js::NewPlainObjectWithProperties(JSContext* cx,
   return obj;
 }
 
-/* static */ JSObject* ObjectGroup::newPlainObject(JSContext* cx,
-                                                   IdValuePair* properties,
-                                                   size_t nproperties,
-                                                   NewObjectKind newKind) {
+/* static */
+JSObject* ObjectGroup::newPlainObject(JSContext* cx, IdValuePair* properties,
+                                      size_t nproperties,
+                                      NewObjectKind newKind) {
   // Watch for simple cases where we don't try to reuse plain object groups.
   if (newKind == SingletonObject || nproperties == 0 ||
       nproperties >= PropertyTree::MAX_HEIGHT) {
@@ -1321,15 +1271,6 @@ PlainObject* js::NewPlainObjectWithProperties(JSContext* cx,
   mozilla::Maybe<AutoSweepObjectGroup> sweep;
   sweep.emplace(group);
 
-  // Watch for existing groups which now use an unboxed layout.
-  if (group->maybeUnboxedLayout(*sweep)) {
-    MOZ_ASSERT(group->maybeUnboxedLayout(*sweep)->properties().length() ==
-               nproperties);
-    sweep.reset();
-    return UnboxedPlainObject::createWithProperties(cx, group, newKind,
-                                                    properties);
-  }
-
   // Update property types according to the properties we are about to add.
   // Do this before we do anything which can GC, which might move or remove
   // this table entry.
@@ -1340,12 +1281,12 @@ PlainObject* js::NewPlainObjectWithProperties(JSContext* cx,
       if (ntype == type) {
         continue;
       }
-      if (ntype.isPrimitive(JSVAL_TYPE_INT32) &&
-          type.isPrimitive(JSVAL_TYPE_DOUBLE)) {
+      if (ntype.isPrimitive(ValueType::Int32) &&
+          type.isPrimitive(ValueType::Double)) {
         // The property types already reflect 'int32'.
       } else {
-        if (ntype.isPrimitive(JSVAL_TYPE_DOUBLE) &&
-            type.isPrimitive(JSVAL_TYPE_INT32)) {
+        if (ntype.isPrimitive(ValueType::Double) &&
+            type.isPrimitive(ValueType::Int32)) {
           // Include 'double' in the property types to avoid the update below
           // later.
           p->value().types[i] = TypeSet::DoubleType();
@@ -1392,12 +1333,12 @@ PlainObject* js::NewPlainObjectWithProperties(JSContext* cx,
 
 struct ObjectGroupRealm::AllocationSiteKey
     : public DefaultHasher<AllocationSiteKey> {
-  ReadBarrieredScript script;
+  WeakHeapPtrScript script;
 
   uint32_t offset : 24;
   JSProtoKey kind : 8;
 
-  ReadBarrieredObject proto;
+  WeakHeapPtrObject proto;
 
   static const uint32_t OFFSET_LIMIT = (1 << 23);
 
@@ -1426,17 +1367,20 @@ struct ObjectGroupRealm::AllocationSiteKey
     proto = std::move(key.proto);
   }
 
-  static inline uint32_t hash(AllocationSiteKey key) {
-    return uint32_t(
-        size_t(key.script.unbarrieredGet()->offsetToPC(key.offset)) ^ key.kind ^
-        MovableCellHasher<JSObject*>::hash(key.proto.unbarrieredGet()));
+  static inline HashNumber hash(const AllocationSiteKey& key) {
+    JSScript* script = key.script.unbarrieredGet();
+    JSObject* proto = key.proto.unbarrieredGet();
+    HashNumber hash = mozilla::HashGeneric(key.offset, key.kind);
+    hash = mozilla::AddToHash(hash, MovableCellHasher<JSScript*>::hash(script));
+    hash = mozilla::AddToHash(hash, MovableCellHasher<JSObject*>::hash(proto));
+    return hash;
   }
 
   static inline bool match(const AllocationSiteKey& a,
                            const AllocationSiteKey& b) {
-    return DefaultHasher<JSScript*>::match(a.script.unbarrieredGet(),
-                                           b.script.unbarrieredGet()) &&
-           a.offset == b.offset && a.kind == b.kind &&
+    return a.offset == b.offset && a.kind == b.kind &&
+           MovableCellHasher<JSScript*>::match(a.script.unbarrieredGet(),
+                                               b.script.unbarrieredGet()) &&
            MovableCellHasher<JSObject*>::match(a.proto, b.proto);
   }
 
@@ -1458,9 +1402,9 @@ struct ObjectGroupRealm::AllocationSiteKey
 
 class ObjectGroupRealm::AllocationSiteTable
     : public JS::WeakCache<
-          js::GCHashMap<AllocationSiteKey, ReadBarrieredObjectGroup,
+          js::GCHashMap<AllocationSiteKey, WeakHeapPtrObjectGroup,
                         AllocationSiteKey, SystemAllocPolicy>> {
-  using Table = js::GCHashMap<AllocationSiteKey, ReadBarrieredObjectGroup,
+  using Table = js::GCHashMap<AllocationSiteKey, WeakHeapPtrObjectGroup,
                               AllocationSiteKey, SystemAllocPolicy>;
   using Base = JS::WeakCache<Table>;
 
@@ -1468,7 +1412,8 @@ class ObjectGroupRealm::AllocationSiteTable
   explicit AllocationSiteTable(Zone* zone) : Base(zone) {}
 };
 
-/* static */ ObjectGroup* ObjectGroup::allocationSiteGroup(
+/* static */
+ObjectGroup* ObjectGroup::allocationSiteGroup(
     JSContext* cx, JSScript* scriptArg, jsbytecode* pc, JSProtoKey kind,
     HandleObject protoArg /* = nullptr */) {
   MOZ_ASSERT(!useSingletonForAllocationSite(scriptArg, pc, kind));
@@ -1565,8 +1510,10 @@ void ObjectGroupRealm::replaceAllocationSiteGroup(JSScript* script,
   }
 }
 
-/* static */ ObjectGroup* ObjectGroup::callingAllocationSiteGroup(
-    JSContext* cx, JSProtoKey key, HandleObject proto) {
+/* static */
+ObjectGroup* ObjectGroup::callingAllocationSiteGroup(JSContext* cx,
+                                                     JSProtoKey key,
+                                                     HandleObject proto) {
   MOZ_ASSERT_IF(proto, key == JSProto_Array);
 
   jsbytecode* pc;
@@ -1580,24 +1527,17 @@ void ObjectGroupRealm::replaceAllocationSiteGroup(JSScript* script,
   return defaultNewGroup(cx, key);
 }
 
-/* static */ bool ObjectGroup::setAllocationSiteObjectGroup(JSContext* cx,
-                                                            HandleScript script,
-                                                            jsbytecode* pc,
-                                                            HandleObject obj,
-                                                            bool singleton) {
+/* static */
+bool ObjectGroup::setAllocationSiteObjectGroup(JSContext* cx,
+                                               HandleScript script,
+                                               jsbytecode* pc, HandleObject obj,
+                                               bool singleton) {
   JSProtoKey key = JSCLASS_CACHED_PROTO_KEY(obj->getClass());
   MOZ_ASSERT(key != JSProto_Null);
   MOZ_ASSERT(singleton == useSingletonForAllocationSite(script, pc, key));
 
   if (singleton) {
     MOZ_ASSERT(obj->isSingleton());
-
-    /*
-     * Inference does not account for types of run-once initializer
-     * objects, as these may not be created until after the script
-     * has been analyzed.
-     */
-    TypeScript::Monitor(cx, script, pc, ObjectValue(*obj));
   } else {
     ObjectGroup* group = allocationSiteGroup(cx, script, pc, key);
     if (!group) {
@@ -1609,8 +1549,10 @@ void ObjectGroupRealm::replaceAllocationSiteGroup(JSScript* script,
   return true;
 }
 
-/* static */ ArrayObject* ObjectGroup::getOrFixupCopyOnWriteObject(
-    JSContext* cx, HandleScript script, jsbytecode* pc) {
+/* static */
+ArrayObject* ObjectGroup::getOrFixupCopyOnWriteObject(JSContext* cx,
+                                                      HandleScript script,
+                                                      jsbytecode* pc) {
   // Make sure that the template object for script/pc has a type indicating
   // that the object and its copies have copy on write elements.
   RootedArrayObject obj(
@@ -1646,8 +1588,9 @@ void ObjectGroupRealm::replaceAllocationSiteGroup(JSScript* script,
   return obj;
 }
 
-/* static */ ArrayObject* ObjectGroup::getCopyOnWriteObject(JSScript* script,
-                                                            jsbytecode* pc) {
+/* static */
+ArrayObject* ObjectGroup::getCopyOnWriteObject(JSScript* script,
+                                               jsbytecode* pc) {
   // getOrFixupCopyOnWriteObject should already have been called for
   // script/pc, ensuring that the template object has a group with the
   // COPY_ON_WRITE flag. We don't assert this here, due to a corner case
@@ -1660,10 +1603,9 @@ void ObjectGroupRealm::replaceAllocationSiteGroup(JSScript* script,
   return obj;
 }
 
-/* static */ bool ObjectGroup::findAllocationSite(JSContext* cx,
-                                                  const ObjectGroup* group,
-                                                  JSScript** script,
-                                                  uint32_t* offset) {
+/* static */
+bool ObjectGroup::findAllocationSite(JSContext* cx, const ObjectGroup* group,
+                                     JSScript** script, uint32_t* offset) {
   *script = nullptr;
   *offset = 0;
 
@@ -1756,15 +1698,13 @@ ObjectGroup* ObjectGroupRealm::getStringSplitStringGroup(JSContext* cx) {
   // The following code is a specialized version of the code
   // for ObjectGroup::allocationSiteGroup().
 
-  const Class* clasp = GetClassForProtoKey(JSProto_Array);
-
   JSObject* proto = GlobalObject::getOrCreateArrayPrototype(cx, cx->global());
   if (!proto) {
     return nullptr;
   }
   Rooted<TaggedProto> tagged(cx, TaggedProto(proto));
 
-  group = makeGroup(cx, cx->realm(), clasp, tagged, /* initialFlags = */ 0);
+  group = makeGroup(cx, cx->realm(), &ArrayObject::class_, tagged);
   if (!group) {
     return nullptr;
   }
@@ -1837,7 +1777,8 @@ void ObjectGroupRealm::clearTables() {
   defaultNewGroupCache.purge();
 }
 
-/* static */ bool ObjectGroupRealm::PlainObjectTableSweepPolicy::needsSweep(
+/* static */
+bool ObjectGroupRealm::PlainObjectTableSweepPolicy::needsSweep(
     PlainObjectKey* key, PlainObjectEntry* entry) {
   if (!(JS::GCPolicy<PlainObjectKey>::needsSweep(key) ||
         entry->needsSweep(key->nproperties))) {
@@ -1861,7 +1802,7 @@ void ObjectGroupRealm::sweep() {
     plainObjectTable->sweep();
   }
   if (stringSplitStringGroup) {
-    if (JS::GCPolicy<ReadBarrieredObjectGroup>::needsSweep(
+    if (JS::GCPolicy<WeakHeapPtrObjectGroup>::needsSweep(
             &stringSplitStringGroup)) {
       stringSplitStringGroup = nullptr;
     }

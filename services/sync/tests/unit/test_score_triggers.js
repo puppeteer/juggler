@@ -1,13 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://services-sync/engines.js");
-ChromeUtils.import("resource://services-sync/engines/clients.js");
-ChromeUtils.import("resource://services-sync/constants.js");
-ChromeUtils.import("resource://services-sync/service.js");
-ChromeUtils.import("resource://services-sync/status.js");
-ChromeUtils.import("resource://services-sync/util.js");
-ChromeUtils.import("resource://testing-common/services/sync/rotaryengine.js");
+const { Service } = ChromeUtils.import("resource://services-sync/service.js");
+const { Status } = ChromeUtils.import("resource://services-sync/status.js");
 
 // Tracking info/collections.
 var collectionsHelper = track_collections_helper();
@@ -16,22 +11,21 @@ var upd = collectionsHelper.with_updated_collection;
 function sync_httpd_setup() {
   let handlers = {};
 
-  handlers["/1.1/johndoe/storage/meta/global"] =
-    new ServerWBO("global", {}).handler();
-  handlers["/1.1/johndoe/storage/steam"] =
-    new ServerWBO("steam", {}).handler();
+  handlers["/1.1/johndoe/storage/meta/global"] = new ServerWBO(
+    "global",
+    {}
+  ).handler();
+  handlers["/1.1/johndoe/storage/steam"] = new ServerWBO("steam", {}).handler();
 
   handlers["/1.1/johndoe/info/collections"] = collectionsHelper.handler;
   delete collectionsHelper.collections.crypto;
   delete collectionsHelper.collections.meta;
 
   let cr = new ServerWBO("keys");
-  handlers["/1.1/johndoe/storage/crypto/keys"] =
-    upd("crypto", cr.handler());
+  handlers["/1.1/johndoe/storage/crypto/keys"] = upd("crypto", cr.handler());
 
   let cl = new ServerCollection();
-  handlers["/1.1/johndoe/storage/clients"] =
-    upd("clients", cl.handler());
+  handlers["/1.1/johndoe/storage/clients"] = upd("clients", cl.handler());
 
   return httpd_setup(handlers);
 }
@@ -77,7 +71,6 @@ add_task(async function test_sync_triggered() {
 
   Service.scheduler.syncThreshold = MULTI_DEVICE_THRESHOLD;
 
-
   Assert.equal(Status.login, LOGIN_SUCCEEDED);
   tracker.score += SCORE_INCREMENT_XLARGE;
 
@@ -120,7 +113,9 @@ add_task(async function test_clients_engine_sync_triggered() {
 add_task(async function test_incorrect_credentials_sync_not_triggered() {
   enableValidationPrefs();
 
-  _("Ensure that score changes don't trigger a sync if Status.login != LOGIN_SUCCEEDED.");
+  _(
+    "Ensure that score changes don't trigger a sync if Status.login != LOGIN_SUCCEEDED."
+  );
   let server = sync_httpd_setup();
   let { engine, tracker } = await setUp(server);
 

@@ -10,7 +10,6 @@ This script manages Desktop repacks for nightly builds.
 """
 import os
 import glob
-import re
 import sys
 import shlex
 
@@ -26,7 +25,6 @@ from mozharness.mozilla.building.buildbase import (
     get_mozconfig_path,
 )
 from mozharness.mozilla.l10n.locales import LocalesMixin
-from mozharness.mozilla.mar import MarMixin
 
 try:
     import simplejson as json
@@ -43,20 +41,9 @@ SUCCESS_STR = "Success"
 FAILURE_STR = "Failed"
 
 
-# mandatory configuration options, without them, this script will not work
-# it's a list of values that are already known before starting a build
-configuration_tokens = ('branch', 'update_channel')
-
-# some other values such as "%(version)s", ...
-# are defined at run time and they cannot be enforced in the _pre_config_lock
-# phase
-runtime_config_tokens = ('version', 'locale', 'abs_objdir',
-                         'en_us_installer_binary_url')
-
-
 # DesktopSingleLocale {{{1
 class DesktopSingleLocale(LocalesMixin, AutomationMixin,
-                          VCSMixin, BaseScript, MarMixin):
+                          VCSMixin, BaseScript):
     """Manages desktop repacks"""
     config_options = [[
         ['--locale', ],
@@ -77,15 +64,6 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
          "dest": "en_us_installer_url",
          "type": "string",
          "help": "Specify the url of the en-us binary"}
-    ], [
-        ['--scm-level'], {  # Ignored on desktop for now: see Bug 1414678.
-         "action": "store",
-         "type": "int",
-         "dest": "scm_level",
-         "default": 1,
-         "help": "This sets the SCM level for the branch being built."
-                 " See https://www.mozilla.org/en-US/about/"
-                 "governance/policies/commit/access-policy/"}
     ]]
 
     def __init__(self, require_config_file=True):
@@ -102,6 +80,7 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
                 "ignore_locales": ["en-US"],
                 "locales_dir": "browser/locales",
                 "log_name": "single_locale",
+                "hg_l10n_base": "https://hg.mozilla.org/l10n-central",
             },
         }
 
@@ -120,115 +99,6 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
         # upload_files is a dictionary of files to upload, keyed by locale.
         self.upload_files = {}
 
-    def _pre_config_lock(self, rw_config):
-        """replaces 'configuration_tokens' with their values, before the
-           configuration gets locked. If some of the configuration_tokens
-           are not present, stops the execution of the script"""
-        # since values as branch, platform are mandatory, can replace them in
-        # in the configuration before it is locked down
-        # mandatory tokens
-        for token in configuration_tokens:
-            if token not in self.config:
-                self.fatal('No %s in configuration!' % token)
-
-        # all the important tokens are present in our configuration
-        for token in configuration_tokens:
-            # token_string '%(branch)s'
-            token_string = ''.join(('%(', token, ')s'))
-            # token_value => ash
-            token_value = self.config[token]
-            for element in self.config:
-                # old_value =>  https://hg.mozilla.org/projects/%(branch)s
-                old_value = self.config[element]
-                # new_value => https://hg.mozilla.org/projects/ash
-                new_value = self.__detokenise_element(self.config[element],
-                                                      token_string,
-                                                      token_value)
-                if new_value and new_value != old_value:
-                    msg = "%s: replacing %s with %s" % (element,
-                                                        old_value,
-                                                        new_value)
-                    self.debug(msg)
-                    self.config[element] = new_value
-
-        # now, only runtime_config_tokens should be present in config
-        # we should parse self.config and fail if any other  we spot any
-        # other token
-        tokens_left = set(self._get_configuration_tokens(self.config))
-        unknown_tokens = set(tokens_left) - set(runtime_config_tokens)
-        if unknown_tokens:
-            msg = ['unknown tokens in configuration:']
-            for t in unknown_tokens:
-                msg.append(t)
-            self.fatal(' '.join(msg))
-        self.info('configuration looks ok')
-        return
-
-    def _get_configuration_tokens(self, iterable):
-        """gets a list of tokens in iterable"""
-        regex = re.compile('%\(\w+\)s')
-        results = []
-        try:
-            for element in iterable:
-                if isinstance(iterable, str):
-                    # this is a string, look for tokens
-                    # self.debug("{0}".format(re.findall(regex, element)))
-                    tokens = re.findall(regex, iterable)
-                    for token in tokens:
-                        # clean %(branch)s => branch
-                        # remove %(
-                        token_name = token.partition('%(')[2]
-                        # remove )s
-                        token_name = token_name.partition(')s')[0]
-                        results.append(token_name)
-                    break
-
-                elif isinstance(iterable, (list, tuple)):
-                    results.extend(self._get_configuration_tokens(element))
-
-                elif isinstance(iterable, dict):
-                    results.extend(self._get_configuration_tokens(iterable[element]))
-
-        except TypeError:
-            # element is a int/float/..., nothing to do here
-            pass
-
-        # remove duplicates, and return results
-
-        return list(set(results))
-
-    def __detokenise_element(self, config_option, token, value):
-        """reads config_options and returns a version of the same config_option
-           replacing token with value recursively"""
-        # config_option is a string, let's replace token with value
-        if isinstance(config_option, str):
-            # if token does not appear in this string,
-            # nothing happens and the original value is returned
-            return config_option.replace(token, value)
-        # it's a dictionary
-        elif isinstance(config_option, dict):
-            # replace token for each element of this dictionary
-            for element in config_option:
-                config_option[element] = self.__detokenise_element(
-                    config_option[element], token, value)
-            return config_option
-        # it's a list
-        elif isinstance(config_option, list):
-            # create a new list and append the replaced elements
-            new_list = []
-            for element in config_option:
-                new_list.append(self.__detokenise_element(element, token, value))
-            return new_list
-        elif isinstance(config_option, tuple):
-            # create a new list and append the replaced elements
-            new_list = []
-            for element in config_option:
-                new_list.append(self.__detokenise_element(element, token, value))
-            return tuple(new_list)
-        else:
-            # everything else, bool, number, ...
-            return config_option
-
     # Helper methods {{{2
     def query_bootstrap_env(self):
         """returns the env for repacks"""
@@ -239,17 +109,17 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
 
         bootstrap_env = self.query_env(partial_env=config.get("bootstrap_env"),
                                        replace_dict=replace_dict)
-        for binary in self._mar_binaries():
-            # "mar -> MAR" and 'mar.exe -> MAR' (windows)
-            name = binary.replace('.exe', '')
-            name = name.upper()
-            binary_path = os.path.join(self._mar_tool_dir(), binary)
-            # windows fix...
-            if binary.endswith('.exe'):
-                binary_path = binary_path.replace('\\', '\\\\\\\\')
-            bootstrap_env[name] = binary_path
         if self.query_is_nightly():
             bootstrap_env["IS_NIGHTLY"] = "yes"
+            # we might set update_channel explicitly
+            if config.get('update_channel'):
+                update_channel = config['update_channel']
+            else:  # Let's just give the generic channel based on branch.
+                update_channel = "nightly-%s" % (config['branch'],)
+            if isinstance(update_channel, unicode):
+                update_channel = update_channel.encode("utf-8")
+            bootstrap_env["MOZ_UPDATE_CHANNEL"] = update_channel
+            self.info("Update channel set to: {}".format(bootstrap_env["MOZ_UPDATE_CHANNEL"]))
         self.bootstrap_env = bootstrap_env
         return self.bootstrap_env
 
@@ -323,7 +193,6 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
         self._run_make_in_config_dir()
         self.make_wget_en_US()
         self.make_unpack_en_US()
-        self.download_mar_tools()
 
     def _run_make_in_config_dir(self):
         """this step creates nsinstall, needed my make_wget_en_US()
@@ -449,7 +318,7 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
                        glob.glob(os.path.join(upload_target, 'setup.exe')) +
                        glob.glob(os.path.join(upload_target, 'setup-stub.exe')))
             targets_exts = ["tar.bz2", "dmg", "langpack.xpi",
-                            "complete.mar", "checksums", "zip",
+                            "checksums", "zip",
                             "installer.exe", "installer-stub.exe"]
             targets = [(".%s" % (ext,), "target.%s" % (ext,)) for ext in targets_exts]
             targets.extend([(f, f) for f in 'setup.exe', 'setup-stub.exe'])
@@ -551,11 +420,6 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin,
                 abs_dirs[key] = dirs[key]
         self.abs_dirs = abs_dirs
         return self.abs_dirs
-
-    def _mar_binaries(self):
-        """returns a tuple with mar and mbsdiff paths"""
-        config = self.config
-        return (config['mar'], config['mbsdiff'])
 
     # TODO: replace with ToolToolMixin
     def _get_tooltool_auth_file(self):

@@ -26,7 +26,7 @@ interface PeerConnectionImpl  {
 
   /* JSEP calls */
   [Throws]
-  void createOffer(optional RTCOfferOptions options);
+  void createOffer(optional RTCOfferOptions options = {});
   [Throws]
   void createAnswer();
   [Throws]
@@ -91,7 +91,10 @@ interface PeerConnectionImpl  {
    * into the SDP.
    */
   [Throws]
-  void addIceCandidate(DOMString candidate, DOMString mid, unsigned short? level);
+  void addIceCandidate(DOMString candidate,
+                       DOMString mid,
+                       DOMString ufrag,
+                       unsigned short? level);
 
   /* Shuts down threads, deletes state */
   [Throws]
@@ -108,16 +111,14 @@ interface PeerConnectionImpl  {
   attribute RTCCertificate certificate;
   [Constant]
   readonly attribute DOMString fingerprint;
-  readonly attribute DOMString localDescription;
   readonly attribute DOMString currentLocalDescription;
   readonly attribute DOMString pendingLocalDescription;
-  readonly attribute DOMString remoteDescription;
   readonly attribute DOMString currentRemoteDescription;
   readonly attribute DOMString pendingRemoteDescription;
 
-  readonly attribute PCImplIceConnectionState iceConnectionState;
-  readonly attribute PCImplIceGatheringState iceGatheringState;
-  readonly attribute PCImplSignalingState signalingState;
+  readonly attribute RTCIceConnectionState iceConnectionState;
+  readonly attribute RTCIceGatheringState iceGatheringState;
+  readonly attribute RTCSignalingState signalingState;
   attribute DOMString id;
 
   [SetterThrows]

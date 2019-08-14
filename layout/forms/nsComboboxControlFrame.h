@@ -38,6 +38,7 @@ class nsIScrollableFrame;
 class nsTextNode;
 
 namespace mozilla {
+class PresShell;
 namespace gfx {
 class DrawTarget;
 }  // namespace gfx
@@ -53,10 +54,12 @@ class nsComboboxControlFrame final : public nsBlockFrame,
 
  public:
   friend nsComboboxControlFrame* NS_NewComboboxControlFrame(
-      nsIPresShell* aPresShell, ComputedStyle* aStyle, nsFrameState aFlags);
+      mozilla::PresShell* aPresShell, ComputedStyle* aStyle,
+      nsFrameState aFlags);
   friend class nsComboboxDisplayFrame;
 
-  explicit nsComboboxControlFrame(ComputedStyle* aStyle);
+  explicit nsComboboxControlFrame(ComputedStyle* aStyle,
+                                  nsPresContext* aPresContext);
   ~nsComboboxControlFrame();
 
   NS_DECL_QUERYFRAME
@@ -83,6 +86,7 @@ class nsComboboxControlFrame final : public nsBlockFrame,
                       const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
@@ -125,23 +129,17 @@ class nsComboboxControlFrame final : public nsBlockFrame,
    * and FireOnChange() will be called.
    * @param aOn true if got focus, false if lost focus.
    * @param aRepaint if true then force repaint (NOTE: we always force repaint
-   * currently)
+   *        currently)
    * @note This method might destroy |this|.
    */
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual void SetFocus(bool aOn, bool aRepaint) override;
 
   bool IsDroppedDown() { return mDroppedDown; }
-  /**
-   * @note This method might destroy |this|.
-   */
-  void ShowDropDown(bool aDoDropDown);
+  MOZ_CAN_RUN_SCRIPT void ShowDropDown(bool aDoDropDown);
   nsIFrame* GetDropDown();
   void SetDropDown(nsIFrame* aDropDownFrame);
-  /**
-   * @note This method might destroy |this|.
-   */
-  void RollupFromList();
+  MOZ_CAN_RUN_SCRIPT void RollupFromList();
 
   /**
    * Return the available space before and after this frame for
@@ -173,13 +171,15 @@ class nsComboboxControlFrame final : public nsBlockFrame,
   NS_IMETHOD RemoveOption(int32_t index) override;
   NS_IMETHOD DoneAddingChildren(bool aIsDone) override;
   NS_IMETHOD OnOptionSelected(int32_t aIndex, bool aSelected) override;
-  NS_IMETHOD OnSetSelectedIndex(int32_t aOldIndex, int32_t aNewIndex) override;
+  NS_IMETHOD_(void)
+  OnSetSelectedIndex(int32_t aOldIndex, int32_t aNewIndex) override;
 
   // nsIRollupListener
   /**
    * Hide the dropdown menu and stop capturing mouse events.
    * @note This method might destroy |this|.
    */
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual bool Rollup(uint32_t aCount, bool aFlush, const nsIntPoint* pos,
                       nsIContent** aLastRolledUp) override;
   virtual void NotifyGeometryChange() override;
@@ -207,9 +207,10 @@ class nsComboboxControlFrame final : public nsBlockFrame,
 
   // nsIStatefulFrame
   mozilla::UniquePtr<mozilla::PresState> SaveState() override;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   NS_IMETHOD RestoreState(mozilla::PresState* aState) override;
-  NS_IMETHOD GenerateStateKey(nsIContent* aContent, nsIDocument* aDocument,
-                              nsACString& aKey) override;
+  void GenerateStateKey(nsIContent* aContent, mozilla::dom::Document* aDocument,
+                        nsACString& aKey) override;
 
   static bool ToolkitHasNativePopup();
 
@@ -255,7 +256,7 @@ class nsComboboxControlFrame final : public nsBlockFrame,
    * Show or hide the dropdown list.
    * @note This method might destroy |this|.
    */
-  void ShowPopup(bool aShowPopup);
+  MOZ_CAN_RUN_SCRIPT void ShowPopup(bool aShowPopup);
 
   /**
    * Show or hide the dropdown list.
@@ -263,7 +264,7 @@ class nsComboboxControlFrame final : public nsBlockFrame,
    * @note This method might destroy |this|.
    * @return false if this frame is destroyed, true if still alive.
    */
-  bool ShowList(bool aShowList);
+  MOZ_CAN_RUN_SCRIPT bool ShowList(bool aShowList);
   void CheckFireOnChange();
   void FireValueChangeEvent();
   nsresult RedisplayText();
@@ -288,6 +289,11 @@ class nsComboboxControlFrame final : public nsBlockFrame,
   // The inline size of our display area.  Used by that frame's reflow
   // to size to the full inline size except the drop-marker.
   nscoord mDisplayISize;
+  // The maximum inline size of our display area, which is the
+  // nsComoboxControlFrame's border-box.
+  //
+  // Going over this would be observable via DOM APIs like client / scrollWidth.
+  nscoord mMaxDisplayISize;
 
   nsRevocableEventPtr<RedisplayTextEvent> mRedisplayTextEvent;
 

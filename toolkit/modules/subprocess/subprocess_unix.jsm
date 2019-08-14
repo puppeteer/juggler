@@ -7,19 +7,25 @@
 
 /* eslint-disable mozilla/balanced-listeners */
 
-Cu.importGlobalProperties(["TextDecoder"]);
-
 var EXPORTED_SYMBOLS = ["SubprocessImpl"];
 
-ChromeUtils.import("resource://gre/modules/ctypes.jsm");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/subprocess/subprocess_common.jsm");
+const { ctypes } = ChromeUtils.import("resource://gre/modules/ctypes.jsm");
+const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { BaseProcess, PromiseWorker } = ChromeUtils.import(
+  "resource://gre/modules/subprocess/subprocess_common.jsm"
+);
 
 /* import-globals-from subprocess_shared.js */
 /* import-globals-from subprocess_shared_unix.js */
-Services.scriptloader.loadSubScript("resource://gre/modules/subprocess/subprocess_shared.js", this);
-Services.scriptloader.loadSubScript("resource://gre/modules/subprocess/subprocess_shared_unix.js", this);
+Services.scriptloader.loadSubScript(
+  "resource://gre/modules/subprocess/subprocess_shared.js",
+  this
+);
+Services.scriptloader.loadSubScript(
+  "resource://gre/modules/subprocess/subprocess_shared_unix.js",
+  this
+);
 
 class UnixPromiseWorker extends PromiseWorker {
   constructor(...args) {
@@ -37,7 +43,7 @@ class UnixPromiseWorker extends PromiseWorker {
     libc.fcntl(fds[0], LIBC.F_SETFD, LIBC.FD_CLOEXEC);
     libc.fcntl(fds[1], LIBC.F_SETFD, LIBC.FD_CLOEXEC);
 
-    this.call("init", [{signalFd: fds[0]}]);
+    this.call("init", [{ signalFd: fds[0] }]);
   }
 
   closePipe() {
@@ -62,7 +68,6 @@ class UnixPromiseWorker extends PromiseWorker {
   }
 }
 
-
 class Process extends BaseProcess {
   static get WORKER_URL() {
     return "resource://gre/modules/subprocess/subprocess_worker_unix.js";
@@ -77,10 +82,14 @@ class Process extends BaseProcess {
 // convert that into a JS typed array.
 // The resulting array will not be null-terminated.
 function ptrToUint8Array(input) {
-  let {cast, uint8_t} = ctypes;
+  let { cast, uint8_t } = ctypes;
 
   let len = 0;
-  for (let ptr = cast(input, uint8_t.ptr); ptr.contents; ptr = ptr.increment()) {
+  for (
+    let ptr = cast(input, uint8_t.ptr);
+    ptr.contents;
+    ptr = ptr.increment()
+  ) {
     len++;
   }
 
@@ -95,7 +104,7 @@ var SubprocessUnix = {
     return Process.create(options);
   },
 
-  * getEnvironment() {
+  *getEnvironment() {
     let environ;
     if (OS.Constants.Sys.Name == "Darwin") {
       environ = libc._NSGetEnviron().contents;
@@ -104,7 +113,7 @@ var SubprocessUnix = {
     }
 
     const EQUAL = "=".charCodeAt(0);
-    let decoder = new TextDecoder("utf-8", {fatal: true});
+    let decoder = new TextDecoder("utf-8", { fatal: true });
 
     function decode(array) {
       try {
@@ -114,13 +123,16 @@ var SubprocessUnix = {
       }
     }
 
-    for (let envp = environ; !envp.contents.isNull(); envp = envp.increment()) {
+    for (
+      let envp = environ;
+      !envp.isNull() && !envp.contents.isNull();
+      envp = envp.increment()
+    ) {
       let buf = ptrToUint8Array(envp.contents);
 
       for (let i = 0; i < buf.length; i++) {
         if (buf[i] == EQUAL) {
-          yield [decode(buf.subarray(0, i)),
-                 decode(buf.subarray(i + 1))];
+          yield [decode(buf.subarray(0, i)), decode(buf.subarray(i + 1))];
           break;
         }
       }
@@ -137,7 +149,7 @@ var SubprocessUnix = {
 
       // FIXME: We really want access(path, X_OK) here, but OS.File does not
       // support it.
-      return !info.isDir && (info.unixMode & 0o111);
+      return !info.isDir && info.unixMode & 0o111;
     } catch (e) {
       return false;
     }
@@ -165,7 +177,9 @@ var SubprocessUnix = {
       if (await this.isExecutableFile(bin)) {
         return bin;
       }
-      let error = new Error(`File at path "${bin}" does not exist, or is not executable`);
+      let error = new Error(
+        `File at path "${bin}" does not exist, or is not executable`
+      );
       error.errorCode = SubprocessConstants.ERROR_BAD_EXECUTABLE;
       throw error;
     }

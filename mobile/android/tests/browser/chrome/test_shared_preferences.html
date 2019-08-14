@@ -8,15 +8,13 @@ Migrated from Robocop: https://bugzilla.mozilla.org/show_bug.cgi?id=1184186
   <meta charset="utf-8">
   <title>Test for Bug 866271</title>
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/AddTask.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://global/skin"/>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"/>
   <script type="application/javascript" src="head.js"></script>
   <script type="application/javascript">
 
-  ChromeUtils.import("resource://gre/modules/SharedPreferences.jsm");
-  ChromeUtils.import("resource://gre/modules/Promise.jsm");
-  ChromeUtils.import("resource://gre/modules/Task.jsm");
+  const {SharedPreferences} = ChromeUtils.import("resource://gre/modules/SharedPreferences.jsm");
+  const {Promise} = ChromeUtils.import("resource://gre/modules/Promise.jsm");
 
   let _observerId = 0;
 

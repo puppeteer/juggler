@@ -30,7 +30,7 @@ namespace gl {
 
 class GLContextGLX;
 
-class GLXLibrary {
+class GLXLibrary final {
  public:
   bool EnsureInitialized();
 
@@ -40,11 +40,11 @@ class GLXLibrary {
 
  public:
 #ifdef DEBUG
-#define BEFORE_CALL BeforeGLXCall();
-#define AFTER_CALL AfterGLXCall();
+#  define BEFORE_CALL BeforeGLXCall();
+#  define AFTER_CALL AfterGLXCall();
 #else
-#define BEFORE_CALL
-#define AFTER_CALL
+#  define BEFORE_CALL
+#  define AFTER_CALL
 #endif
 
 #define WRAP(X)                  \
@@ -179,9 +179,7 @@ class GLXLibrary {
   bool IsATI() { return mIsATI; }
   bool IsMesa() { return mClientIsMesa; }
 
-  PRFuncPtr GetGetProcAddress() const {
-    return (PRFuncPtr)mSymbols.fGetProcAddress;
-  }
+  auto GetGetProcAddress() const { return mSymbols.fGetProcAddress; }
 
  private:
   struct {

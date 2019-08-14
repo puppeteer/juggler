@@ -5,7 +5,13 @@
 from __future__ import absolute_import
 
 from mozboot.base import BaseBootstrapper
-from mozboot.linux_common import NodeInstall, StyloInstall, ClangStaticAnalysisInstall
+from mozboot.linux_common import (
+    ClangStaticAnalysisInstall,
+    NasmInstall,
+    NodeInstall,
+    SccacheInstall,
+    StyloInstall,
+)
 
 try:
     from urllib2 import urlopen
@@ -16,8 +22,9 @@ import re
 import subprocess
 
 
-class GentooBootstrapper(NodeInstall, StyloInstall, ClangStaticAnalysisInstall,
-                         BaseBootstrapper):
+class GentooBootstrapper(NasmInstall, NodeInstall, StyloInstall, ClangStaticAnalysisInstall,
+                         SccacheInstall, BaseBootstrapper):
+
     def __init__(self, version, dist_id, **kwargs):
         BaseBootstrapper.__init__(self, **kwargs)
 
@@ -109,6 +116,7 @@ class GentooBootstrapper(NodeInstall, StyloInstall, ClangStaticAnalysisInstall,
                           '--autounmask-continue', '--ask',
                           'dev-java/oracle-jdk-bin'])
 
+        self.ensure_java()
         from mozboot import android
         android.ensure_android('linux', artifact_mode=artifact_mode,
                                no_interactive=self.no_interactive)

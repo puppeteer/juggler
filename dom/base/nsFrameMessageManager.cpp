@@ -63,13 +63,13 @@
 #include "chrome/common/ipc_channel.h"  // for IPC::Channel::kMaximumMessageSize
 
 #ifdef XP_WIN
-#if defined(SendMessage)
-#undef SendMessage
-#endif
+#  if defined(SendMessage)
+#    undef SendMessage
+#  endif
 #endif
 
 #ifdef FUZZING
-#include "MessageManagerFuzzer.h"
+#  include "MessageManagerFuzzer.h"
 #endif
 
 using namespace mozilla;
@@ -168,13 +168,13 @@ void MessageManagerCallback::DoGetRemoteType(nsAString& aRemoteType,
 }
 
 bool MessageManagerCallback::BuildClonedMessageDataForParent(
-    nsIContentParent* aParent, StructuredCloneData& aData,
+    ContentParent* aParent, StructuredCloneData& aData,
     ClonedMessageData& aClonedData) {
   return aData.BuildClonedMessageDataForParent(aParent, aClonedData);
 }
 
 bool MessageManagerCallback::BuildClonedMessageDataForChild(
-    nsIContentChild* aChild, StructuredCloneData& aData,
+    ContentChild* aChild, StructuredCloneData& aData,
     ClonedMessageData& aClonedData) {
   return aData.BuildClonedMessageDataForChild(aChild, aClonedData);
 }
@@ -380,9 +380,11 @@ void nsFrameMessageManager::GetDelayedScripts(
   }
 }
 
-static bool GetParamsForMessage(JSContext* aCx, const JS::Value& aValue,
-                                const JS::Value& aTransfer,
-                                StructuredCloneData& aData) {
+/* static */
+bool nsFrameMessageManager::GetParamsForMessage(JSContext* aCx,
+                                                const JS::Value& aValue,
+                                                const JS::Value& aTransfer,
+                                                StructuredCloneData& aData) {
   // First try to use structured clone on the whole thing.
   JS::RootedValue v(aCx, aValue);
   JS::RootedValue t(aCx, aTransfer);
@@ -407,7 +409,8 @@ static bool GetParamsForMessage(JSContext* aCx, const JS::Value& aValue,
                                   "you trying to send an XPCOM object?"),
                 filename, EmptyString(), lineno, column,
                 nsIScriptError::warningFlag, "chrome javascript",
-                false /* from private window */);
+                false /* from private window */,
+                true /* from chrome context */);
     console->LogMessage(error);
   }
 
@@ -741,7 +744,7 @@ void nsFrameMessageManager::ReceiveMessage(
 
       if (JS::IsCallable(object)) {
         // A small hack to get 'this' value right on content side where
-        // messageManager is wrapped in TabChildMessageManager's global.
+        // messageManager is wrapped in BrowserChildMessageManager's global.
         nsCOMPtr<nsISupports> defaultThisValue;
         if (mChrome) {
           defaultThisValue = do_QueryObject(this);
@@ -822,7 +825,8 @@ void nsFrameMessageManager::ReceiveMessage(
                 do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
             error->Init(msg, EmptyString(), EmptyString(), 0, 0,
                         nsIScriptError::warningFlag, "chrome javascript",
-                        false /* from private window */);
+                        false /* from private window */,
+                        true /* from chrome context */);
             console->LogMessage(error);
           }
 
@@ -1224,7 +1228,7 @@ void nsMessageManagerScriptExecutor::LoadScriptInternal(
       }
     } else {
       JS::RootedValue rval(cx);
-      JS::AutoObjectVector envChain(cx);
+      JS::RootedVector<JSObject*> envChain(cx);
       if (!envChain.append(aMessageManager)) {
         return;
       }
@@ -1282,7 +1286,7 @@ void nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
     }
 
     nsCOMPtr<nsIInputStream> input;
-    rv = channel->Open2(getter_AddRefs(input));
+    rv = channel->Open(getter_AddRefs(input));
     NS_ENSURE_SUCCESS_VOID(rv);
     nsString dataString;
     char16_t* dataStringBuf = nullptr;
@@ -1315,7 +1319,8 @@ void nsMessageManagerScriptExecutor::TryCacheLoadAndCompileScript(
     options.setFileAndLine(url.get(), 1);
     options.setNoScriptRval(true);
 
-    if (!JS::CompileForNonSyntacticScope(cx, options, srcBuf, &script)) {
+    script = JS::CompileForNonSyntacticScope(cx, options, srcBuf);
+    if (!script) {
       return;
     }
   }

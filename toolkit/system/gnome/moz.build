@@ -13,14 +13,13 @@ SOURCES += [
     'nsSystemAlertsService.cpp',
 ]
 
-if CONFIG['MOZ_ENABLE_GCONF']:
-    SOURCES += [
-        'nsGConfService.cpp',
-    ]
-
 SOURCES += [
     'nsGIOService.cpp',
     'nsGSettingsService.cpp',
+]
+
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 FINAL_LIBRARY = 'xul'
@@ -29,7 +28,6 @@ LOCAL_INCLUDES += [
     '/toolkit/components/build/',
 ]
 
-CXXFLAGS += CONFIG['MOZ_GCONF_CFLAGS']
 CXXFLAGS += CONFIG['GLIB_CFLAGS']
 CXXFLAGS += CONFIG['MOZ_DBUS_GLIB_CFLAGS']
 CXXFLAGS += CONFIG['TK_CFLAGS']

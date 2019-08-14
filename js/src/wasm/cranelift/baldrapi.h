@@ -21,7 +21,7 @@
 //
 // This file is input to Rust's bindgen, so as to create primitive APIs for the
 // Cranelift pipeline to access compilation metadata. The actual Rust API then
-// wraps these primitive APIs.  See src/baldrdash.rs.
+// wraps these primitive APIs.  See src/bindings/mod.rs.
 //
 // This file can be included in SpiderMonkey's C++ code, where all the prefixes
 // must be obeyed.  The purpose of the prefixes is to avoid type confusion.  See
@@ -83,7 +83,8 @@ struct CraneliftStaticEnvironment {
 // contains.
 
 struct CraneliftModuleEnvironment {
-  const js::wasm::ModuleEnvironment& env;
+  // This is a pointer and not a reference to work-around a bug in bindgen.
+  const js::wasm::ModuleEnvironment* env;
   uint32_t min_memory_length;
 
   // Not bindgen'd because it's inlined.
@@ -99,6 +100,7 @@ struct CraneliftFuncCompileInput {
   const uint8_t* bytecode;
   size_t bytecodeSize;
   uint32_t index;
+  uint32_t offset_in_module;
 
   // Not bindgen'd because it's inlined.
   explicit inline CraneliftFuncCompileInput(const js::wasm::FuncCompileInput&);
@@ -119,8 +121,8 @@ struct CraneliftMetadataEntry {
     MemoryAccess,
     SymbolicAccess
   } which;
-  uint32_t offset;
-  uint32_t srcLoc;
+  uint32_t codeOffset;
+  uint32_t moduleBytecodeOffset;
   size_t extra;
 };
 
@@ -135,8 +137,21 @@ struct CraneliftCompiledFunc {
   size_t framePushed;
   bool containsCalls;
 
-  size_t codeSize;
+  // The compiled code comprises machine code, relocatable jump tables, and
+  // copyable read-only data, concatenated without padding.  The "...Size"
+  // members give the sizes of the individual sections.  The code starts at
+  // offsets 0; the other offsets can be derived from the sizes.
   const uint8_t* code;
+  size_t codeSize;
+  size_t jumptablesSize;
+  size_t rodataSize;
+  size_t totalSize;
+
+  // Relocation information for instructions that reference into the jump tables
+  // and read-only data segments.  The relocation information is
+  // machine-specific.
+  size_t numRodataRelocs;
+  const uint32_t* rodataRelocs;
 };
 
 // Possible constant values for initializing globals.
@@ -160,8 +175,8 @@ struct BD_ValType {
 // enum is hardcoded in wasm2clif.rs.
 
 enum class BD_SymbolicAddress {
-  GrowMemory,
-  CurrentMemory,
+  MemoryGrow,
+  MemorySize,
   FloorF32,
   FloorF64,
   CeilF32,

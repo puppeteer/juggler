@@ -20,6 +20,7 @@ const SHADER_PREFIX: &str = "#define WR_MAX_VERTEX_TEXTURE_WIDTH 1024U\n";
 
 const BRUSH_FEATURES: &[&str] = &["", "ALPHA_PASS"];
 const CLIP_FEATURES: &[&str] = &[""];
+const FAST_CLIP_FEATURES: &[&str] = &["FAST_PATH"];
 const CACHE_FEATURES: &[&str] = &[""];
 const GRADIENT_FEATURES: &[&str] = &[ "", "DITHERING", "ALPHA_PASS", "DITHERING,ALPHA_PASS" ];
 const PRIM_FEATURES: &[&str] = &[""];
@@ -29,6 +30,10 @@ const SHADERS: &[Shader] = &[
     Shader {
         name: "cs_clip_rectangle",
         features: CLIP_FEATURES,
+    },
+    Shader {
+        name: "cs_clip_rectangle",
+        features: FAST_CLIP_FEATURES,
     },
     Shader {
         name: "cs_clip_image",
@@ -49,6 +54,10 @@ const SHADERS: &[Shader] = &[
     },
     Shader {
         name: "cs_line_decoration",
+        features: CACHE_FEATURES,
+    },
+    Shader {
+        name: "cs_gradient",
         features: CACHE_FEATURES,
     },
     Shader {
@@ -125,7 +134,7 @@ fn validate_shaders() {
             }
 
             let (vs, fs) =
-                webrender::build_shader_strings(VERSION_STRING, &features, shader.name, &None);
+                webrender::build_shader_strings(VERSION_STRING, &features, shader.name, None);
 
             validate(&vs_validator, shader.name, vs);
             validate(&fs_validator, shader.name, fs);

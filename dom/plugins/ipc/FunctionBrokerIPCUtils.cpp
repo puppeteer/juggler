@@ -8,16 +8,16 @@
 
 #if defined(XP_WIN)
 
-#include <schannel.h>
+#  include <schannel.h>
 
 /* these defines are missing from mingw headers */
-#ifndef SP_PROT_TLS1_1_CLIENT
-#define SP_PROT_TLS1_1_CLIENT 0x00000200
-#endif
+#  ifndef SP_PROT_TLS1_1_CLIENT
+#    define SP_PROT_TLS1_1_CLIENT 0x00000200
+#  endif
 
-#ifndef SP_PROT_TLS1_2_CLIENT
-#define SP_PROT_TLS1_2_CLIENT 0x00000800
-#endif
+#  ifndef SP_PROT_TLS1_2_CLIENT
+#    define SP_PROT_TLS1_2_CLIENT 0x00000800
+#  endif
 
 namespace mozilla {
 namespace plugins {
@@ -304,7 +304,8 @@ void IPCInternetBuffers::CopyTo(LPINTERNET_BUFFERSA& aBufs) const {
   }
 }
 
-/* static */ void IPCInternetBuffers::FreeBuffers(LPINTERNET_BUFFERSA& aBufs) {
+/* static */
+void IPCInternetBuffers::FreeBuffers(LPINTERNET_BUFFERSA& aBufs) {
   if (!aBufs) {
     return;
   }

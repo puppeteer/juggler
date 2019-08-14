@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if defined(MOZILLA_INTERNAL_API)
-#error This code is NOT for internal Gecko use!
+#  error This code is NOT for internal Gecko use!
 #endif  // defined(MOZILLA_INTERNAL_API)
 
 #include "AccessibleHandlerControl.h"
@@ -76,12 +76,13 @@ TextChange::GetNew(long aIA2UniqueId, NotNull<IA2TextSegment*> aOutNewSegment) {
   return SegCopy(*aOutNewSegment, mText);
 }
 
-/* static */ BSTR TextChange::BSTRCopy(const BSTR& aIn) {
+/* static */
+BSTR TextChange::BSTRCopy(const BSTR& aIn) {
   return ::SysAllocStringLen(aIn, ::SysStringLen(aIn));
 }
 
-/* static */ HRESULT TextChange::SegCopy(IA2TextSegment& aDest,
-                                         const IA2TextSegment& aSrc) {
+/* static */
+HRESULT TextChange::SegCopy(IA2TextSegment& aDest, const IA2TextSegment& aSrc) {
   aDest = {BSTRCopy(aSrc.text), aSrc.start, aSrc.end};
   if (aSrc.text && !aDest.text) {
     return E_OUTOFMEMORY;

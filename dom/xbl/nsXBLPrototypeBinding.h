@@ -17,14 +17,12 @@
 #include "nsXBLProtoImpl.h"
 #include "nsXBLProtoImplMethod.h"
 #include "nsXBLPrototypeHandler.h"
-#include "nsXBLPrototypeResources.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/WeakPtr.h"
-#include "mozilla/StyleSheet.h"
 
 class nsAtom;
 class nsIContent;
-class nsIDocument;
+
 class nsXBLAttributeEntry;
 class nsXBLBinding;
 class nsXBLProtoImplField;
@@ -56,14 +54,6 @@ class nsXBLPrototypeBinding final
 
   nsresult BindingAttached(nsIContent* aBoundElement);
   nsresult BindingDetached(nsIContent* aBoundElement);
-
-  // aBoundElement is passed in here because we need to get owner document
-  // and PresContext in nsXBLResourceLoader::LoadResources().
-  bool LoadResources(nsIContent* aBoundElement);
-  nsresult AddResource(nsAtom* aResourceType, const nsAString& aSrc);
-
-  bool InheritsStyle() const { return mInheritStyle; }
-  void SetInheritsStyle(bool aInheritStyle) { mInheritStyle = aInheritStyle; }
 
   nsXBLPrototypeHandler* GetPrototypeHandlers() { return mPrototypeHandler; }
   void SetPrototypeHandlers(nsXBLPrototypeHandler* aHandler) {
@@ -122,41 +112,10 @@ class nsXBLPrototypeBinding final
   void SetInitialAttributes(mozilla::dom::Element* aBoundElement,
                             nsIContent* aAnonymousContent);
 
-  void AppendStyleSheet(mozilla::StyleSheet* aSheet);
-  void RemoveStyleSheet(mozilla::StyleSheet* aSheet);
-  void InsertStyleSheetAt(size_t aIndex, mozilla::StyleSheet* aSheet);
-  mozilla::StyleSheet* StyleSheetAt(size_t aIndex) const;
-  size_t SheetCount() const;
-  bool HasStyleSheets() const;
-  void AppendStyleSheetsTo(nsTArray<mozilla::StyleSheet*>& aResult) const;
-
-  const RawServoAuthorStyles* GetServoStyles() const {
-    return mResources ? mResources->GetServoStyles() : nullptr;
-  }
-
-  void SyncServoStyles() {
-    MOZ_ASSERT(mResources);
-    mResources->SyncServoStyles();
-  }
-
-  RawServoAuthorStyles* GetServoStyles() {
-    return mResources
-               ? const_cast<RawServoAuthorStyles*>(mResources->GetServoStyles())
-               : nullptr;
-  }
-
-  mozilla::ServoStyleRuleMap* GetServoStyleRuleMap() {
-    return mResources ? mResources->GetServoStyleRuleMap() : nullptr;
-  }
-
-  nsresult FlushSkinSheets();
-
   nsAtom* GetBaseTag(int32_t* aNamespaceID);
   void SetBaseTag(int32_t aNamespaceID, nsAtom* aTag);
 
   bool ImplementsInterface(REFNSIID aIID) const;
-
-  nsresult AddResourceListener(nsIContent* aBoundElement);
 
   void Initialize();
 
@@ -173,7 +132,7 @@ class nsXBLPrototypeBinding final
 
  private:
   nsresult Read(nsIObjectInputStream* aStream, nsXBLDocumentInfo* aDocInfo,
-                nsIDocument* aDocument, uint8_t aFlags);
+                mozilla::dom::Document* aDocument, uint8_t aFlags);
 
   /**
    * Read a new binding from the stream aStream into the xbl document aDocument.
@@ -181,15 +140,14 @@ class nsXBLPrototypeBinding final
    * aFlags can contain XBLBinding_Serialize_InheritStyle to indicate that
    * mInheritStyle flag should be set, and XBLBinding_Serialize_IsFirstBinding
    * to indicate the first binding in a document.
-   * XBLBinding_Serialize_ChromeOnlyContent indicates that
-   * nsXBLPrototypeBinding::mChromeOnlyContent should be true.
    * XBLBinding_Serialize_BindToUntrustedContent indicates that
    * nsXBLPrototypeBinding::mBindToUntrustedContent should be true.
    */
  public:
   static nsresult ReadNewBinding(nsIObjectInputStream* aStream,
                                  nsXBLDocumentInfo* aDocInfo,
-                                 nsIDocument* aDocument, uint8_t aFlags);
+                                 mozilla::dom::Document* aDocument,
+                                 uint8_t aFlags);
 
   /**
    * Write this binding to the stream.
@@ -202,8 +160,8 @@ class nsXBLPrototypeBinding final
    * the child will be inserted into.
    */
   nsresult ReadContentNode(nsIObjectInputStream* aStream,
-                           nsIDocument* aDocument, nsNodeInfoManager* aNim,
-                           nsIContent** aChild);
+                           mozilla::dom::Document* aDocument,
+                           nsNodeInfoManager* aNim, nsIContent** aChild);
 
   /**
    * Write the content node aNode to aStream.
@@ -273,7 +231,6 @@ class nsXBLPrototypeBinding final
                                         nsIContent* aCopyRoot,
                                         mozilla::dom::Element* aTemplChild);
 
-  bool ChromeOnlyContent() const { return mChromeOnlyContent; }
   bool SimpleScopeChain() const { return mSimpleScopeChain; }
   bool BindToUntrustedContent() const { return mBindToUntrustedContent; }
 
@@ -289,9 +246,6 @@ class nsXBLPrototypeBinding final
                            mozilla::dom::Element* aContent);
   void ConstructAttributeTable(mozilla::dom::Element* aElement);
   void CreateKeyHandlers();
-
- private:
-  void EnsureResources();
 
   // MEMBER VARIABLES
  protected:
@@ -313,17 +267,14 @@ class nsXBLPrototypeBinding final
 
   // Weak.  The docinfo will own our base binding.
   mozilla::WeakPtr<nsXBLPrototypeBinding> mBaseBinding;
-  bool mInheritStyle;
   bool mCheckedBaseProto;
   bool mKeyHandlersRegistered;
-  bool mChromeOnlyContent;
+  // FIXME(emilio): This is dead code now.
   bool mBindToUntrustedContent;
   // True if constructors, handlers, etc for this binding would skip the scope
   // chain for parent elements and go directly to the document.
+  // FIXME(emilio): This is dead code now.
   bool mSimpleScopeChain;
-
-  nsAutoPtr<nsXBLPrototypeResources>
-      mResources;  // If we have any resources, this will be non-null.
 
   nsXBLDocumentInfo* mXBLDocInfoWeak;  // A pointer back to our doc info.  Weak,
                                        // since it owns us.
@@ -361,10 +312,6 @@ class nsXBLPrototypeBinding final
   };
   nsInterfaceHashtable<IIDHashKey, nsIContent>
       mInterfaceTable;  // A table of cached interfaces that we support.
-
-  int32_t mBaseNameSpaceID;  // If we extend a tagname/namespace, then that
-                             // information will
-  RefPtr<nsAtom> mBaseTag;   // be stored in here.
 
   nsCOMArray<nsXBLKeyEventHandler> mKeyHandlers;
 };

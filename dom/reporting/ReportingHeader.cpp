@@ -25,6 +25,9 @@
 #include "nsNetUtil.h"
 #include "nsXULAppAPI.h"
 
+#define REPORTING_PURGE_ALL "reporting:purge-all"
+#define REPORTING_PURGE_HOST "reporting:purge-host"
+
 namespace mozilla {
 namespace dom {
 
@@ -34,7 +37,8 @@ StaticRefPtr<ReportingHeader> gReporting;
 
 }  // namespace
 
-/* static */ void ReportingHeader::Initialize() {
+/* static */
+void ReportingHeader::Initialize() {
   MOZ_ASSERT(!gReporting);
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -51,14 +55,15 @@ StaticRefPtr<ReportingHeader> gReporting;
 
   obs->AddObserver(service, NS_HTTP_ON_EXAMINE_RESPONSE_TOPIC, false);
   obs->AddObserver(service, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
-  obs->AddObserver(service, "browser:purge-domain-data", false);
   obs->AddObserver(service, "clear-origin-attributes-data", false);
-  obs->AddObserver(service, "extension:purge-localStorage", false);
+  obs->AddObserver(service, REPORTING_PURGE_HOST, false);
+  obs->AddObserver(service, REPORTING_PURGE_ALL, false);
 
   gReporting = service;
 }
 
-/* static */ void ReportingHeader::Shutdown() {
+/* static */
+void ReportingHeader::Shutdown() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!gReporting) {
@@ -80,9 +85,9 @@ StaticRefPtr<ReportingHeader> gReporting;
 
   obs->RemoveObserver(service, NS_HTTP_ON_EXAMINE_RESPONSE_TOPIC);
   obs->RemoveObserver(service, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
-  obs->RemoveObserver(service, "browser:purge-domain-data");
   obs->RemoveObserver(service, "clear-origin-attributes-data");
-  obs->RemoveObserver(service, "extension:purge-localStorage");
+  obs->RemoveObserver(service, REPORTING_PURGE_HOST);
+  obs->RemoveObserver(service, REPORTING_PURGE_ALL);
 }
 
 ReportingHeader::ReportingHeader() = default;
@@ -111,7 +116,7 @@ ReportingHeader::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
-  if (!strcmp(aTopic, "browser:purge-domain-data")) {
+  if (!strcmp(aTopic, REPORTING_PURGE_HOST)) {
     RemoveOriginsFromHost(nsDependentString(aData));
     return NS_OK;
   }
@@ -127,7 +132,7 @@ ReportingHeader::Observe(nsISupports* aSubject, const char* aTopic,
     return NS_OK;
   }
 
-  if (!strcmp(aTopic, "extension:purge-localStorage")) {
+  if (!strcmp(aTopic, REPORTING_PURGE_ALL)) {
     RemoveOrigins();
     return NS_OK;
   }
@@ -368,37 +373,45 @@ bool ReportingHeader::IsSecureURI(nsIURI* aURI) const {
   return prioriAuthenticated;
 }
 
-/* static */ void ReportingHeader::LogToConsoleInvalidJSON(
-    nsIHttpChannel* aChannel, nsIURI* aURI) {
+/* static */
+void ReportingHeader::LogToConsoleInvalidJSON(nsIHttpChannel* aChannel,
+                                              nsIURI* aURI) {
   nsTArray<nsString> params;
   LogToConsoleInternal(aChannel, aURI, "ReportingHeaderInvalidJSON", params);
 }
 
-/* static */ void ReportingHeader::LogToConsoleDuplicateGroup(
-    nsIHttpChannel* aChannel, nsIURI* aURI, const nsAString& aName) {
+/* static */
+void ReportingHeader::LogToConsoleDuplicateGroup(nsIHttpChannel* aChannel,
+                                                 nsIURI* aURI,
+                                                 const nsAString& aName) {
   nsTArray<nsString> params;
   params.AppendElement(aName);
 
   LogToConsoleInternal(aChannel, aURI, "ReportingHeaderDuplicateGroup", params);
 }
 
-/* static */ void ReportingHeader::LogToConsoleInvalidNameItem(
-    nsIHttpChannel* aChannel, nsIURI* aURI) {
+/* static */
+void ReportingHeader::LogToConsoleInvalidNameItem(nsIHttpChannel* aChannel,
+                                                  nsIURI* aURI) {
   nsTArray<nsString> params;
   LogToConsoleInternal(aChannel, aURI, "ReportingHeaderInvalidNameItem",
                        params);
 }
 
-/* static */ void ReportingHeader::LogToConsoleIncompleteItem(
-    nsIHttpChannel* aChannel, nsIURI* aURI, const nsAString& aName) {
+/* static */
+void ReportingHeader::LogToConsoleIncompleteItem(nsIHttpChannel* aChannel,
+                                                 nsIURI* aURI,
+                                                 const nsAString& aName) {
   nsTArray<nsString> params;
   params.AppendElement(aName);
 
   LogToConsoleInternal(aChannel, aURI, "ReportingHeaderInvalidItem", params);
 }
 
-/* static */ void ReportingHeader::LogToConsoleIncompleteEndpoint(
-    nsIHttpChannel* aChannel, nsIURI* aURI, const nsAString& aName) {
+/* static */
+void ReportingHeader::LogToConsoleIncompleteEndpoint(nsIHttpChannel* aChannel,
+                                                     nsIURI* aURI,
+                                                     const nsAString& aName) {
   nsTArray<nsString> params;
   params.AppendElement(aName);
 
@@ -406,9 +419,11 @@ bool ReportingHeader::IsSecureURI(nsIURI* aURI) const {
                        params);
 }
 
-/* static */ void ReportingHeader::LogToConsoleInvalidURLEndpoint(
-    nsIHttpChannel* aChannel, nsIURI* aURI, const nsAString& aName,
-    const nsAString& aURL) {
+/* static */
+void ReportingHeader::LogToConsoleInvalidURLEndpoint(nsIHttpChannel* aChannel,
+                                                     nsIURI* aURI,
+                                                     const nsAString& aName,
+                                                     const nsAString& aURL) {
   nsTArray<nsString> params;
   params.AppendElement(aURL);
   params.AppendElement(aName);
@@ -417,9 +432,10 @@ bool ReportingHeader::IsSecureURI(nsIURI* aURI) const {
                        params);
 }
 
-/* static */ void ReportingHeader::LogToConsoleInternal(
-    nsIHttpChannel* aChannel, nsIURI* aURI, const char* aMsg,
-    const nsTArray<nsString>& aParams) {
+/* static */
+void ReportingHeader::LogToConsoleInternal(nsIHttpChannel* aChannel,
+                                           nsIURI* aURI, const char* aMsg,
+                                           const nsTArray<nsString>& aParams) {
   MOZ_ASSERT(aURI);
 
   if (!aChannel) {
@@ -459,7 +475,8 @@ bool ReportingHeader::IsSecureURI(nsIURI* aURI) const {
   Unused << NS_WARN_IF(NS_FAILED(rv));
 }
 
-/* static */ void ReportingHeader::GetEndpointForReport(
+/* static */
+void ReportingHeader::GetEndpointForReport(
     const nsAString& aGroupName,
     const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
     nsACString& aEndpointURI) {
@@ -496,7 +513,8 @@ bool ReportingHeader::IsSecureURI(nsIURI* aURI) const {
   }
 }
 
-/* static */ void ReportingHeader::GetEndpointForReportInternal(
+/* static */
+void ReportingHeader::GetEndpointForReportInternal(
     const ReportingHeader::Group& aGroup, nsACString& aEndpointURI) {
   TimeDuration diff = TimeStamp::Now() - aGroup.mCreationTime;
   if (diff.ToSeconds() > aGroup.mTTL) {
@@ -554,7 +572,8 @@ bool ReportingHeader::IsSecureURI(nsIURI* aURI) const {
   }
 }
 
-/* static */ void ReportingHeader::RemoveEndpoint(
+/* static */
+void ReportingHeader::RemoveEndpoint(
     const nsAString& aGroupName, const nsACString& aEndpointURL,
     const mozilla::ipc::PrincipalInfo& aPrincipalInfo) {
   if (!gReporting) {
@@ -695,8 +714,8 @@ void ReportingHeader::RemoveOriginsForTTL() {
   }
 }
 
-/* static */ bool ReportingHeader::HasReportingHeaderForOrigin(
-    const nsACString& aOrigin) {
+/* static */
+bool ReportingHeader::HasReportingHeaderForOrigin(const nsACString& aOrigin) {
   if (!gReporting) {
     return false;
   }

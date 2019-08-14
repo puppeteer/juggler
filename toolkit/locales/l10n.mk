@@ -78,7 +78,6 @@ STAGEDIST = $(ABS_DIST)/l10n-stage/$(MOZ_PKG_DIR)
 endif
 UNPACKED_INSTALLER = $(ABS_DIST)/unpacked-installer
 
-include $(MOZILLA_DIR)/toolkit/mozapps/installer/signing.mk
 include $(MOZILLA_DIR)/toolkit/mozapps/installer/packager.mk
 
 PACKAGE_BASE_DIR = $(ABS_DIST)/l10n-stage
@@ -183,14 +182,22 @@ L10N_CO = $(error You need to use either hg or git)
 endif
 endif
 
-
 merge-%: IS_LANGUAGE_REPACK=1
 merge-%: AB_CD=$*
 merge-%:
 # For nightly builds, we automatically check out missing localizations
-# from l10n-central.
+# from l10n-central.  We never automatically check out in automation:
+# automation builds check out revisions that have been signed-off by
+# l10n drivers prior to use.
+ifdef MOZ_AUTOMATION
+	if  ! test -d $(L10NBASEDIR)/$(AB_CD) ; then \
+		echo 'Error: Automation requires l10n repositories to be checked out: $(L10NBASEDIR)/$(AB_CD)' ; \
+		exit 1 ; \
+	fi
+endif
 ifdef NIGHTLY_BUILD
-	@if  ! test -d $(L10NBASEDIR)/$(AB_CD) ; then \
+	if  ! test -d $(L10NBASEDIR)/$(AB_CD) ; then \
+		echo 'Checking out $(L10NBASEDIR)/$(AB_CD)' ; \
 		$(NSINSTALL) -D $(L10NBASEDIR) ; \
 		$(L10N_CO) ; \
 	fi
@@ -211,22 +218,17 @@ package-langpack-%: XPI_NAME=locale-$*
 package-langpack-%: AB_CD=$*
 package-langpack-%:
 	$(NSINSTALL) -D $(DIST)/$(PKG_LANGPACK_PATH)
-	$(call py_action,langpack_manifest,--locales $(AB_CD) --min-app-ver $(MOZ_APP_VERSION) --max-app-ver $(MOZ_APP_MAXVERSION) --app-name "$(MOZ_APP_DISPLAYNAME)" --l10n-basedir "$(L10NBASEDIR)" --defines $(LANGPACK_DEFINES) --langpack-eid "$(MOZ_LANGPACK_EID)" --input $(DIST)/xpi-stage/locale-$(AB_CD))
+	$(call py_action,langpack_manifest,--locales $(AB_CD) --min-app-ver $(MOZ_APP_VERSION) --max-app-ver $(MOZ_APP_MAXVERSION) --app-name '$(MOZ_APP_DISPLAYNAME)' --l10n-basedir '$(L10NBASEDIR)' --defines $(LANGPACK_DEFINES) --langpack-eid '$(MOZ_LANGPACK_EID)' --input $(DIST)/xpi-stage/locale-$(AB_CD))
 	$(call py_action,zip,-C $(DIST)/xpi-stage/locale-$(AB_CD) -x **/*.manifest -x **/*.js -x **/*.ini $(LANGPACK_FILE) $(PKG_ZIP_DIRS) manifest.json)
 
 # This variable is to allow the wget-en-US target to know which ftp server to download from
 ifndef EN_US_BINARY_URL 
 EN_US_BINARY_URL = $(error You must set EN_US_BINARY_URL)
 endif
-# In taskcluster the installer comes from another location
-ifndef EN_US_INSTALLER_BINARY_URL
-EN_US_INSTALLER_BINARY_URL = $(EN_US_BINARY_URL)
-endif
 
 # Allow the overriding of PACKAGE format so we can get an EN_US build with a different
 # PACKAGE format than we are creating l10n packages with.
 EN_US_PACKAGE_NAME ?= $(PACKAGE)
-EN_US_PKG_INST_BASENAME ?= $(PKG_INST_BASENAME)
 
 # This make target allows us to wget the latest en-US binary from a specified website
 # The make installers-% target needs the en-US binary in dist/
@@ -239,11 +241,3 @@ endif
 	(cd $(ABS_DIST)/$(PKG_PATH) && \
         $(WGET) --no-cache -nv --no-iri -N -O $(PACKAGE) '$(EN_US_BINARY_URL)/$(EN_US_PACKAGE_NAME)')
 	@echo 'Downloaded $(EN_US_BINARY_URL)/$(EN_US_PACKAGE_NAME) to $(ABS_DIST)/$(PKG_PATH)/$(PACKAGE)'
-ifdef RETRIEVE_WINDOWS_INSTALLER
-ifeq ($(OS_ARCH), WINNT)
-	$(NSINSTALL) -D $(ABS_DIST)/$(PKG_INST_PATH)
-	(cd $(ABS_DIST)/$(PKG_INST_PATH) && \
-        $(WGET) --no-cache -nv --no-iri -N -O $(PKG_INST_BASENAME).exe '$(EN_US_INSTALLER_BINARY_URL)/$(PKG_PATH)$(EN_US_PKG_INST_BASENAME).exe')
-	@echo 'Downloaded $(EN_US_INSTALLER_BINARY_URL)/$(PKG_PATH)$(EN_US_PKG_INST_BASENAME).exe to $(ABS_DIST)/$(PKG_INST_PATH)$(PKG_INST_BASENAME).exe'
-endif
-endif

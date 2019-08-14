@@ -30,24 +30,24 @@
 #include <stdlib.h>
 
 #if defined(PROCESSMODEL_WINAPI)
-#include "nsString.h"
-#include "nsLiteralString.h"
-#include "nsReadableUtils.h"
-#include "mozilla/UniquePtrExtensions.h"
+#  include "nsString.h"
+#  include "nsLiteralString.h"
+#  include "nsReadableUtils.h"
+#  include "mozilla/UniquePtrExtensions.h"
 #else
-#ifdef XP_MACOSX
-#include <crt_externs.h>
-#include <spawn.h>
-#endif
-#ifdef XP_UNIX
-#ifndef XP_MACOSX
-#include "base/process_util.h"
-#endif
-#include <sys/wait.h>
-#include <sys/errno.h>
-#endif
-#include <sys/types.h>
-#include <signal.h>
+#  ifdef XP_MACOSX
+#    include <crt_externs.h>
+#    include <spawn.h>
+#  endif
+#  ifdef XP_UNIX
+#    ifndef XP_MACOSX
+#      include "base/process_util.h"
+#    endif
+#    include <sys/wait.h>
+#    include <sys/errno.h>
+#  endif
+#  include <sys/types.h>
+#  include <signal.h>
 #endif
 
 using namespace mozilla;
@@ -257,7 +257,7 @@ void nsProcess::Monitor(void* aArg) {
     }
   }
 #else
-#ifdef XP_UNIX
+#  ifdef XP_UNIX
   int exitCode = -1;
   int status = 0;
   pid_t result;
@@ -271,19 +271,19 @@ void nsProcess::Monitor(void* aArg) {
       exitCode = 256;  // match NSPR's signal exit status
     }
   }
-#else
+#  else
   int32_t exitCode = -1;
   if (PR_WaitProcess(process->mProcess, &exitCode) != PR_SUCCESS) {
     exitCode = -1;
   }
-#endif
+#  endif
 
   // Lock in case Kill or GetExitCode are called during this
   {
     MutexAutoLock lock(process->mLock);
-#if !defined(XP_UNIX)
+#  if !defined(XP_UNIX)
     process->mProcess = nullptr;
-#endif
+#  endif
     process->mExitValue = exitCode;
     if (process->mShutdown) {
       return;

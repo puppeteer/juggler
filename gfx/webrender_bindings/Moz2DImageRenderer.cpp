@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gfxPrefs.h"
+#include "mozilla/StaticPrefs.h"
 #include "gfxUtils.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Range.h"
@@ -20,11 +20,11 @@
 #include <unordered_map>
 
 #ifdef XP_MACOSX
-#include "mozilla/gfx/UnscaledFontMac.h"
+#  include "mozilla/gfx/UnscaledFontMac.h"
 #elif defined(XP_WIN)
-#include "mozilla/gfx/UnscaledFontDWrite.h"
+#  include "mozilla/gfx/UnscaledFontDWrite.h"
 #else
-#include "mozilla/gfx/UnscaledFontFreeType.h"
+#  include "mozilla/gfx/UnscaledFontFreeType.h"
 #endif
 
 namespace std {
@@ -311,8 +311,8 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
                                 const mozilla::wr::TileOffset* aTileOffset,
                                 const mozilla::wr::LayoutIntRect* aDirtyRect,
                                 Range<uint8_t> aOutput) {
-  AUTO_PROFILER_TRACING("WebRender", "RasterizeSingleBlob");
-  MOZ_ASSERT(aSize.width > 0 && aSize.height > 0);
+  AUTO_PROFILER_TRACING("WebRender", "RasterizeSingleBlob", GRAPHICS);
+  MOZ_RELEASE_ASSERT(aSize.width > 0 && aSize.height > 0);
   if (aSize.width <= 0 || aSize.height <= 0) {
     return false;
   }
@@ -408,6 +408,9 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   while (reader.pos < reader.len) {
     size_t end = reader.ReadSize();
     size_t extra_end = reader.ReadSize();
+    MOZ_RELEASE_ASSERT(extra_end >= end);
+    MOZ_RELEASE_ASSERT(extra_end < aBlob.length());
+
     auto combinedBounds = absBounds.Intersect(reader.ReadBounds());
     if (combinedBounds.IsEmpty()) {
       offset = extra_end;
@@ -415,9 +418,6 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
     }
 
     layers::WebRenderTranslator translator(dt);
-
-    MOZ_RELEASE_ASSERT(extra_end >= end);
-    MOZ_RELEASE_ASSERT(extra_end < aBlob.length());
     Reader fontReader(aBlob.begin().get() + end, extra_end - end);
     size_t count = fontReader.ReadSize();
     for (size_t i = 0; i < count; i++) {
@@ -437,7 +437,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
     offset = extra_end;
   }
 
-  if (gfxPrefs::WebRenderBlobPaintFlashing()) {
+  if (StaticPrefs::gfx_webrender_blob_paint_flashing()) {
     dt->SetTransform(gfx::Matrix());
     float r = float(rand()) / RAND_MAX;
     float g = float(rand()) / RAND_MAX;

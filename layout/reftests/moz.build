@@ -208,7 +208,7 @@ with Files('mathml/**'):
 with Files('native-theme/**'):
     BUG_COMPONENT = ('Core', 'Layout')
 with Files('object/**'):
-    BUG_COMPONENT = ('Core', 'DOM')
+    BUG_COMPONENT = ('Core', 'DOM: Core & HTML')
 with Files('ogg-video/**'):
     BUG_COMPONENT = ('Core', 'Audio/Video')
 with Files('outline/**'):
@@ -297,6 +297,8 @@ with Files('w3c-css/submitted/multicol3/**'):
     BUG_COMPONENT = ('Core', 'Layout')
 with Files('w3c-css/submitted/ruby/**'):
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
+with Files('w3c-css/submitted/sizing/**'):
+    BUG_COMPONENT = ('Core', 'Layout')
 with Files('w3c-css/submitted/text-decor-3/**'):
     BUG_COMPONENT = ('Core', 'Layout: Block and Inline')
 with Files('w3c-css/submitted/ui3/**'):
@@ -306,7 +308,7 @@ with Files('w3c-css/submitted/values3/**'):
 with Files('w3c-css/submitted/variables/**'):
     BUG_COMPONENT = ('Core', 'CSS Parsing and Computation')
 with Files('webcomponents/**'):
-    BUG_COMPONENT = ('Core', 'DOM')
+    BUG_COMPONENT = ('Core', 'DOM: Core & HTML')
 with Files('webm-video/**'):
     BUG_COMPONENT = ('Core', 'Audio/Video')
 with Files('writing-mode/**'):

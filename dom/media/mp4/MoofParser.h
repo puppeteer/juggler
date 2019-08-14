@@ -6,6 +6,7 @@
 #define MOOF_PARSER_H_
 
 #include "mozilla/ResultExtensions.h"
+#include "mozilla/Variant.h"
 #include "Atom.h"
 #include "AtomType.h"
 #include "SinfParser.h"
@@ -21,6 +22,16 @@ class Box;
 class BoxContext;
 class BoxReader;
 class Moof;
+
+// Used to track the CTS end time of the last sample of a track
+// in the preceeding Moof, so that we can smooth tracks' timestamps
+// across Moofs.
+struct TrackEndCts {
+  TrackEndCts(uint32_t aTrackId, Microseconds aCtsEndTime)
+      : mTrackId(aTrackId), mCtsEndTime(aCtsEndTime) {}
+  uint32_t mTrackId;
+  Microseconds mCtsEndTime;
+};
 
 class Mvhd : public Atom {
  public:
@@ -185,6 +196,10 @@ class Sbgp final : public Atom  // SampleToGroup box.
   Result<Ok, nsresult> Parse(Box& aBox);
 };
 
+// Stores information form CencSampleEncryptionInformationGroupEntry (seig).
+// Cenc here refers to the common encryption standard, rather than the specific
+// cenc scheme from that standard. This structure is used for all encryption
+// schemes. I.e. it is used for both cenc and cbcs, not just cenc.
 struct CencSampleEncryptionInfoEntry final {
  public:
   CencSampleEncryptionInfoEntry() {}
@@ -194,6 +209,9 @@ struct CencSampleEncryptionInfoEntry final {
   bool mIsEncrypted = false;
   uint8_t mIVSize = 0;
   nsTArray<uint8_t> mKeyId;
+  uint8_t mCryptByteBlock = 0;
+  uint8_t mSkipByteBlock = 0;
+  nsTArray<uint8_t> mConsantIV;
 };
 
 class Sgpd final : public Atom  // SampleGroupDescription box.
@@ -208,20 +226,26 @@ class Sgpd final : public Atom  // SampleGroupDescription box.
   Result<Ok, nsresult> Parse(Box& aBox);
 };
 
-class AuxInfo {
- public:
-  AuxInfo(int64_t aMoofOffset, Saiz& aSaiz, Saio& aSaio);
-
- private:
-  int64_t mMoofOffset;
-  Saiz& mSaiz;
-  Saio& mSaio;
+// Audio/video entries from the sample description box (stsd). We only need to
+// store if these are encrypted, so do not need a specialized class for
+// different audio and video data. Currently most of the parsing of these
+// entries is by the mp4parse-rust, but moof pasrser needs to know which of
+// these are encrypted when parsing the track fragment header (tfhd).
+struct SampleDescriptionEntry {
+  bool mIsEncryptedEntry = false;
 };
+
+// Used to indicate in variants if all tracks should be parsed.
+struct ParseAllTracks {};
+
+typedef Variant<ParseAllTracks, uint32_t> TrackParseMode;
 
 class Moof final : public Atom {
  public:
-  Moof(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts,
-       Sinf& aSinf, uint64_t* aDecoderTime, bool aIsAudio);
+  Moof(Box& aBox, const TrackParseMode& aTrackParseMode, Trex& aTrex,
+       Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, Sinf& aSinf,
+       uint64_t* aDecodeTime, bool aIsAudio,
+       nsTArray<TrackEndCts>& aTracksEndCts);
   bool GetAuxInfo(AtomType aType, FallibleTArray<MediaByteRange>* aByteRanges);
   void FixRounding(const Moof& aMoof);
 
@@ -234,21 +258,27 @@ class Moof final : public Atom {
       mFragmentSampleEncryptionInfoEntries;
   FallibleTArray<SampleToGroupEntry> mFragmentSampleToGroupEntries;
 
+  Tfhd mTfhd;
   FallibleTArray<Saiz> mSaizs;
   FallibleTArray<Saio> mSaios;
   nsTArray<nsTArray<uint8_t>> mPsshes;
 
  private:
   // aDecodeTime is updated to the end of the parsed TRAF on return.
-  void ParseTraf(Box& aBox, Trex& aTrex, Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts,
-                 Sinf& aSinf, uint64_t* aDecodeTime, bool aIsAudio);
+  void ParseTraf(Box& aBox, const TrackParseMode& aTrackParseMode, Trex& aTrex,
+                 Mvhd& aMvhd, Mdhd& aMdhd, Edts& aEdts, Sinf& aSinf,
+                 uint64_t* aDecodeTime, bool aIsAudio);
   // aDecodeTime is updated to the end of the parsed TRUN on return.
-  Result<Ok, nsresult> ParseTrun(Box& aBox, Tfhd& aTfhd, Mvhd& aMvhd,
-                                 Mdhd& aMdhd, Edts& aEdts,
-                                 uint64_t* aDecodeTime, bool aIsAudio);
-  void ParseSaiz(Box& aBox);
-  void ParseSaio(Box& aBox);
-  bool ProcessCenc();
+  Result<Ok, nsresult> ParseTrun(Box& aBox, Mvhd& aMvhd, Mdhd& aMdhd,
+                                 Edts& aEdts, uint64_t* aDecodeTime,
+                                 bool aIsAudio);
+  // Process the sample auxiliary information used by common encryption.
+  // aScheme is used to select the appropriate auxiliary information and should
+  // be set based on the encryption scheme used by the track being processed.
+  // Note, the term cenc here refers to the standard, not the specific scheme
+  // from that standard. I.e. this function is used to handle up auxiliary
+  // information from the cenc and cbcs schemes.
+  bool ProcessCencAuxInfo(AtomType aScheme);
   uint64_t mMaxRoundingError;
 };
 
@@ -256,14 +286,19 @@ DDLoggedTypeDeclName(MoofParser);
 
 class MoofParser : public DecoderDoctorLifeLogger<MoofParser> {
  public:
-  MoofParser(ByteStream* aSource, uint32_t aTrackId, bool aIsAudio)
+  MoofParser(ByteStream* aSource, const TrackParseMode& aTrackParseMode,
+             bool aIsAudio)
       : mSource(aSource),
         mOffset(0),
-        mTrex(aTrackId),
+        mTrex(aTrackParseMode.is<uint32_t>() ? aTrackParseMode.as<uint32_t>()
+                                             : 0),
         mIsAudio(aIsAudio),
-        mLastDecodeTime(0) {
-    // Setting the mTrex.mTrackId to 0 is a nasty work around for calculating
-    // the composition range for MSE. We need an array of tracks.
+        mLastDecodeTime(0),
+        mTrackParseMode(aTrackParseMode) {
+    // Setting mIsMultitrackParser is a nasty work around for calculating
+    // the composition range for MSE that causes the parser to parse multiple
+    // tracks. Ideally we'd store an array of tracks with different metadata
+    // for each.
     DDLINKCHILD("source", aSource);
   }
   bool RebuildFragmentedIndex(const mozilla::MediaByteRangeSet& aByteRanges);
@@ -278,14 +313,13 @@ class MoofParser : public DecoderDoctorLifeLogger<MoofParser> {
   bool ReachedEnd();
   void ParseMoov(Box& aBox);
   void ParseTrak(Box& aBox);
-  void ParseMdia(Box& aBox, Tkhd& aTkhd);
+  void ParseMdia(Box& aBox);
   void ParseMvex(Box& aBox);
 
   void ParseMinf(Box& aBox);
   void ParseStbl(Box& aBox);
   void ParseStsd(Box& aBox);
   void ParseEncrypted(Box& aBox);
-  void ParseSinf(Box& aBox);
 
   bool BlockingReadNextMoof();
 
@@ -306,6 +340,7 @@ class MoofParser : public DecoderDoctorLifeLogger<MoofParser> {
   FallibleTArray<CencSampleEncryptionInfoEntry>
       mTrackSampleEncryptionInfoEntries;
   FallibleTArray<SampleToGroupEntry> mTrackSampleToGroupEntries;
+  FallibleTArray<SampleDescriptionEntry> mSampleDescriptions;
 
   nsTArray<Moof>& Moofs() { return mMoofs; }
 
@@ -313,8 +348,16 @@ class MoofParser : public DecoderDoctorLifeLogger<MoofParser> {
   void ScanForMetadata(mozilla::MediaByteRange& aMoov);
   nsTArray<Moof> mMoofs;
   nsTArray<MediaByteRange> mMediaRanges;
+  nsTArray<TrackEndCts> mTracksEndCts;
   bool mIsAudio;
   uint64_t mLastDecodeTime;
+  // Either a ParseAllTracks if in multitrack mode, or an integer representing
+  // the track_id for the track being parsed. If parsing a specific track, mTrex
+  // should have an id matching mTrackParseMode.as<uint32_t>(). In this case 0
+  // is a valid track id -- this is not allowed in the spec, but such mp4s
+  // appear in the wild. In the ParseAllTracks case, mTrex can have an arbitrary
+  // id based on the tracks being parsed.
+  const TrackParseMode mTrackParseMode;
 };
 }  // namespace mozilla
 

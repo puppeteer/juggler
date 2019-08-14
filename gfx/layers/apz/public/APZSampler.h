@@ -59,10 +59,12 @@ class APZSampler {
    */
   static void SetSamplerThread(const wr::WrWindowId& aWindowId);
   static void SampleForWebRender(const wr::WrWindowId& aWindowId,
-                                 wr::Transaction* aTxn);
+                                 wr::Transaction* aTxn,
+                                 const wr::DocumentId& aRenderRootId);
 
   void SetSampleTime(const TimeStamp& aSampleTime);
-  void SampleForWebRender(wr::TransactionWrapper& aTxn);
+  void SampleForWebRender(wr::TransactionWrapper& aTxn,
+                          wr::RenderRoot aRenderRoot);
 
   bool SampleAnimations(const LayerMetricsWrapper& aLayer,
                         const TimeStamp& aSampleTime);
@@ -87,7 +89,8 @@ class APZSampler {
   CSSRect GetCurrentAsyncLayoutViewport(const LayerMetricsWrapper& aLayer);
   ParentLayerPoint GetCurrentAsyncScrollOffset(
       const LayerMetricsWrapper& aLayer);
-  AsyncTransform GetCurrentAsyncTransform(const LayerMetricsWrapper& aLayer);
+  AsyncTransform GetCurrentAsyncTransform(const LayerMetricsWrapper& aLayer,
+                                          AsyncTransformComponents aComponents);
   AsyncTransform GetCurrentAsyncTransformForFixedAdjustment(
       const LayerMetricsWrapper& aLayer);
   AsyncTransformComponentMatrix GetOverscrollTransform(
@@ -97,6 +100,8 @@ class APZSampler {
 
   void MarkAsyncTransformAppliedToContent(const LayerMetricsWrapper& aLayer);
   bool HasUnusedAsyncTransform(const LayerMetricsWrapper& aLayer);
+
+  ScrollableLayerGuid GetGuid(const LayerMetricsWrapper& aLayer);
 
   /**
    * This can be used to assert that the current thread is the

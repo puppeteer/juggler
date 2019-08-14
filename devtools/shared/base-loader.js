@@ -12,15 +12,26 @@ this.EXPORTED_SYMBOLS = ["Loader", "resolveURI", "Module", "Require", "unload"];
 const { Constructor: CC, manager: Cm } = Components;
 const systemPrincipal = CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")();
 
-const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
-const { XPCOMUtils } = ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm", {});
-const { normalize, dirname } = ChromeUtils.import("resource://gre/modules/osfile/ospath_unix.jsm", {});
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+const { normalize, dirname } = ChromeUtils.import(
+  "resource://gre/modules/osfile/ospath_unix.jsm"
+);
 
-XPCOMUtils.defineLazyServiceGetter(this, "resProto",
-                                   "@mozilla.org/network/protocol;1?name=resource",
-                                   "nsIResProtocolHandler");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "resProto",
+  "@mozilla.org/network/protocol;1?name=resource",
+  "nsIResProtocolHandler"
+);
 
-ChromeUtils.defineModuleGetter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "NetUtil",
+  "resource://gre/modules/NetUtil.jsm"
+);
 
 const { defineLazyGetter } = XPCOMUtils;
 
@@ -48,50 +59,6 @@ function isRelative(id) {
   return id.startsWith(".");
 }
 
-function sourceURI(uri) {
-  return String(uri).split(" -> ").pop();
-}
-
-function isntLoaderFrame(frame) {
-  return frame.fileName !== __URI__ && !frame.fileName.endsWith("/browser-loader.js");
-}
-
-function parseURI(uri) {
-  return String(uri).split(" -> ").pop();
-}
-
-function parseStack(stack) {
-  const lines = String(stack).split("\n");
-  return lines.reduce(function(frames, line) {
-    if (line) {
-      const atIndex = line.indexOf("@");
-      const columnIndex = line.lastIndexOf(":");
-      const lineIndex = line.lastIndexOf(":", columnIndex - 1);
-      const fileName = parseURI(line.slice(atIndex + 1, lineIndex));
-      const lineNumber = parseInt(line.slice(lineIndex + 1, columnIndex), 10);
-      const columnNumber = parseInt(line.slice(columnIndex + 1), 10);
-      const name = line.slice(0, atIndex).split("(").shift();
-      frames.unshift({
-        fileName: fileName,
-        name: name,
-        lineNumber: lineNumber,
-        columnNumber: columnNumber,
-      });
-    }
-    return frames;
-  }, []);
-}
-
-function serializeStack(frames) {
-  return frames.reduce(function(stack, frame) {
-    return frame.name + "@" +
-           frame.fileName + ":" +
-           frame.lineNumber + ":" +
-           frame.columnNumber + "\n" +
-           stack;
-  }, "");
-}
-
 function readURI(uri) {
   const nsURI = NetUtil.newURI(uri);
   if (nsURI.scheme == "resource") {
@@ -102,8 +69,8 @@ function readURI(uri) {
 
   const stream = NetUtil.newChannel({
     uri: NetUtil.newURI(uri, "UTF-8"),
-    loadUsingSystemPrincipal: true}
-  ).open2();
+    loadUsingSystemPrincipal: true,
+  }).open();
   const count = stream.available();
   const data = NetUtil.readInputStreamToString(stream, count, {
     charset: "UTF-8",
@@ -118,7 +85,9 @@ function readURI(uri) {
 function join(base, ...paths) {
   // If this is an absolute URL, we need to normalize only the path portion,
   // or we wind up stripping too many slashes and producing invalid URLs.
-  const match = /^((?:resource|file|chrome)\:\/\/[^\/]*|jar:[^!]+!)(.*)/.exec(base);
+  const match = /^((?:resource|file|chrome)\:\/\/[^\/]*|jar:[^!]+!)(.*)/.exec(
+    base
+  );
   if (match) {
     return match[1] + normalize([match[2], ...paths].join("/"));
   }
@@ -144,8 +113,9 @@ function Sandbox(options) {
     wantComponents: false,
     sandboxName: options.name,
     sandboxPrototype: "prototype" in options ? options.prototype : {},
-    invisibleToDebugger: "invisibleToDebugger" in options ?
-                         options.invisibleToDebugger : false,
+    invisibleToDebugger:
+      "invisibleToDebugger" in options ? options.invisibleToDebugger : false,
+    freshCompartment: options.freshCompartment || false,
   };
 
   const sandbox = Cu.Sandbox(systemPrincipal, options);
@@ -212,7 +182,10 @@ function load(loader, module) {
       descriptors.define = define;
     }
     if ("DOMParser" in globals) {
-      descriptors.DOMParser = Object.getOwnPropertyDescriptor(globals, "DOMParser");
+      descriptors.DOMParser = Object.getOwnPropertyDescriptor(
+        globals,
+        "DOMParser"
+      );
     }
     Object.defineProperties(sandbox, descriptors);
   } else {
@@ -226,42 +199,27 @@ function load(loader, module) {
 
   const originalExports = module.exports;
   try {
-    Services.scriptloader.loadSubScript(module.uri, sandbox, "UTF-8");
+    Services.scriptloader.loadSubScript(module.uri, sandbox);
   } catch (error) {
-    let { message, fileName, lineNumber } = error;
-    const stack = error.stack || Error().stack;
-    const frames = parseStack(stack).filter(isntLoaderFrame);
-    let toString = String(error);
-    const file = sourceURI(fileName);
-
-    // Note that `String(error)` where error is from subscript loader does
-    // not puts `:` after `"Error"` unlike regular errors thrown by JS code.
-    // If there is a JS stack then this error has already been handled by an
-    // inner module load.
-    if (/^Error opening input stream/.test(String(error))) {
-      const caller = frames.slice(0).pop();
-      fileName = caller.fileName;
-      lineNumber = caller.lineNumber;
-      message = "Module `" + module.id + "` is not found at " + module.uri;
-      toString = message;
-    } else if (frames[frames.length - 1].fileName !== file) {
-      // Workaround for a Bug 910653. Errors thrown by subscript loader
-      // do not include `stack` field and above created error won't have
-      // fileName or lineNumber of the module being loaded, so we ensure
-      // it does.
-      frames.push({ fileName: file, lineNumber: lineNumber, name: "" });
+    // loadSubScript sometime throws string errors, which includes no stack.
+    // At least provide the current stack by re-throwing a real Error object.
+    if (typeof error == "string") {
+      if (
+        error.startsWith("Error creating URI") ||
+        error.startsWith("Error opening input stream (invalid filename?)")
+      ) {
+        throw new Error(
+          `Module \`${module.id}\` is not found at ${module.uri}`
+        );
+      }
+      throw new Error(
+        `Error while loading module \`${module.id}\` at ${module.uri}:` +
+          "\n" +
+          error
+      );
     }
-
-    const prototype = typeof (error) === "object" ? error.constructor.prototype :
-                    Error.prototype;
-
-    throw Object.create(prototype, {
-      message: { value: message, writable: true, configurable: true },
-      fileName: { value: fileName, writable: true, configurable: true },
-      lineNumber: { value: lineNumber, writable: true, configurable: true },
-      stack: { value: serializeStack(frames), writable: true, configurable: true },
-      toString: { value: () => toString, writable: true, configurable: true },
-    });
+    // Otherwise just re-throw everything else which should have a stack
+    throw error;
   }
 
   // Only freeze the exports object if we created it ourselves. Modules
@@ -311,8 +269,8 @@ function resolve(id, base) {
 function compileMapping(paths) {
   // Make mapping array that is sorted from longest path to shortest path.
   const mapping = Object.keys(paths)
-                      .sort((a, b) => b.length - a.length)
-                      .map(path => [path, paths[path]]);
+    .sort((a, b) => b.length - a.length)
+    .map(path => [path, paths[path]]);
 
   const PATTERN = /([.\\?+*(){}[\]^$])/g;
   const escapeMeta = str => str.replace(PATTERN, "\\$1");
@@ -391,7 +349,7 @@ function lazyRequire(obj, moduleId, ...args) {
 
   for (let props of args) {
     if (typeof props !== "object") {
-      props = {[props]: props};
+      props = { [props]: props };
     }
 
     for (const [fromName, toName] of Object.entries(props)) {
@@ -420,15 +378,16 @@ function lazyRequireModule(obj, moduleId, prop = moduleId) {
 // of `require` that is allowed to load only a modules that are associated
 // with it during link time.
 function Require(loader, requirer) {
-  const {
-    modules, mapping, mappingCache, requireHook,
-  } = loader;
+  const { modules, mapping, mappingCache, requireHook } = loader;
 
   function require(id) {
     if (!id) {
       // Throw if `id` is not passed.
-      throw Error("You must provide a module name when calling require() from "
-                  + requirer.id, requirer.uri);
+      throw Error(
+        "You must provide a module name when calling require() from " +
+          requirer.id,
+        requirer.uri
+      );
     }
 
     if (requireHook) {
@@ -497,8 +456,11 @@ function Require(loader, requirer) {
   function getRequirements(id) {
     if (!id) {
       // Throw if `id` is not passed.
-      throw Error("you must provide a module name when calling require() from "
-                  + requirer.id, requirer.uri);
+      throw Error(
+        "you must provide a module name when calling require() from " +
+          requirer.id,
+        requirer.uri
+      );
     }
 
     let requirement, uri;
@@ -524,8 +486,15 @@ function Require(loader, requirer) {
 
     // Throw if `uri` can not be resolved.
     if (!uri) {
-      throw Error("Module: Can not resolve '" + id + "' module required by " +
-                  requirer.id + " located at " + requirer.uri, requirer.uri);
+      throw Error(
+        "Module: Can not resolve '" +
+          id +
+          "' module required by " +
+          requirer.id +
+          " located at " +
+          requirer.uri,
+        requirer.uri
+      );
     }
 
     return { uri: uri, requirement: requirement };
@@ -553,8 +522,12 @@ function Require(loader, requirer) {
 function Module(id, uri) {
   return Object.create(null, {
     id: { enumerable: true, value: id },
-    exports: { enumerable: true, writable: true, value: Object.create(null),
-               configurable: true },
+    exports: {
+      enumerable: true,
+      writable: true,
+      value: Object.create(null),
+      configurable: true,
+    },
     uri: { value: uri },
   });
 }
@@ -610,9 +583,15 @@ function Loader(options) {
   let modules = {
     "@loader/unload": destructor,
     "@loader/options": options,
-    "chrome": { Cc, Ci, Cu, Cr, Cm,
-                CC: bind(CC, Components), components: Components,
-                ChromeWorker,
+    chrome: {
+      Cc,
+      Ci,
+      Cu,
+      Cr,
+      Cm,
+      CC: bind(CC, Components),
+      components: Components,
+      ChromeWorker,
     },
   };
 
@@ -643,6 +622,7 @@ function Loader(options) {
     name: options.sandboxName || "DevTools",
     invisibleToDebugger: options.invisibleToDebugger || false,
     prototype: options.sandboxPrototype || globals,
+    freshCompartment: options.freshCompartment,
   });
 
   if (options.sandboxPrototype) {
@@ -650,8 +630,11 @@ function Loader(options) {
     // the sandbox directly. Note that this will not work for callers who
     // depend on being able to add globals after the loader was created.
     for (const name of getOwnIdentifiers(globals)) {
-      Object.defineProperty(sharedGlobalSandbox, name,
-                            Object.getOwnPropertyDescriptor(globals, name));
+      Object.defineProperty(
+        sharedGlobalSandbox,
+        name,
+        Object.getOwnPropertyDescriptor(globals, name)
+      );
     }
   }
 
@@ -670,9 +653,15 @@ function Loader(options) {
     // Map of module sandboxes indexed by module URIs.
     sandboxes: { enumerable: false, value: {} },
     // Whether the modules loaded should be ignored by the debugger
-    invisibleToDebugger: { enumerable: false,
-                           value: options.invisibleToDebugger || false },
-    requireHook: { enumerable: false, value: options.requireHook },
+    invisibleToDebugger: {
+      enumerable: false,
+      value: options.invisibleToDebugger || false,
+    },
+    requireHook: {
+      enumerable: false,
+      writable: true,
+      value: options.requireHook,
+    },
   };
 
   return Object.create(null, returnObj);

@@ -4,14 +4,13 @@
 
 <!-- Sync panel -->
 
-<script type="application/javascript"
-        src="chrome://browser/content/preferences/in-content/sync.js"/>
-
+<script src="chrome://browser/content/preferences/in-content/sync.js"/>
+<html:template id="template-paneSync">
 <hbox id="firefoxAccountCategory"
       class="subcategory"
       hidden="true"
       data-category="paneSync">
-  <html:h1 data-l10n-id="pane-sync-title"/>
+  <html:h1 data-l10n-id="pane-sync-title2"/>
 </hbox>
 
 <deck id="weavePrefsDeck" data-category="paneSync" hidden="true"
@@ -36,6 +35,7 @@
             <label id="signedOutAccountBoxTitle"><html:h2 data-l10n-id="sync-signedout-account-title"/></label>
           </hbox>
           <button id="noFxaSignIn"
+                  is="highlightable-button"
                   class="accessory-button"
                   data-l10n-id="sync-signedout-account-signin"/>
         </hbox>
@@ -70,7 +70,7 @@
     <hbox>
       <vbox id="fxaContentWrapper" flex="1">
         <groupbox id="fxaGroup">
-          <label class="search-header" hidden="true"><html:h2 data-l10n-id="pane-sync-title"/></label>
+          <label class="search-header" hidden="true"><html:h2 data-l10n-id="pane-sync-title2"/></label>
 
           <deck id="fxaLoginStatus" flex="1">
 
@@ -88,6 +88,7 @@
                   </label>
                   <label id="fxaEmailAddress" flex="1" crop="end"/>
                   <button id="fxaUnlinkButton"
+                          is="highlightable-button"
                           class="accessory-button"
                           data-l10n-id="sync-disconnect"/>
                 </hbox>
@@ -113,8 +114,12 @@
                     data-l10n-args='{"email": ""}'/>
                 </hbox>
                 <hbox class="fxaAccountBoxButtons">
-                  <button id="verifyFxaAccount" data-l10n-id="sync-resend-verification"/>
-                  <button id="unverifiedUnlinkFxaAccount" data-l10n-id="sync-remove-account"/>
+                  <button id="verifyFxaAccount"
+                          is="highlightable-button"
+                          data-l10n-id="sync-resend-verification"/>
+                  <button id="unverifiedUnlinkFxaAccount"
+                          is="highlightable-button"
+                          data-l10n-id="sync-remove-account"/>
                 </hbox>
               </vbox>
             </hbox>
@@ -133,8 +138,12 @@
                     data-l10n-args='{"email": ""}'/>
                 </hbox>
                 <hbox class="fxaAccountBoxButtons">
-                  <button id="rejectReSignIn" data-l10n-id="sync-sign-in"/>
-                  <button id="rejectUnlinkFxaAccount" data-l10n-id="sync-remove-account"/>
+                  <button id="rejectReSignIn"
+                          is="highlightable-button"
+                          data-l10n-id="sync-sign-in"/>
+                  <button id="rejectUnlinkFxaAccount"
+                          is="highlightable-button"
+                          data-l10n-id="sync-remove-account"/>
                 </hbox>
               </vbox>
             </hbox>
@@ -173,26 +182,30 @@
     <groupbox>
       <label control="fxaSyncComputerName"><html:h2 data-l10n-id="sync-device-name-header"/></label>
       <hbox id="fxaDeviceName">
-        <textbox id="fxaSyncComputerName" flex="1" disabled="true"/>
+        <html:input id="fxaSyncComputerName" type="text" disabled="true"/>
         <button id="fxaChangeDeviceName"
+                is="highlightable-button"
                 data-l10n-id="sync-device-name-change"/>
         <button id="fxaCancelChangeDeviceName"
+                is="highlightable-button"
                 data-l10n-id="sync-device-name-cancel"
                 hidden="true"/>
         <button id="fxaSaveChangeDeviceName"
+                is="highlightable-button"
                 data-l10n-id="sync-device-name-save"
                 hidden="true"/>
       </hbox>
     </groupbox>
     <vbox align="start">
-      <label id="mobilePromo-singledevice"
-             class="text-link fxaMobilePromo" data-l10n-id="sync-mobilepromo-single"/>
-      <label id="mobilePromo-multidevice"
-             class="text-link fxaMobilePromo" data-l10n-id="sync-mobilepromo-multi"/>
+      <label id="connect-another-device" is="text-link"
+             class="fxaMobilePromo" data-l10n-id="sync-connect-another-device"/>
+      <label id="manage-devices" is="text-link"
+             class="fxaMobilePromo" data-l10n-id="sync-manage-devices"/>
     </vbox>
     <vbox id="tosPP-small" align="start">
-      <label id="tosPP-small-ToS" class="text-link" data-l10n-id="sync-tos-link"/>
-      <label id="tosPP-small-PP" class="text-link" data-l10n-id="sync-fxa-privacy-notice"/>
+      <label id="tosPP-small-ToS" is="text-link" data-l10n-id="sync-tos-link"/>
+      <label id="tosPP-small-PP" is="text-link" data-l10n-id="sync-fxa-privacy-notice"/>
     </vbox>
   </vbox>
 </deck>
+</html:template>

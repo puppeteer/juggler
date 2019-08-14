@@ -22,7 +22,7 @@ class nsInterfaceRequestorAgg final : public nsIInterfaceRequestor {
                           nsIEventTarget* aConsumerTarget = nullptr)
       : mFirst(aFirst), mSecond(aSecond), mConsumerTarget(aConsumerTarget) {
     if (!mConsumerTarget) {
-      mConsumerTarget = GetCurrentThreadEventTarget();
+      mConsumerTarget = mozilla::GetCurrentThreadEventTarget();
     }
   }
 
@@ -58,9 +58,7 @@ nsresult NS_NewInterfaceRequestorAggregation(nsIInterfaceRequestor* aFirst,
                                              nsIInterfaceRequestor* aSecond,
                                              nsIInterfaceRequestor** aResult) {
   *aResult = new nsInterfaceRequestorAgg(aFirst, aSecond);
-  if (!*aResult) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+
   NS_ADDREF(*aResult);
   return NS_OK;
 }
@@ -70,9 +68,7 @@ nsresult NS_NewInterfaceRequestorAggregation(nsIInterfaceRequestor* aFirst,
                                              nsIEventTarget* aTarget,
                                              nsIInterfaceRequestor** aResult) {
   *aResult = new nsInterfaceRequestorAgg(aFirst, aSecond, aTarget);
-  if (!*aResult) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+
   NS_ADDREF(*aResult);
   return NS_OK;
 }

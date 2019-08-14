@@ -92,14 +92,14 @@ StickyScrollContainer::GetStickyScrollContainerForScrollFrame(
   return aFrame->GetProperty(StickyScrollContainerProperty());
 }
 
-static nscoord ComputeStickySideOffset(Side aSide, const nsStyleSides& aOffset,
-                                       nscoord aPercentBasis) {
-  if (eStyleUnit_Auto == aOffset.GetUnit(aSide)) {
+static nscoord ComputeStickySideOffset(
+    Side aSide, const StyleRect<LengthPercentageOrAuto>& aOffset,
+    nscoord aPercentBasis) {
+  auto& side = aOffset.Get(aSide);
+  if (side.IsAuto()) {
     return NS_AUTOOFFSET;
-  } else {
-    return nsLayoutUtils::ComputeCBDependentValue(aPercentBasis,
-                                                  aOffset.Get(aSide));
   }
+  return nsLayoutUtils::ComputeCBDependentValue(aPercentBasis, side);
 }
 
 // static
@@ -320,6 +320,12 @@ void StickyScrollContainer::GetScrollRanges(nsIFrame* aFrame,
   // Note that this doesn't necessarily solve all problems stemming from
   // comparing pre- and post-collapsing margins (TODO: find a proper solution).
   *aInner = aInner->Intersect(*aOuter);
+  if (aInner->IsEmpty()) {
+    // This might happen if aInner didn't intersect aOuter at all initially,
+    // in which case aInner is empty and outside aOuter. Make sure it doesn't
+    // extend outside aOuter.
+    *aInner = aInner->MoveInsideAndClamp(*aOuter);
+  }
 }
 
 void StickyScrollContainer::PositionContinuations(nsIFrame* aFrame) {

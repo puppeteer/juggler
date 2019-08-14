@@ -14,7 +14,7 @@
 #include "nsAutoPtr.h"
 #include "nsClassHashtable.h"
 #include "nsDataHashtable.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDocumentObserver.h"
 #include "nsIObserver.h"
 #include "nsIScrollPositionListener.h"
@@ -27,7 +27,12 @@ const uint32_t kDefaultCacheLength = 128;
 
 namespace mozilla {
 
+class PresShell;
 class TextEditor;
+
+namespace dom {
+class Document;
+}
 
 namespace a11y {
 
@@ -50,8 +55,11 @@ class DocAccessible : public HyperTextAccessibleWrap,
   NS_DECL_NSIOBSERVER
   NS_DECL_NSIACCESSIBLEPIVOTOBSERVER
 
+ protected:
+  typedef mozilla::dom::Document Document;
+
  public:
-  DocAccessible(nsIDocument* aDocument, nsIPresShell* aPresShell);
+  DocAccessible(Document* aDocument, PresShell* aPresShell);
 
   // nsIScrollPositionListener
   virtual void ScrollPositionWillChange(nscoord aX, nscoord aY) override {}
@@ -65,7 +73,7 @@ class DocAccessible : public HyperTextAccessibleWrap,
   virtual void Shutdown() override;
   virtual nsIFrame* GetFrame() const override;
   virtual nsINode* GetNode() const override { return mDocumentNode; }
-  nsIDocument* DocumentNode() const { return mDocumentNode; }
+  Document* DocumentNode() const { return mDocumentNode; }
 
   virtual mozilla::a11y::ENameValueFlag Name(nsString& aName) const override;
   virtual void Description(nsString& aDescription) override;
@@ -118,9 +126,17 @@ class DocAccessible : public HyperTextAccessibleWrap,
   nsIAccessiblePivot* VirtualCursor();
 
   /**
+   * Returns true if the instance has shutdown.
+   */
+  bool HasShutdown() const { return !mPresShell; }
+
+  /**
    * Return presentation shell for this document accessible.
    */
-  nsIPresShell* PresShell() const { return mPresShell; }
+  PresShell* PresShellPtr() const {
+    MOZ_DIAGNOSTIC_ASSERT(!HasShutdown());
+    return mPresShell;
+  }
 
   /**
    * Return the presentation shell's context.
@@ -133,7 +149,7 @@ class DocAccessible : public HyperTextAccessibleWrap,
   bool IsContentLoaded() const {
     // eDOMLoaded flag check is used for error pages as workaround to make this
     // method return correct result since error pages do not receive 'pageshow'
-    // event and as consequence nsIDocument::IsShowing() returns false.
+    // event and as consequence Document::IsShowing() returns false.
     return mDocumentNode && mDocumentNode->IsVisible() &&
            (mDocumentNode->IsShowing() || HasLoadState(eDOMLoaded));
   }
@@ -219,10 +235,10 @@ class DocAccessible : public HyperTextAccessibleWrap,
    *          notification is processed.
    * @see   NotificationController::HandleNotification
    */
-  template <class Class, class Arg>
-  void HandleNotification(Class* aInstance,
-                          typename TNotification<Class, Arg>::Callback aMethod,
-                          Arg* aArg);
+  template <class Class, class... Args>
+  void HandleNotification(
+      Class* aInstance,
+      typename TNotification<Class, Args...>::Callback aMethod, Args*... aArgs);
 
   /**
    * Return the cached accessible by the given DOM node if it's in subtree of
@@ -268,11 +284,12 @@ class DocAccessible : public HyperTextAccessibleWrap,
 
   /**
    * Return an accessible for the given DOM node or container accessible if
-   * the node is not accessible.
+   * the node is not accessible. If aNoContainerIfPruned is true it will return
+   * null if the node is in a pruned subtree (eg. aria-hidden or unselected deck
+   * panel)
    */
-  enum { eIgnoreARIAHidden = 0, eNoContainerIfARIAHidden = 1 };
-  Accessible* GetAccessibleOrContainer(
-      nsINode* aNode, int aARIAHiddenFlag = eIgnoreARIAHidden) const;
+  Accessible* GetAccessibleOrContainer(nsINode* aNode,
+                                       bool aNoContainerIfPruned = false) const;
 
   /**
    * Return a container accessible for the given DOM node.
@@ -286,7 +303,7 @@ class DocAccessible : public HyperTextAccessibleWrap,
    * container for it.
    */
   Accessible* AccessibleOrTrueContainer(
-      nsINode* aNode, int aARIAHiddenFlag = eIgnoreARIAHidden) const;
+      nsINode* aNode, bool aNoContainerIfPruned = false) const;
 
   /**
    * Return an accessible for the given node or its first accessible descendant.
@@ -553,7 +570,7 @@ class DocAccessible : public HyperTextAccessibleWrap,
    * Set the object responsible for communicating with the main process on
    * behalf of this document.
    */
-  void SetIPCDoc(DocAccessibleChild* aIPCDoc) { mIPCDoc = aIPCDoc; }
+  void SetIPCDoc(DocAccessibleChild* aIPCDoc);
 
   friend class DocAccessibleChildBase;
 
@@ -596,7 +613,7 @@ class DocAccessible : public HyperTextAccessibleWrap,
   nsDataHashtable<nsPtrHashKey<const nsINode>, Accessible*>
       mNodeToAccessibleMap;
 
-  nsIDocument* mDocumentNode;
+  Document* mDocumentNode;
   nsCOMPtr<nsITimer> mScrollWatchTimer;
   uint16_t mScrollPositionChangedTicks;  // Used for tracking scroll events
   TimeStamp mLastScrollingDispatch;
@@ -703,7 +720,7 @@ class DocAccessible : public HyperTextAccessibleWrap,
   friend class NotificationController;
 
  private:
-  nsIPresShell* mPresShell;
+  PresShell* mPresShell;
 
   // Exclusively owned by IPDL so don't manually delete it!
   DocAccessibleChild* mIPCDoc;

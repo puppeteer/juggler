@@ -4,10 +4,8 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from distutils.version import LooseVersion
 import logging
 from mozbuild.base import (
-    BuildEnvironmentNotFoundException,
     MozbuildObject,
 )
 import mozfile
@@ -18,6 +16,7 @@ import re
 import sys
 import tarfile
 from urlparse import urlparse
+
 
 class VendorDav1d(MozbuildObject):
     def upstream_snapshot(self, revision):
@@ -51,7 +50,7 @@ Please set a repository url with --repo on either googlesource or github.''' % h
 
     def upstream_gitlab_commit(self, revision):
         '''Query the github api for a git commit id and timestamp.'''
-        gitlab_api = 'https://code.videolan.org/api/v4/projects/videolan%2Fdav1d/repository/commits'
+        gitlab_api = 'https://code.videolan.org/api/v4/projects/videolan%2Fdav1d/repository/commits'  # noqa
         url = mozpath.join(gitlab_api, revision)
         self.log(logging.INFO, 'fetch', {'url': url},
                  'Fetching commit id from {url}')
@@ -96,8 +95,8 @@ Please set a repository url with --repo on either googlesource or github.''' % h
         prefix = '  release: commit'
         if prefix in yaml:
             new_yaml = re.sub(prefix + ' [v\.a-f0-9]+.*$',
-                                prefix + ' %s (%s).' % (revision, timestamp),
-                                yaml)
+                              prefix + ' %s (%s).' % (revision, timestamp),
+                              yaml, flags=re.MULTILINE)
         else:
             new_yaml = '%s\n\n%s %s.' % (yaml, prefix, revision)
 
@@ -105,12 +104,21 @@ Please set a repository url with --repo on either googlesource or github.''' % h
             with open(filename, 'w') as f:
                 f.write(new_yaml)
 
+    def update_vcs_version(self, revision, vendor_dir, glue_dir):
+        src_filename = mozpath.join(vendor_dir, 'include/vcs_version.h.in')
+        dst_filename = mozpath.join(glue_dir, 'vcs_version.h')
+        with open(src_filename) as f:
+            vcs_version_in = f.read()
+        vcs_version = vcs_version_in.replace('@VCS_TAG@', revision)
+        with open(dst_filename, 'w') as f:
+            f.write(vcs_version)
+
     def clean_upstream(self, target):
         '''Remove files we don't want to import.'''
         mozfile.remove(mozpath.join(target, '.gitattributes'))
         mozfile.remove(mozpath.join(target, '.gitignore'))
         mozfile.remove(mozpath.join(target, 'build', '.gitattributes'))
-        mozfile.remove(mozpath.join(target, 'build' ,'.gitignore'))
+        mozfile.remove(mozpath.join(target, 'build', '.gitignore'))
 
     def check_modified_files(self):
         '''
@@ -154,7 +162,9 @@ Please commit or stash these changes before vendoring, or re-run with `--ignore-
         self.log(logging.INFO, 'update_moz.yaml', {},
                  '''Updating moz.yaml.''')
         self.update_yaml(commit, timestamp, glue_dir)
-        self.repository.add_remove_files(vendor_dir)
+        self.log(logging.INFO, 'update_vcs_version', {},
+                 '''Updating vcs_version.h.''')
+        self.update_vcs_version(commit, vendor_dir, glue_dir)
         self.log(logging.INFO, 'add_remove_files', {},
                  '''Registering changes with version control.''')
         self.repository.add_remove_files(vendor_dir)

@@ -129,6 +129,9 @@ static constexpr Register WasmTableCallIndexReg = ABINonArgReg3;
 static constexpr Register OsrFrameReg = edx;
 static constexpr Register PreBarrierReg = edx;
 
+// Not enough registers for a PC register (R0-R2 use 2 registers each).
+static constexpr Register InterpreterPCReg = InvalidReg;
+
 // Registerd used in RegExpMatcher instruction (do not use JSReturnOperand).
 static constexpr Register RegExpMatcherRegExpReg = CallTempReg0;
 static constexpr Register RegExpMatcherStringReg = CallTempReg1;
@@ -352,6 +355,8 @@ class Assembler : public AssemblerX86Shared {
   void mov(Register src, Register dest) { movl(src, dest); }
   void xchg(Register src, Register dest) { xchgl(src, dest); }
   void lea(const Operand& src, Register dest) { return leal(src, dest); }
+  void cmovz32(const Operand& src, Register dest) { return cmovzl(src, dest); }
+  void cmovzPtr(const Operand& src, Register dest) { return cmovzl(src, dest); }
 
   void fstp32(const Operand& src) {
     switch (src.kind()) {

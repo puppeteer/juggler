@@ -1,6 +1,7 @@
 use super::TokenStreamExt;
 
 use std::borrow::Cow;
+use std::iter;
 
 use proc_macro2::{Group, Ident, Literal, Punct, Span, TokenStream, TokenTree};
 
@@ -20,12 +21,9 @@ pub trait ToTokens {
     /// Example implementation for a struct representing Rust paths like
     /// `std::cmp::PartialEq`:
     ///
-    /// ```
-    /// extern crate quote;
-    /// use quote::{TokenStreamExt, ToTokens};
-    ///
-    /// extern crate proc_macro2;
+    /// ```edition2018
     /// use proc_macro2::{TokenTree, Spacing, Span, Punct, TokenStream};
+    /// use quote::{TokenStreamExt, ToTokens};
     ///
     /// pub struct Path {
     ///     pub global: bool,
@@ -52,8 +50,6 @@ pub trait ToTokens {
     /// #         unimplemented!()
     /// #     }
     /// # }
-    /// #
-    /// # fn main() {}
     /// ```
     fn to_tokens(&self, tokens: &mut TokenStream);
 
@@ -72,6 +68,12 @@ pub trait ToTokens {
 }
 
 impl<'a, T: ?Sized + ToTokens> ToTokens for &'a T {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        (**self).to_tokens(tokens);
+    }
+}
+
+impl<'a, T: ?Sized + ToTokens> ToTokens for &'a mut T {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         (**self).to_tokens(tokens);
     }
@@ -136,6 +138,12 @@ primitive! {
     f64 => f64_suffixed
 }
 
+#[cfg(integer128)]
+primitive! {
+    i128 => i128_suffixed
+    u128 => u128_suffixed
+}
+
 impl ToTokens for char {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         tokens.append(Literal::character(*self));
@@ -181,7 +189,7 @@ impl ToTokens for TokenTree {
 
 impl ToTokens for TokenStream {
     fn to_tokens(&self, dst: &mut TokenStream) {
-        dst.append_all(self.clone().into_iter());
+        dst.extend(iter::once(self.clone()));
     }
 
     fn into_token_stream(self) -> TokenStream {

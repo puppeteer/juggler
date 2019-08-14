@@ -19,6 +19,7 @@ import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.menu.MenuPanel;
 import org.mozilla.gecko.mma.MmaDelegate;
 import org.mozilla.gecko.notifications.NotificationHelper;
+import org.mozilla.gecko.search.SearchWidgetProvider;
 import org.mozilla.gecko.util.IntentUtils;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.mozglue.GeckoLoader;
@@ -94,6 +95,7 @@ import android.widget.Toast;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.mozilla.geckoview.GeckoViewBridge;
 import org.mozilla.mozstumbler.service.mainthread.SafeReceiver;
 
 import java.io.File;
@@ -297,6 +299,15 @@ public abstract class GeckoApp extends GeckoActivity
 
         @Override
         public void onClosedTabsRead(final JSONArray closedTabData) throws JSONException {
+            // All tabs opened in the current session (including those that will be restored through
+            // the session store) will be numbered with a tab ID ≥ 0.
+            // To avoid duplicate IDs with closed tabs read from the previous session, we therefore
+            // renumber the latter with IDs in the negative range.
+            int closedTabId = Tabs.INVALID_TAB_ID;
+            for (int i = 0; i < closedTabData.length(); i++) {
+                final JSONObject closedTab = closedTabData.getJSONObject(i);
+                closedTab.put("tabId", --closedTabId);
+            }
             windowObject.put("closedTabs", closedTabData);
         }
 
@@ -339,7 +350,7 @@ public abstract class GeckoApp extends GeckoActivity
     private volatile HealthRecorder mHealthRecorder;
     private volatile Locale mLastLocale;
 
-    private boolean mShutdownOnDestroy;
+    protected boolean mShutdownOnDestroy;
     private boolean mRestartOnShutdown;
 
     private boolean mWasFirstTabShownAfterActivityUnhidden;
@@ -900,18 +911,6 @@ public abstract class GeckoApp extends GeckoActivity
     }
 
     @Override // GeckoSession.ContentDelegate
-    public void onTitleChange(final GeckoSession session, final String title) {
-    }
-
-    @Override // GeckoSession.ContentDelegate
-    public void onFocusRequest(final GeckoSession session) {
-    }
-
-    @Override // GeckoSession.ContentDelegate
-    public void onCloseRequest(final GeckoSession session) {
-    }
-
-    @Override // GeckoSession.ContentDelegate
     public void onFullScreen(final GeckoSession session, final boolean fullScreen) {
         if (fullScreen) {
             SnackbarBuilder.builder(this)
@@ -920,26 +919,6 @@ public abstract class GeckoApp extends GeckoActivity
         }
         ThreadUtils.assertOnUiThread();
         ActivityUtils.setFullScreen(this, fullScreen);
-    }
-
-    @Override
-    public void onContextMenu(final GeckoSession session,
-                              final int screenX, final int screenY,
-                              final GeckoSession.ContentDelegate.ContextElement element) {
-    }
-
-    @Override
-    public void onExternalResponse(final GeckoSession session, final GeckoSession.WebResponseInfo request) {
-        // Won't happen, as we don't use the GeckoView download support in Fennec
-    }
-
-    @Override
-    public void onCrash(final GeckoSession session) {
-        // Won't happen, as we don't use e10s in Fennec
-    }
-
-    @Override
-    public void onFirstComposite(final GeckoSession session) {
     }
 
     protected void setFullScreen(final boolean fullscreen) {
@@ -1043,7 +1022,13 @@ public abstract class GeckoApp extends GeckoActivity
         // no need to touch that here.
         if (BrowserLocaleManager.getInstance().systemLocaleDidChange()) {
             Log.i(LOGTAG, "System locale changed. Restarting.");
+
+            mIsAbortingAppLaunch = true;
+
+            // Call finish() asap so that other classes would know BrowserApp isFinishing()
             finishAndShutdown(/* restart */ true);
+            super.onCreate(savedInstanceState);
+
             return;
         }
 
@@ -1119,9 +1104,10 @@ public abstract class GeckoApp extends GeckoActivity
         // ourselves.
         mLayerView.setSaveFromParentEnabled(false);
 
-        final GeckoSession session = new GeckoSession();
-        session.getSettings().setString(GeckoSessionSettings.CHROME_URI,
-                                        "chrome://browser/content/browser.xul");
+        final GeckoSession session = new GeckoSession(
+                new GeckoSessionSettings.Builder()
+                        .chromeUri("chrome://browser/content/browser.xul")
+                        .build());
         session.setContentDelegate(this);
 
         // If the view already has a session, we need to ensure it is closed.
@@ -1446,6 +1432,8 @@ public abstract class GeckoApp extends GeckoActivity
     /**
      * Loads the initial tab at Fennec startup. If we don't restore tabs, this
      * tab will be about:home, or the homepage if the user has set one.
+     * If the app was started from the search widget we need to always load about:home
+     * and not the homepage which the user may have set to be another address.
      * If we've temporarily disabled restoring to break out of a crash loop, we'll show
      * the Recent Tabs folder of the Combined History panel, so the user can manually
      * restore tabs as needed.
@@ -1453,6 +1441,12 @@ public abstract class GeckoApp extends GeckoActivity
      * to be #android.Intent.ACTION_VIEW, which is launched from widget to create a new tab.
      */
     protected void loadStartupTab(final int flags, String action) {
+        final SearchWidgetProvider.InputType input = getWidgetInputType(getIntent());
+        if (input != null) {
+            Tabs.getInstance().loadUrl("about:home", flags);
+            return;
+        }
+
         if (!mShouldRestore || Intent.ACTION_VIEW.equals(action)) {
             if (mLastSessionCrashed) {
                 // The Recent Tabs panel no longer exists, but BrowserApp will redirect us
@@ -1480,6 +1474,14 @@ public abstract class GeckoApp extends GeckoActivity
         }
 
         Tabs.getInstance().loadUrlWithIntentExtras(url, intent, flags);
+    }
+
+    protected SearchWidgetProvider.InputType getWidgetInputType(final Intent intent) {
+        final Intent searchIntent = intent != null ? intent : getIntent();
+        if (searchIntent == null) {
+            return null;
+        }
+        return (SearchWidgetProvider.InputType) searchIntent.getSerializableExtra(SearchWidgetProvider.INPUT_TYPE_KEY);
     }
 
     protected String getIntentURI(SafeIntent intent) {
@@ -1726,7 +1728,7 @@ public abstract class GeckoApp extends GeckoActivity
             throw new IllegalStateException("Must not call getAppEventDispatcher() until after onCreate()");
         }
 
-        return mLayerView.getEventDispatcher();
+        return GeckoViewBridge.getEventDispatcher(mLayerView);
     }
 
     protected static GeckoProfile getProfile() {
@@ -2123,6 +2125,12 @@ public abstract class GeckoApp extends GeckoActivity
             // This build does not support the Android version of the device:
             // We did not initialize anything, so skip cleaning up.
             super.onDestroy();
+
+            if (mShutdownOnDestroy) {
+                GeckoApplication.shutdown(!mRestartOnShutdown ? null : new Intent(
+                        Intent.ACTION_MAIN, /* uri */ null, getApplicationContext(), getClass()));
+            }
+
             return;
         }
 

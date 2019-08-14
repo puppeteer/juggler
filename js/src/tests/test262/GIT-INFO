@@ -1,6 +1,5 @@
-commit 2726142bb97e4538703eda748c3b7300183bc66d
-Author: test262-automation <test262-automation@bocoup.com>
-Date:   Wed Nov 14 19:00:37 2018 +0000
+commit df1a1c75b785192a6ee9ab46a862cb83aaed037a
+Author: Alexey Shvayka <shvaikalesh@gmail.com>
+Date:   Wed Jun 19 23:39:21 2019 +0300
 
-    [v8-test262-automation] Updated curation log with latest revision sha's from export and changed files.
-        sourceRevisionAtLastExport: ac250b9b targetRevisionAtLastExport: 6218e682b2
+    Remove trailing spaces from YAML blocks (#2201)

@@ -6,11 +6,9 @@
 package org.mozilla.gecko.preferences;
 
 import android.content.Context;
-import android.content.Intent;
 import android.preference.Preference;
 import android.util.AttributeSet;
 
-import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.Tabs;
 
 class LinkPreference extends Preference {
@@ -29,20 +27,9 @@ class LinkPreference extends Preference {
         mUrl = url;
     }
 
-    /**
-     * Open Default apps screen of Settings for API Levels>=24. Support URL will open for lower API levels
-     */
     @Override
     protected void onClick() {
-        if (GeckoPreferences.PREFS_DEFAULT_BROWSER.equals(getKey()) && AppConstants.Versions.feature24Plus) {
-            // We are special casing the link to set the default browser here: On old Android versions we
-            // link to a SUMO page but on new Android versions we can link to the default app settings where
-            // the user can actually set a default browser (Bug 1312686).
-            Intent changeDefaultApps = new Intent("android.settings.MANAGE_DEFAULT_APPS_SETTINGS");
-            getContext().startActivity(changeDefaultApps);
-        } else {
-            Tabs.getInstance().loadUrlInTab(mUrl);
-            callChangeListener(mUrl);
-        }
+        Tabs.getInstance().loadUrlInTab(mUrl);
+        callChangeListener(mUrl);
     }
 }

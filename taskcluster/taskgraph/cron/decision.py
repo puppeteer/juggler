@@ -9,18 +9,27 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import jsone
 import pipes
-import yaml
 import os
 import slugid
 
 from taskgraph.util.time import current_json_time
 from taskgraph.util.hg import find_hg_revision_push_info
+from taskgraph.util.yaml import load_yaml
 
 
 def run_decision_task(job, params, root):
     arguments = []
     if 'target-tasks-method' in job:
         arguments.append('--target-tasks-method={}'.format(job['target-tasks-method']))
+    if job.get('optimize-target-tasks') is not None:
+        arguments.append('--optimize-target-tasks={}'.format(
+            str(job['optimize-target-tasks']).lower(),
+        ))
+    if 'include-push-tasks' in job:
+        arguments.append('--include-push-tasks')
+    if 'rebuild-kinds' in job:
+        for kind in job['rebuild-kinds']:
+            arguments.append('--rebuild-kind={}'.format(kind))
     return [
         make_decision_task(
             params,
@@ -32,21 +41,11 @@ def run_decision_task(job, params, root):
 
 def make_decision_task(params, root, symbol, arguments=[]):
     """Generate a basic decision task, based on the root .taskcluster.yml"""
-    with open(os.path.join(root, '.taskcluster.yml'), 'rb') as f:
-        taskcluster_yml = yaml.safe_load(f)
+    taskcluster_yml = load_yaml(root, '.taskcluster.yml')
 
     push_info = find_hg_revision_push_info(
         params['repository_url'],
         params['head_rev'])
-
-    slugids = {}
-
-    def as_slugid(name):
-        # https://github.com/taskcluster/json-e/issues/164
-        name = name[0]
-        if name not in slugids:
-            slugids[name] = slugid.nice()
-        return slugids[name]
 
     # provide a similar JSON-e context to what mozilla-taskcluster provides:
     # https://docs.taskcluster.net/reference/integrations/mozilla-taskcluster/docs/taskcluster-yml
@@ -64,7 +63,6 @@ def make_decision_task(params, root, symbol, arguments=[]):
             'pushlog_id': push_info['pushid'],
             'pushdate': push_info['pushdate'],
             'owner': 'cron',
-            'comment': '',
         },
         'cron': {
             'task_id': os.environ.get('TASK_ID', '<cron task id>'),
@@ -74,7 +72,7 @@ def make_decision_task(params, root, symbol, arguments=[]):
             'quoted_args': ' '.join(pipes.quote(a) for a in arguments),
         },
         'now': current_json_time(),
-        'as_slugid': as_slugid,
+        'ownTaskId': slugid.nice(),
     }
 
     rendered = jsone.render(taskcluster_yml, context)

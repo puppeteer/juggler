@@ -7,7 +7,6 @@ include('/media/webrtc/webrtc.mozbuild')
 
 EXPORTS += [
     'nsIIPCSerializableInputStream.h',
-    'nsIIPCSerializableURI.h',
 ]
 
 EXPORTS.mozilla.ipc += [
@@ -163,6 +162,7 @@ UNIFIED_SOURCES += [
     'MessageLink.cpp',
     'MessagePump.cpp',
     'ProcessChild.cpp',
+    'ProcessUtils_common.cpp',
     'ProtocolUtils.cpp',
     'ScopedXREEmbed.cpp',
     'SharedMemory.cpp',
@@ -188,12 +188,6 @@ else:
     UNIFIED_SOURCES += [
         'GeckoChildProcessHost.cpp',
     ]
-
-if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
-    # This is intended as a temporary hack to support building with VS2015.
-    # 'reinterpret_cast': conversion from 'DWORD' to 'HANDLE' of greater size
-    SOURCES['BackgroundChildImpl.cpp'].flags += ['-wd4312']
-    SOURCES['BackgroundParentImpl.cpp'].flags += ['-wd4312']
 
 LOCAL_INCLUDES += [
     '/caps',
@@ -223,6 +217,7 @@ LOCAL_INCLUDES += [
     '/dom/ipc',
     '/toolkit/crashreporter',
     '/toolkit/xre',
+    '/xpcom/base',
     '/xpcom/threads',
 ]
 

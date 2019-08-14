@@ -22,6 +22,7 @@
 #include "nsXULAppAPI.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/layers/APZTypes.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/ScrollableLayerGuid.h"
 #include "mozilla/layers/ZoomConstraints.h"
@@ -51,7 +52,7 @@ class Shmem;
 }
 #endif  // defined(MOZ_WIDGET_ANDROID)
 namespace dom {
-class TabChild;
+class BrowserChild;
 }  // namespace dom
 namespace plugins {
 class PluginWidgetChild;
@@ -79,6 +80,7 @@ class CompositorWidgetInitData;
 namespace wr {
 class DisplayListBuilder;
 class IpcResourceUpdateQueue;
+enum class RenderRoot : uint8_t;
 }  // namespace wr
 }  // namespace mozilla
 
@@ -128,29 +130,29 @@ typedef void* nsNativeWidget;
 // XP code should use nsIWidget::GetNativeIMEContext() instead of using this.
 #define NS_RAW_NATIVE_IME_CONTEXT 14
 #ifdef XP_MACOSX
-#define NS_NATIVE_PLUGIN_PORT_QD 100
-#define NS_NATIVE_PLUGIN_PORT_CG 101
+#  define NS_NATIVE_PLUGIN_PORT_QD 100
+#  define NS_NATIVE_PLUGIN_PORT_CG 101
 #endif
 #ifdef XP_WIN
-#define NS_NATIVE_TSF_THREAD_MGR 100
-#define NS_NATIVE_TSF_CATEGORY_MGR 101
-#define NS_NATIVE_TSF_DISPLAY_ATTR_MGR 102
-#define NS_NATIVE_ICOREWINDOW 103  // winrt specific
-#define NS_NATIVE_CHILD_WINDOW 104
-#define NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW 105
+#  define NS_NATIVE_TSF_THREAD_MGR 100
+#  define NS_NATIVE_TSF_CATEGORY_MGR 101
+#  define NS_NATIVE_TSF_DISPLAY_ATTR_MGR 102
+#  define NS_NATIVE_ICOREWINDOW 103  // winrt specific
+#  define NS_NATIVE_CHILD_WINDOW 104
+#  define NS_NATIVE_CHILD_OF_SHAREABLE_WINDOW 105
 #endif
 #if defined(MOZ_WIDGET_GTK)
 // set/get nsPluginNativeWindowGtk, e10s specific
-#define NS_NATIVE_PLUGIN_OBJECT_PTR 104
-#ifdef MOZ_X11
-#define NS_NATIVE_COMPOSITOR_DISPLAY 105
-#endif  // MOZ_X11
-#define NS_NATIVE_EGL_WINDOW 106
+#  define NS_NATIVE_PLUGIN_OBJECT_PTR 104
+#  ifdef MOZ_X11
+#    define NS_NATIVE_COMPOSITOR_DISPLAY 105
+#  endif  // MOZ_X11
+#  define NS_NATIVE_EGL_WINDOW 106
 #endif
 #ifdef MOZ_WIDGET_ANDROID
-#define NS_JAVA_SURFACE 100
-#define NS_PRESENTATION_WINDOW 101
-#define NS_PRESENTATION_SURFACE 102
+#  define NS_JAVA_SURFACE 100
+#  define NS_PRESENTATION_WINDOW 101
+#  define NS_PRESENTATION_SURFACE 102
 #endif
 
 // Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
@@ -331,7 +333,7 @@ struct AutoObserverNotifier {
  */
 class nsIWidget : public nsISupports {
  protected:
-  typedef mozilla::dom::TabChild TabChild;
+  typedef mozilla::dom::BrowserChild BrowserChild;
 
  public:
   typedef mozilla::layers::CompositorBridgeChild CompositorBridgeChild;
@@ -341,6 +343,7 @@ class nsIWidget : public nsISupports {
   typedef mozilla::layers::LayerManagerComposite LayerManagerComposite;
   typedef mozilla::layers::LayersBackend LayersBackend;
   typedef mozilla::layers::PLayerTransactionChild PLayerTransactionChild;
+  typedef mozilla::layers::SLGuidAndRenderRoot SLGuidAndRenderRoot;
   typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
   typedef mozilla::layers::ZoomConstraints ZoomConstraints;
   typedef mozilla::widget::IMEMessage IMEMessage;
@@ -735,6 +738,14 @@ class nsIWidget : public nsISupports {
   virtual void Resize(double aWidth, double aHeight, bool aRepaint) = 0;
 
   /**
+   * Lock the aspect ratio of a Window
+   *
+   * @param aShouldLock bool
+   *
+   */
+  virtual void LockAspectRatio(bool aShouldLock){};
+
+  /**
    * Move or resize this widget. Any size constraints set for the window by
    * a previous call to SetSizeConstraints will be applied.
    *
@@ -842,16 +853,18 @@ class nsIWidget : public nsISupports {
    */
   virtual bool IsEnabled() const = 0;
 
+  /*
+   * Whether we should request activation of this widget's toplevel window.
+   */
+  enum class Raise {
+    No,
+    Yes,
+  };
+
   /**
    * Request activation of this window or give focus to this widget.
-   *
-   * @param aRaise If true, this function requests activation of this
-   *               widget's toplevel window.
-   *               If false, the appropriate toplevel window (which in
-   *               the case of popups may not be this widget's toplevel
-   *               window) is already active.
    */
-  virtual nsresult SetFocus(bool aRaise = false) = 0;
+  virtual void SetFocus(Raise) = 0;
 
   /**
    * Get this widget's outside dimensions relative to its parent widget. For
@@ -925,6 +938,16 @@ class nsIWidget : public nsISupports {
   }
 
   /**
+   * Get the size of the bounds of this widget that will be visible when
+   * rendered.
+   *
+   * @return the width and height of the composition size of this widget.
+   */
+  virtual LayoutDeviceIntSize GetCompositionSize() {
+    return GetBounds().Size();
+  }
+
+  /**
    * Set the background color for this widget
    *
    * @param aColor the new background color
@@ -934,13 +957,6 @@ class nsIWidget : public nsISupports {
   virtual void SetBackgroundColor(const nscolor& aColor) {}
 
   /**
-   * Set the cursor for this widget
-   *
-   * @param aCursor the new cursor for this widget
-   */
-  virtual void SetCursor(nsCursor aCursor) = 0;
-
-  /**
    * If a cursor type is currently cached locally for this widget, clear the
    * cached cursor to force an update on the next SetCursor call.
    */
@@ -948,16 +964,15 @@ class nsIWidget : public nsISupports {
   virtual void ClearCachedCursor() = 0;
 
   /**
-   * Sets an image as the cursor for this widget.
+   * Sets the cursor cursor for this widget.
    *
-   * @param aCursor the cursor to set
-   * @param aX the X coordinate of the hotspot (from left).
-   * @param aY the Y coordinate of the hotspot (from top).
-   * @retval NS_ERROR_NOT_IMPLEMENTED if setting images as cursors is not
-   *         supported
+   * @param aDefaultCursor the default cursor to be set
+   * @param aCursorImage a custom cursor, maybe null.
+   * @param aX the X coordinate of the hotspot for aCursorImage (from left).
+   * @param aY the Y coordinate of the hotspot for aCursorImage (from top).
    */
-  virtual nsresult SetCursor(imgIContainer* aCursor, uint32_t aHotspotX,
-                             uint32_t aHotspotY) = 0;
+  virtual void SetCursor(nsCursor aDefaultCursor, imgIContainer* aCursorImage,
+                         uint32_t aHotspotX, uint32_t aHotspotY) = 0;
 
   /**
    * Get the window type of this widget.
@@ -1343,6 +1358,26 @@ class nsIWidget : public nsISupports {
   virtual LayoutDeviceIntPoint WidgetToScreenOffset() = 0;
 
   /**
+   * The same as WidgetToScreenOffset(), except in the case of
+   * PuppetWidget where this method omits the chrome offset.
+   */
+  virtual LayoutDeviceIntPoint TopLevelWidgetToScreenOffset() {
+    return WidgetToScreenOffset();
+  }
+
+  /**
+   * For a PuppetWidget, returns the transform from the coordinate
+   * space of the PuppetWidget to the coordinate space of the
+   * top-level native widget.
+   *
+   * Identity transform in other cases.
+   */
+  virtual mozilla::LayoutDeviceToLayoutDeviceMatrix4x4
+  WidgetToTopLevelWidgetTransform() {
+    return mozilla::LayoutDeviceToLayoutDeviceMatrix4x4();
+  }
+
+  /**
    * Given the specified client size, return the corresponding window size,
    * which includes the area for the borders and titlebar. This method
    * should work even when the window is not yet visible.
@@ -1376,7 +1411,7 @@ class nsIWidget : public nsISupports {
    */
   virtual void SetConfirmedTargetAPZC(
       uint64_t aInputBlockId,
-      const nsTArray<ScrollableLayerGuid>& aTargets) const = 0;
+      const nsTArray<SLGuidAndRenderRoot>& aTargets) const = 0;
 
   /**
    * Returns true if APZ is in use, false otherwise.
@@ -1460,12 +1495,6 @@ class nsIWidget : public nsISupports {
   virtual MOZ_MUST_USE nsresult BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
                                                 int32_t aHorizontal,
                                                 int32_t aVertical) = 0;
-
-  /**
-   * Begin a window moving drag, based on the event passed in.
-   */
-  virtual MOZ_MUST_USE nsresult
-  BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) = 0;
 
   enum Modifiers {
     CAPS_LOCK = 0x00000001,  // when CapsLock is active
@@ -1649,13 +1678,13 @@ class nsIWidget : public nsISupports {
    * @return true if APZ has been successfully notified
    */
   virtual bool StartAsyncAutoscroll(const ScreenPoint& aAnchorLocation,
-                                    const ScrollableLayerGuid& aGuid) = 0;
+                                    const SLGuidAndRenderRoot& aGuid) = 0;
 
   /**
    * Notify APZ to stop autoscrolling.
    * @param aGuid identifies the scroll frame which is being autoscrolled.
    */
-  virtual void StopAsyncAutoscroll(const ScrollableLayerGuid& aGuid) = 0;
+  virtual void StopAsyncAutoscroll(const SLGuidAndRenderRoot& aGuid) = 0;
 
   // If this widget supports out-of-process compositing, it can override
   // this method to provide additional information to the compositor.
@@ -1887,7 +1916,8 @@ class nsIWidget : public nsISupports {
    * This function is called "Create" to match CreateInstance().
    * The returned widget must still be nsIWidget::Create()d.
    */
-  static already_AddRefed<nsIWidget> CreatePuppetWidget(TabChild* aTabChild);
+  static already_AddRefed<nsIWidget> CreatePuppetWidget(
+      BrowserChild* aBrowserChild);
 
   static already_AddRefed<nsIWidget> CreateHeadlessWidget();
 
@@ -1898,7 +1928,7 @@ class nsIWidget : public nsISupports {
    * nsIWidget's Create to do this.
    */
   static already_AddRefed<nsIWidget> CreatePluginProxyWidget(
-      TabChild* aTabChild, mozilla::plugins::PluginWidgetChild* aActor);
+      BrowserChild* aBrowserChild, mozilla::plugins::PluginWidgetChild* aActor);
 
   /**
    * Reparent this widget's native widget.
@@ -1956,10 +1986,10 @@ class nsIWidget : public nsISupports {
   virtual const SizeConstraints GetSizeConstraints() = 0;
 
   /**
-   * If this is owned by a TabChild, return that.  Otherwise return
+   * If this is owned by a BrowserChild, return that.  Otherwise return
    * null.
    */
-  virtual TabChild* GetOwningTabChild() { return nullptr; }
+  virtual BrowserChild* GetOwningBrowserChild() { return nullptr; }
 
   /**
    * If this isn't directly compositing to its window surface,

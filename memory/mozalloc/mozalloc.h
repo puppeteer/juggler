@@ -8,25 +8,38 @@
 #ifndef mozilla_mozalloc_h
 #define mozilla_mozalloc_h
 
+#if defined(MOZ_MEMORY) && defined(IMPL_MFBT)
+#  define MOZ_MEMORY_IMPL
+#  include "mozmemory_wrap.h"
+#  define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
+// See mozmemory_wrap.h for more details. Files that are part of libmozglue,
+// need to use _impl suffixes, which is becoming cumbersome. We'll have to use
+// something like a malloc.h wrapper and allow the use of the functions without
+// a _impl suffix. In the meanwhile, this is enough to get by for C++ code.
+#  define MALLOC_DECL(name, return_type, ...) \
+    MOZ_MEMORY_API return_type name##_impl(__VA_ARGS__);
+#  include "malloc_decls.h"
+#endif
+
 /*
  * https://bugzilla.mozilla.org/show_bug.cgi?id=427099
  */
 
 #if defined(__cplusplus)
-#include <new>
+#  include <new>
 // Since libstdc++ 6, including the C headers (e.g. stdlib.h) instead of the
 // corresponding C++ header (e.g. cstdlib) can cause confusion in C++ code
 // using things defined there. Specifically, with stdlib.h, the use of abs()
 // in gfx/graphite2/src/inc/UtfCodec.h somehow ends up picking the wrong abs()
-#include <cstdlib>
+#  include <cstdlib>
 #else
-#include <stdlib.h>
+#  include <stdlib.h>
 #endif
 
 #if defined(__cplusplus)
-#include "mozilla/fallible.h"
-#include "mozilla/mozalloc_abort.h"
-#include "mozilla/TemplateLib.h"
+#  include "mozilla/fallible.h"
+#  include "mozilla/mozalloc_abort.h"
+#  include "mozilla/TemplateLib.h"
 #endif
 #include "mozilla/Attributes.h"
 #include "mozilla/Types.h"
@@ -40,12 +53,12 @@ MOZ_BEGIN_EXTERN_C
  * ours.
  */
 #ifndef free_impl
-#define free_impl free
-#define free_impl_
+#  define free_impl free
+#  define free_impl_
 #endif
 #ifndef malloc_impl
-#define malloc_impl malloc
-#define malloc_impl_
+#  define malloc_impl malloc
+#  define malloc_impl_
 #endif
 
 /*
@@ -90,95 +103,16 @@ MOZ_END_EXTERN_C
 
 #ifdef __cplusplus
 
-/*
- * We implement the default operators new/delete as part of
- * libmozalloc, replacing their definitions in libstdc++.  The
- * operator new* definitions in libmozalloc will never return a NULL
- * pointer.
- *
- * Each operator new immediately below returns a pointer to memory
- * that can be delete'd by any of
- *
- *   (1) the matching infallible operator delete immediately below
- *   (2) the matching system |operator delete(void*, std::nothrow)|
- *   (3) the matching system |operator delete(void*) noexcept(false)|
- *
- * NB: these are declared |noexcept(false)|, though they will never
- * throw that exception.  This declaration is consistent with the rule
- * that |::operator new() noexcept(false)| will never return NULL.
- *
- * NB: mozilla::fallible can be used instead of std::nothrow.
- */
-
 /* NB: This is defined just to silence vacuous warnings about symbol
  * visibility on OS X/gcc. These symbols are force-inline and not
  * exported. */
-#if defined(XP_MACOSX)
-#define MOZALLOC_EXPORT_NEW MFBT_API
-#else
-#define MOZALLOC_EXPORT_NEW
-#endif
+#  if defined(XP_MACOSX)
+#    define MOZALLOC_EXPORT_NEW MFBT_API MOZ_ALWAYS_INLINE_EVEN_DEBUG
+#  else
+#    define MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG
+#  endif
 
-MOZALLOC_EXPORT_NEW
-#if defined(__GNUC__) && !defined(__clang__) && defined(__SANITIZE_ADDRESS__)
-/* gcc's asan somehow doesn't like always_inline on this function. */
-__attribute__((gnu_inline)) inline
-#else
-MOZ_ALWAYS_INLINE_EVEN_DEBUG
-#endif
-    void*
-    operator new(size_t size) noexcept(false) {
-  return moz_xmalloc(size);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void* operator new(
-    size_t size, const std::nothrow_t&) noexcept(true) {
-  return malloc_impl(size);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void* operator new[](
-    size_t size) noexcept(false) {
-  return moz_xmalloc(size);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void* operator new[](
-    size_t size, const std::nothrow_t&) noexcept(true) {
-  return malloc_impl(size);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void operator delete(
-    void* ptr) noexcept(true) {
-  return free_impl(ptr);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void operator delete(
-    void* ptr, const std::nothrow_t&)noexcept(true) {
-  return free_impl(ptr);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void operator delete[](
-    void* ptr) noexcept(true) {
-  return free_impl(ptr);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void operator delete[](
-    void* ptr, const std::nothrow_t&) noexcept(true) {
-  return free_impl(ptr);
-}
-
-#if defined(XP_WIN)
-// We provide the global sized delete overloads unconditionally because the
-// MSVC runtime headers do, despite compiling with /Zc:sizedDealloc-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void operator delete(
-    void* ptr, size_t /*size*/) noexcept(true) {
-  return free_impl(ptr);
-}
-
-MOZALLOC_EXPORT_NEW MOZ_ALWAYS_INLINE_EVEN_DEBUG void operator delete[](
-    void* ptr, size_t /*size*/) noexcept(true) {
-  return free_impl(ptr);
-}
-#endif
+#  include "mozilla/cxxalloc.h"
 
 /*
  * This policy is identical to MallocAllocPolicy, except it uses
@@ -236,12 +170,12 @@ class InfallibleAllocPolicy {
 #endif /* ifdef __cplusplus */
 
 #ifdef malloc_impl_
-#undef malloc_impl_
-#undef malloc_impl
+#  undef malloc_impl_
+#  undef malloc_impl
 #endif
 #ifdef free_impl_
-#undef free_impl_
-#undef free_impl
+#  undef free_impl_
+#  undef free_impl
 #endif
 
 #endif /* ifndef mozilla_mozalloc_h */

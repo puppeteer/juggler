@@ -4,16 +4,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #if !defined(VPXDecoder_h_)
-#define VPXDecoder_h_
+#  define VPXDecoder_h_
 
-#include "PlatformDecoderModule.h"
-#include "mozilla/Span.h"
+#  include "PlatformDecoderModule.h"
+#  include "mozilla/Span.h"
 
-#include <stdint.h>
-#define VPX_DONT_DEFINE_STDINT_TYPES
-#include "vpx/vp8dx.h"
-#include "vpx/vpx_codec.h"
-#include "vpx/vpx_decoder.h"
+#  include <stdint.h>
+#  define VPX_DONT_DEFINE_STDINT_TYPES
+#  include "mozilla/gfx/Types.h"
+#  include "vpx/vp8dx.h"
+#  include "vpx/vpx_codec.h"
+#  include "vpx/vpx_decoder.h"
 
 namespace mozilla {
 
@@ -79,6 +80,21 @@ class VPXDecoder : public MediaDataDecoder,
     */
     int mColorSpace = 1;  // CS_BT_601
 
+    gfx::YUVColorSpace ColorSpace() const {
+      switch (mColorSpace) {
+        case 1:
+        case 3:
+        case 4:
+          return gfx::YUVColorSpace::BT601;
+        case 2:
+          return gfx::YUVColorSpace::BT709;
+        case 5:
+          return gfx::YUVColorSpace::BT2020;
+        default:
+          return gfx::YUVColorSpace::UNKNOWN;
+      }
+    }
+
     /*
     mFullRange == false then:
       For BitDepth equals 8:
@@ -108,8 +124,11 @@ class VPXDecoder : public MediaDataDecoder,
 
     bool IsCompatible(const VPXStreamInfo& aOther) const {
       return mImage == aOther.mImage && mProfile == aOther.mProfile &&
-             mBitDepth == aOther.mBitDepth && mSubSampling_x &&
-             aOther.mSubSampling_x && mSubSampling_y == aOther.mSubSampling_y;
+             mBitDepth == aOther.mBitDepth &&
+             mSubSampling_x == aOther.mSubSampling_x &&
+             mSubSampling_y == aOther.mSubSampling_y &&
+             mColorSpace == aOther.mColorSpace &&
+             mFullRange == aOther.mFullRange;
     }
   };
 

@@ -6,7 +6,7 @@ Bug 1265798 - Replace inIDOMUtils.cssPropertyIsShorthand
 <head>
   <meta charset="utf-8">
   <title>Test CSS Properties Actor</title>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
   <script type="application/javascript" src="inspector-helpers.js"></script>
   <script type="application/javascript">
@@ -65,7 +65,7 @@ window.onload = function() {
       "A CSS variable with spaces fails");
 
     is(toSortedString(cssProperties.getValues("margin")),
-       toSortedString(["auto", "inherit", "initial", "unset"]),
+       toSortedString(["auto", "inherit", "initial", "unset", "revert"]),
        "Can get values for the CSS margin.");
     is(cssProperties.getValues("foobar").length, 0,
       "Unknown values return an empty array.");

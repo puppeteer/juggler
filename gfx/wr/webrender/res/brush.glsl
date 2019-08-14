@@ -9,7 +9,8 @@ void brush_vs(
     int prim_address,
     RectWithSize local_rect,
     RectWithSize segment_rect,
-    ivec4 user_data,
+    ivec4 prim_user_data,
+    int segment_user_data,
     mat4 transform,
     PictureTask pic_task,
     int brush_flags,
@@ -29,7 +30,8 @@ void brush_vs(
 void main(void) {
     // Load the brush instance from vertex attributes.
     int prim_header_address = aData.x;
-    int clip_address = aData.y;
+    int render_task_index = aData.y >> 16;
+    int clip_address = aData.y & 0xffff;
     int segment_index = aData.z & 0xffff;
     int edge_flags = (aData.z >> 16) & 0xff;
     int brush_flags = (aData.z >> 24) & 0xff;
@@ -56,7 +58,7 @@ void main(void) {
     VertexInfo vi;
 
     // Fetch the dynamic picture that we are drawing on.
-    PictureTask pic_task = fetch_picture_task(ph.render_task_index);
+    PictureTask pic_task = fetch_picture_task(render_task_index);
     ClipArea clip_area = fetch_clip_area(clip_address);
 
     Transform transform = fetch_transform(ph.transform_id);
@@ -69,7 +71,8 @@ void main(void) {
             ph.z,
             transform,
             pic_task,
-            ph.local_rect
+            ph.local_rect,
+            ph.snap_offsets
         );
 
         // TODO(gw): transform bounds may be referenced by
@@ -115,7 +118,8 @@ void main(void) {
         ph.specific_prim_address,
         ph.local_rect,
         segment_rect,
-        ivec4(ph.user_data, segment_user_data),
+        ph.user_data,
+        segment_user_data,
         transform.m,
         pic_task,
         brush_flags,
@@ -153,8 +157,7 @@ void main(void) {
     #endif
 #endif
 
-    // TODO(gw): Handle pre-multiply common code here as required.
-    oFragColor = frag.color;
+    write_output(frag.color);
 #endif
 }
 #endif

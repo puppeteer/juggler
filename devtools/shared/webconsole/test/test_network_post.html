@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf8">
   <title>Test for the network actor (POST request)</title>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript" src="common.js"></script>
   <!-- Any copyright is dedicated to the Public Domain.
      - http://creativecommons.org/publicdomain/zero/1.0/ -->
@@ -28,18 +28,16 @@ function onAttach(aState, aResponse)
   info("test network POST request");
 
   onNetworkEvent = onNetworkEvent.bind(null, aState);
-  aState.dbgClient.addListener("networkEvent", onNetworkEvent);
+  aState.client.on("serverNetworkEvent", onNetworkEvent);
   onNetworkEventUpdate = onNetworkEventUpdate.bind(null, aState);
-  aState.dbgClient.addListener("networkEventUpdate", onNetworkEventUpdate);
+  aState.dbgClient.on("networkEventUpdate", onNetworkEventUpdate);
 
   let iframe = document.querySelector("iframe").contentWindow;
   iframe.wrappedJSObject.testXhrPost();
 }
 
-function onNetworkEvent(aState, aType, aPacket)
+function onNetworkEvent(aState, aPacket)
 {
-  is(aPacket.from, aState.actor, "network event actor");
-
   info("checking the network event packet");
 
   let netActor = aPacket.eventActor;
@@ -53,12 +51,12 @@ function onNetworkEvent(aState, aType, aPacket)
 
   aState.netActor = netActor.actor;
 
-  aState.dbgClient.removeListener("networkEvent", onNetworkEvent);
+  aState.client.off("serverNetworkEvent", onNetworkEvent);
 }
 
 let updates = [];
 
-function onNetworkEventUpdate(aState, aType, aPacket)
+function onNetworkEventUpdate(aState, aPacket)
 {
   info("received networkEventUpdate " + aPacket.updateType);
   is(aPacket.from, aState.netActor, "networkEventUpdate actor");
@@ -128,7 +126,7 @@ function onNetworkEventUpdate(aState, aType, aPacket)
 
   if (updates.indexOf("responseContent") > -1 &&
       updates.indexOf("eventTimings") > -1) {
-    aState.dbgClient.removeListener("networkEventUpdate",
+    aState.dbgClient.off("networkEventUpdate",
                                     onNetworkEvent);
 
     onRequestHeaders = onRequestHeaders.bind(null, aState);

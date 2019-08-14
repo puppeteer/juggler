@@ -7,9 +7,11 @@
 
 "use strict";
 
-const TEST_URI = "data:text/html;charset=utf-8,<p>bug 900448 - autocomplete " +
-                 "popup closes on tab switch";
-const TEST_URI_NAVIGATE = "data:text/html;charset=utf-8,<p>testing autocomplete closes";
+const TEST_URI =
+  "data:text/html;charset=utf-8,<p>bug 900448 - autocomplete " +
+  "popup closes on tab switch";
+const TEST_URI_NAVIGATE =
+  "data:text/html;charset=utf-8,<p>testing autocomplete closes";
 
 add_task(async function() {
   // Run test with legacy JsTerm
@@ -25,7 +27,7 @@ async function performTests() {
   const popup = hud.jsterm.autocompletePopup;
   const popupShown = once(popup, "popup-opened");
 
-  hud.jsterm.setInputValue("sc");
+  setInputValue(hud, "sc");
   EventUtils.sendString("r");
 
   await popupShown;

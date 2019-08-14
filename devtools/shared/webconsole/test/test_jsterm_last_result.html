@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf8">
   <title>Test for the $_ getter</title>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript" src="common.js"></script>
   <!-- Any copyright is dedicated to the Public Domain.
      - http://creativecommons.org/publicdomain/zero/1.0/ -->
@@ -17,15 +17,8 @@
 SimpleTest.waitForExplicitFinish();
 let gState;
 
-function evaluateJS(input, callback) {
-  return new Promise((resolve, reject) => {
-    gState.client.evaluateJSAsync(input, response => {
-      if (callback) {
-        callback(response);
-      }
-      resolve(response);
-    });
-  });
+function evaluateJS(input) {
+  return gState.client.evaluateJSAsync(input);
 }
 
 function startTest()
@@ -108,7 +101,6 @@ let checkObjectResult = async function () {
 
 function basicResultCheck(response, input, output) {
   checkObject(response, {
-    from: gState.actor,
     input: input,
     result: output,
   });

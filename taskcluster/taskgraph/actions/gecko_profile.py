@@ -12,9 +12,11 @@ import requests
 from requests.exceptions import HTTPError
 
 from .registry import register_callback_action
-from .util import find_decision_task, create_tasks, combine_task_graph_files
+from .util import create_tasks, combine_task_graph_files
 from taskgraph.util.taskcluster import get_artifact_from_index
+from taskgraph.util.taskgraph import find_decision_task
 from taskgraph.taskgraph import TaskGraph
+from taskgraph.util import taskcluster
 
 PUSHLOG_TMPL = '{}/json-pushes?version=2&startID={}&endID={}'
 INDEX_TMPL = 'gecko.v2.{}.pushlog-id.{}.decision'
@@ -25,7 +27,6 @@ logger = logging.getLogger(__name__)
 @register_callback_action(
     title='GeckoProfile',
     name='geckoprofile',
-    kind='hook',
     generic=True,
     symbol='Gp',
     description=('Take the label of the current task, '
@@ -37,7 +38,8 @@ logger = logging.getLogger(__name__)
     schema={},
     available=lambda parameters: True
 )
-def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id, task):
+def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id):
+    task = taskcluster.get_task_definition(task_id)
     label = task['metadata']['name']
     pushes = []
     depth = 2
@@ -87,7 +89,7 @@ def geckoprofile_action(parameters, graph_config, input, task_group_id, task_id,
                 task.task['extra']['treeherder']['symbol'] += '-p'
                 return task
 
-            create_tasks([label], full_task_graph, label_to_taskid,
+            create_tasks(graph_config, [label], full_task_graph, label_to_taskid,
                          push_params, push_decision_task_id, push, modifier=modifier)
             backfill_pushes.append(push)
         else:

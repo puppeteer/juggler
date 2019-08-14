@@ -51,8 +51,9 @@ class nsSVGPaintServerFrame : public nsSVGContainerFrame {
  protected:
   typedef mozilla::gfx::DrawTarget DrawTarget;
 
-  nsSVGPaintServerFrame(ComputedStyle* aStyle, ClassID aID)
-      : nsSVGContainerFrame(aStyle, aID) {
+  nsSVGPaintServerFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                        ClassID aID)
+      : nsSVGContainerFrame(aStyle, aPresContext, aID) {
     AddStateBits(NS_FRAME_IS_NONDISPLAY);
   }
 
@@ -72,7 +73,7 @@ class nsSVGPaintServerFrame : public nsSVGContainerFrame {
   virtual already_AddRefed<gfxPattern> GetPaintServerPattern(
       nsIFrame* aSource, const DrawTarget* aDrawTarget,
       const gfxMatrix& aContextMatrix,
-      nsStyleSVGPaint nsStyleSVG::*aFillOrStroke, float aOpacity,
+      mozilla::StyleSVGPaint nsStyleSVG::*aFillOrStroke, float aOpacity,
       imgDrawingParams& aImgParams,
       const gfxRect* aOverrideBounds = nullptr) = 0;
 

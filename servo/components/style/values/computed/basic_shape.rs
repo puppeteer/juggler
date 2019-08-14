@@ -8,10 +8,8 @@
 //! [basic-shape]: https://drafts.csswg.org/css-shapes/#typedef-basic-shape
 
 use crate::values::computed::url::ComputedUrl;
-use crate::values::computed::{Image, LengthOrPercentage};
+use crate::values::computed::{Image, LengthPercentage, NonNegativeLengthPercentage};
 use crate::values::generics::basic_shape as generic;
-use std::fmt::{self, Write};
-use style_traits::{CssWriter, ToCss};
 
 /// A computed alias for FillRule.
 pub use crate::values::generics::basic_shape::FillRule;
@@ -23,48 +21,22 @@ pub type ClippingShape = generic::ClippingShape<BasicShape, ComputedUrl>;
 pub type FloatAreaShape = generic::FloatAreaShape<BasicShape, Image>;
 
 /// A computed basic shape.
-pub type BasicShape =
-    generic::BasicShape<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
+pub type BasicShape = generic::GenericBasicShape<
+    LengthPercentage,
+    LengthPercentage,
+    LengthPercentage,
+    NonNegativeLengthPercentage,
+>;
 
 /// The computed value of `inset()`
-pub type InsetRect = generic::InsetRect<LengthOrPercentage>;
+pub type InsetRect = generic::InsetRect<LengthPercentage, NonNegativeLengthPercentage>;
 
 /// A computed circle.
-pub type Circle = generic::Circle<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
+pub type Circle = generic::Circle<LengthPercentage, LengthPercentage, NonNegativeLengthPercentage>;
 
 /// A computed ellipse.
-pub type Ellipse = generic::Ellipse<LengthOrPercentage, LengthOrPercentage, LengthOrPercentage>;
+pub type Ellipse =
+    generic::Ellipse<LengthPercentage, LengthPercentage, NonNegativeLengthPercentage>;
 
 /// The computed value of `ShapeRadius`
-pub type ShapeRadius = generic::ShapeRadius<LengthOrPercentage>;
-
-impl ToCss for Circle {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        dest.write_str("circle(")?;
-        self.radius.to_css(dest)?;
-        dest.write_str(" at ")?;
-        self.position.to_css(dest)?;
-        dest.write_str(")")
-    }
-}
-
-impl ToCss for Ellipse {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        dest.write_str("ellipse(")?;
-        if (self.semiaxis_x, self.semiaxis_y) != Default::default() {
-            self.semiaxis_x.to_css(dest)?;
-            dest.write_str(" ")?;
-            self.semiaxis_y.to_css(dest)?;
-            dest.write_str(" ")?;
-        }
-        dest.write_str("at ")?;
-        self.position.to_css(dest)?;
-        dest.write_str(")")
-    }
-}
+pub type ShapeRadius = generic::GenericShapeRadius<NonNegativeLengthPercentage>;

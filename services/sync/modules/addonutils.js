@@ -6,14 +6,22 @@
 
 var EXPORTED_SYMBOLS = ["AddonUtils"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://services-sync/util.js");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+const { Log } = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const { Svc } = ChromeUtils.import("resource://services-sync/util.js");
 
-ChromeUtils.defineModuleGetter(this, "AddonManager",
-  "resource://gre/modules/AddonManager.jsm");
-ChromeUtils.defineModuleGetter(this, "AddonRepository",
-  "resource://gre/modules/addons/AddonRepository.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "AddonManager",
+  "resource://gre/modules/AddonManager.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "AddonRepository",
+  "resource://gre/modules/addons/AddonRepository.jsm"
+);
 
 function AddonUtilsInternal() {
   this._log = Log.repository.getLogger("Sync.AddonUtils");
@@ -37,10 +45,12 @@ AddonUtilsInternal.prototype = {
     // reflected in the AddonInstall, so we can't use it. If we ever get rid
     // of sourceURI rewriting, we can avoid having to reconstruct the
     // AddonInstall.
-    return AddonManager.getInstallForURL(
-      addon.sourceURI.spec, "application/x-xpinstall", undefined, addon.name, addon.iconURL, addon.version,
-      null, {source: "sync"}
-    );
+    return AddonManager.getInstallForURL(addon.sourceURI.spec, {
+      name: addon.name,
+      icons: addon.iconURL,
+      version: addon.version,
+      telemetryInfo: { source: "sync" },
+    });
   },
 
   /**
@@ -84,23 +94,25 @@ AddonUtilsInternal.prototype = {
             }
 
             if (options.syncGUID) {
-              log.info("Setting syncGUID of " + install.name + ": " +
-                       options.syncGUID);
+              log.info(
+                "Setting syncGUID of " + install.name + ": " + options.syncGUID
+              );
               install.addon.syncGUID = options.syncGUID;
             }
 
             // We only need to change userDisabled if it is disabled because
             // enabled is the default.
             if ("enabled" in options && !options.enabled) {
-              log.info("Marking add-on as disabled for install: " +
-                       install.name);
+              log.info(
+                "Marking add-on as disabled for install: " + install.name
+              );
               install.addon.disable();
             }
           },
           onInstallEnded(install, addon) {
             install.removeListener(listener);
 
-            res({id: addon.id, install, addon});
+            res({ id: addon.id, install, addon });
           },
           onInstallFailed(install) {
             install.removeListener(listener);
@@ -198,15 +210,17 @@ AddonUtilsInternal.prototype = {
     }
 
     let addons = await AddonRepository.getAddonsByIDs(ids);
-    this._log.info(`Found ${addons.length} / ${ids.length}` +
-                   " add-ons during repository search.");
+    this._log.info(
+      `Found ${addons.length} / ${ids.length}` +
+        " add-ons during repository search."
+    );
 
     let ourResult = {
       installedIDs: [],
-      installs:     [],
-      addons:       [],
-      skipped:      [],
-      errors:       [],
+      installs: [],
+      addons: [],
+      skipped: [],
+      errors: [],
     };
 
     let toInstall = [];
@@ -239,23 +253,25 @@ AddonUtilsInternal.prototype = {
       try {
         addon.sourceURI.QueryInterface(Ci.nsIURL);
       } catch (ex) {
-        this._log.warn("Unable to QI sourceURI to nsIURL: " +
-                       addon.sourceURI.spec);
+        this._log.warn(
+          "Unable to QI sourceURI to nsIURL: " + addon.sourceURI.spec
+        );
         continue;
       }
 
-      let params = addon.sourceURI.query.split("&").map(
-        function rewrite(param) {
+      let params = addon.sourceURI.query
+        .split("&")
+        .map(function rewrite(param) {
+          if (param.indexOf("src=") == 0) {
+            return "src=sync";
+          }
+          return param;
+        });
 
-        if (param.indexOf("src=") == 0) {
-          return "src=sync";
-        }
-        return param;
-      });
-
-      addon.sourceURI = addon.sourceURI.mutate()
-                                       .setQuery(params.join("&"))
-                                       .finalize();
+      addon.sourceURI = addon.sourceURI
+        .mutate()
+        .setQuery(params.join("&"))
+        .finalize();
     }
 
     if (!toInstall.length) {
@@ -274,16 +290,21 @@ AddonUtilsInternal.prototype = {
         }
       }
 
-      installPromises.push((async () => {
-        try {
-          const result = await this.installAddonFromSearchResult(addon, options);
-          ourResult.installedIDs.push(result.id);
-          ourResult.installs.push(result.install);
-          ourResult.addons.push(result.addon);
-        } catch (error) {
-          ourResult.errors.push(error);
-        }
-      })());
+      installPromises.push(
+        (async () => {
+          try {
+            const result = await this.installAddonFromSearchResult(
+              addon,
+              options
+            );
+            ourResult.installedIDs.push(result.id);
+            ourResult.installs.push(result.install);
+            ourResult.addons.push(result.addon);
+          } catch (error) {
+            ourResult.errors.push(error);
+          }
+        })()
+      );
     }
 
     await Promise.all(installPromises);
@@ -309,8 +330,9 @@ AddonUtilsInternal.prototype = {
     // sourceURI presence isn't enforced by AddonRepository. So, we skip
     // add-ons without a sourceURI.
     if (!addon.sourceURI) {
-      this._log.info("Skipping install of add-on because missing " +
-                     "sourceURI: " + addon.id);
+      this._log.info(
+        "Skipping install of add-on because missing sourceURI: " + addon.id
+      );
       return false;
     }
     // Verify that the source URI uses TLS. We don't allow installs from
@@ -327,14 +349,17 @@ AddonUtilsInternal.prototype = {
     if (requireSecureURI) {
       let scheme = addon.sourceURI.scheme;
       if (scheme != "https") {
-        this._log.info(`Skipping install of add-on "${addon.id}" because sourceURI's scheme of "${scheme}" is not trusted`);
+        this._log.info(
+          `Skipping install of add-on "${
+            addon.id
+          }" because sourceURI's scheme of "${scheme}" is not trusted`
+        );
         return false;
       }
     }
     this._log.info(`Add-on "${addon.id}" is able to be installed`);
     return true;
   },
-
 
   /**
    * Update the user disabled flag for an add-on.
@@ -359,7 +384,6 @@ AddonUtilsInternal.prototype = {
       addon.enable();
     }
   },
-
 };
 
 XPCOMUtils.defineLazyGetter(this, "AddonUtils", function() {

@@ -17,9 +17,32 @@
 using namespace js;
 using namespace js::gc;
 
-void StoreBuffer::GenericBuffer::trace(StoreBuffer* owner, JSTracer* trc) {
-  mozilla::ReentrancyGuard g(*owner);
-  MOZ_ASSERT(owner->isEnabled());
+bool StoreBuffer::WholeCellBuffer::init() {
+  MOZ_ASSERT(!head_);
+  if (!storage_) {
+    storage_ = MakeUnique<LifoAlloc>(LifoAllocBlockSize);
+    // This prevents LifoAlloc::Enum from crashing with a release
+    // assertion if we ever allocate one entry larger than
+    // LifoAllocBlockSize.
+    if (storage_) {
+      storage_->disableOversize();
+    }
+  }
+  clear();
+  return bool(storage_);
+}
+
+bool StoreBuffer::GenericBuffer::init() {
+  if (!storage_) {
+    storage_ = MakeUnique<LifoAlloc>(LifoAllocBlockSize);
+  }
+  clear();
+  return bool(storage_);
+}
+
+void StoreBuffer::GenericBuffer::trace(JSTracer* trc) {
+  mozilla::ReentrancyGuard g(*owner_);
+  MOZ_ASSERT(owner_->isEnabled());
   if (!storage_) {
     return;
   }
@@ -31,9 +54,29 @@ void StoreBuffer::GenericBuffer::trace(StoreBuffer* owner, JSTracer* trc) {
   }
 }
 
+StoreBuffer::StoreBuffer(JSRuntime* rt, const Nursery& nursery)
+    : bufferVal(this, JS::GCReason::FULL_VALUE_BUFFER),
+      bufStrCell(this, JS::GCReason::FULL_CELL_PTR_STR_BUFFER),
+      bufObjCell(this, JS::GCReason::FULL_CELL_PTR_OBJ_BUFFER),
+      bufferSlot(this, JS::GCReason::FULL_SLOT_BUFFER),
+      bufferWholeCell(this),
+      bufferGeneric(this),
+      cancelIonCompilations_(false),
+      runtime_(rt),
+      nursery_(nursery),
+      aboutToOverflow_(false),
+      enabled_(false)
+#ifdef DEBUG
+      ,
+      mEntered(false)
+#endif
+{
+}
+
 void StoreBuffer::checkEmpty() const {
   MOZ_ASSERT(bufferVal.isEmpty());
-  MOZ_ASSERT(bufferCell.isEmpty());
+  MOZ_ASSERT(bufStrCell.isEmpty());
+  MOZ_ASSERT(bufObjCell.isEmpty());
   MOZ_ASSERT(bufferSlot.isEmpty());
   MOZ_ASSERT(bufferWholeCell.isEmpty());
   MOZ_ASSERT(bufferGeneric.isEmpty());
@@ -75,13 +118,14 @@ void StoreBuffer::clear() {
   cancelIonCompilations_ = false;
 
   bufferVal.clear();
-  bufferCell.clear();
+  bufStrCell.clear();
+  bufObjCell.clear();
   bufferSlot.clear();
   bufferWholeCell.clear();
   bufferGeneric.clear();
 }
 
-void StoreBuffer::setAboutToOverflow(JS::gcreason::Reason reason) {
+void StoreBuffer::setAboutToOverflow(JS::GCReason reason) {
   if (!aboutToOverflow_) {
     aboutToOverflow_ = true;
     runtime_->gc.stats().count(gcstats::COUNT_STOREBUFFER_OVERFLOW);
@@ -92,7 +136,8 @@ void StoreBuffer::setAboutToOverflow(JS::gcreason::Reason reason) {
 void StoreBuffer::addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
                                          JS::GCSizes* sizes) {
   sizes->storeBufferVals += bufferVal.sizeOfExcludingThis(mallocSizeOf);
-  sizes->storeBufferCells += bufferCell.sizeOfExcludingThis(mallocSizeOf);
+  sizes->storeBufferCells += bufStrCell.sizeOfExcludingThis(mallocSizeOf) +
+                             bufObjCell.sizeOfExcludingThis(mallocSizeOf);
   sizes->storeBufferSlots += bufferSlot.sizeOfExcludingThis(mallocSizeOf);
   sizes->storeBufferWholeCells +=
       bufferWholeCell.sizeOfExcludingThis(mallocSizeOf);
@@ -132,7 +177,7 @@ ArenaCellSet* StoreBuffer::WholeCellBuffer::allocateCellSet(Arena* arena) {
 
   if (isAboutToOverflow()) {
     rt->gc.storeBuffer().setAboutToOverflow(
-        JS::gcreason::FULL_WHOLE_CELL_BUFFER);
+        JS::GCReason::FULL_WHOLE_CELL_BUFFER);
   }
 
   return cells;

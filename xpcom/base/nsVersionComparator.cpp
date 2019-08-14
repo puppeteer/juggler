@@ -9,9 +9,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include "mozilla/CheckedInt.h"
 #if defined(XP_WIN) && !defined(UPDATER_NO_STRING_GLUE_STL)
-#include <wchar.h>
-#include "nsString.h"
+#  include <wchar.h>
+#  include "nsString.h"
 #endif
 
 struct VersionPart {
@@ -37,6 +39,29 @@ struct VersionPartW {
   wchar_t* extraD;  // null-terminated
 };
 #endif
+
+static int32_t ns_strtol(const char* aPart, char** aNext) {
+  errno = 0;
+  long result_long = strtol(aPart, aNext, 10);
+
+  // Different platforms seem to disagree on what to return when the value
+  // is out of range so we ensure that it is always what we want it to be.
+  // We choose 0 firstly because that is the default when the number doesn't
+  // exist at all and also because it would be easier to recover from should
+  // you somehow end up in a situation where an old version is invalid. It is
+  // much easier to create a version either larger or smaller than 0, much
+  // harder to do the same with INT_MAX.
+  if (errno != 0) {
+    return 0;
+  }
+
+  mozilla::CheckedInt<int32_t> result = result_long;
+  if (!result.isValid()) {
+    return 0;
+  }
+
+  return result.value();
+}
 
 /**
  * Parse a version part into a number and "extra text".
@@ -65,7 +90,7 @@ static char* ParseVP(char* aPart, VersionPart& aResult) {
     aResult.numA = INT32_MAX;
     aResult.strB = "";
   } else {
-    aResult.numA = strtol(aPart, const_cast<char**>(&aResult.strB), 10);
+    aResult.numA = ns_strtol(aPart, const_cast<char**>(&aResult.strB));
   }
 
   if (!*aResult.strB) {
@@ -84,8 +109,8 @@ static char* ParseVP(char* aPart, VersionPart& aResult) {
         aResult.strBlen = strlen(aResult.strB);
       } else {
         aResult.strBlen = numstart - aResult.strB;
+        aResult.numC = ns_strtol(numstart, const_cast<char**>(&aResult.extraD));
 
-        aResult.numC = strtol(numstart, &aResult.extraD, 10);
         if (!*aResult.extraD) {
           aResult.extraD = nullptr;
         }
@@ -110,6 +135,24 @@ static char* ParseVP(char* aPart, VersionPart& aResult) {
  * @returns A pointer to the next versionpart, or null if none.
  */
 #ifdef XP_WIN
+
+static int32_t ns_wcstol(const wchar_t* aPart, wchar_t** aNext) {
+  errno = 0;
+  long result_long = wcstol(aPart, aNext, 10);
+
+  // See above for the rationale for using 0 here.
+  if (errno != 0) {
+    return 0;
+  }
+
+  mozilla::CheckedInt<int32_t> result = result_long;
+  if (!result.isValid()) {
+    return 0;
+  }
+
+  return result.value();
+}
+
 static wchar_t* ParseVP(wchar_t* aPart, VersionPartW& aResult) {
   wchar_t* dot;
 
@@ -134,7 +177,7 @@ static wchar_t* ParseVP(wchar_t* aPart, VersionPartW& aResult) {
     aResult.numA = INT32_MAX;
     aResult.strB = kEmpty;
   } else {
-    aResult.numA = wcstol(aPart, const_cast<wchar_t**>(&aResult.strB), 10);
+    aResult.numA = ns_wcstol(aPart, const_cast<wchar_t**>(&aResult.strB));
   }
 
   if (!*aResult.strB) {
@@ -153,8 +196,9 @@ static wchar_t* ParseVP(wchar_t* aPart, VersionPartW& aResult) {
         aResult.strBlen = wcslen(aResult.strB);
       } else {
         aResult.strBlen = numstart - aResult.strB;
+        aResult.numC =
+            ns_wcstol(numstart, const_cast<wchar_t**>(&aResult.extraD));
 
-        aResult.numC = wcstol(numstart, &aResult.extraD, 10);
         if (!*aResult.extraD) {
           aResult.extraD = nullptr;
         }

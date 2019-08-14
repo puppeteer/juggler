@@ -1,6 +1,9 @@
+/* import-globals-from antitracking_head.js */
+
 requestLongerTimeout(2);
 
-AntiTracking.runTest("SharedWorkers",
+AntiTracking.runTest(
+  "SharedWorkers",
   async _ => {
     try {
       new SharedWorker("a.js", "foo");
@@ -16,11 +19,15 @@ AntiTracking.runTest("SharedWorkers",
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
-  });
+  }
+);
 
-AntiTracking.runTest("SharedWorkers and Storage Access API",
+AntiTracking.runTest(
+  "SharedWorkers and Storage Access API",
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
     await noStorageAccessInitially();
@@ -36,12 +43,30 @@ AntiTracking.runTest("SharedWorkers and Storage Access API",
     /* import-globals-from storageAccessAPIHelpers.js */
     await callRequestStorageAccess();
 
-    new SharedWorker("a.js", "foo");
-    ok(true, "SharedWorker is allowed");
+    if (
+      SpecialPowers.Services.prefs.getIntPref(
+        "network.cookie.cookieBehavior"
+      ) == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT
+    ) {
+      try {
+        new SharedWorker("a.js", "foo");
+        ok(false, "SharedWorker cannot be used!");
+      } catch (e) {
+        ok(true, "SharedWorker cannot be used!");
+        is(e.name, "SecurityError", "We want a security error message.");
+      }
+    } else {
+      new SharedWorker("a.js", "foo");
+      ok(true, "SharedWorker is allowed");
+    }
   },
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
-    await noStorageAccessInitially();
+    if (allowListed) {
+      await hasStorageAccessInitially();
+    } else {
+      await noStorageAccessInitially();
+    }
 
     new SharedWorker("a.js", "foo");
     ok(true, "SharedWorker is allowed");
@@ -55,7 +80,12 @@ AntiTracking.runTest("SharedWorkers and Storage Access API",
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
   },
-  null, false, false);
+  null,
+  false,
+  false
+);

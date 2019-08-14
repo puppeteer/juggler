@@ -247,16 +247,16 @@ class TestConfigure(unittest.TestCase):
                 def foo():
                     import sys
                 foo()'''),
-                sandbox
-            )
+                  sandbox
+                  )
 
         exec_(textwrap.dedent('''
             @template
             @imports('sys')
             def foo():
                 return sys'''),
-            sandbox
-        )
+              sandbox
+              )
 
         self.assertIs(sandbox['foo'](), sys)
 
@@ -265,8 +265,8 @@ class TestConfigure(unittest.TestCase):
             @imports(_from='os', _import='path')
             def foo():
                 return path'''),
-            sandbox
-        )
+              sandbox
+              )
 
         self.assertIs(sandbox['foo'](), os.path)
 
@@ -275,8 +275,8 @@ class TestConfigure(unittest.TestCase):
             @imports(_from='os', _import='path', _as='os_path')
             def foo():
                 return os_path'''),
-            sandbox
-        )
+              sandbox
+              )
 
         self.assertIs(sandbox['foo'](), os.path)
 
@@ -285,8 +285,8 @@ class TestConfigure(unittest.TestCase):
             @imports('__builtin__')
             def foo():
                 return __builtin__'''),
-            sandbox
-        )
+              sandbox
+              )
 
         import __builtin__
         self.assertIs(sandbox['foo'](), __builtin__)
@@ -296,8 +296,8 @@ class TestConfigure(unittest.TestCase):
             @imports(_from='__builtin__', _import='open')
             def foo():
                 return open('%s')''' % os.devnull),
-            sandbox
-        )
+              sandbox
+              )
 
         f = sandbox['foo']()
         self.assertEquals(f.name, os.devnull)
@@ -310,8 +310,8 @@ class TestConfigure(unittest.TestCase):
             def foo():
                 import sys
                 return sys'''),
-            sandbox
-        )
+              sandbox
+              )
 
         self.assertIs(sandbox['foo'](), sys)
 
@@ -320,8 +320,8 @@ class TestConfigure(unittest.TestCase):
             @imports('__sandbox__')
             def foo():
                 return __sandbox__'''),
-            sandbox
-        )
+              sandbox
+              )
 
         self.assertIs(sandbox['foo'](), sandbox)
 
@@ -330,8 +330,8 @@ class TestConfigure(unittest.TestCase):
             @imports(_import='__sandbox__', _as='s')
             def foo():
                 return s'''),
-            sandbox
-        )
+              sandbox
+              )
 
         self.assertIs(sandbox['foo'](), sandbox)
 
@@ -348,8 +348,8 @@ class TestConfigure(unittest.TestCase):
                     return sys
                 return bar
             bar = foo()'''),
-            sandbox
-        )
+              sandbox
+              )
 
         with self.assertRaises(NameError) as e:
             sandbox._depends[sandbox['bar']].result()
@@ -377,8 +377,8 @@ class TestConfigure(unittest.TestCase):
                 return sys
             foo()
             foo()'''),
-            sandbox
-        )
+              sandbox
+              )
 
         self.assertEquals(len(imports), 1)
 
@@ -587,7 +587,7 @@ class TestConfigure(unittest.TestCase):
 
         config = get_config(['--enable-foo=a,b'])
         self.assertIn('BAR', config)
-        self.assertEquals(config['BAR'], PositiveOptionValue(('a','b')))
+        self.assertEquals(config['BAR'], PositiveOptionValue(('a', 'b')))
 
         with self.assertRaises(InvalidOptionError) as e:
             get_config(['--enable-foo=a,b', '--disable-bar'])
@@ -639,18 +639,20 @@ class TestConfigure(unittest.TestCase):
             mozpath.join(test_data_path, 'imply_option', 'imm.configure'))
 
         with self.assertRaisesRegexp(InvalidOptionError,
-            "--enable-foo' implied by 'imply_option at %s:7' conflicts with "
-            "'--disable-foo' from the command-line" % config_path):
+                                     "--enable-foo' implied by 'imply_option at %s:7' conflicts "
+                                     "with '--disable-foo' from the command-line" % config_path):
             get_config(['--disable-foo'])
 
         with self.assertRaisesRegexp(InvalidOptionError,
-            "--enable-bar=foo,bar' implied by 'imply_option at %s:16' conflicts"
-            " with '--enable-bar=a,b,c' from the command-line" % config_path):
+                                     "--enable-bar=foo,bar' implied by 'imply_option at %s:16' "
+                                     "conflicts with '--enable-bar=a,b,c' from the command-line"
+                                     % config_path):
             get_config(['--enable-bar=a,b,c'])
 
         with self.assertRaisesRegexp(InvalidOptionError,
-            "--enable-baz=BAZ' implied by 'imply_option at %s:25' conflicts"
-            " with '--enable-baz=QUUX' from the command-line" % config_path):
+                                     "--enable-baz=BAZ' implied by 'imply_option at %s:25' "
+                                     "conflicts with '--enable-baz=QUUX' from the command-line"
+                                     % config_path):
             get_config(['--enable-baz=QUUX'])
 
     def test_imply_option_failures(self):
@@ -694,6 +696,135 @@ class TestConfigure(unittest.TestCase):
             self.assertEquals(config, {
                 'QUX': PositiveOptionValue(),
             })
+
+    def test_imply_option_dependency_loop(self):
+        with self.moz_configure('''
+            option('--without-foo', help='foo')
+
+            @depends('--with-foo')
+            def qux_default(foo):
+                return bool(foo)
+
+            option('--with-qux', default=qux_default, help='qux')
+
+            imply_option('--with-foo', depends('--with-qux')(lambda x: x or None))
+
+            set_config('FOO', depends('--with-foo')(lambda x: x))
+            set_config('QUX', depends('--with-qux')(lambda x: x))
+        '''):
+            config = self.get_config()
+            self.assertEquals(config, {
+                'FOO': PositiveOptionValue(),
+                'QUX': PositiveOptionValue(),
+            })
+
+            config = self.get_config(['--without-foo'])
+            self.assertEquals(config, {
+                'FOO': NegativeOptionValue(),
+                'QUX': NegativeOptionValue(),
+            })
+
+            config = self.get_config(['--with-qux'])
+            self.assertEquals(config, {
+                'FOO': PositiveOptionValue(),
+                'QUX': PositiveOptionValue(),
+            })
+
+            with self.assertRaises(InvalidOptionError) as e:
+                config = self.get_config(['--without-foo', '--with-qux'])
+
+            self.assertEquals(e.exception.message,
+                              "'--with-foo' implied by '--with-qux' conflicts "
+                              "with '--without-foo' from the command-line")
+
+            config = self.get_config(['--without-qux'])
+            self.assertEquals(config, {
+                'FOO': PositiveOptionValue(),
+                'QUX': NegativeOptionValue(),
+            })
+
+        with self.moz_configure('''
+            option('--with-foo', help='foo')
+
+            @depends('--with-foo')
+            def qux_default(foo):
+                return bool(foo)
+
+            option('--with-qux', default=qux_default, help='qux')
+
+            imply_option('--with-foo', depends('--with-qux')(lambda x: x or None))
+
+            set_config('FOO', depends('--with-foo')(lambda x: x))
+            set_config('QUX', depends('--with-qux')(lambda x: x))
+        '''):
+            config = self.get_config()
+            self.assertEquals(config, {
+                'FOO': NegativeOptionValue(),
+                'QUX': NegativeOptionValue(),
+            })
+
+            config = self.get_config(['--with-foo'])
+            self.assertEquals(config, {
+                'FOO': PositiveOptionValue(),
+                'QUX': PositiveOptionValue(),
+            })
+
+            with self.assertRaises(InvalidOptionError) as e:
+                config = self.get_config(['--with-qux'])
+
+            self.assertEquals(e.exception.message,
+                              "'--with-foo' implied by '--with-qux' conflicts "
+                              "with '--without-foo' from the default")
+
+            with self.assertRaises(InvalidOptionError) as e:
+                config = self.get_config(['--without-foo', '--with-qux'])
+
+            self.assertEquals(e.exception.message,
+                              "'--with-foo' implied by '--with-qux' conflicts "
+                              "with '--without-foo' from the command-line")
+
+            config = self.get_config(['--without-qux'])
+            self.assertEquals(config, {
+                'FOO': NegativeOptionValue(),
+                'QUX': NegativeOptionValue(),
+            })
+
+    def test_imply_option_recursion(self):
+        config_path = mozpath.abspath(
+            mozpath.join(test_data_path, 'moz.configure'))
+
+        message = ("'--without-foo' appears somewhere in the direct or indirect dependencies "
+                   "when resolving imply_option at %s:8" % config_path)
+
+        with self.moz_configure('''
+            option('--without-foo', help='foo')
+
+            imply_option('--with-qux', depends('--with-foo')(lambda x: x or None))
+
+            option('--with-qux', help='qux')
+
+            imply_option('--with-foo', depends('--with-qux')(lambda x: x or None))
+
+            set_config('FOO', depends('--with-foo')(lambda x: x))
+            set_config('QUX', depends('--with-qux')(lambda x: x))
+        '''):
+            # Note: no error is detected when the depends function in the
+            # imply_options resolve to None, which disables the imply_option.
+
+            with self.assertRaises(ConfigureError) as e:
+                self.get_config()
+
+            self.assertEquals(e.exception.message, message)
+
+            with self.assertRaises(ConfigureError) as e:
+                self.get_config(['--with-qux'])
+
+            self.assertEquals(e.exception.message, message)
+
+            with self.assertRaises(ConfigureError) as e:
+                self.get_config(['--without-foo', '--with-qux'])
+
+            self.assertEquals(e.exception.message, message)
 
     def test_option_failures(self):
         with self.assertRaises(ConfigureError) as e:
@@ -890,6 +1021,31 @@ class TestConfigure(unittest.TestCase):
                 set_config('FOO', depends('--with-foo', when=always)(lambda x: x))
         '''):
             self.get_config()
+
+        with self.moz_configure('''
+            option('--with-foo', help='foo')
+            option('--without-bar', help='bar', when='--with-foo')
+            option('--with-qux', help='qux', when='--with-bar')
+            set_config('QUX', True, when='--with-qux')
+        '''):
+            # These are valid:
+            self.get_config(['--with-foo'])
+            self.get_config(['--with-foo', '--with-bar'])
+            self.get_config(['--with-foo', '--without-bar'])
+            self.get_config(['--with-foo', '--with-bar', '--with-qux'])
+            self.get_config(['--with-foo', '--with-bar', '--without-qux'])
+            with self.assertRaises(InvalidOptionError) as e:
+                self.get_config(['--with-bar'])
+            with self.assertRaises(InvalidOptionError) as e:
+                self.get_config(['--without-bar'])
+            with self.assertRaises(InvalidOptionError) as e:
+                self.get_config(['--with-qux'])
+            with self.assertRaises(InvalidOptionError) as e:
+                self.get_config(['--without-qux'])
+            with self.assertRaises(InvalidOptionError) as e:
+                self.get_config(['--with-foo', '--without-bar', '--with-qux'])
+            with self.assertRaises(InvalidOptionError) as e:
+                self.get_config(['--with-foo', '--without-bar', '--without-qux'])
 
     def test_include_failures(self):
         with self.assertRaises(ConfigureError) as e:

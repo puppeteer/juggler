@@ -9,9 +9,7 @@
  * - this time the alt data must arive
  */
 
-ChromeUtils.import("resource://testing-common/httpd.js");
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpServer.identity.primaryPort + "/content";
@@ -20,13 +18,14 @@ XPCOMUtils.defineLazyGetter(this, "URL", function() {
 var httpServer = null;
 
 function make_channel(url, callback, ctx) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true});
+  return NetUtil.newChannel({ uri: url, loadUsingSystemPrincipal: true });
 }
 
 function inChildProcess() {
-  return Cc["@mozilla.org/xre/app-info;1"]
-           .getService(Ci.nsIXULRuntime)
-           .processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+  return (
+    Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime)
+      .processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT
+  );
 }
 
 const responseContent = "response body";
@@ -39,15 +38,14 @@ var shouldPassRevalidation = true;
 
 var cache_storage = null;
 
-function contentHandler(metadata, response)
-{
+function contentHandler(metadata, response) {
   response.setHeader("Content-Type", "text/plain");
   response.setHeader("Cache-Control", "no-cache");
   response.setHeader("ETag", "test-etag1");
 
   try {
     var etag = metadata.getHeader("If-None-Match");
-  } catch(ex) {
+  } catch (ex) {
     var etag = "";
   }
 
@@ -60,8 +58,7 @@ function contentHandler(metadata, response)
   }
 }
 
-function check_has_alt_data_in_index(aHasAltData)
-{
+function check_has_alt_data_in_index(aHasAltData) {
   if (inChildProcess()) {
     return;
   }
@@ -70,8 +67,7 @@ function check_has_alt_data_in_index(aHasAltData)
   Assert.equal(hasAltData.value, aHasAltData);
 }
 
-function run_test()
-{
+function run_test() {
   httpServer = new HttpServer();
   httpServer.registerPathHandler("/content", contentHandler);
   httpServer.start(-1);
@@ -80,18 +76,16 @@ function run_test()
   asyncOpen();
 }
 
-function asyncOpen()
-{
+function asyncOpen() {
   var chan = make_channel(URL);
 
   var cc = chan.QueryInterface(Ci.nsICacheInfoChannel);
-  cc.preferAlternativeDataType(altContentType, "");
+  cc.preferAlternativeDataType(altContentType, "", true);
 
-  chan.asyncOpen2(new ChannelListener(readServerContent, null));
+  chan.asyncOpen(new ChannelListener(readServerContent, null));
 }
 
-function readServerContent(request, buffer)
-{
+function readServerContent(request, buffer) {
   var cc = request.QueryInterface(Ci.nsICacheInfoChannel);
 
   Assert.equal(buffer, responseContent);
@@ -107,12 +101,11 @@ function readServerContent(request, buffer)
   });
 }
 
-function flushAndOpenAltChannel()
-{
+function flushAndOpenAltChannel() {
   // We need to do a GC pass to ensure the cache entry has been freed.
   gc();
-  do_send_remote_message('flush');
-  do_await_remote_message('flushed').then(() => {
+  do_send_remote_message("flush");
+  do_await_remote_message("flushed").then(() => {
     openAltChannel();
   });
 }
@@ -120,13 +113,12 @@ function flushAndOpenAltChannel()
 function openAltChannel() {
   var chan = make_channel(URL);
   var cc = chan.QueryInterface(Ci.nsICacheInfoChannel);
-  cc.preferAlternativeDataType(altContentType, "");
+  cc.preferAlternativeDataType(altContentType, "", true);
 
-  chan.asyncOpen2(new ChannelListener(readAltContent, null));
+  chan.asyncOpen(new ChannelListener(readAltContent, null));
 }
 
-function readAltContent(request, buffer)
-{
+function readAltContent(request, buffer) {
   var cc = request.QueryInterface(Ci.nsICacheInfoChannel);
 
   Assert.equal(servedNotModified, true);
@@ -134,8 +126,8 @@ function readAltContent(request, buffer)
   Assert.equal(buffer, altContent);
 
   // FINISH
-  do_send_remote_message('done');
-  do_await_remote_message('finish').then(() => {
+  do_send_remote_message("done");
+  do_await_remote_message("finish").then(() => {
     httpServer.stop(do_test_finished);
   });
 }

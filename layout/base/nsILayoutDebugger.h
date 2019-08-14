@@ -11,9 +11,6 @@
 
 #include "nsISupports.h"
 
-class nsIDocument;
-class nsIPresShell;
-
 // 1295f7c0-96b3-41fc-93ed-c95dfb712ce7
 #define NS_ILAYOUT_DEBUGGER_IID                      \
   {                                                  \
@@ -39,5 +36,9 @@ class nsILayoutDebugger : public nsISupports {
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsILayoutDebugger, NS_ILAYOUT_DEBUGGER_IID)
+
+#ifdef DEBUG
+nsresult NS_NewLayoutDebugger(nsILayoutDebugger** aResult);
+#endif /* DEBUG */
 
 #endif /* nsILayoutDebugger_h___ */

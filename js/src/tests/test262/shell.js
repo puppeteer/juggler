@@ -1,3 +1,4 @@
+// GENERATED, DO NOT EDIT
 // file: assert.js
 // Copyright (C) 2017 Ecma International.  All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
@@ -169,7 +170,7 @@ function verifyProperty(obj, name, desc, options) {
   var failures = [];
 
   if (Object.prototype.hasOwnProperty.call(desc, 'value')) {
-    if (desc.value !== originalDesc.value) {
+    if (!isSameValue(desc.value, originalDesc.value)) {
       failures.push("descriptor value should be " + desc.value);
     }
   }
@@ -235,10 +236,11 @@ function isEnumerable(obj, name) {
     Object.prototype.propertyIsEnumerable.call(obj, name);
 }
 
-function isEqualTo(obj, name, expectedValue) {
-  var actualValue = obj[name];
+function isSameValue(a, b) {
+  if (a === 0 && b === 0) return 1 / a === 1 / b;
+  if (a !== a && b !== b) return true;
 
-  return assert._isSameValue(actualValue, expectedValue);
+  return a === b;
 }
 
 function isWritable(obj, name, verifyProp, value) {
@@ -255,7 +257,7 @@ function isWritable(obj, name, verifyProp, value) {
     }
   }
 
-  writeSucceeded = isEqualTo(obj, verifyProp || name, newValue);
+  writeSucceeded = isSameValue(obj[verifyProp || name], newValue);
 
   // Revert the change only if it was successful (in other cases, reverting
   // is unnecessary and may trigger exceptions for certain property
@@ -272,7 +274,7 @@ function isWritable(obj, name, verifyProp, value) {
 }
 
 function verifyEqualTo(obj, name, value) {
-  if (!isEqualTo(obj, name, value)) {
+  if (!isSameValue(obj[name], value)) {
     $ERROR("Expected obj[" + String(name) + "] to equal " + value +
            ", actually " + obj[name]);
   }
@@ -589,4 +591,9 @@ function $DONE(failure) {
         reportFailure(failure);
     else
         reportCompare(0, 0);
+}
+
+// Some tests in test262 leave promise rejections unhandled.
+if ("ignoreUnhandledRejections" in this) {
+  ignoreUnhandledRejections();
 }

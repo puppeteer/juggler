@@ -7,15 +7,19 @@ config = {
         "clobber",
         "download-and-extract",
         "populate-webroot",
-        "install-chrome",
+        "install-chromium-distribution",
         "create-virtualenv",
         "install",
         "run-tests",
     ],
     "tooltool_cache": "/builds/tooltool_cache",
     "download_tooltool": True,
-    "download_minidump_stackwalk": True,
     "minidump_stackwalk_path": "linux64-minidump_stackwalk",
     "tooltool_servers": ['https://tooltool.mozilla-releng.net/'],
     "minidump_tooltool_manifest_path": "config/tooltool-manifests/linux64/releng.manifest",
+    "hostutils_manifest_path": "testing/config/tooltool-manifests/linux64/hostutils.manifest",
 }
+
+# raptor will pick these up in mitmproxy.py, doesn't use the mozharness config
+os.environ['TOOLTOOLCACHE'] = config['tooltool_cache']
+os.environ['HOSTUTILS_MANIFEST_PATH'] = config['hostutils_manifest_path']

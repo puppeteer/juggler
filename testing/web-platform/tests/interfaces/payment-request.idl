@@ -12,6 +12,8 @@ interface PaymentRequest : EventTarget {
   Promise<void> abort();
   [NewObject]
   Promise<boolean> canMakePayment();
+  [NewObject]
+  Promise<boolean> hasEnrolledInstrument();
 
   readonly attribute DOMString id;
   readonly attribute PaymentAddress? shippingAddress;
@@ -68,6 +70,7 @@ enum PaymentShippingType {
 
 dictionary PaymentOptions {
   boolean requestPayerName = false;
+  boolean requestBillingAddress = false;
   boolean requestPayerEmail = false;
   boolean requestPayerPhone = false;
   boolean requestShipping = false;
@@ -91,7 +94,6 @@ interface PaymentAddress {
   readonly attribute DOMString postalCode;
   readonly attribute DOMString recipient;
   readonly attribute DOMString region;
-  readonly attribute DOMString regionCode;
   readonly attribute DOMString sortingCode;
   readonly attribute FrozenArray<DOMString> addressLine;
 };
@@ -100,7 +102,6 @@ dictionary AddressInit {
   DOMString country;
   sequence<DOMString> addressLine;
   DOMString region;
-  DOMString regionCode;
   DOMString city;
   DOMString dependentLocality;
   DOMString postalCode;
@@ -120,7 +121,6 @@ dictionary AddressErrors {
   DOMString postalCode;
   DOMString recipient;
   DOMString region;
-  DOMString regionCode;
   DOMString sortingCode;
 };
 

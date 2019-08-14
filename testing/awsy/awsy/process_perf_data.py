@@ -12,25 +12,29 @@ import parse_about_memory
 
 # A description of each checkpoint and the root path to it.
 CHECKPOINTS = [
-    { 'name': "Fresh start", 'path': "memory-report-Start-0.json.gz" },
-    { 'name': "Fresh start [+30s]", 'path': "memory-report-StartSettled-0.json.gz" },
-    { 'name': "After tabs open", 'path': "memory-report-TabsOpen-4.json.gz" },
-    { 'name': "After tabs open [+30s]", 'path': "memory-report-TabsOpenSettled-4.json.gz" },
-    { 'name': "After tabs open [+30s, forced GC]", 'path': "memory-report-TabsOpenForceGC-4.json.gz" },
-    { 'name': "Tabs closed extra processes", 'path': "memory-report-TabsClosedExtraProcesses-4.json.gz" },
-    { 'name': "Tabs closed", 'path': "memory-report-TabsClosed-4.json.gz" },
-    { 'name': "Tabs closed [+30s]", 'path': "memory-report-TabsClosedSettled-4.json.gz" },
-    { 'name': "Tabs closed [+30s, forced GC]", 'path': "memory-report-TabsClosedForceGC-4.json.gz" }
+    {'name': "Fresh start", 'path': "memory-report-Start-0.json.gz"},
+    {'name': "Fresh start [+30s]", 'path': "memory-report-StartSettled-0.json.gz"},
+    {'name': "After tabs open", 'path': "memory-report-TabsOpen-4.json.gz"},
+    {'name': "After tabs open [+30s]", 'path': "memory-report-TabsOpenSettled-4.json.gz"},
+    {'name': "After tabs open [+30s, forced GC]",
+        'path': "memory-report-TabsOpenForceGC-4.json.gz"},
+    {'name': "Tabs closed extra processes",
+     'path': "memory-report-TabsClosedExtraProcesses-4.json.gz"},
+    {'name': "Tabs closed", 'path': "memory-report-TabsClosed-4.json.gz"},
+    {'name': "Tabs closed [+30s]", 'path': "memory-report-TabsClosedSettled-4.json.gz"},
+    {'name': "Tabs closed [+30s, forced GC]",
+     'path': "memory-report-TabsClosedForceGC-4.json.gz"}
 ]
 
 # A description of each perfherder suite and the path to its values.
 PERF_SUITES = [
-    { 'name': "Resident Memory", 'node': "resident" },
-    { 'name': "Explicit Memory", 'node': "explicit/" },
-    { 'name': "Heap Unclassified", 'node': "explicit/heap-unclassified" },
-    { 'name': "JS", 'node': "js-main-runtime/" },
-    { 'name': "Images", 'node': "explicit/images/" }
+    {'name': "Resident Memory", 'node': "resident"},
+    {'name': "Explicit Memory", 'node': "explicit/"},
+    {'name': "Heap Unclassified", 'node': "explicit/heap-unclassified"},
+    {'name': "JS", 'node': "js-main-runtime/"},
+    {'name': "Images", 'node': "explicit/images/"}
 ]
+
 
 def median(values):
     sorted_ = sorted(values)
@@ -40,6 +44,7 @@ def median(values):
         return sorted_[med]
     return (sorted_[med - 1] + sorted_[med]) / 2
 
+
 def update_checkpoint_paths(checkpoint_files, checkpoints):
     """
     Updates checkpoints with memory report file fetched in data_path
@@ -47,25 +52,27 @@ def update_checkpoint_paths(checkpoint_files, checkpoints):
     :param checkpoints: The checkpoints to update the path of.
     """
     target_path = [['Start-', 0],
-                      ['StartSettled-', 0],
-                      ['TabsOpen-', -1],
-                      ['TabsOpenSettled-', -1],
-                      ['TabsOpenForceGC-', -1],
-                      ['TabsClosedExtraProcesses-', -1],
-                      ['TabsClosed-', -1],
-                      ['TabsClosedSettled-', -1],
-                      ['TabsClosedForceGC-', -1]]
+                   ['StartSettled-', 0],
+                   ['TabsOpen-', -1],
+                   ['TabsOpenSettled-', -1],
+                   ['TabsOpenForceGC-', -1],
+                   ['TabsClosedExtraProcesses-', -1],
+                   ['TabsClosed-', -1],
+                   ['TabsClosedSettled-', -1],
+                   ['TabsClosedForceGC-', -1]]
     for i in range(len(target_path)):
         (name, idx) = target_path[i]
         paths = sorted([x for x in checkpoint_files if name in x])
         if paths:
-            indices = [i for i,x in enumerate(checkpoints) if name in x['path']]
+            indices = [i for i, x in enumerate(checkpoints) if name in x['path']]
             if indices:
                 checkpoints[indices[0]]['path'] = paths[idx]
             else:
-                print "found files but couldn't find %s" % name
+                print("found files but couldn't find {}").format(name)
 
-def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
+
+def create_suite(name, node, data_path, checkpoints=CHECKPOINTS,
+                 alertThreshold=None, extra_opts=None):
     """
     Creates a suite suitable for adding to a perfherder blob. Calculates the
     geometric mean of the checkpoint values and adds that to the suite as
@@ -75,6 +82,7 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
     :param node: The path of the data node to extract data from.
     :param data_path: The directory to retrieve data from.
     :param checkpoints: Which checkpoints to include.
+    :param alertThreshold: The percentage of change that triggers an alert.
     """
     suite = {
         'name': name,
@@ -83,18 +91,28 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
         'units': 'bytes'
     }
 
-    extra_opts = []
+    if alertThreshold:
+        suite['alertThreshold'] = alertThreshold
+
+    opts = []
+    if extra_opts:
+        opts.extend(extra_opts)
+
     # The stylo attributes override each other.
+    stylo_opt = None
     if 'STYLO_FORCE_ENABLED' in os.environ and os.environ['STYLO_FORCE_ENABLED']:
-        extra_opts = ["stylo"]
+        stylo_opt = "stylo"
     if 'STYLO_THREADS' in os.environ and os.environ['STYLO_THREADS'] == '1':
-        extra_opts = ["stylo-sequential"]
+        stylo_opt = "stylo-sequential"
+
+    if stylo_opt:
+        opts.append(stylo_opt)
 
     if 'DMD' in os.environ and os.environ['DMD']:
-        extra_opts.append("dmd")
+        opts.append("dmd")
 
     if extra_opts:
-        suite['extraOptions'] = extra_opts
+        suite['extraOptions'] = opts
 
     update_checkpoint_paths(glob.glob(os.path.join(data_path, "memory-report*")), checkpoints)
 
@@ -122,7 +140,7 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
             totals_uss = parse_about_memory.calculate_memory_report_values(
                                             memory_report_path, 'resident-unique')
             value = totals_rss.values()[0] + \
-                    sum([v for k, v in totals_uss.iteritems() if not 'Main' in k])
+                sum([v for k, v in totals_uss.iteritems() if 'Main' not in k])
 
         subtest = {
             'name': checkpoint['name'],
@@ -130,7 +148,7 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
             'lowerIsBetter': True,
             'units': 'bytes'
         }
-        suite['subtests'].append(subtest);
+        suite['subtests'].append(subtest)
         total += math.log(subtest['value'])
 
     # Add the geometric mean. For more details on the calculation see:
@@ -140,21 +158,24 @@ def create_suite(name, node, data_path, checkpoints=CHECKPOINTS):
     return suite
 
 
-def create_perf_data(data_path, perf_suites=PERF_SUITES, checkpoints=CHECKPOINTS):
+def create_perf_data(data_path, perf_suites=PERF_SUITES, checkpoints=CHECKPOINTS,
+                     extra_opts=None):
     """
     Builds up a performance data blob suitable for submitting to perfherder.
     """
     if ("GCOV_PREFIX" in os.environ) or ("JS_CODE_COVERAGE_OUTPUT_DIR" in os.environ):
-        print "Code coverage is being collected, performance data will not be gathered."
+        print("Code coverage is being collected, performance data will not be gathered.")
         return {}
 
     perf_blob = {
-        'framework': { 'name': 'awsy' },
+        'framework': {'name': 'awsy'},
         'suites': []
     }
 
     for suite in perf_suites:
-        perf_blob['suites'].append(create_suite(suite['name'], suite['node'], data_path, checkpoints))
+        perf_blob['suites'].append(create_suite(
+            suite['name'], suite['node'], data_path, checkpoints,
+            suite.get('alertThreshold'), extra_opts))
 
     return perf_blob
 
@@ -162,12 +183,12 @@ def create_perf_data(data_path, perf_suites=PERF_SUITES, checkpoints=CHECKPOINTS
 if __name__ == '__main__':
     args = sys.argv[1:]
     if not args:
-        print "Usage: process_perf_data.py data_path"
+        print("Usage: process_perf_data.py data_path")
         sys.exit(1)
 
     # Determine which revisions we need to process.
     data_path = args[0]
     perf_blob = create_perf_data(data_path)
-    print "PERFHERDER_DATA: %s" % json.dumps(perf_blob)
+    print("PERFHERDER_DATA: {}").format(json.dumps(perf_blob))
 
     sys.exit(0)

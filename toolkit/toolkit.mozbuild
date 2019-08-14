@@ -64,7 +64,10 @@ if CONFIG['MOZ_AUTH_EXTENSION']:
     DIRS += ['/extensions/auth']
 
 if CONFIG['MOZ_UPDATER'] and CONFIG['OS_TARGET'] != 'Android':
-    DIRS += ['/other-licenses/bsdiff']
+    DIRS += [
+        '/toolkit/mozapps/update/updater/bspatch',
+        '/other-licenses/bsdiff',
+    ]
 
 # Gecko/Core components.
 
@@ -84,7 +87,6 @@ if CONFIG['COMPILE_ENVIRONMENT']:
     ]
 
 DIRS += [
-    '/extensions/cookie',
     '/extensions/permissions',
 ]
 
@@ -129,6 +131,7 @@ if CONFIG['MOZ_JPROF']:
 
 DIRS += [
     '/tools/code-coverage',
+    '/tools/performance',
     '/tools/power',
     '/tools/profiler',
 ]
@@ -156,17 +159,20 @@ DIRS += [
 if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     DIRS += [
         '/toolkit/system/gnome',
-        '/widget/xremoteclient',
     ]
+
+if CONFIG['ENABLE_REMOTE_AGENT']:
+    DIRS += ['/remote']
 
 if CONFIG['ENABLE_MARIONETTE']:
     DIRS += [
         '/testing/firefox-ui',
         '/testing/marionette',
         '/testing/juggler',
+        '/toolkit/components/telemetry/tests/marionette',
     ]
 
-if CONFIG['ENABLE_GECKODRIVER'] and not CONFIG['MOZ_TSAN']:
+if CONFIG['ENABLE_GECKODRIVER'] and not CONFIG['MOZ_TSAN'] and not CONFIG['FUZZING_INTERFACES']:
     DIRS += ['/testing/geckodriver']
 
 DIRS += [
@@ -184,6 +190,7 @@ if CONFIG['ENABLE_TESTS']:
         '/testing/modules',
         '/testing/runtimes',
         '/testing/web-platform',
+        '/testing/extensions',
     ]
 
     # The file id utility requires breakpad libraries.

@@ -114,6 +114,10 @@ static bool ToNrIceCandidate(const nr_ice_candidate& candc,
 
   if (!ToNrIceAddr(cand->addr, &out->cand_addr)) return false;
 
+  if (cand->mdns_addr) {
+    out->mdns_addr = cand->mdns_addr;
+  }
+
   if (cand->isock) {
     nr_transport_addr addr;
     r = nr_socket_getaddr(cand->isock->sock, &addr);
@@ -269,17 +273,22 @@ nsresult NrIceMediaStream::SetIceCredentials(const std::string& ufrag,
 }
 
 // Parse trickle ICE candidate
-nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate) {
-  // TODO(bug 1490658): This needs to take ufrag into account. For now, trickle
-  // candidates will land on the most recently-created ICE stream.
-  int r;
+nsresult NrIceMediaStream::ParseTrickleCandidate(const std::string& candidate,
+                                                 const std::string& ufrag,
+                                                 const std::string& mdns_addr) {
+  nr_ice_media_stream* stream = GetStreamForRemoteUfrag(ufrag);
+  if (!stream) {
+    return NS_ERROR_FAILURE;
+  }
 
   MOZ_MTLOG(ML_DEBUG, "NrIceCtx(" << ctx_->label << ")/STREAM(" << name()
                                   << ") : parsing trickle candidate "
                                   << candidate);
 
-  r = nr_ice_peer_ctx_parse_trickle_candidate(
-      ctx_peer_, stream_, const_cast<char*>(candidate.c_str()));
+  int r = nr_ice_peer_ctx_parse_trickle_candidate(
+      ctx_peer_, stream, const_cast<char*>(candidate.c_str()),
+      mdns_addr.c_str());
+
   if (r) {
     if (r == R_ALREADY) {
       MOZ_MTLOG(ML_INFO, "Trickle candidate is redundant for stream '"
@@ -668,6 +677,28 @@ void NrIceMediaStream::DeferredCloseOldStream(const nr_ice_media_stream* old) {
   if (old == old_stream_) {
     CloseStream(&old_stream_);
   }
+}
+
+nr_ice_media_stream* NrIceMediaStream::GetStreamForRemoteUfrag(
+    const std::string& aUfrag) {
+  if (aUfrag.empty()) {
+    return stream_;
+  }
+
+  nr_ice_media_stream* peer_stream = nullptr;
+
+  if (!nr_ice_peer_ctx_find_pstream(ctx_peer_, stream_, &peer_stream) &&
+      aUfrag == peer_stream->ufrag) {
+    return stream_;
+  }
+
+  if (old_stream_ &&
+      !nr_ice_peer_ctx_find_pstream(ctx_peer_, old_stream_, &peer_stream) &&
+      aUfrag == peer_stream->ufrag) {
+    return old_stream_;
+  }
+
+  return nullptr;
 }
 
 }  // namespace mozilla

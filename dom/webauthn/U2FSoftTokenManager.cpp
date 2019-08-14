@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "WebAuthnCoseIdentifiers.h"
 #include "mozilla/dom/U2FSoftTokenManager.h"
 #include "CryptoBuffer.h"
 #include "mozilla/Base64.h"
@@ -573,15 +574,54 @@ RefPtr<U2FRegisterPromise> U2FSoftTokenManager::Register(
     }
   }
 
-  if (aInfo.Extra().type() != WebAuthnMaybeMakeCredentialExtraInfo::Tnull_t) {
-    const auto& extra = aInfo.Extra().get_WebAuthnMakeCredentialExtraInfo();
+  if (aInfo.Extra().isSome()) {
+    const auto& extra = aInfo.Extra().ref();
     const WebAuthnAuthenticatorSelection& sel = extra.AuthenticatorSelection();
+
+    UserVerificationRequirement userVerificaitonRequirement =
+        sel.userVerificationRequirement();
+
+    bool requireUserVerification =
+        userVerificaitonRequirement == UserVerificationRequirement::Required;
+
+    bool requirePlatformAttachment = false;
+    if (sel.authenticatorAttachment().isSome()) {
+      const AuthenticatorAttachment authenticatorAttachment =
+          sel.authenticatorAttachment().value();
+      if (authenticatorAttachment == AuthenticatorAttachment::Platform) {
+        requirePlatformAttachment = true;
+      }
+    }
 
     // The U2F softtoken neither supports resident keys or
     // user verification, nor is it a platform authenticator.
-    if (sel.requireResidentKey() || sel.requireUserVerification() ||
-        sel.requirePlatformAttachment()) {
+    if (sel.requireResidentKey() || requireUserVerification ||
+        requirePlatformAttachment) {
       return U2FRegisterPromise::CreateAndReject(NS_ERROR_DOM_NOT_ALLOWED_ERR,
+                                                 __func__);
+    }
+
+    nsTArray<CoseAlg> coseAlgos;
+    for (const auto& coseAlg : extra.coseAlgs()) {
+      switch (static_cast<CoseAlgorithmIdentifier>(coseAlg.alg())) {
+        case CoseAlgorithmIdentifier::ES256:
+          coseAlgos.AppendElement(coseAlg);
+          break;
+        default:
+          continue;
+      }
+    }
+
+    // Only if no algorithms were specified, default to the one the soft token
+    // supports.
+    if (extra.coseAlgs().IsEmpty()) {
+      coseAlgos.AppendElement(
+          static_cast<int32_t>(CoseAlgorithmIdentifier::ES256));
+    }
+
+    // If there are no acceptable/supported algorithms, reject the promise.
+    if (coseAlgos.IsEmpty()) {
+      return U2FRegisterPromise::CreateAndReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
                                                  __func__);
     }
   }
@@ -712,8 +752,10 @@ RefPtr<U2FRegisterPromise> U2FSoftTokenManager::Register(
     return U2FRegisterPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
 
+  nsTArray<WebAuthnExtensionResult> extensions;
   WebAuthnMakeCredentialResult result(aInfo.ClientDataJSON(), attObj,
-                                      keyHandleBuf, registrationBuf);
+                                      keyHandleBuf, registrationBuf,
+                                      extensions);
   return U2FRegisterPromise::CreateAndResolve(std::move(result), __func__);
 }
 
@@ -773,11 +815,14 @@ RefPtr<U2FSignPromise> U2FSoftTokenManager::Sign(
   nsTArray<nsTArray<uint8_t>> appIds;
   appIds.AppendElement(rpIdHash);
 
-  if (aInfo.Extra().type() != WebAuthnMaybeGetAssertionExtraInfo::Tnull_t) {
-    const auto& extra = aInfo.Extra().get_WebAuthnGetAssertionExtraInfo();
+  if (aInfo.Extra().isSome()) {
+    const auto& extra = aInfo.Extra().ref();
+
+    UserVerificationRequirement userVerificaitonReq =
+        extra.userVerificationRequirement();
 
     // The U2F softtoken doesn't support user verification.
-    if (extra.RequireUserVerification()) {
+    if (userVerificaitonReq == UserVerificationRequirement::Required) {
       return U2FSignPromise::CreateAndReject(NS_ERROR_DOM_NOT_ALLOWED_ERR,
                                              __func__);
     }
@@ -921,9 +966,11 @@ RefPtr<U2FSignPromise> U2FSoftTokenManager::Sign(
     return U2FSignPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
 
+  nsTArray<uint8_t> userHandle;
+
   WebAuthnGetAssertionResult result(aInfo.ClientDataJSON(), keyHandle,
                                     signatureBuf, authenticatorData, extensions,
-                                    signatureDataBuf);
+                                    signatureDataBuf, userHandle);
   return U2FSignPromise::CreateAndResolve(std::move(result), __func__);
 }
 

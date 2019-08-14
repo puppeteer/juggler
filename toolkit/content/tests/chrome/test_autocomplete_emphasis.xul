@@ -5,16 +5,17 @@
 <window title="Autocomplete emphasis test"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"/>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
+  <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"/>
 
 <textbox id="richautocomplete" type="autocomplete"
          autocompletesearch="simple"
          onsearchcomplete="checkSearchCompleted();"
          autocompletepopup="richpopup"/>
-<panel id="richpopup" type="autocomplete-richlistbox" noautofocus="true"/>
+<panel is="autocomplete-richlistbox-popup"
+       id="richpopup"
+       type="autocomplete-richlistbox"
+       noautofocus="true"/>
 
 <script class="testbody" type="application/javascript">
 <![CDATA[

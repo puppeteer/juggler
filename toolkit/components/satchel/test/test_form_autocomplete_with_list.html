@@ -2,8 +2,8 @@
 <html>
 <head>
   <title>Test for Form History Autocomplete</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/EventUtils.js"></script>
   <script type="text/javascript" src="satchel_common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
@@ -466,6 +466,9 @@ function runTest() {
            "input event should be dispatched with InputEvent interface");
         ok(event.bubbles, "input event should bubble");
         ok(!event.cancelable, "input event should be cancelable");
+        is(event.inputType, "insertReplacementText", 'inputType should be "insertReplacementText"');
+        is(event.data, "Google", 'data should be "Google"');
+        is(event.dataTransfer, null, "dataTransfer should be null");
         checkForm("Google");
         input.blur();
         SimpleTest.finish();

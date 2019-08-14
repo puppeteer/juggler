@@ -29,16 +29,16 @@ class FileBlobImpl : public BaseBlobImpl {
                uint64_t aLength, nsIFile* aFile, int64_t aLastModificationDate);
 
   // Create as a file with custom name
-  FileBlobImpl(nsIFile* aFile, const nsAString& aName,
-               const nsAString& aContentType);
+  FileBlobImpl(
+      nsIFile* aFile, const nsAString& aName, const nsAString& aContentType,
+      const nsAString& aBlobImplType = NS_LITERAL_STRING("FileBlobImpl"));
 
   // Overrides
   virtual uint64_t GetSize(ErrorResult& aRv) override;
   virtual void GetType(nsAString& aType) override;
   virtual int64_t GetLastModified(ErrorResult& aRv) override;
-  virtual void SetLastModified(int64_t aLastModified) override;
   virtual void GetMozFullPathInternal(nsAString& aFullPath,
-                                      ErrorResult& aRv) const override;
+                                      ErrorResult& aRv) override;
   virtual void CreateInputStream(nsIInputStream** aInputStream,
                                  ErrorResult& aRv) override;
 
@@ -56,6 +56,10 @@ class FileBlobImpl : public BaseBlobImpl {
 
   void SetFileId(int64_t aFileId) { mFileId = aFileId; }
 
+  void SetEmptySize() { mLength = 0; }
+
+  void SetMozFullPath(const nsAString& aPath) { mMozFullPath = aPath; }
+
  protected:
   virtual ~FileBlobImpl() = default;
 
@@ -69,8 +73,9 @@ class FileBlobImpl : public BaseBlobImpl {
                                                  ErrorResult& aRv) override;
 
   nsCOMPtr<nsIFile> mFile;
-  bool mWholeFile;
+  nsString mMozFullPath;
   int64_t mFileId;
+  bool mWholeFile;
 };
 
 }  // namespace dom

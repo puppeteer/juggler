@@ -11,6 +11,7 @@ if sys.platform.startswith("linux"):
 
 config = {
     "log_name": "l10n_bumper",
+    "log_type": "multi",
     "exes": EXES,
 
     "gecko_pull_url": "https://hg.mozilla.org/{}".format(MULTI_REPO),
@@ -44,13 +45,14 @@ config = {
             "ja-JP-mac": [
                 "linux", "linux-devedition", "linux64", "linux64-devedition",
                 "win32", "win32-devedition", "win64", "win64-devedition",
+                "win64-aarch64", "win64-aarch64-devedition",
             ],
         },
         "platform_configs": [{
             "platforms": [
                 "linux", "linux-devedition", "linux64", "linux64-devedition",
                 "macosx64", "macosx64-devedition", "win32", "win32-devedition",
-                "win64", "win64-devedition",
+                "win64", "win64-devedition", "win64-aarch64", "win64-aarch64-devedition",
             ],
             "path": "browser/locales/all-locales",
         }],

@@ -197,13 +197,13 @@ class nsTString : public nsTSubstring<T> {
   template <typename Q = T, typename EnableIfChar16 = mozilla::Char16OnlyT<Q>>
   int32_t Find(const char_type* aString, int32_t aOffset = 0,
                int32_t aCount = -1) const;
-#ifdef MOZ_USE_CHAR16_WRAPPER
+#  ifdef MOZ_USE_CHAR16_WRAPPER
   template <typename Q = T, typename EnableIfChar16 = mozilla::Char16OnlyT<Q>>
   int32_t Find(char16ptr_t aString, int32_t aOffset = 0,
                int32_t aCount = -1) const {
     return Find(static_cast<const char16_t*>(aString), aOffset, aCount);
   }
-#endif
+#  endif
 
   /**
    * This methods scans the string backwards, looking for the given string
@@ -448,12 +448,13 @@ class nsTString : public nsTSubstring<T> {
    * verify restrictions for dependent strings
    */
   void AssertValidDependentString() {
-    NS_ASSERTION(this->mData, "nsTDependentString must wrap a non-NULL buffer");
-    NS_ASSERTION(this->mLength != size_type(-1),
-                 "nsTDependentString has bogus length");
-    NS_ASSERTION(this->mData[substring_type::mLength] == 0,
-                 "nsTDependentString must wrap only null-terminated strings. "
-                 "You are probably looking for nsTDependentSubstring.");
+    MOZ_ASSERT(this->mData, "nsTDependentString must wrap a non-NULL buffer");
+    MOZ_ASSERT(this->mLength != size_type(-1),
+               "nsTDependentString has bogus length");
+    MOZ_DIAGNOSTIC_ASSERT(this->mData[substring_type::mLength] == 0,
+                          "nsTDependentString must wrap only null-terminated "
+                          "strings.  You are probably looking for "
+                          "nsTDependentSubstring.");
   }
 
  protected:

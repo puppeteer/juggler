@@ -19,7 +19,10 @@
 #include "gc/GC.h"
 #include "js/AllocPolicy.h"
 #include "js/CharacterEncoding.h"
+#include "js/Equality.h"     // JS::SameValue
+#include "js/RegExpFlags.h"  // JS::RegExpFlags
 #include "js/Vector.h"
+#include "js/Warnings.h"  // JS::SetWarningReporter
 #include "vm/JSContext.h"
 
 /* Note: Aborts on OOM. */
@@ -158,6 +161,26 @@ class JSAPITest {
     return JSAPITestString(v ? "true" : "false");
   }
 
+  JSAPITestString toSource(JS::RegExpFlags flags) {
+    JSAPITestString str;
+    if (flags.global()) {
+      str += "g";
+    }
+    if (flags.ignoreCase()) {
+      str += "i";
+    }
+    if (flags.multiline()) {
+      str += "m";
+    }
+    if (flags.unicode()) {
+      str += "u";
+    }
+    if (flags.sticky()) {
+      str += "y";
+    }
+    return str;
+  }
+
   JSAPITestString toSource(JSAtom* v) {
     JS::RootedValue val(cx, JS::StringValue((JSString*)v));
     return jsvalToSource(val);
@@ -208,12 +231,12 @@ class JSAPITest {
                  const char* filename, int lineno) {
     bool same;
     JS::RootedValue actual(cx, actualArg), expected(cx, expectedArg);
-    return (JS_SameValue(cx, actual, expected, &same) && same) ||
+    return (JS::SameValue(cx, actual, expected, &same) && same) ||
            fail(JSAPITestString(
-                    "CHECK_SAME failed: expected JS_SameValue(cx, ") +
+                    "CHECK_SAME failed: expected JS::SameValue(cx, ") +
                     actualExpr + ", " + expectedExpr +
-                    "), got !JS_SameValue(cx, " + jsvalToSource(actual) + ", " +
-                    jsvalToSource(expected) + ")",
+                    "), got !JS::SameValue(cx, " + jsvalToSource(actual) +
+                    ", " + jsvalToSource(expected) + ")",
                 filename, lineno);
   }
 
@@ -266,18 +289,8 @@ class JSAPITest {
   JSAPITestString messages() const { return msgs; }
 
   static const JSClass* basicGlobalClass() {
-    static const JSClassOps cOps = {nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    nullptr,
-                                    JS_GlobalObjectTraceHook};
-    static const JSClass c = {"global", JSCLASS_GLOBAL_FLAGS, &cOps};
+    static const JSClass c = {"global", JSCLASS_GLOBAL_FLAGS,
+                              &JS::DefaultGlobalClassOps};
     return &c;
   }
 
@@ -352,11 +365,13 @@ class JSAPITest {
   virtual JSObject* createGlobal(JSPrincipals* principals = nullptr);
 };
 
-#define BEGIN_TEST(testname)                                  \
+#define BEGIN_TEST_WITH_ATTRIBUTES(testname, attrs)           \
   class cls_##testname : public JSAPITest {                   \
    public:                                                    \
     virtual const char* name() override { return #testname; } \
-    virtual bool run(JS::HandleObject global) override
+    virtual bool run(JS::HandleObject global) override attrs
+
+#define BEGIN_TEST(testname) BEGIN_TEST_WITH_ATTRIBUTES(testname, )
 
 #define END_TEST(testname) \
   }                        \
@@ -497,7 +512,7 @@ class AutoLeaveZeal {
     JS_GetGCZealBits(cx_, &zealBits_, &frequency_, &dummy);
     JS_SetGCZeal(cx_, 0, 0);
     JS::PrepareForFullGC(cx_);
-    JS::NonIncrementalGC(cx_, GC_SHRINK, JS::gcreason::DEBUG_GC);
+    JS::NonIncrementalGC(cx_, GC_SHRINK, JS::GCReason::DEBUG_GC);
   }
   ~AutoLeaveZeal() {
     JS_SetGCZeal(cx_, 0, 0);
@@ -507,12 +522,12 @@ class AutoLeaveZeal {
       }
     }
 
-#ifdef DEBUG
+#  ifdef DEBUG
     uint32_t zealBitsAfter, frequencyAfter, dummy;
     JS_GetGCZealBits(cx_, &zealBitsAfter, &frequencyAfter, &dummy);
     MOZ_ASSERT(zealBitsAfter == zealBits_);
     MOZ_ASSERT(frequencyAfter == frequency_);
-#endif
+#  endif
   }
 };
 #endif /* JS_GC_ZEAL */

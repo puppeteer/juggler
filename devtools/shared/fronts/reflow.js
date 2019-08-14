@@ -4,26 +4,28 @@
 
 "use strict";
 
-const {reflowSpec} = require("devtools/shared/specs/reflow");
-const protocol = require("devtools/shared/protocol");
+const { reflowSpec } = require("devtools/shared/specs/reflow");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
 
 /**
  * Usage example of the reflow front:
  *
- * let front = ReflowFront(toolbox.target.client, toolbox.target.form);
+ * let front = await target.getFront("reflow");
  * front.on("reflows", this._onReflows);
  * front.start();
  * // now wait for events to come
  */
-const ReflowFront = protocol.FrontClassWithSpec(reflowSpec, {
-  initialize: function(client, {reflowActor}) {
-    protocol.Front.prototype.initialize.call(this, client, {actor: reflowActor});
-    this.manage(this);
-  },
+class ReflowFront extends FrontClassWithSpec(reflowSpec) {
+  constructor(client) {
+    super(client);
 
-  destroy: function() {
-    protocol.Front.prototype.destroy.call(this);
-  },
-});
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "reflowActor";
+  }
+}
 
 exports.ReflowFront = ReflowFront;
+registerFront(ReflowFront);

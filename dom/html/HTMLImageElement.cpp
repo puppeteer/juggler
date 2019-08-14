@@ -6,13 +6,13 @@
 
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/HTMLImageElementBinding.h"
+#include "mozilla/dom/BindContext.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsMappedAttributes.h"
 #include "nsSize.h"
-#include "nsDocument.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsImageFrame.h"
 #include "nsIScriptContext.h"
 #include "nsIURL.h"
@@ -102,7 +102,7 @@ class ImageLoadTask : public Runnable {
  private:
   ~ImageLoadTask() {}
   RefPtr<HTMLImageElement> mElement;
-  nsCOMPtr<nsIDocument> mDocument;
+  nsCOMPtr<Document> mDocument;
   bool mAlwaysLoad;
 
   // True if we want to set nsIClassOfService::UrgentStart to the channel to
@@ -190,6 +190,10 @@ int32_t HTMLImageElement::Y() { return GetXY().y; }
 
 void HTMLImageElement::GetDecoding(nsAString& aValue) {
   GetEnumAttr(nsGkAtoms::decoding, kDecodingTableDefault->tag, aValue);
+}
+
+already_AddRefed<Promise> HTMLImageElement::Decode(ErrorResult& aRv) {
+  return nsImageLoadingContent::QueueDecodeAsync(aRv);
 }
 
 bool HTMLImageElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
@@ -488,23 +492,17 @@ bool HTMLImageElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
   return false;
 }
 
-nsresult HTMLImageElement::BindToTree(nsIDocument* aDocument,
-                                      nsIContent* aParent,
-                                      nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult HTMLImageElement::BindToTree(BindContext& aContext, nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsImageLoadingContent::BindToTree(aDocument, aParent, aBindingParent);
+  nsImageLoadingContent::BindToTree(aContext, aParent);
 
-  if (aParent) {
-    UpdateFormOwner();
-  }
+  UpdateFormOwner();
 
   if (HaveSrcsetOrInPicture()) {
-    nsIDocument* doc = GetComposedDoc();
-    if (doc && !mInDocResponsiveContent) {
-      doc->AddResponsiveContent(this);
+    if (IsInComposedDoc() && !mInDocResponsiveContent) {
+      aContext.OwnerDoc().AddResponsiveContent(this);
       mInDocResponsiveContent = true;
     }
 
@@ -528,11 +526,6 @@ nsresult HTMLImageElement::BindToTree(nsIDocument* aDocument,
     // initaiated by a user interaction.
     mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
 
-    // FIXME: Bug 660963 it would be nice if we could just have
-    // ClearBrokenState update our state and do it fast...
-    ClearBrokenState();
-    RemoveStatesSilently(NS_EVENT_STATE_BROKEN);
-
     // We still act synchronously for the non-responsive case (Bug
     // 1076583), but still need to delay if it is unsafe to run
     // script.
@@ -540,7 +533,7 @@ nsresult HTMLImageElement::BindToTree(nsIDocument* aDocument,
     // If loading is temporarily disabled, don't even launch MaybeLoadImage.
     // Otherwise MaybeLoadImage may run later when someone has reenabled
     // loading.
-    if (LoadingEnabled() && OwnerDoc()->ShouldLoadImages()) {
+    if (LoadingEnabled() && aContext.OwnerDoc().ShouldLoadImages()) {
       nsContentUtils::AddScriptRunner(
           NewRunnableMethod<bool>("dom::HTMLImageElement::MaybeLoadImage", this,
                                   &HTMLImageElement::MaybeLoadImage, false));
@@ -550,7 +543,7 @@ nsresult HTMLImageElement::BindToTree(nsIDocument* aDocument,
   return rv;
 }
 
-void HTMLImageElement::UnbindFromTree(bool aDeep, bool aNullParent) {
+void HTMLImageElement::UnbindFromTree(bool aNullParent) {
   if (mForm) {
     if (aNullParent || !FindAncestorForm(mForm)) {
       ClearForm(true);
@@ -564,8 +557,8 @@ void HTMLImageElement::UnbindFromTree(bool aDeep, bool aNullParent) {
     mInDocResponsiveContent = false;
   }
 
-  nsImageLoadingContent::UnbindFromTree(aDeep, aNullParent);
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+  nsImageLoadingContent::UnbindFromTree(aNullParent);
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 }
 
 void HTMLImageElement::UpdateFormOwner() {
@@ -612,7 +605,7 @@ EventStates HTMLImageElement::IntrinsicState() const {
          nsImageLoadingContent::ImageState();
 }
 
-void HTMLImageElement::NodeInfoChanged(nsIDocument* aOldDoc) {
+void HTMLImageElement::NodeInfoChanged(Document* aOldDoc) {
   nsGenericHTMLElement::NodeInfoChanged(aOldDoc);
   // Force reload image if adoption steps are run.
   // If loading is temporarily disabled, don't even launch script runner.
@@ -636,7 +629,7 @@ already_AddRefed<HTMLImageElement> HTMLImageElement::Image(
     const GlobalObject& aGlobal, const Optional<uint32_t>& aWidth,
     const Optional<uint32_t>& aHeight, ErrorResult& aError) {
   nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobal.GetAsSupports());
-  nsIDocument* doc;
+  Document* doc;
   if (!win || !(doc = win->GetExtantDoc())) {
     aError.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -662,6 +655,16 @@ already_AddRefed<HTMLImageElement> HTMLImageElement::Image(
   }
 
   return img.forget();
+}
+
+uint32_t HTMLImageElement::Height() {
+  RefPtr<imgRequestProxy> currentRequest(mCurrentRequest);
+  return GetWidthHeightForImage(currentRequest).height;
+}
+
+uint32_t HTMLImageElement::Width() {
+  RefPtr<imgRequestProxy> currentRequest(mCurrentRequest);
+  return GetWidthHeightForImage(currentRequest).width;
 }
 
 uint32_t HTMLImageElement::NaturalHeight() {
@@ -879,7 +882,7 @@ nsresult HTMLImageElement::LoadSelectedImage(bool aForce, bool aNotify,
       CancelImageRequests(aNotify);
       rv = NS_OK;
     } else {
-      nsIDocument* doc = OwnerDoc();
+      Document* doc = OwnerDoc();
       StringToURI(src, doc, getter_AddRefs(selectedSource));
       if (!aAlwaysLoad && SelectedSourceMatchesLast(selectedSource)) {
         UpdateDensityOnly();
@@ -1048,8 +1051,8 @@ bool HTMLImageElement::UpdateResponsiveSource() {
   return hadSelector || mResponsiveSelector;
 }
 
-/*static */ bool HTMLImageElement::SupportedPictureSourceType(
-    const nsAString& aType) {
+/*static */
+bool HTMLImageElement::SupportedPictureSourceType(const nsAString& aType) {
   nsAutoString type;
   nsAutoString params;
 
@@ -1137,8 +1140,9 @@ bool HTMLImageElement::TryCreateResponsiveSelector(Element* aSourceElement) {
   return true;
 }
 
-/* static */ bool HTMLImageElement::SelectSourceForTagWithAttrs(
-    nsIDocument* aDocument, bool aIsSourceTag, const nsAString& aSrcAttr,
+/* static */
+bool HTMLImageElement::SelectSourceForTagWithAttrs(
+    Document* aDocument, bool aIsSourceTag, const nsAString& aSrcAttr,
     const nsAString& aSrcsetAttr, const nsAString& aSizesAttr,
     const nsAString& aTypeAttr, const nsAString& aMediaAttr,
     nsAString& aResult) {

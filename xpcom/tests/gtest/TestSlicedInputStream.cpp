@@ -13,27 +13,23 @@ using namespace mozilla;
 
 // This helper class is used to call OnInputStreamReady with the right stream
 // as argument.
-class InputStreamCallback final : public nsIInputStreamCallback
-{
+class InputStreamCallback final : public nsIInputStreamCallback {
   nsCOMPtr<nsIAsyncInputStream> mStream;
   nsCOMPtr<nsIInputStreamCallback> mCallback;
 
-public:
+ public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
   InputStreamCallback(nsIAsyncInputStream* aStream,
                       nsIInputStreamCallback* aCallback)
-    : mStream(aStream)
-    , mCallback(aCallback)
-  {}
+      : mStream(aStream), mCallback(aCallback) {}
 
   NS_IMETHOD
-  OnInputStreamReady(nsIAsyncInputStream* aStream) override
-  {
+  OnInputStreamReady(nsIAsyncInputStream* aStream) override {
     return mCallback->OnInputStreamReady(mStream);
   }
 
-private:
+ private:
   ~InputStreamCallback() {}
 };
 
@@ -44,57 +40,43 @@ NS_IMPL_ISUPPORTS(InputStreamCallback, nsIInputStreamCallback)
  * provide a string stream that doesn't permit seeking, so we can test the
  * logic that emulates seeking in sliced input streams.
  */
-class NonSeekableStringStream final : public nsIAsyncInputStream
-{
+class NonSeekableStringStream final : public nsIAsyncInputStream {
   nsCOMPtr<nsIInputStream> mStream;
 
-public:
+ public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  explicit NonSeekableStringStream(const nsACString& aBuffer)
-  {
+  explicit NonSeekableStringStream(const nsACString& aBuffer) {
     NS_NewCStringInputStream(getter_AddRefs(mStream), aBuffer);
   }
 
   explicit NonSeekableStringStream(nsIInputStream* aStream)
-    : mStream(aStream)
-  {
-  }
+      : mStream(aStream) {}
 
   NS_IMETHOD
-  Available(uint64_t* aLength) override
-  {
-    return mStream->Available(aLength);
-  }
+  Available(uint64_t* aLength) override { return mStream->Available(aLength); }
 
   NS_IMETHOD
-  Read(char* aBuffer, uint32_t aCount, uint32_t* aReadCount) override
-  {
+  Read(char* aBuffer, uint32_t aCount, uint32_t* aReadCount) override {
     return mStream->Read(aBuffer, aCount, aReadCount);
   }
 
   NS_IMETHOD
-  ReadSegments(nsWriteSegmentFun aWriter, void* aClosure,
-               uint32_t aCount, uint32_t *aResult) override
-  {
+  ReadSegments(nsWriteSegmentFun aWriter, void* aClosure, uint32_t aCount,
+               uint32_t* aResult) override {
     return mStream->ReadSegments(aWriter, aClosure, aCount, aResult);
   }
 
   NS_IMETHOD
-  Close() override
-  {
-    return mStream->Close();
-  }
+  Close() override { return mStream->Close(); }
 
   NS_IMETHOD
-  IsNonBlocking(bool* aNonBlocking) override
-  {
+  IsNonBlocking(bool* aNonBlocking) override {
     return mStream->IsNonBlocking(aNonBlocking);
   }
 
   NS_IMETHOD
-  CloseWithStatus(nsresult aStatus) override
-  {
+  CloseWithStatus(nsresult aStatus) override {
     nsCOMPtr<nsIAsyncInputStream> async = do_QueryInterface(mStream);
     if (!async) {
       MOZ_CRASH("This should not happen.");
@@ -105,10 +87,8 @@ public:
   }
 
   NS_IMETHOD
-  AsyncWait(nsIInputStreamCallback* aCallback,
-            uint32_t aFlags, uint32_t aRequestedCount,
-            nsIEventTarget* aEventTarget) override
-  {
+  AsyncWait(nsIInputStreamCallback* aCallback, uint32_t aFlags,
+            uint32_t aRequestedCount, nsIEventTarget* aEventTarget) override {
     nsCOMPtr<nsIAsyncInputStream> async = do_QueryInterface(mStream);
     if (!async) {
       MOZ_CRASH("This should not happen.");
@@ -116,22 +96,21 @@ public:
     }
 
     RefPtr<InputStreamCallback> callback =
-      new InputStreamCallback(this, aCallback);
+        new InputStreamCallback(this, aCallback);
 
     return async->AsyncWait(callback, aFlags, aRequestedCount, aEventTarget);
   }
 
-private:
+ private:
   ~NonSeekableStringStream() {}
 };
 
 NS_IMPL_ISUPPORTS(NonSeekableStringStream, nsIInputStream, nsIAsyncInputStream)
 
 // Helper function for creating a seekable nsIInputStream + a SlicedInputStream.
-SlicedInputStream*
-CreateSeekableStreams(uint32_t aSize, uint64_t aStart, uint64_t aLength,
-                      nsCString& aBuffer)
-{
+static SlicedInputStream* CreateSeekableStreams(uint32_t aSize, uint64_t aStart,
+                                                uint64_t aLength,
+                                                nsCString& aBuffer) {
   aBuffer.SetLength(aSize);
   for (uint32_t i = 0; i < aSize; ++i) {
     aBuffer.BeginWriting()[i] = i % 10;
@@ -144,10 +123,10 @@ CreateSeekableStreams(uint32_t aSize, uint64_t aStart, uint64_t aLength,
 
 // Helper function for creating a non-seekable nsIInputStream + a
 // SlicedInputStream.
-SlicedInputStream*
-CreateNonSeekableStreams(uint32_t aSize, uint64_t aStart, uint64_t aLength,
-                         nsCString& aBuffer)
-{
+static SlicedInputStream* CreateNonSeekableStreams(uint32_t aSize,
+                                                   uint64_t aStart,
+                                                   uint64_t aLength,
+                                                   nsCString& aBuffer) {
   aBuffer.SetLength(aSize);
   for (uint32_t i = 0; i < aSize; ++i) {
     aBuffer.BeginWriting()[i] = i % 10;
@@ -158,12 +137,13 @@ CreateNonSeekableStreams(uint32_t aSize, uint64_t aStart, uint64_t aLength,
 }
 
 // Same start, same length.
-TEST(TestSlicedInputStream, Simple) {
+TEST(TestSlicedInputStream, Simple)
+{
   const size_t kBufSize = 4096;
 
   nsCString buf;
   RefPtr<SlicedInputStream> sis =
-    CreateSeekableStreams(kBufSize, 0, kBufSize, buf);
+      CreateSeekableStreams(kBufSize, 0, kBufSize, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -177,12 +157,12 @@ TEST(TestSlicedInputStream, Simple) {
 }
 
 // Simple sliced stream - seekable
-TEST(TestSlicedInputStream, Sliced) {
+TEST(TestSlicedInputStream, Sliced)
+{
   const size_t kBufSize = 4096;
 
   nsCString buf;
-  RefPtr<SlicedInputStream> sis =
-    CreateSeekableStreams(kBufSize, 10, 100, buf);
+  RefPtr<SlicedInputStream> sis = CreateSeekableStreams(kBufSize, 10, 100, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -196,12 +176,13 @@ TEST(TestSlicedInputStream, Sliced) {
 }
 
 // Simple sliced stream - non seekable
-TEST(TestSlicedInputStream, SlicedNoSeek) {
+TEST(TestSlicedInputStream, SlicedNoSeek)
+{
   const size_t kBufSize = 4096;
 
   nsCString buf;
   RefPtr<SlicedInputStream> sis =
-    CreateNonSeekableStreams(kBufSize, 10, 100, buf);
+      CreateNonSeekableStreams(kBufSize, 10, 100, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -215,12 +196,13 @@ TEST(TestSlicedInputStream, SlicedNoSeek) {
 }
 
 // Big inputStream - seekable
-TEST(TestSlicedInputStream, BigSliced) {
+TEST(TestSlicedInputStream, BigSliced)
+{
   const size_t kBufSize = 4096 * 40;
 
   nsCString buf;
   RefPtr<SlicedInputStream> sis =
-    CreateSeekableStreams(kBufSize, 4096 * 5, 4096 * 10, buf);
+      CreateSeekableStreams(kBufSize, 4096 * 5, 4096 * 10, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -230,16 +212,18 @@ TEST(TestSlicedInputStream, BigSliced) {
   uint32_t count;
   ASSERT_EQ(NS_OK, sis->Read(buf2, sizeof(buf2), &count));
   ASSERT_EQ((uint64_t)4096 * 10, count);
-  ASSERT_TRUE(nsCString(buf.get() + 4096 * 5, count).Equals(nsCString(buf2, count)));
+  ASSERT_TRUE(
+      nsCString(buf.get() + 4096 * 5, count).Equals(nsCString(buf2, count)));
 }
 
 // Big inputStream - non seekable
-TEST(TestSlicedInputStream, BigSlicedNoSeek) {
+TEST(TestSlicedInputStream, BigSlicedNoSeek)
+{
   const size_t kBufSize = 4096 * 40;
 
   nsCString buf;
   RefPtr<SlicedInputStream> sis =
-    CreateNonSeekableStreams(kBufSize, 4096 * 5, 4096 * 10, buf);
+      CreateNonSeekableStreams(kBufSize, 4096 * 5, 4096 * 10, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -249,14 +233,16 @@ TEST(TestSlicedInputStream, BigSlicedNoSeek) {
   uint32_t count;
   ASSERT_EQ(NS_OK, sis->Read(buf2, sizeof(buf2), &count));
   ASSERT_EQ((uint64_t)4096 * 10, count);
-  ASSERT_TRUE(nsCString(buf.get() + 4096 * 5, count).Equals(nsCString(buf2, count)));
+  ASSERT_TRUE(
+      nsCString(buf.get() + 4096 * 5, count).Equals(nsCString(buf2, count)));
 }
 
 // Available size.
-TEST(TestSlicedInputStream, Available) {
+TEST(TestSlicedInputStream, Available)
+{
   nsCString buf;
   RefPtr<SlicedInputStream> sis =
-    CreateNonSeekableStreams(500000, 4, 400000, buf);
+      CreateNonSeekableStreams(500000, 4, 400000, buf);
 
   uint64_t toRead = 400000;
   for (uint32_t i = 0; i < 400; ++i) {
@@ -268,7 +254,8 @@ TEST(TestSlicedInputStream, Available) {
     uint32_t count;
     ASSERT_EQ(NS_OK, sis->Read(buf2, sizeof(buf2), &count));
     ASSERT_EQ((uint64_t)1000, count);
-    ASSERT_TRUE(nsCString(buf.get() + 4 + (1000 * i), count).Equals(nsCString(buf2, count)));
+    ASSERT_TRUE(nsCString(buf.get() + 4 + (1000 * i), count)
+                    .Equals(nsCString(buf2, count)));
 
     toRead -= count;
   }
@@ -284,10 +271,10 @@ TEST(TestSlicedInputStream, Available) {
 }
 
 // What if start is > then the size of the buffer?
-TEST(TestSlicedInputStream, StartBiggerThan) {
+TEST(TestSlicedInputStream, StartBiggerThan)
+{
   nsCString buf;
-  RefPtr<SlicedInputStream> sis =
-    CreateNonSeekableStreams(500, 4000, 1, buf);
+  RefPtr<SlicedInputStream> sis = CreateNonSeekableStreams(500, 4000, 1, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -300,10 +287,10 @@ TEST(TestSlicedInputStream, StartBiggerThan) {
 }
 
 // What if the length is > than the size of the buffer?
-TEST(TestSlicedInputStream, LengthBiggerThan) {
+TEST(TestSlicedInputStream, LengthBiggerThan)
+{
   nsCString buf;
-  RefPtr<SlicedInputStream> sis =
-    CreateNonSeekableStreams(500, 0, 500000, buf);
+  RefPtr<SlicedInputStream> sis = CreateNonSeekableStreams(500, 0, 500000, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -316,10 +303,10 @@ TEST(TestSlicedInputStream, LengthBiggerThan) {
 }
 
 // What if the length is 0?
-TEST(TestSlicedInputStream, Length0) {
+TEST(TestSlicedInputStream, Length0)
+{
   nsCString buf;
-  RefPtr<SlicedInputStream> sis =
-    CreateNonSeekableStreams(500, 0, 0, buf);
+  RefPtr<SlicedInputStream> sis = CreateNonSeekableStreams(500, 0, 0, buf);
 
   uint64_t length;
   ASSERT_EQ(NS_OK, sis->Available(&length));
@@ -332,7 +319,8 @@ TEST(TestSlicedInputStream, Length0) {
 }
 
 // Seek test NS_SEEK_SET
-TEST(TestSlicedInputStream, Seek_SET) {
+TEST(TestSlicedInputStream, Seek_SET)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
@@ -357,7 +345,8 @@ TEST(TestSlicedInputStream, Seek_SET) {
 }
 
 // Seek test NS_SEEK_CUR
-TEST(TestSlicedInputStream, Seek_CUR) {
+TEST(TestSlicedInputStream, Seek_CUR)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
@@ -389,7 +378,8 @@ TEST(TestSlicedInputStream, Seek_CUR) {
 }
 
 // Seek test NS_SEEK_END - length > real one
-TEST(TestSlicedInputStream, Seek_END_Bigger) {
+TEST(TestSlicedInputStream, Seek_END_Bigger)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
@@ -427,7 +417,8 @@ TEST(TestSlicedInputStream, Seek_END_Bigger) {
 }
 
 // Seek test NS_SEEK_END - length < real one
-TEST(TestSlicedInputStream, Seek_END_Lower) {
+TEST(TestSlicedInputStream, Seek_END_Lower)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
@@ -453,19 +444,21 @@ TEST(TestSlicedInputStream, Seek_END_Lower) {
 }
 
 // Check the nsIAsyncInputStream interface
-TEST(TestSlicedInputStream, NoAsyncInputStream) {
+TEST(TestSlicedInputStream, NoAsyncInputStream)
+{
   const size_t kBufSize = 4096;
 
   nsCString buf;
   nsCOMPtr<nsIInputStream> sis =
-    CreateSeekableStreams(kBufSize, 0, kBufSize, buf);
+      CreateSeekableStreams(kBufSize, 0, kBufSize, buf);
 
   // If the stream is not asyncInputStream, also SIS is not.
   nsCOMPtr<nsIAsyncInputStream> async = do_QueryInterface(sis);
   ASSERT_TRUE(!async);
 }
 
-TEST(TestSlicedInputStream, AsyncInputStream) {
+TEST(TestSlicedInputStream, AsyncInputStream)
+{
   nsCOMPtr<nsIAsyncInputStream> reader;
   nsCOMPtr<nsIAsyncOutputStream> writer;
 
@@ -485,7 +478,7 @@ TEST(TestSlicedInputStream, AsyncInputStream) {
   nsCOMPtr<nsIInputStream> sis;
   {
     RefPtr<NonSeekableStringStream> wrapper =
-      new NonSeekableStringStream(reader);
+        new NonSeekableStringStream(reader);
 
     sis = new SlicedInputStream(wrapper.forget(), 500, 500);
   }
@@ -493,8 +486,7 @@ TEST(TestSlicedInputStream, AsyncInputStream) {
   nsCOMPtr<nsIAsyncInputStream> async = do_QueryInterface(sis);
   ASSERT_TRUE(!!async);
 
-  RefPtr<testing::InputStreamCallback> cb =
-    new testing::InputStreamCallback();
+  RefPtr<testing::InputStreamCallback> cb = new testing::InputStreamCallback();
 
   rv = async->AsyncWait(cb, 0, 0, nullptr);
   ASSERT_TRUE(NS_SUCCEEDED(rv));
@@ -513,7 +505,8 @@ TEST(TestSlicedInputStream, AsyncInputStream) {
   testing::ConsumeAndValidateStream(async, inputData);
 }
 
-TEST(TestSlicedInputStream, QIInputStreamLength) {
+TEST(TestSlicedInputStream, QIInputStreamLength)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
@@ -521,7 +514,7 @@ TEST(TestSlicedInputStream, QIInputStreamLength) {
     nsCOMPtr<nsIInputStream> sis;
     {
       RefPtr<testing::LengthInputStream> stream =
-        new testing::LengthInputStream(buf, i % 2, i > 1);
+          new testing::LengthInputStream(buf, i % 2, i > 1);
 
       sis = new SlicedInputStream(stream.forget(), 0, 5);
     }
@@ -538,14 +531,15 @@ TEST(TestSlicedInputStream, QIInputStreamLength) {
   }
 }
 
-TEST(TestSlicedInputStream, InputStreamLength) {
+TEST(TestSlicedInputStream, InputStreamLength)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
   nsCOMPtr<nsIInputStream> sis;
   {
     RefPtr<testing::LengthInputStream> stream =
-      new testing::LengthInputStream(buf, true, false);
+        new testing::LengthInputStream(buf, true, false);
 
     sis = new SlicedInputStream(stream.forget(), 0, 5);
   }
@@ -559,14 +553,15 @@ TEST(TestSlicedInputStream, InputStreamLength) {
   ASSERT_EQ(5, size);
 }
 
-TEST(TestSlicedInputStream, NegativeInputStreamLength) {
+TEST(TestSlicedInputStream, NegativeInputStreamLength)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
   nsCOMPtr<nsIInputStream> sis;
   {
     RefPtr<testing::LengthInputStream> stream =
-      new testing::LengthInputStream(buf, true, false, NS_OK, true);
+        new testing::LengthInputStream(buf, true, false, NS_OK, true);
 
     sis = new SlicedInputStream(stream.forget(), 0, 5);
   }
@@ -580,14 +575,15 @@ TEST(TestSlicedInputStream, NegativeInputStreamLength) {
   ASSERT_EQ(-1, size);
 }
 
-TEST(TestSlicedInputStream, AsyncInputStreamLength) {
+TEST(TestSlicedInputStream, AsyncInputStreamLength)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
   nsCOMPtr<nsIInputStream> sis;
   {
     RefPtr<testing::LengthInputStream> stream =
-      new testing::LengthInputStream(buf, false, true);
+        new testing::LengthInputStream(buf, false, true);
 
     sis = new SlicedInputStream(stream.forget(), 0, 5);
   }
@@ -598,21 +594,22 @@ TEST(TestSlicedInputStream, AsyncInputStreamLength) {
   RefPtr<testing::LengthCallback> callback = new testing::LengthCallback();
 
   nsresult rv =
-    qi->AsyncLengthWait(callback, GetCurrentThreadSerialEventTarget());
+      qi->AsyncLengthWait(callback, GetCurrentThreadSerialEventTarget());
   ASSERT_EQ(NS_OK, rv);
 
   MOZ_ALWAYS_TRUE(SpinEventLoopUntil([&]() { return callback->Called(); }));
   ASSERT_EQ(5, callback->Size());
 }
 
-TEST(TestSlicedInputStream, NegativeAsyncInputStreamLength) {
+TEST(TestSlicedInputStream, NegativeAsyncInputStreamLength)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
   nsCOMPtr<nsIInputStream> sis;
   {
     RefPtr<testing::LengthInputStream> stream =
-      new testing::LengthInputStream(buf, false, true, NS_OK, true);
+        new testing::LengthInputStream(buf, false, true, NS_OK, true);
 
     sis = new SlicedInputStream(stream.forget(), 0, 5);
   }
@@ -623,21 +620,22 @@ TEST(TestSlicedInputStream, NegativeAsyncInputStreamLength) {
   RefPtr<testing::LengthCallback> callback = new testing::LengthCallback();
 
   nsresult rv =
-    qi->AsyncLengthWait(callback, GetCurrentThreadSerialEventTarget());
+      qi->AsyncLengthWait(callback, GetCurrentThreadSerialEventTarget());
   ASSERT_EQ(NS_OK, rv);
 
   MOZ_ALWAYS_TRUE(SpinEventLoopUntil([&]() { return callback->Called(); }));
   ASSERT_EQ(-1, callback->Size());
 }
 
-TEST(TestSlicedInputStream, AbortLengthCallback) {
+TEST(TestSlicedInputStream, AbortLengthCallback)
+{
   nsCString buf;
   buf.AssignLiteral("Hello world");
 
   nsCOMPtr<nsIInputStream> sis;
   {
     RefPtr<testing::LengthInputStream> stream =
-      new testing::LengthInputStream(buf, false, true, NS_OK, true);
+        new testing::LengthInputStream(buf, false, true, NS_OK, true);
 
     sis = new SlicedInputStream(stream.forget(), 0, 5);
   }
@@ -647,7 +645,7 @@ TEST(TestSlicedInputStream, AbortLengthCallback) {
 
   RefPtr<testing::LengthCallback> callback1 = new testing::LengthCallback();
   nsresult rv =
-    qi->AsyncLengthWait(callback1, GetCurrentThreadSerialEventTarget());
+      qi->AsyncLengthWait(callback1, GetCurrentThreadSerialEventTarget());
   ASSERT_EQ(NS_OK, rv);
 
   RefPtr<testing::LengthCallback> callback2 = new testing::LengthCallback();

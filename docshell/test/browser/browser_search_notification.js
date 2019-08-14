@@ -1,25 +1,33 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-add_task(async function () {
+add_task(async function() {
   const kSearchEngineID = "test_urifixup_search_engine";
   const kSearchEngineURL = "http://localhost/?search={searchTerms}";
-  Services.search.addEngineWithDetails(kSearchEngineID, "", "", "", "get",
-                                       kSearchEngineURL);
+  await Services.search.addEngineWithDetails(kSearchEngineID, {
+    method: "get",
+    template: kSearchEngineURL,
+  });
 
-  let oldDefaultEngine = Services.search.defaultEngine;
-  Services.search.defaultEngine = Services.search.getEngineByName(kSearchEngineID);
+  let oldDefaultEngine = await Services.search.getDefault();
+  await Services.search.setDefault(
+    Services.search.getEngineByName(kSearchEngineID)
+  );
 
-  let selectedName = Services.search.defaultEngine.name;
-  Assert.equal(selectedName, kSearchEngineID, "Check fake search engine is selected");
+  let selectedName = (await Services.search.getDefault()).name;
+  Assert.equal(
+    selectedName,
+    kSearchEngineID,
+    "Check fake search engine is selected"
+  );
 
-  registerCleanupFunction(function() {
+  registerCleanupFunction(async function() {
     if (oldDefaultEngine) {
-      Services.search.defaultEngine = oldDefaultEngine;
+      await Services.search.setDefault(oldDefaultEngine);
     }
     let engine = Services.search.getEngineByName(kSearchEngineID);
     if (engine) {
-      Services.search.removeEngine(engine);
+      await Services.search.removeEngine(engine);
     }
   });
 
@@ -34,7 +42,11 @@ add_task(async function () {
   let engine = Services.search.defaultEngine;
   Assert.ok(engine, "Have default search engine.");
   Assert.equal(engine, subject, "Notification subject is engine.");
-  Assert.equal(data, "firefox health report", "Notification data is search term.");
+  Assert.equal(
+    data,
+    "firefox health report",
+    "Notification data is search term."
+  );
 
   gBrowser.removeTab(tab);
 });

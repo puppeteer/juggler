@@ -3,7 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { types, generateActorSpec, RetVal, Option } = require("devtools/shared/protocol");
+const {
+  types,
+  generateActorSpec,
+  RetVal,
+  Option,
+} = require("devtools/shared/protocol");
 
 types.addDictType("browsingContextTarget.attach", {
   type: "string",
@@ -136,14 +141,21 @@ const browsingContextTargetSpecPrototype = {
     workerListChanged: {
       type: "workerListChanged",
     },
+
+    // The thread actor is no longer emitting newSource event in the name of the target
+    // actor (bug 1269919), but as we may still connect to older servers which still do,
+    // we have to keep it being mentioned here. Otherwise the event is considered as a
+    // response to a request and confuses the packet ordering.
+    // We can remove that once FF66 is no longer supported.
     newSource: {
       type: "newSource",
-      source: Option(0, "json"),
     },
   },
 };
 
-const browsingContextTargetSpec = generateActorSpec(browsingContextTargetSpecPrototype);
+const browsingContextTargetSpec = generateActorSpec(
+  browsingContextTargetSpecPrototype
+);
 
 exports.browsingContextTargetSpecPrototype = browsingContextTargetSpecPrototype;
 exports.browsingContextTargetSpec = browsingContextTargetSpec;

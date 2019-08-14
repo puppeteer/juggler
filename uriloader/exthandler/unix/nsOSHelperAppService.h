@@ -14,20 +14,19 @@
 
 #include "nsExternalHelperAppService.h"
 #include "nsCExternalHandlerService.h"
-#include "nsMIMEInfoImpl.h"
 #include "nsCOMPtr.h"
 
 class nsILineInputStream;
+class nsMIMEInfoBase;
 
 class nsOSHelperAppService : public nsExternalHelperAppService {
  public:
-  nsOSHelperAppService();
   virtual ~nsOSHelperAppService();
 
   // method overrides for mime.types and mime.info look up steps
-  already_AddRefed<nsIMIMEInfo> GetMIMEInfoFromOS(const nsACString& aMimeType,
-                                                  const nsACString& aFileExt,
-                                                  bool* aFound) override;
+  NS_IMETHOD GetMIMEInfoFromOS(const nsACString& aMimeType,
+                               const nsACString& aFileExt, bool* aFound,
+                               nsIMIMEInfo** aMIMEInfo) override;
   NS_IMETHOD GetProtocolHandlerInfoFromOS(const nsACString& aScheme,
                                           bool* found,
                                           nsIHandlerInfo** _retval) override;
@@ -52,8 +51,6 @@ class nsOSHelperAppService : public nsExternalHelperAppService {
   already_AddRefed<nsMIMEInfoBase> GetFromExtension(const nsCString& aFileExt);
 
  private:
-  uint32_t mPermissions;
-
   // Helper methods which have to access static members
   static nsresult UnescapeCommand(const nsAString& aEscapedCommand,
                                   const nsAString& aMajorType,

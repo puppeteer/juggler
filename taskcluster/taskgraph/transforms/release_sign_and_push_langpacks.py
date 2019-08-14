@@ -11,10 +11,9 @@ from taskgraph.loader.single_dep import schema
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.schema import resolve_keyed_by, optionally_keyed_by
+from taskgraph.util.treeherder import inherit_treeherder_from_dep
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Any, Required
-
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
 transforms = TransformSequence()
 
@@ -84,9 +83,13 @@ def filter_out_macos_jobs_but_mac_only_locales(config, jobs):
     for job in jobs:
         build_platform = job['primary-dependency'].attributes.get('build_platform')
 
-        if build_platform in ('linux64-nightly', 'linux64-devedition-nightly'):
+        if build_platform in (
+                'linux64-nightly', 'linux64-devedition-nightly',
+                'linux64-shippable'):
             yield job
-        elif build_platform in ('macosx64-nightly', 'macosx64-devedition-nightly') and \
+        elif build_platform in (
+                'macosx64-nightly', 'macosx64-devedition-nightly',
+                'macosx64-shippable') and \
                 'ja-JP-mac' in job['attributes']['chunk_locales']:
             # Other locales of the same job shouldn't be processed
             job['attributes']['chunk_locales'] = ['ja-JP-mac']
@@ -101,23 +104,16 @@ def make_task_description(config, jobs):
     for job in jobs:
         dep_job = job['primary-dependency']
 
-        treeherder = job.get('treeherder', {})
+        treeherder = inherit_treeherder_from_dep(job, dep_job)
         treeherder.setdefault('symbol', 'langpack(SnP{})'.format(
             job['attributes'].get('l10n_chunk', '')
         ))
-        dep_th_platform = dep_job.task.get('extra', {}).get(
-            'treeherder', {}).get('machine', {}).get('platform', '')
-        treeherder.setdefault('platform', '{}/opt'.format(dep_th_platform))
-        treeherder.setdefault('tier', 1)
-        treeherder.setdefault('kind', 'build')
 
         job['description'] = job['description'].format(
             locales='/'.join(job['attributes']['chunk_locales']),
         )
 
-        job['dependencies'] = {
-            str(dep_job.kind): dep_job.label
-        }
+        job['dependencies'] = {dep_job.kind: dep_job.label}
         job['treeherder'] = treeherder
 
         yield job

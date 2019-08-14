@@ -7,13 +7,10 @@
 #ifndef mozilla_dom_SVGFilterElement_h
 #define mozilla_dom_SVGFilterElement_h
 
-#include "nsSVGEnum.h"
-#include "nsSVGElement.h"
-#include "nsSVGIntegerPair.h"
-#include "nsSVGLength2.h"
-#include "nsSVGString.h"
-
-typedef nsSVGElement SVGFilterElementBase;
+#include "SVGAnimatedEnumeration.h"
+#include "SVGAnimatedLength.h"
+#include "SVGAnimatedString.h"
+#include "mozilla/dom/SVGElement.h"
 
 class nsSVGFilterFrame;
 class nsSVGFilterInstance;
@@ -23,7 +20,9 @@ nsresult NS_NewSVGFilterElement(
 
 namespace mozilla {
 namespace dom {
-class SVGAnimatedLength;
+class DOMSVGAnimatedLength;
+
+typedef SVGElement SVGFilterElementBase;
 
 class SVGFilterElement : public SVGFilterElementBase {
   friend class ::nsSVGFilterFrame;
@@ -47,13 +46,13 @@ class SVGFilterElement : public SVGFilterElementBase {
   virtual bool HasValidDimensions() const override;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedLength> X();
-  already_AddRefed<SVGAnimatedLength> Y();
-  already_AddRefed<SVGAnimatedLength> Width();
-  already_AddRefed<SVGAnimatedLength> Height();
-  already_AddRefed<SVGAnimatedEnumeration> FilterUnits();
-  already_AddRefed<SVGAnimatedEnumeration> PrimitiveUnits();
-  already_AddRefed<SVGAnimatedString> Href();
+  already_AddRefed<DOMSVGAnimatedLength> X();
+  already_AddRefed<DOMSVGAnimatedLength> Y();
+  already_AddRefed<DOMSVGAnimatedLength> Width();
+  already_AddRefed<DOMSVGAnimatedLength> Height();
+  already_AddRefed<DOMSVGAnimatedEnumeration> FilterUnits();
+  already_AddRefed<DOMSVGAnimatedEnumeration> PrimitiveUnits();
+  already_AddRefed<DOMSVGAnimatedString> Href();
 
  protected:
   virtual LengthAttributesInfo GetLengthInfo() override;
@@ -61,15 +60,15 @@ class SVGFilterElement : public SVGFilterElementBase {
   virtual StringAttributesInfo GetStringInfo() override;
 
   enum { ATTR_X, ATTR_Y, ATTR_WIDTH, ATTR_HEIGHT };
-  nsSVGLength2 mLengthAttributes[4];
+  SVGAnimatedLength mLengthAttributes[4];
   static LengthInfo sLengthInfo[4];
 
   enum { FILTERUNITS, PRIMITIVEUNITS };
-  nsSVGEnum mEnumAttributes[2];
+  SVGAnimatedEnumeration mEnumAttributes[2];
   static EnumInfo sEnumInfo[2];
 
   enum { HREF, XLINK_HREF };
-  nsSVGString mStringAttributes[2];
+  SVGAnimatedString mStringAttributes[2];
   static StringInfo sStringInfo[2];
 };
 

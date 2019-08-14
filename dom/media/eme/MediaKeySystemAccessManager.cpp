@@ -12,10 +12,10 @@
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/DetailedPromise.h"
 #ifdef XP_WIN
-#include "mozilla/WindowsVersion.h"
+#  include "mozilla/WindowsVersion.h"
 #endif
 #ifdef XP_MACOSX
-#include "nsCocoaFeatures.h"
+#  include "nsCocoaFeatures.h"
 #endif
 #include "nsPrintfCString.h"
 #include "nsContentUtils.h"
@@ -101,7 +101,7 @@ void MediaKeySystemAccessManager::Request(
     return;
   }
 
-  if (!StaticPrefs::MediaEmeEnabled() && !IsClearkeyKeySystem(aKeySystem)) {
+  if (!StaticPrefs::media_eme_enabled() && !IsClearkeyKeySystem(aKeySystem)) {
     // EME disabled by user, send notification to chrome so UI can inform user.
     // Clearkey is allowed even when EME is disabled because we want the pref
     // "media.eme.enabled" only taking effect on proprietary DRMs.
@@ -162,21 +162,20 @@ void MediaKeySystemAccessManager::Request(
     return;
   }
 
-  nsCOMPtr<nsIDocument> doc = mWindow->GetExtantDoc();
+  nsCOMPtr<Document> doc = mWindow->GetExtantDoc();
   nsDataHashtable<nsCharPtrHashKey, bool> warnings;
   std::function<void(const char*)> deprecationWarningLogFn =
       [&](const char* aMsgName) {
         EME_LOG("Logging deprecation warning '%s' to WebConsole.", aMsgName);
         warnings.Put(aMsgName, true);
-        nsString uri;
+        AutoTArray<nsString, 1> params;
+        nsString& uri = *params.AppendElement();
         if (doc) {
           Unused << doc->GetDocumentURI(uri);
         }
-        const char16_t* params[] = {uri.get()};
-        nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                        NS_LITERAL_CSTRING("Media"), doc,
-                                        nsContentUtils::eDOM_PROPERTIES,
-                                        aMsgName, params, ArrayLength(params));
+        nsContentUtils::ReportToConsole(
+            nsIScriptError::warningFlag, NS_LITERAL_CSTRING("Media"), doc,
+            nsContentUtils::eDOM_PROPERTIES, aMsgName, params);
       };
 
   bool isPrivateBrowsing =

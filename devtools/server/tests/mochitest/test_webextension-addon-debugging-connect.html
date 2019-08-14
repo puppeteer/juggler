@@ -7,7 +7,6 @@ Bug 1302702 - Test connect to a webextension addon
   <meta charset="utf-8">
   <title>Mozilla Bug</title>
   <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script src="chrome://mochikit/content/tests/SimpleTest/AddTask.js"></script>
   <script src="chrome://mochikit/content/tests/SimpleTest/ExtensionTestUtils.js"></script>
   <script src="webextension-helpers.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
@@ -37,29 +36,25 @@ async function test_connect_addon(oopMode) {
   await client.connect();
 
   // List addons and assertions on the expected addon actor.
-  const addonTargetFront = await client.mainRoot.getAddon({ id: extension.id });
-  ok(addonTargetFront, "The expected webextension addon actor has been found");
+  const addonFront = await client.mainRoot.getAddon({ id: extension.id });
+  ok(addonFront, "The expected webextension addon actor has been found");
+
+  const addonTarget = await addonFront.connect();
+  ok(addonTarget, "The expected webextension target addon actor has been found");
 
   // Connect to the target addon actor and wait for the updated list of frames.
-  const addonTarget = await TargetFactory.forRemoteTab({
-    activeTab: addonTargetFront,
-    client,
-    chrome: true,
-  });
-  is(addonTarget.form.isOOP, oopMode,
+  is(addonTarget.targetForm.isOOP, oopMode,
      "Got the expected oop mode in the webextension actor form");
   const frames = await waitForFramesUpdated(addonTarget);
   const backgroundPageFrame = frames.filter((frame) => {
     return frame.url && frame.url.endsWith("/_generated_background_page.html");
   }).pop();
   is(backgroundPageFrame.addonID, extension.id, "Got an extension frame");
-  ok(addonTarget.activeTab, "The addon target has an activeTab");
 
   // When running in oop mode we can explicitly attach the thread without locking
   // the main process.
   if (oopMode) {
-    const [, threadFront] = await addonTarget.activeTab
-                                             .attachThread(addonTarget.form.threadActor);
+    const [, threadFront] = await addonTarget.attachThread();
 
     ok(threadFront, "Got a threadFront for the target addon");
     is(threadFront.paused, true, "The addon threadActor is paused");

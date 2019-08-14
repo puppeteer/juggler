@@ -103,12 +103,12 @@ fuzzy-if(OSX,0-1,0-324) == background-layers-1b.html background-layers-1-ref.htm
 # box-decoration-break's effect on backgrounds is touchy and hard to test due to stretching
 # artifacts and the difficulty of covering exact lines, so just make sure
 # background-size results in a different rendering when present.
-pref(layout.css.box-decoration-break.enabled,true) != background-size-cover-slice.html background-size-slice.html
-pref(layout.css.box-decoration-break.enabled,true) != background-size-cover-clone.html background-size-clone.html
+!= background-size-cover-slice.html background-size-slice.html
+!= background-size-cover-clone.html background-size-clone.html
 
 # ...and make sure each rendering with background-size is different from the
 # other
-pref(layout.css.box-decoration-break.enabled,true) != background-size-cover-slice.html background-size-cover-clone.html
+!= background-size-cover-slice.html background-size-cover-clone.html
 
 random-if(OSX==1010) == background-size-monster-ch.html background-size-monster-ref.html # bug 1129300
 random-if(OSX==1010) == background-size-monster-cm.html background-size-monster-ref.html # bug 1129300
@@ -169,7 +169,7 @@ fuzzy(0-50,0-500) fuzzy-if(skiaContent,0-51,0-320) == attachment-local-clipping-
 # The next three tests are fuzzy due to bug 1128229.
 fuzzy(0-16,0-69) fuzzy-if(skiaContent,0-95,0-2206) == attachment-local-clipping-image-4.html attachment-local-clipping-image-4-ref.html
 fuzzy(0-16,0-69) fuzzy-if(skiaContent,0-95,0-2206) == attachment-local-clipping-image-5.html attachment-local-clipping-image-4-ref.html
-fuzzy(0-80,0-500) fuzzy-if(skiaContent,0-109,0-908) == attachment-local-clipping-image-6.html attachment-local-clipping-image-6-ref.html
+fuzzy(0-80,0-500) fuzzy-if(skiaContent,0-109,0-908) fuzzy-if(geckoview&&webrender,64-64,2462-2830) == attachment-local-clipping-image-6.html attachment-local-clipping-image-6-ref.html
 
 fuzzy-if(skiaContent,0-1,0-8) fuzzy-if(webrender,0-1,0-84) == background-multiple-with-border-radius.html background-multiple-with-border-radius-ref.html
 fuzzy-if(webrender,10-93,49600-49600) == background-repeat-large-area.html background-repeat-large-area-ref.html
@@ -185,3 +185,6 @@ fuzzy-if(winWidget,0-102,0-2032) fuzzy-if(skiaContent,0-102,0-2811) fuzzy-if(web
 fuzzy-if(winWidget,0-102,0-2032) fuzzy-if(skiaContent,0-102,0-2811) fuzzy-if(webrender&&winWidget,153-153,2866-2866) random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == background-clip-text-1e.html background-clip-text-1-ref.html # Bug 1392106
 
 random-if(/^Windows\x20NT\x206\.1/.test(http.oscpu)) == background-clip-text-2.html background-clip-text-2-ref.html # Bug 1392106
+
+== background-clip-text-scale.html background-clip-text-scale-ref.html
+!= text-clip-and-stroke.html text-clip-and-no-stroke.html

@@ -5,7 +5,7 @@
 # This script creates a zip file, but will also strip any binaries
 # it finds before adding them to the zip.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 from mozpack.files import FileFinder
 from mozpack.copier import Jarrer
@@ -31,7 +31,7 @@ def main(args):
                         help="Path to files to add to zip")
     args = parser.parse_args(args)
 
-    jarrer = Jarrer(optimize=False)
+    jarrer = Jarrer()
 
     with errors.accumulate():
         finder = FileFinder(args.C, find_executables=args.strip)

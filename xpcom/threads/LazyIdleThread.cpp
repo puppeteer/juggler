@@ -16,12 +16,12 @@
 #include "mozilla/Services.h"
 
 #ifdef DEBUG
-#define ASSERT_OWNING_THREAD()                           \
-  do {                                                   \
-    MOZ_ASSERT(mOwningEventTarget->IsOnCurrentThread()); \
-  } while (0)
+#  define ASSERT_OWNING_THREAD()                           \
+    do {                                                   \
+      MOZ_ASSERT(mOwningEventTarget->IsOnCurrentThread()); \
+    } while (0)
 #else
-#define ASSERT_OWNING_THREAD() /* nothing */
+#  define ASSERT_OWNING_THREAD() /* nothing */
 #endif
 
 namespace mozilla {
@@ -151,7 +151,7 @@ nsresult LazyIdleThread::EnsureThread() {
     return NS_ERROR_UNEXPECTED;
   }
 
-  rv = NS_NewNamedThread("Lazy Idle", getter_AddRefs(mThread), runnable);
+  rv = NS_NewNamedThread(mName, getter_AddRefs(mThread), runnable);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -446,6 +446,11 @@ LazyIdleThread::GetLastLongNonIdleTaskEnd(TimeStamp* _retval) {
 }
 
 NS_IMETHODIMP
+LazyIdleThread::SetNameForWakeupTelemetry(const nsACString& aName) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 LazyIdleThread::AsyncShutdown() {
   ASSERT_OWNING_THREAD();
   return NS_ERROR_NOT_IMPLEMENTED;
@@ -478,7 +483,16 @@ LazyIdleThread::HasPendingEvents(bool* aHasPendingEvents) {
 }
 
 NS_IMETHODIMP
-LazyIdleThread::IdleDispatch(already_AddRefed<nsIRunnable> aEvent) {
+LazyIdleThread::HasPendingHighPriorityEvents(bool* aHasPendingEvents) {
+  // This is only supposed to be called from the thread itself so it's not
+  // implemented here.
+  MOZ_ASSERT_UNREACHABLE("Shouldn't ever call this!");
+  return NS_ERROR_UNEXPECTED;
+}
+
+NS_IMETHODIMP
+LazyIdleThread::DispatchToQueue(already_AddRefed<nsIRunnable> aEvent,
+                                EventQueuePriority aQueue) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -514,7 +528,7 @@ LazyIdleThread::Notify(nsITimer* aTimer) {
 
 NS_IMETHODIMP
 LazyIdleThread::GetName(nsACString& aName) {
-  aName.AssignLiteral("LazyIdleThread");
+  aName.Assign(mName);
   return NS_OK;
 }
 

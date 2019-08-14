@@ -165,7 +165,9 @@ nsresult XPathResult::SetExprResult(txAExprResult* aExprResult,
       mResult->stringValue(mStringResult);
       break;
     }
-    default: { MOZ_ASSERT(isNode() || isIterator() || isSnapshot()); }
+    default: {
+      MOZ_ASSERT(isNode() || isIterator() || isSnapshot());
+    }
   }
 
   if (aExprResult->getResultType() == txAExprResult::NODESET) {
@@ -185,6 +187,7 @@ nsresult XPathResult::SetExprResult(txAExprResult* aExprResult,
     return NS_OK;
   }
 
+  mCurrentPos = 0;
   mInvalidIteratorState = false;
 
   if (mResultNodes.Count() > 0) {

@@ -147,8 +147,7 @@ NS_IMETHODIMP nsBaseFilePicker::Init(mozIDOMWindowProxy* aParent,
 
   mParent = nsPIDOMWindowOuter::From(aParent);
 
-  nsCOMPtr<nsIWidget> widget =
-      WidgetUtils::DOMWindowToWidget(mParent->GetOuterWindow());
+  nsCOMPtr<nsIWidget> widget = WidgetUtils::DOMWindowToWidget(mParent);
   NS_ENSURE_TRUE(widget, NS_ERROR_FAILURE);
 
   mMode = aMode;
@@ -229,6 +228,11 @@ nsBaseFilePicker::AppendFilters(int32_t aFilterMask) {
     // should recognize and do the correct platform behavior for.
     AppendFilter(title, NS_LITERAL_STRING("..apps"));
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsBaseFilePicker::AppendRawFilter(const nsAString& aFilter) {
+  mRawFilters.AppendElement(aFilter);
   return NS_OK;
 }
 

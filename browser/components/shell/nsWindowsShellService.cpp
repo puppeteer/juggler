@@ -12,6 +12,7 @@
 #include "mozilla/RefPtr.h"
 #include "nsIContent.h"
 #include "nsIImageLoadingContent.h"
+#include "nsIOutputStream.h"
 #include "nsIPrefService.h"
 #include "nsIPrefLocalizedString.h"
 #include "nsIServiceManager.h"
@@ -21,7 +22,6 @@
 #include "nsShellService.h"
 #include "nsIProcess.h"
 #include "nsICategoryManager.h"
-#include "nsBrowserCompsCID.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceDefs.h"
@@ -36,7 +36,7 @@
 #include "shellapi.h"
 
 #ifdef _WIN32_WINNT
-#undef _WIN32_WINNT
+#  undef _WIN32_WINNT
 #endif
 #define _WIN32_WINNT 0x0600
 #define INITGUID
@@ -53,7 +53,7 @@
 #undef ACCESS_READ
 
 #ifndef MAX_BUF
-#define MAX_BUF 4096
+#  define MAX_BUF 4096
 #endif
 
 #define REG_SUCCEEDED(val) (val == ERROR_SUCCESS)
@@ -64,9 +64,9 @@
 
 using mozilla::IsWin8OrLater;
 using namespace mozilla;
-using namespace mozilla::widget;
 
-NS_IMPL_ISUPPORTS(nsWindowsShellService, nsIShellService)
+NS_IMPL_ISUPPORTS(nsWindowsShellService, nsIToolkitShellService,
+                  nsIShellService)
 
 static nsresult OpenKeyForReading(HKEY aKeyRoot, const nsAString& aKeyName,
                                   HKEY* aKey) {
@@ -199,10 +199,8 @@ static nsresult GetAppRegName(nsAutoString& aAppRegName) {
 }
 
 NS_IMETHODIMP
-nsWindowsShellService::IsDefaultBrowser(bool aStartupCheck, bool aForAllTypes,
+nsWindowsShellService::IsDefaultBrowser(bool aForAllTypes,
                                         bool* aIsDefaultBrowser) {
-  mozilla::Unused << aStartupCheck;
-
   *aIsDefaultBrowser = false;
 
   RefPtr<IApplicationAssociationRegistration> pAAR;
@@ -451,6 +449,92 @@ nsWindowsShellService::SetDefaultBrowser(bool aClaimAllTypes,
   return rv;
 }
 
+static nsresult WriteBitmap(nsIFile* aFile, imgIContainer* aImage) {
+  nsresult rv;
+
+  RefPtr<gfx::SourceSurface> surface = aImage->GetFrame(
+      imgIContainer::FRAME_FIRST, imgIContainer::FLAG_SYNC_DECODE);
+  NS_ENSURE_TRUE(surface, NS_ERROR_FAILURE);
+
+  // For either of the following formats we want to set the biBitCount member
+  // of the BITMAPINFOHEADER struct to 32, below. For that value the bitmap
+  // format defines that the A8/X8 WORDs in the bitmap byte stream be ignored
+  // for the BI_RGB value we use for the biCompression member.
+  MOZ_ASSERT(surface->GetFormat() == gfx::SurfaceFormat::B8G8R8A8 ||
+             surface->GetFormat() == gfx::SurfaceFormat::B8G8R8X8);
+
+  RefPtr<gfx::DataSourceSurface> dataSurface = surface->GetDataSurface();
+  NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
+
+  int32_t width = dataSurface->GetSize().width;
+  int32_t height = dataSurface->GetSize().height;
+  int32_t bytesPerPixel = 4 * sizeof(uint8_t);
+  uint32_t bytesPerRow = bytesPerPixel * width;
+
+  // initialize these bitmap structs which we will later
+  // serialize directly to the head of the bitmap file
+  BITMAPINFOHEADER bmi;
+  bmi.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.biWidth = width;
+  bmi.biHeight = height;
+  bmi.biPlanes = 1;
+  bmi.biBitCount = (WORD)bytesPerPixel * 8;
+  bmi.biCompression = BI_RGB;
+  bmi.biSizeImage = bytesPerRow * height;
+  bmi.biXPelsPerMeter = 0;
+  bmi.biYPelsPerMeter = 0;
+  bmi.biClrUsed = 0;
+  bmi.biClrImportant = 0;
+
+  BITMAPFILEHEADER bf;
+  bf.bfType = 0x4D42;  // 'BM'
+  bf.bfReserved1 = 0;
+  bf.bfReserved2 = 0;
+  bf.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
+  bf.bfSize = bf.bfOffBits + bmi.biSizeImage;
+
+  // get a file output stream
+  nsCOMPtr<nsIOutputStream> stream;
+  rv = NS_NewLocalFileOutputStream(getter_AddRefs(stream), aFile);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  gfx::DataSourceSurface::MappedSurface map;
+  if (!dataSurface->Map(gfx::DataSourceSurface::MapType::READ, &map)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // write the bitmap headers and rgb pixel data to the file
+  rv = NS_ERROR_FAILURE;
+  if (stream) {
+    uint32_t written;
+    stream->Write((const char*)&bf, sizeof(BITMAPFILEHEADER), &written);
+    if (written == sizeof(BITMAPFILEHEADER)) {
+      stream->Write((const char*)&bmi, sizeof(BITMAPINFOHEADER), &written);
+      if (written == sizeof(BITMAPINFOHEADER)) {
+        // write out the image data backwards because the desktop won't
+        // show bitmaps with negative heights for top-to-bottom
+        uint32_t i = map.mStride * height;
+        do {
+          i -= map.mStride;
+          stream->Write(((const char*)map.mData) + i, bytesPerRow, &written);
+          if (written == bytesPerRow) {
+            rv = NS_OK;
+          } else {
+            rv = NS_ERROR_FAILURE;
+            break;
+          }
+        } while (i != 0);
+      }
+    }
+
+    stream->Close();
+  }
+
+  dataSurface->Unmap();
+
+  return rv;
+}
+
 NS_IMETHODIMP
 nsWindowsShellService::SetDesktopBackground(dom::Element* aElement,
                                             int32_t aPosition,
@@ -505,8 +589,9 @@ nsWindowsShellService::SetDesktopBackground(dom::Element* aElement,
   rv = file->GetPath(path);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // write the bitmap to a file in the profile directory
-  rv = WinUtils::WriteBitmap(file, container);
+  // write the bitmap to a file in the profile directory.
+  // We have to write old bitmap format for Windows 7 wallpapar support.
+  rv = WriteBitmap(file, container);
 
   // if the file was written successfully, set it as the system wallpaper
   if (NS_SUCCEEDED(rv)) {
@@ -540,6 +625,10 @@ nsWindowsShellService::SetDesktopBackground(dom::Element* aElement,
         break;
       case BACKGROUND_FIT:
         style.Assign('6');
+        tile.Assign('0');
+        break;
+      case BACKGROUND_SPAN:
+        style.AssignLiteral("22");
         tile.Assign('0');
         break;
     }

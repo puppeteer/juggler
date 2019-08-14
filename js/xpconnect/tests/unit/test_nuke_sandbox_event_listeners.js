@@ -4,7 +4,7 @@
 
 // See https://bugzilla.mozilla.org/show_bug.cgi?id=1273251
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function promiseEvent(target, event) {
   return new Promise(resolve => {
@@ -20,7 +20,7 @@ add_task(async function() {
 
   let docShell = webnav.docShell;
 
-  docShell.createAboutBlankContentViewer(principal);
+  docShell.createAboutBlankContentViewer(principal, principal);
 
   let window = webnav.document.defaultView;
   let sandbox = Cu.Sandbox(window, {sandboxPrototype: window});

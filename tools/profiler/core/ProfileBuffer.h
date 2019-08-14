@@ -6,12 +6,11 @@
 #ifndef MOZ_PROFILE_BUFFER_H
 #define MOZ_PROFILE_BUFFER_H
 
-#include "platform.h"
 #include "ProfileBufferEntry.h"
 #include "ProfilerMarker.h"
-#include "ProfileJSONWriter.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/RefCounted.h"
+
+#include "mozilla/Maybe.h"
+#include "mozilla/PowerOfTwo.h"
 
 // A fixed-capacity circular buffer.
 // This class is used as a queue of entries which, after construction, never
@@ -29,9 +28,8 @@
 class ProfileBuffer final {
  public:
   // ProfileBuffer constructor
-  // @param aCapacity The minimum capacity of the buffer. The actual buffer
-  //                   capacity will be rounded up to the next power of two.
-  explicit ProfileBuffer(uint32_t aCapacity);
+  // @param aCapacity The capacity of the buffer.
+  explicit ProfileBuffer(mozilla::PowerOfTwo32 aCapacity);
 
   ~ProfileBuffer();
 
@@ -46,7 +44,7 @@ class ProfileBuffer final {
       const char* aLabel, const char* aStr, uint32_t aFrameFlags,
       const mozilla::Maybe<uint32_t>& aLineNumber,
       const mozilla::Maybe<uint32_t>& aColumnNumber,
-      const mozilla::Maybe<js::ProfilingStackFrame::Category>& aCategory);
+      const mozilla::Maybe<JS::ProfilingCategoryPair>& aCategoryPair);
 
   // Maximum size of a frameKey string that we'll handle.
   static const size_t kMaxFrameKeyLength = 512;
@@ -76,6 +74,9 @@ class ProfileBuffer final {
                            UniqueStacks& aUniqueStacks) const;
   void StreamPausedRangesToJSON(SpliceableJSONWriter& aWriter,
                                 double aSinceTime) const;
+  void StreamProfilerOverheadToJSON(SpliceableJSONWriter& aWriter,
+                                    const mozilla::TimeStamp& aProcessStartTime,
+                                    double aSinceTime) const;
   void StreamCountersToJSON(SpliceableJSONWriter& aWriter,
                             const mozilla::TimeStamp& aProcessStartTime,
                             double aSinceTime) const;
@@ -106,25 +107,25 @@ class ProfileBuffer final {
   size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
  private:
-  // The storage that backs our buffer. Holds mCapacity entries.
+  // The storage that backs our buffer. Holds capacity entries.
   // All accesses to entries in mEntries need to go through GetEntry(), which
   // translates the given buffer position from the near-infinite uint64_t space
   // into the entry storage space.
   mozilla::UniquePtr<ProfileBufferEntry[]> mEntries;
 
-  // A mask such that pos & mEntryIndexMask == pos % mCapacity.
-  uint32_t mEntryIndexMask;
+  // A mask such that pos & mEntryIndexMask == pos % capacity.
+  mozilla::PowerOfTwoMask32 mEntryIndexMask;
 
  public:
   // mRangeStart and mRangeEnd are uint64_t values that strictly advance and
   // never wrap around. mRangeEnd is always greater than or equal to
-  // mRangeStart, but never gets more than mCapacity steps ahead of
+  // mRangeStart, but never gets more than capacity steps ahead of
   // mRangeStart, because we can only store a fixed number of entries in the
   // buffer. Once the entire buffer is in use, adding a new entry will evict an
   // entry from the front of the buffer (and increase mRangeStart).
   // In other words, the following conditions hold true at all times:
   //  (1) mRangeStart <= mRangeEnd
-  //  (2) mRangeEnd - mRangeStart <= mCapacity
+  //  (2) mRangeEnd - mRangeStart <= capacity
   //
   // If there are no live entries, then mRangeStart == mRangeEnd.
   // Otherwise, mRangeStart is the first live entry and mRangeEnd is one past
@@ -133,9 +134,6 @@ class ProfileBuffer final {
   // (mRangeEnd - mRangeStart) always gives the number of live entries.
   uint64_t mRangeStart;
   uint64_t mRangeEnd;
-
-  // The number of entries in our buffer. Always a power of two.
-  uint32_t mCapacity;
 
   // Markers that marker entries in the buffer might refer to.
   ProfilerMarkerLinkedList mStoredMarkers;

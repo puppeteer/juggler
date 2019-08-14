@@ -10,9 +10,6 @@ const TEST_URI = `data:text/html,<meta charset=utf8>Test reverse search`;
 const isMacOS = AppConstants.platform === "macosx";
 
 add_task(async function() {
-  // Force reverse search on.
-  await pushPref("devtools.webconsole.jsterm.reverse-search", true);
-
   const hud = await openNewTabAndConsole(TEST_URI);
 
   const jstermHistory = [
@@ -32,11 +29,18 @@ add_task(async function() {
   await openReverseSearch(hud);
   EventUtils.sendString("d");
   const infoElement = await waitFor(() => getReverseSearchInfoElement(hud));
-  is(infoElement.textContent, "3 of 3 results", "The reverse info has the expected text");
+  is(
+    infoElement.textContent,
+    "3 of 3 results",
+    "The reverse info has the expected text"
+  );
 
-  is(hud.jsterm.getInputValue(), jstermHistory[2], "JsTerm has the expected input");
-  is(hud.jsterm.autocompletePopup.isOpen, false,
-    "Setting the input value did not trigger the autocompletion");
+  is(getInputValue(hud), jstermHistory[2], "JsTerm has the expected input");
+  is(
+    hud.jsterm.autocompletePopup.isOpen,
+    false,
+    "Setting the input value did not trigger the autocompletion"
+  );
 
   await navigateResultsAndCheckState(hud, {
     direction: "previous",
@@ -50,7 +54,9 @@ add_task(async function() {
     expectedJsTermInputValue: jstermHistory[0],
   });
 
-  info("Check that we go back to the last matching item if we were at the first");
+  info(
+    "Check that we go back to the last matching item if we were at the first"
+  );
   await navigateResultsAndCheckState(hud, {
     direction: "previous",
     expectedInfoText: "3 of 3 results",
@@ -75,24 +81,29 @@ add_task(async function() {
     expectedJsTermInputValue: jstermHistory[2],
   });
 
-  info("Check that trying to navigate when there's only 1 result does not throw");
+  info(
+    "Check that trying to navigate when there's only 1 result does not throw"
+  );
   EventUtils.sendString("og");
-  await waitFor(() => getReverseSearchInfoElement(hud).textContent === "1 result");
+  await waitFor(
+    () => getReverseSearchInfoElement(hud).textContent === "1 result"
+  );
   triggerPreviousResultShortcut();
   triggerNextResultShortcut();
 
   info("Check that trying to navigate when there's no result does not throw");
   EventUtils.sendString("g");
-  await waitFor(() => getReverseSearchInfoElement(hud).textContent === "No results");
+  await waitFor(
+    () => getReverseSearchInfoElement(hud).textContent === "No results"
+  );
   triggerPreviousResultShortcut();
   triggerNextResultShortcut();
 });
 
-async function navigateResultsAndCheckState(hud, {
-  direction,
-  expectedInfoText,
-  expectedJsTermInputValue,
-}) {
+async function navigateResultsAndCheckState(
+  hud,
+  { direction, expectedInfoText, expectedJsTermInputValue }
+) {
   const onJsTermValueChanged = hud.jsterm.once("set-input-value");
   if (direction === "previous") {
     triggerPreviousResultShortcut();
@@ -101,16 +112,24 @@ async function navigateResultsAndCheckState(hud, {
   }
   await onJsTermValueChanged;
 
-  is(hud.jsterm.getInputValue(), expectedJsTermInputValue, "JsTerm has expected value");
+  is(getInputValue(hud), expectedJsTermInputValue, "JsTerm has expected value");
 
   const infoElement = getReverseSearchInfoElement(hud);
-  is(infoElement.textContent, expectedInfoText, "The reverse info has the expected text");
-  is(isReverseSearchInputFocused(hud), true, "reverse search input is still focused");
+  is(
+    infoElement.textContent,
+    expectedInfoText,
+    "The reverse info has the expected text"
+  );
+  is(
+    isReverseSearchInputFocused(hud),
+    true,
+    "reverse search input is still focused"
+  );
 }
 
 function triggerPreviousResultShortcut() {
   if (isMacOS) {
-    EventUtils.synthesizeKey("r", {ctrlKey: true});
+    EventUtils.synthesizeKey("r", { ctrlKey: true });
   } else {
     EventUtils.synthesizeKey("VK_F9");
   }
@@ -118,8 +137,8 @@ function triggerPreviousResultShortcut() {
 
 function triggerNextResultShortcut() {
   if (isMacOS) {
-    EventUtils.synthesizeKey("s", {ctrlKey: true});
+    EventUtils.synthesizeKey("s", { ctrlKey: true });
   } else {
-    EventUtils.synthesizeKey("VK_F9", {shiftKey: true});
+    EventUtils.synthesizeKey("VK_F9", { shiftKey: true });
   }
 }

@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM: Device Interfaces")
+    BUG_COMPONENT = ("Core", "DOM: Web Authentication")
 
 IPDL_SOURCES += [
     'PWebAuthnTransaction.ipdl'
@@ -32,6 +32,7 @@ EXPORTS.mozilla.dom += [
     'WebAuthnTransactionChild.h',
     'WebAuthnTransactionParent.h',
     'WebAuthnUtil.h',
+    'winwebauthn/webauthn.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -60,11 +61,28 @@ LOCAL_INCLUDES += [
     '/dom/base',
     '/dom/crypto',
     '/security/manager/ssl',
+    '/third_party/rust',
 ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    EXPORTS.mozilla.dom += [
+        'AndroidWebAuthnTokenManager.h',
+    ]
+    UNIFIED_SOURCES += [
+        'AndroidWebAuthnTokenManager.cpp',
+    ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     OS_LIBS += [
         'hid',
+    ]
+
+if CONFIG['OS_TARGET'] == 'WINNT':
+    EXPORTS.mozilla.dom += [
+        'WinWebAuthnManager.h',
+    ]
+    UNIFIED_SOURCES += [
+        'WinWebAuthnManager.cpp',
     ]
 
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']

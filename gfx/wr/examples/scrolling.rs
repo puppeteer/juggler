@@ -11,10 +11,12 @@ extern crate winit;
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
-use boilerplate::{Example, HandyDandyRectBuilder};
+use crate::boilerplate::{Example, HandyDandyRectBuilder};
 use euclid::SideOffsets2D;
 use webrender::api::*;
+use webrender::api::units::*;
 use winit::dpi::LogicalPosition;
+
 
 struct App {
     cursor_position: WorldPoint,
@@ -26,86 +28,85 @@ impl Example for App {
         _api: &RenderApi,
         builder: &mut DisplayListBuilder,
         _txn: &mut Transaction,
-        _framebuffer_size: DeviceIntSize,
-        _pipeline_id: PipelineId,
+        _device_size: DeviceIntSize,
+        pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
-        let info = LayoutPrimitiveInfo::new(
-            LayoutRect::new(LayoutPoint::zero(), builder.content_size())
-        );
-        builder.push_stacking_context(
-            &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+        let root_space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+        builder.push_simple_stacking_context(
+            LayoutPoint::zero(),
+            root_space_and_clip.spatial_id,
+            true,
         );
 
         if true {
             // scrolling and clips stuff
             // let's make a scrollbox
             let scrollbox = (0, 0).to(300, 400);
-            builder.push_stacking_context(
-                &LayoutPrimitiveInfo::new((10, 10).by(0, 0)),
-                None,
-                TransformStyle::Flat,
-                MixBlendMode::Normal,
-                &[],
-                RasterSpace::Screen,
+            builder.push_simple_stacking_context(
+                LayoutPoint::new(10., 10.),
+                root_space_and_clip.spatial_id,
+                true,
             );
             // set the scrolling clip
-            let clip_id = builder.define_scroll_frame(
+            let space_and_clip1 = builder.define_scroll_frame(
+                &root_space_and_clip,
                 None,
                 (0, 0).by(1000, 1000),
                 scrollbox,
                 vec![],
                 None,
                 ScrollSensitivity::ScriptAndInputEvents,
+                LayoutVector2D::zero(),
             );
-            builder.push_clip_id(clip_id);
 
             // now put some content into it.
             // start with a white background
-            let mut info = LayoutPrimitiveInfo::new((0, 0).to(1000, 1000));
-            info.tag = Some((0, 1));
+            let mut info = CommonItemProperties::new((0, 0).to(1000, 1000), space_and_clip1);
+            info.hit_info = Some((0, 1));
             builder.push_rect(&info, ColorF::new(1.0, 1.0, 1.0, 1.0));
 
             // let's make a 50x50 blue square as a visual reference
-            let mut info = LayoutPrimitiveInfo::new((0, 0).to(50, 50));
-            info.tag = Some((0, 2));
+            let mut info = CommonItemProperties::new((0, 0).to(50, 50), space_and_clip1);
+            info.hit_info = Some((0, 2));
             builder.push_rect(&info, ColorF::new(0.0, 0.0, 1.0, 1.0));
 
             // and a 50x50 green square next to it with an offset clip
             // to see what that looks like
-            let mut info =
-                LayoutPrimitiveInfo::with_clip_rect((50, 0).to(100, 50), (60, 10).to(110, 60));
-            info.tag = Some((0, 3));
+            let mut info = CommonItemProperties::new(
+                (50, 0).to(100, 50).intersection(&(60, 10).to(110, 60)).unwrap(),
+                space_and_clip1,
+            );
+            info.hit_info = Some((0, 3));
             builder.push_rect(&info, ColorF::new(0.0, 1.0, 0.0, 1.0));
 
             // Below the above rectangles, set up a nested scrollbox. It's still in
             // the same stacking context, so note that the rects passed in need to
             // be relative to the stacking context.
-            let nested_clip_id = builder.define_scroll_frame(
+            let space_and_clip2 = builder.define_scroll_frame(
+                &space_and_clip1,
                 None,
                 (0, 100).to(300, 1000),
                 (0, 100).to(200, 300),
                 vec![],
                 None,
                 ScrollSensitivity::ScriptAndInputEvents,
+                LayoutVector2D::zero(),
             );
-            builder.push_clip_id(nested_clip_id);
 
             // give it a giant gray background just to distinguish it and to easily
             // visually identify the nested scrollbox
-            let mut info = LayoutPrimitiveInfo::new((-1000, -1000).to(5000, 5000));
-            info.tag = Some((0, 4));
+            let mut info = CommonItemProperties::new(
+                (-1000, -1000).to(5000, 5000),
+                space_and_clip2,
+            );
+            info.hit_info = Some((0, 4));
             builder.push_rect(&info, ColorF::new(0.5, 0.5, 0.5, 1.0));
 
             // add a teal square to visualize the scrolling/clipping behaviour
             // as you scroll the nested scrollbox
-            let mut info = LayoutPrimitiveInfo::new((0, 200).to(50, 250));
-            info.tag = Some((0, 5));
+            let mut info = CommonItemProperties::new((0, 200).to(50, 250), space_and_clip2);
+            info.hit_info = Some((0, 5));
             builder.push_rect(&info, ColorF::new(0.0, 1.0, 1.0, 1.0));
 
             // Add a sticky frame. It will "stick" twice while scrolling, once
@@ -113,6 +114,7 @@ impl Example for App {
             // and once at a margin of 10px from the top, for 60 pixels of
             // scrolling.
             let sticky_id = builder.define_sticky_frame(
+                space_and_clip2.spatial_id,
                 (50, 350).by(50, 50),
                 SideOffsets2D::new(Some(10.0), None, Some(10.0), None),
                 StickyOffsetBounds::new(-40.0, 60.0),
@@ -120,21 +122,28 @@ impl Example for App {
                 LayoutVector2D::new(0.0, 0.0)
             );
 
-            builder.push_clip_id(sticky_id);
-            let mut info = LayoutPrimitiveInfo::new((50, 350).by(50, 50));
-            info.tag = Some((0, 6));
-            builder.push_rect(&info, ColorF::new(0.5, 0.5, 1.0, 1.0));
-            builder.pop_clip_id(); // sticky_id
+            let mut info = CommonItemProperties::new(
+                (50, 350).by(50, 50),
+                SpaceAndClipInfo {
+                    spatial_id: sticky_id,
+                    clip_id: space_and_clip2.clip_id,
+                },
+            );
+            info.hit_info = Some((0, 6));
+            builder.push_rect(
+                &info,
+                ColorF::new(0.5, 0.5, 1.0, 1.0),
+            );
 
             // just for good measure add another teal square further down and to
             // the right, which can be scrolled into view by the user
-            let mut info = LayoutPrimitiveInfo::new((250, 350).to(300, 400));
-            info.tag = Some((0, 7));
+            let mut info = CommonItemProperties::new(
+                (250, 350).to(300, 400),
+                space_and_clip2,
+            );
+            info.hit_info = Some((0, 7));
             builder.push_rect(&info, ColorF::new(0.0, 1.0, 1.0, 1.0));
 
-            builder.pop_clip_id(); // nested_clip_id
-
-            builder.pop_clip_id(); // clip_id
             builder.pop_stacking_context();
         }
 

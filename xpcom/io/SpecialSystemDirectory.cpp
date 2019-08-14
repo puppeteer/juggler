@@ -11,40 +11,40 @@
 
 #if defined(XP_WIN)
 
-#include <windows.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <direct.h>
-#include <shlobj.h>
-#include <knownfolders.h>
-#include <guiddef.h>
+#  include <windows.h>
+#  include <stdlib.h>
+#  include <stdio.h>
+#  include <string.h>
+#  include <direct.h>
+#  include <shlobj.h>
+#  include <knownfolders.h>
+#  include <guiddef.h>
 
 #elif defined(XP_UNIX)
 
-#include <limits.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/param.h>
-#include "prenv.h"
-#if defined(MOZ_WIDGET_COCOA)
-#include "CocoaFileUtils.h"
-#endif
+#  include <limits.h>
+#  include <unistd.h>
+#  include <stdlib.h>
+#  include <sys/param.h>
+#  include "prenv.h"
+#  if defined(MOZ_WIDGET_COCOA)
+#    include "CocoaFileUtils.h"
+#  endif
 
 #endif
 
 #ifndef MAXPATHLEN
-#ifdef PATH_MAX
-#define MAXPATHLEN PATH_MAX
-#elif defined(MAX_PATH)
-#define MAXPATHLEN MAX_PATH
-#elif defined(_MAX_PATH)
-#define MAXPATHLEN _MAX_PATH
-#elif defined(CCHMAXPATH)
-#define MAXPATHLEN CCHMAXPATH
-#else
-#define MAXPATHLEN 1024
-#endif
+#  ifdef PATH_MAX
+#    define MAXPATHLEN PATH_MAX
+#  elif defined(MAX_PATH)
+#    define MAXPATHLEN MAX_PATH
+#  elif defined(_MAX_PATH)
+#    define MAXPATHLEN _MAX_PATH
+#  elif defined(CCHMAXPATH)
+#    define MAXPATHLEN CCHMAXPATH
+#  else
+#    define MAXPATHLEN 1024
+#  endif
 #endif
 
 #if defined(XP_WIN)
@@ -89,7 +89,7 @@ static nsresult GetWindowsFolder(int aFolder, nsIFile** aFile) {
   return NS_NewLocalFile(nsDependentString(path, len), true, aFile);
 }
 
-#if WINVER < 0x0601
+#  if WINVER < 0x0601
 __inline HRESULT SHLoadLibraryFromKnownFolder(REFKNOWNFOLDERID aFolderId,
                                               DWORD aMode, REFIID riid,
                                               void** ppv) {
@@ -106,8 +106,9 @@ __inline HRESULT SHLoadLibraryFromKnownFolder(REFKNOWNFOLDERID aFolderId,
   }
   return hr;
 }
-#endif
+#  endif
 
+#  if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
 /*
  * Return the default save-to location for the Windows Library passed in
  * through aFolderId.
@@ -135,6 +136,7 @@ static nsresult GetLibrarySaveToPath(int aFallbackFolderId,
 
   return GetWindowsFolder(aFallbackFolderId, aFile);
 }
+#  endif
 
 /**
  * Provides a fallback for getting the path to APPDATA or LOCALAPPDATA by
@@ -175,13 +177,13 @@ static nsresult GetRegWindowsAppDataFolder(bool aLocal, nsIFile** aFile) {
 
 #if defined(XP_UNIX)
 static nsresult GetUnixHomeDir(nsIFile** aFile) {
-#if defined(ANDROID)
+#  if defined(ANDROID)
   // XXX no home dir on android; maybe we should return the sdcard if present?
   return NS_ERROR_FAILURE;
-#else
+#  else
   return NS_NewNativeLocalFile(nsDependentCString(PR_GetEnv("HOME")), true,
                                aFile);
-#endif
+#  endif
 }
 
 /*
@@ -582,18 +584,18 @@ nsresult GetSpecialSystemDirectory(SystemDirectories aSystemSystemDirectory,
       }
       return rv;
     }
-#if defined(MOZ_CONTENT_SANDBOX)
+#  if defined(MOZ_SANDBOX)
     case Win_LocalAppdataLow: {
       GUID localAppDataLowGuid = FOLDERID_LocalAppDataLow;
       return GetKnownFolder(&localAppDataLowGuid, aFile);
     }
-#endif
-#if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
+#  endif
+#  if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
     case Win_Documents: {
       return GetLibrarySaveToPath(CSIDL_MYDOCUMENTS, FOLDERID_DocumentsLibrary,
                                   aFile);
     }
-#endif
+#  endif
 #endif  // XP_WIN
 
 #if defined(XP_UNIX)

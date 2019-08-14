@@ -10,12 +10,10 @@
 
 // It would be nice if we could use the InfallibleAllocPolicy from mozalloc,
 // but MFBT cannot use mozalloc.
-class InfallibleAllocPolicy
-{
-public:
+class InfallibleAllocPolicy {
+ public:
   template <typename T>
-  T* pod_malloc(size_t aNumElems)
-  {
+  T* pod_malloc(size_t aNumElems) {
     if (aNumElems & mozilla::tl::MulOverflowMask<sizeof(T)>::value) {
       MOZ_CRASH("TestBufferList.cpp: overflow");
     }
@@ -27,7 +25,9 @@ public:
   }
 
   template <typename T>
-  void free_(T* aPtr, size_t aNumElems = 0) { free(aPtr); }
+  void free_(T* aPtr, size_t aNumElems = 0) {
+    free(aPtr);
+  }
 
   void reportAllocOverflow() const {}
 
@@ -36,8 +36,7 @@ public:
 
 typedef mozilla::BufferList<InfallibleAllocPolicy> BufferList;
 
-int main(void)
-{
+int main(void) {
   const size_t kInitialSize = 16;
   const size_t kInitialCapacity = 24;
   const size_t kStandardCapacity = 32;
@@ -81,14 +80,15 @@ int main(void)
 
   char toWrite[kSmallWrite];
   memset(toWrite, 0x0a, kSmallWrite);
-  bl.WriteBytes(toWrite, kSmallWrite);
+  MOZ_ALWAYS_TRUE(bl.WriteBytes(toWrite, kSmallWrite));
 
   MOZ_RELEASE_ASSERT(bl.Size() == kInitialSize + kSmallWrite);
 
   iter = bl.Iter();
   iter.Advance(bl, kInitialSize);
   MOZ_RELEASE_ASSERT(!iter.Done());
-  MOZ_RELEASE_ASSERT(iter.RemainingInSegment() == kInitialCapacity - kInitialSize);
+  MOZ_RELEASE_ASSERT(iter.RemainingInSegment() ==
+                     kInitialCapacity - kInitialSize);
   MOZ_RELEASE_ASSERT(iter.HasRoomFor(kInitialCapacity - kInitialSize));
   MOZ_RELEASE_ASSERT(*iter.Data() == 0x0a);
 
@@ -102,15 +102,19 @@ int main(void)
   MOZ_RELEASE_ASSERT(*iter.Data() == 0x0a);
 
   iter = bl.Iter();
-  MOZ_RELEASE_ASSERT(iter.AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite - 4));
+  MOZ_RELEASE_ASSERT(
+      iter.AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite - 4));
   MOZ_RELEASE_ASSERT(!iter.Done());
   MOZ_RELEASE_ASSERT(iter.RemainingInSegment() == 4);
   MOZ_RELEASE_ASSERT(iter.HasRoomFor(4));
   MOZ_RELEASE_ASSERT(*iter.Data() == 0x0a);
 
-  MOZ_RELEASE_ASSERT(bl.Iter().AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite - 1));
-  MOZ_RELEASE_ASSERT(bl.Iter().AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite));
-  MOZ_RELEASE_ASSERT(!bl.Iter().AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite + 1));
+  MOZ_RELEASE_ASSERT(
+      bl.Iter().AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite - 1));
+  MOZ_RELEASE_ASSERT(
+      bl.Iter().AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite));
+  MOZ_RELEASE_ASSERT(
+      !bl.Iter().AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite + 1));
   MOZ_RELEASE_ASSERT(!bl.Iter().AdvanceAcrossSegments(bl, size_t(-1)));
 
   // Reading non-contiguous bytes.
@@ -127,7 +131,8 @@ int main(void)
   iter = bl.Iter();
   bl.ReadBytes(iter, toRead, kInitialSize);
   MOZ_RELEASE_ASSERT(!iter.Done());
-  MOZ_RELEASE_ASSERT(iter.RemainingInSegment() == kInitialCapacity - kInitialSize);
+  MOZ_RELEASE_ASSERT(iter.RemainingInSegment() ==
+                     kInitialCapacity - kInitialSize);
 
   const size_t kBigWrite = 1024;
 
@@ -135,11 +140,12 @@ int main(void)
   for (unsigned i = 0; i < kBigWrite; i++) {
     toWriteBig[i] = i % 37;
   }
-  bl.WriteBytes(toWriteBig, kBigWrite);
+  MOZ_ALWAYS_TRUE(bl.WriteBytes(toWriteBig, kBigWrite));
 
   char* toReadBig = static_cast<char*>(malloc(kBigWrite));
   iter = bl.Iter();
-  MOZ_RELEASE_ASSERT(iter.AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite));
+  MOZ_RELEASE_ASSERT(
+      iter.AdvanceAcrossSegments(bl, kInitialSize + kSmallWrite));
   bl.ReadBytes(iter, toReadBig, kBigWrite);
   MOZ_RELEASE_ASSERT(memcmp(toReadBig, toWriteBig, kBigWrite) == 0);
   MOZ_RELEASE_ASSERT(iter.Done());
@@ -159,14 +165,18 @@ int main(void)
 
   MOZ_RELEASE_ASSERT(bl.Size() == kTotalSize);
 
-  static size_t kLastSegmentSize = (kTotalSize - kInitialCapacity) % kStandardCapacity;
+  static size_t kLastSegmentSize =
+      (kTotalSize - kInitialCapacity) % kStandardCapacity;
 
   iter = bl.Iter();
-  MOZ_RELEASE_ASSERT(iter.AdvanceAcrossSegments(bl, kTotalSize - kLastSegmentSize - kStandardCapacity));
+  MOZ_RELEASE_ASSERT(iter.AdvanceAcrossSegments(
+      bl, kTotalSize - kLastSegmentSize - kStandardCapacity));
   MOZ_RELEASE_ASSERT(iter.RemainingInSegment() == kStandardCapacity);
   iter.Advance(bl, kStandardCapacity);
   MOZ_RELEASE_ASSERT(iter.RemainingInSegment() == kLastSegmentSize);
-  MOZ_RELEASE_ASSERT(unsigned(*iter.Data()) == (kTotalSize - kLastSegmentSize - kInitialSize - kSmallWrite) % 37);
+  MOZ_RELEASE_ASSERT(
+      unsigned(*iter.Data()) ==
+      (kTotalSize - kLastSegmentSize - kInitialSize - kSmallWrite) % 37);
 
   // Clear.
 
@@ -179,9 +189,9 @@ int main(void)
   const size_t kSmallCapacity = 8;
 
   BufferList bl2(0, kSmallCapacity, kSmallCapacity);
-  bl2.WriteBytes(toWrite, kSmallWrite);
-  bl2.WriteBytes(toWrite, kSmallWrite);
-  bl2.WriteBytes(toWrite, kSmallWrite);
+  MOZ_ALWAYS_TRUE(bl2.WriteBytes(toWrite, kSmallWrite));
+  MOZ_ALWAYS_TRUE(bl2.WriteBytes(toWrite, kSmallWrite));
+  MOZ_ALWAYS_TRUE(bl2.WriteBytes(toWrite, kSmallWrite));
 
   bl = std::move(bl2);
   MOZ_RELEASE_ASSERT(bl2.Size() == 0);
@@ -217,7 +227,8 @@ int main(void)
   MOZ_RELEASE_ASSERT(success);
   MOZ_RELEASE_ASSERT(bl2.Size() == kBorrowSize);
 
-  MOZ_RELEASE_ASSERT(iter.AdvanceAcrossSegments(bl, kSmallWrite * 3 - kBorrowSize - kBorrowStart));
+  MOZ_RELEASE_ASSERT(iter.AdvanceAcrossSegments(
+      bl, kSmallWrite * 3 - kBorrowSize - kBorrowStart));
   MOZ_RELEASE_ASSERT(iter.Done());
 
   iter = bl2.Iter();
@@ -251,7 +262,7 @@ int main(void)
   MOZ_RELEASE_ASSERT(iter.Done());
 
   BufferList bl4(8, 8, 8);
-  bl4.WriteBytes("abcd1234", 8);
+  MOZ_ALWAYS_TRUE(bl4.WriteBytes("abcd1234", 8));
   iter = bl4.Iter();
   iter.Advance(bl4, 8);
 
@@ -259,8 +270,8 @@ int main(void)
   MOZ_RELEASE_ASSERT(!success);
 
   BufferList bl6(0, 0, 16);
-  bl6.WriteBytes("abcdefgh12345678", 16);
-  bl6.WriteBytes("ijklmnop87654321", 16);
+  MOZ_ALWAYS_TRUE(bl6.WriteBytes("abcdefgh12345678", 16));
+  MOZ_ALWAYS_TRUE(bl6.WriteBytes("ijklmnop87654321", 16));
   iter = bl6.Iter();
   iter.Advance(bl6, 8);
   BufferList bl7 = bl6.Extract(iter, 16, &success);
@@ -273,7 +284,7 @@ int main(void)
   MOZ_RELEASE_ASSERT(memcmp(data, "12345678ijklmnop", 16) == 0);
 
   BufferList bl8(0, 0, 16);
-  bl8.WriteBytes("abcdefgh12345678", 16);
+  MOZ_ALWAYS_TRUE(bl8.WriteBytes("abcdefgh12345678", 16));
   iter = bl8.Iter();
   BufferList bl9 = bl8.Extract(iter, 8, &success);
   MOZ_RELEASE_ASSERT(success);
@@ -281,8 +292,8 @@ int main(void)
   MOZ_RELEASE_ASSERT(!iter.Done());
 
   BufferList bl10(0, 0, 8);
-  bl10.WriteBytes("abcdefgh", 8);
-  bl10.WriteBytes("12345678", 8);
+  MOZ_ALWAYS_TRUE(bl10.WriteBytes("abcdefgh", 8));
+  MOZ_ALWAYS_TRUE(bl10.WriteBytes("12345678", 8));
   iter = bl10.Iter();
   BufferList bl11 = bl10.Extract(iter, 16, &success);
   MOZ_RELEASE_ASSERT(success);

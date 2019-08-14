@@ -6,8 +6,9 @@
 
 "use strict";
 
-const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/mochitest/test-iframe-parent.html";
+const TEST_URI =
+  "http://example.com/browser/devtools/client/webconsole/" +
+  "test/mochitest/test-iframe-parent.html";
 
 add_task(async function() {
   // Run test with legacy JsTerm
@@ -29,16 +30,18 @@ async function performTests() {
 
   // Make sure we don't throw when trying to autocomplete
   const autocompleteUpdated = hud.jsterm.once("autocomplete-updated");
-  jsterm.setInputValue("window[0].document");
+  setInputValue(hud, "window[0].document");
   EventUtils.sendString(".");
   await autocompleteUpdated;
 
-  hud.jsterm.setInputValue("window[0].document.title");
+  setInputValue(hud, "window[0].document.title");
   const onPermissionDeniedMessage = waitForMessage(hud, "Permission denied");
   EventUtils.synthesizeKey("KEY_Enter");
   const permissionDenied = await onPermissionDeniedMessage;
-  ok(permissionDenied.node.classList.contains("error"),
-    "A message error is shown when trying to inspect window[0]");
+  ok(
+    permissionDenied.node.classList.contains("error"),
+    "A message error is shown when trying to inspect window[0]"
+  );
 
   const onParentLocation = waitForMessage(hud, "test-iframe-parent.html");
   hud.jsterm.execute("window.location");

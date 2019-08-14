@@ -5,7 +5,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=319381
 -->
 <head>
   <title>Test for Bug 319381</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>        
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>        
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -32,20 +32,6 @@ for (i = 0; i < vals.length; ++i) {
   $('t').style.overflow = vals[i];
   is($('t').style.overflow, vals[i], "Roundtrip");
   is(c(), vals[i], "Simple property set");
-}
-
-if (SpecialPowers.getBoolPref("layout.css.overflow.moz-scrollbars.enabled")) {
-  $('t').style.overflow = mozVals[0];
-  is($('t').style.getPropertyValue("overflow-y"), "scroll", "Roundtrip");
-  is($('t').style.getPropertyValue("overflow-x"), "hidden", "Roundtrip");
-  is($('t').style.overflow, "hidden scroll", "Shorthand read directly");
-  is(c(), "hidden scroll", "Shorthand computed");
-
-  $('t').style.overflow = mozVals[1];
-  is($('t').style.getPropertyValue("overflow-x"), "scroll", "Roundtrip");
-  is($('t').style.getPropertyValue("overflow-y"), "hidden", "Roundtrip");
-  is($('t').style.overflow, "scroll hidden", "Shorthand read directly");
-  is(c(), "scroll hidden", "Shorthand computed");
 }
 
 for (i = 0; i < vals.length; ++i) {

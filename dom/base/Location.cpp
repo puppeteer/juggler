@@ -11,7 +11,6 @@
 #include "nsIDocShell.h"
 #include "nsDocShellLoadState.h"
 #include "nsIWebNavigation.h"
-#include "nsCDefaultURIFixup.h"
 #include "nsIURIFixup.h"
 #include "nsIURL.h"
 #include "nsIURIMutator.h"
@@ -20,8 +19,6 @@
 #include "nsCOMPtr.h"
 #include "nsEscape.h"
 #include "nsIDOMWindow.h"
-#include "nsIDocument.h"
-#include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsError.h"
 #include "nsReadableUtils.h"
@@ -31,10 +28,14 @@
 #include "nsGlobalWindow.h"
 #include "mozilla/Likely.h"
 #include "nsCycleCollectionParticipant.h"
+#include "mozilla/Components.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/Unused.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/LocationBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "ReferrerInfo.h"
 
 namespace mozilla {
 namespace dom {
@@ -104,7 +105,7 @@ already_AddRefed<nsDocShellLoadState> Location::CheckURL(
 
   nsCOMPtr<nsPIDOMWindowInner> incumbent =
       do_QueryInterface(mozilla::dom::GetIncumbentGlobal());
-  nsCOMPtr<nsIDocument> doc = incumbent ? incumbent->GetDoc() : nullptr;
+  nsCOMPtr<Document> doc = incumbent ? incumbent->GetDoc() : nullptr;
 
   if (doc) {
     nsCOMPtr<nsIURI> docOriginalURI, docCurrentURI, principalURI;
@@ -146,13 +147,17 @@ already_AddRefed<nsDocShellLoadState> Location::CheckURL(
   }
 
   // Create load info
-  RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState();
+  RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState(aURI);
 
   loadState->SetTriggeringPrincipal(triggeringPrincipal);
+  if (doc) {
+    loadState->SetCsp(doc->GetCsp());
+  }
 
   if (sourceURI) {
-    loadState->SetReferrer(sourceURI);
-    loadState->SetReferrerPolicy(referrerPolicy);
+    nsCOMPtr<nsIReferrerInfo> referrerInfo =
+        new ReferrerInfo(sourceURI, referrerPolicy);
+    loadState->SetReferrerInfo(referrerInfo);
   }
 
   return loadState.forget();
@@ -192,8 +197,7 @@ nsresult Location::GetURI(nsIURI** aURI, bool aGetInnermostURI) {
 
   NS_ASSERTION(uri, "nsJARURI screwed up?");
 
-  nsCOMPtr<nsIURIFixup> urifixup(do_GetService(NS_URIFIXUP_CONTRACTID, &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIURIFixup> urifixup(components::URIFixup::Service());
 
   return urifixup->CreateExposableURI(uri, aURI);
 }
@@ -221,7 +225,6 @@ void Location::SetURI(nsIURI* aURI, nsIPrincipal& aSubjectPrincipal,
       loadState->SetSourceDocShell(sourceWindow->GetDocShell());
     }
 
-    loadState->SetURI(aURI);
     loadState->SetLoadFlags(nsIWebNavigation::LOAD_FLAGS_NONE);
     loadState->SetFirstParty(true);
 
@@ -421,7 +424,7 @@ void Location::SetHrefWithBase(const nsAString& aHref, nsIURI* aBase,
 
   nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mDocShell));
 
-  if (nsIDocument* doc = GetEntryDocument()) {
+  if (Document* doc = GetEntryDocument()) {
     result = NS_NewURI(getter_AddRefs(newUri), aHref,
                        doc->GetDocumentCharacterSet(), aBase);
   } else {
@@ -728,7 +731,7 @@ void Location::SetSearch(const nsAString& aSearch,
     return;
   }
 
-  if (nsIDocument* doc = GetEntryDocument()) {
+  if (Document* doc = GetEntryDocument()) {
     aRv = NS_MutateURI(uri)
               .SetQueryWithEncoding(NS_ConvertUTF16toUTF8(aSearch),
                                     doc->GetDocumentCharacterSet())
@@ -759,11 +762,12 @@ nsresult Location::Reload(bool aForceget) {
     // page since some sites may use this trick to work around gecko
     // reflow bugs, and this should have the same effect.
 
-    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+    nsCOMPtr<Document> doc = window->GetExtantDoc();
 
     nsPresContext* pcx;
     if (doc && (pcx = doc->GetPresContext())) {
-      pcx->RebuildAllStyleData(NS_STYLE_HINT_REFLOW, eRestyle_Subtree);
+      pcx->RebuildAllStyleData(NS_STYLE_HINT_REFLOW,
+                               RestyleHint::RestyleSubtree());
     }
 
     return NS_OK;
@@ -807,7 +811,7 @@ void Location::Assign(const nsAString& aUrl, nsIPrincipal& aSubjectPrincipal,
 }
 
 already_AddRefed<nsIURI> Location::GetSourceBaseURL() {
-  nsIDocument* doc = GetEntryDocument();
+  Document* doc = GetEntryDocument();
   // If there's no entry document, we either have no Script Entry Point or one
   // that isn't a DOM Window.  This doesn't generally happen with the DOM, but
   // can sometimes happen with extension code in certain IPC configurations.  If

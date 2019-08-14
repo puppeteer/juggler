@@ -5,16 +5,37 @@
 "use strict";
 
 var Services = require("Services");
-loader.lazyRequireGetter(this, "TargetFactory", "devtools/client/framework/target", true);
 loader.lazyRequireGetter(this, "Tools", "devtools/client/definitions", true);
-loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
-loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
-loader.lazyRequireGetter(this, "DebuggerClient", "devtools/shared/client/debugger-client", true);
-loader.lazyRequireGetter(this, "l10n", "devtools/client/webconsole/webconsole-l10n");
-loader.lazyRequireGetter(this, "WebConsole", "devtools/client/webconsole/webconsole");
-loader.lazyRequireGetter(this, "BrowserConsole", "devtools/client/webconsole/browser-console");
+loader.lazyRequireGetter(
+  this,
+  "gDevTools",
+  "devtools/client/framework/devtools",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "DebuggerClient",
+  "devtools/shared/client/debugger-client",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "l10n",
+  "devtools/client/webconsole/webconsole-l10n"
+);
+loader.lazyRequireGetter(
+  this,
+  "WebConsole",
+  "devtools/client/webconsole/webconsole"
+);
+loader.lazyRequireGetter(
+  this,
+  "BrowserConsole",
+  "devtools/client/webconsole/browser-console"
+);
 
-const BC_WINDOW_FEATURES = "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
+const BC_WINDOW_FEATURES =
+  "chrome,titlebar,toolbar,centerscreen,resizable,dialog=no";
 
 function HUDService() {
   this.consoles = new Map();
@@ -126,41 +147,64 @@ HUDService.prototype = {
     }
 
     async function connect() {
+      // The Browser console ends up using the debugger in autocomplete.
+      // Because the debugger can't be running in the same compartment than its debuggee,
+      // we have to load the server in a dedicated Loader, flagged with
+      // `freshCompartment`, which will force it to be loaded in another compartment.
+      // We aren't using `invisibleToDebugger` in order to allow the Browser toolbox to
+      // debug the Browser console. This is fine as they will spawn distinct Loaders and
+      // so distinct `DebuggerServer` and actor modules.
+      const ChromeUtils = require("ChromeUtils");
+      const { DevToolsLoader } = ChromeUtils.import(
+        "resource://devtools/shared/Loader.jsm"
+      );
+      const loader = new DevToolsLoader();
+      loader.freshCompartment = true;
+      const { DebuggerServer } = loader.require("devtools/server/main");
+
+      DebuggerServer.init();
+
       // Ensure that the root actor and the target-scoped actors have been registered on
       // the DebuggerServer, so that the Browser Console can retrieve the console actors.
       // (See Bug 1416105 for rationale).
-      DebuggerServer.init();
       DebuggerServer.registerActors({ root: true, target: true });
 
       DebuggerServer.allowChromeProcess = true;
 
       const client = new DebuggerClient(DebuggerServer.connectPipe());
       await client.connect();
-      const front = await client.mainRoot.getMainProcess();
-      return { activeTab: front, client, chrome: true };
+      return client.mainRoot.getMainProcess();
     }
 
     async function openWindow(t) {
-      const win = Services.ww.openWindow(null, Tools.webConsole.url,
-                                       "_blank", BC_WINDOW_FEATURES, null);
+      const win = Services.ww.openWindow(
+        null,
+        Tools.webConsole.url,
+        "_blank",
+        BC_WINDOW_FEATURES,
+        null
+      );
 
       await new Promise(resolve => {
-        win.addEventListener("DOMContentLoaded", resolve, {once: true});
+        win.addEventListener("DOMContentLoaded", resolve, { once: true });
       });
 
       win.document.title = l10n.getStr("browserConsole.title");
 
-      return {iframeWindow: win, chromeWindow: win};
+      return { iframeWindow: win, chromeWindow: win };
     }
 
     // Temporarily cache the async startup sequence so that if toggleBrowserConsole
     // gets called again we can return this console instead of opening another one.
     this._browserConsoleInitializing = (async () => {
-      const connection = await connect();
-      const target = await TargetFactory.forRemoteTab(connection);
-      const {iframeWindow, chromeWindow} = await openWindow(target);
-      const browserConsole =
-        await this.openBrowserConsole(target, iframeWindow, chromeWindow);
+      const target = await connect();
+      await target.attach();
+      const { iframeWindow, chromeWindow } = await openWindow(target);
+      const browserConsole = await this.openBrowserConsole(
+        target,
+        iframeWindow,
+        chromeWindow
+      );
       return browserConsole;
     })();
 

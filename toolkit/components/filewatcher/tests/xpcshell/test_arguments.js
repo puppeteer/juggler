@@ -16,7 +16,6 @@ function run_test() {
  * Test for addPath usage with null arguments.
  */
 add_task(async function test_null_args_addPath() {
-
   let watcher = makeWatcher();
   let testPath = "someInvalidPath";
 
@@ -30,8 +29,9 @@ add_task(async function test_null_args_addPath() {
   try {
     watcher.addPath(testPath, null, dummyFunc);
   } catch (ex) {
-    if (ex.result != Cr.NS_ERROR_NULL_POINTER)
+    if (ex.result != Cr.NS_ERROR_NULL_POINTER) {
       throw ex;
+    }
     info("Initialisation thrown NS_ERROR_NULL_POINTER as expected.");
   }
 
@@ -39,8 +39,9 @@ add_task(async function test_null_args_addPath() {
   try {
     watcher.addPath(testPath, null, null);
   } catch (ex) {
-    if (ex.result != Cr.NS_ERROR_NULL_POINTER)
+    if (ex.result != Cr.NS_ERROR_NULL_POINTER) {
       throw ex;
+    }
     info("Initialisation thrown NS_ERROR_NULL_POINTER as expected.");
   }
 });
@@ -49,7 +50,6 @@ add_task(async function test_null_args_addPath() {
  * Test for removePath usage with null arguments.
  */
 add_task(async function test_null_args_removePath() {
-
   let watcher = makeWatcher();
   let testPath = "someInvalidPath";
 
@@ -63,8 +63,9 @@ add_task(async function test_null_args_removePath() {
   try {
     watcher.removePath(testPath, null, dummyFunc);
   } catch (ex) {
-    if (ex.result != Cr.NS_ERROR_NULL_POINTER)
+    if (ex.result != Cr.NS_ERROR_NULL_POINTER) {
       throw ex;
+    }
     info("Initialisation thrown NS_ERROR_NULL_POINTER as expected.");
   }
 
@@ -72,8 +73,9 @@ add_task(async function test_null_args_removePath() {
   try {
     watcher.removePath(testPath, null, null);
   } catch (ex) {
-    if (ex.result != Cr.NS_ERROR_NULL_POINTER)
+    if (ex.result != Cr.NS_ERROR_NULL_POINTER) {
       throw ex;
+    }
     info("Initialisation thrown NS_ERROR_NULL_POINTER as expected.");
   }
 });

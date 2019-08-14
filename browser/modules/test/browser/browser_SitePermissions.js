@@ -14,35 +14,15 @@ add_task(async function testTempAllowThrows() {
 
   await BrowserTestUtils.withNewTab(uri.spec, function(browser) {
     Assert.throws(function() {
-      SitePermissions.set(uri, id, SitePermissions.ALLOW, SitePermissions.SCOPE_TEMPORARY, browser);
+      SitePermissions.set(
+        uri,
+        id,
+        SitePermissions.ALLOW,
+        SitePermissions.SCOPE_TEMPORARY,
+        browser
+      );
     }, /'Block' is the only permission we can save temporarily on a browser/);
   });
-});
-
-// Tests that we can set TEMPORARY ALLOW permissions for autoplay-media
-add_task(async function testTempAutoplayAllowed() {
-  Services.prefs.setIntPref("media.autoplay.default", 2);
-
-  let uri = Services.io.newURI("https://example.com");
-  let permId = "autoplay-media";
-
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, uri.spec);
-
-  SitePermissions.set(uri, permId, SitePermissions.ALLOW,
-                      SitePermissions.SCOPE_TEMPORARY, tab.linkedBrowser);
-
-  let permissions = SitePermissions.getAllPermissionDetailsForBrowser(tab.linkedBrowser);
-
-  let autoplay = permissions.find(({id}) => id === "autoplay-media");
-  Assert.deepEqual(autoplay, {
-    id: "autoplay-media",
-    label: "Automatically Play Media with Sound",
-    state: SitePermissions.ALLOW,
-    scope: SitePermissions.SCOPE_TEMPORARY,
-  });
-
-  Services.prefs.clearUserPref("media.autoplay.default");
-  BrowserTestUtils.removeTab(gBrowser.selectedTab);
 });
 
 // This tests the SitePermissions.getAllPermissionDetailsForBrowser function.
@@ -56,12 +36,19 @@ add_task(async function testGetAllPermissionDetailsForBrowser() {
   SitePermissions.set(uri, "camera", SitePermissions.ALLOW);
   SitePermissions.set(uri, "cookie", SitePermissions.ALLOW_COOKIES_FOR_SESSION);
   SitePermissions.set(uri, "popup", SitePermissions.BLOCK);
-  SitePermissions.set(uri, "geo", SitePermissions.ALLOW, SitePermissions.SCOPE_SESSION);
+  SitePermissions.set(
+    uri,
+    "geo",
+    SitePermissions.ALLOW,
+    SitePermissions.SCOPE_SESSION
+  );
   SitePermissions.set(uri, "shortcuts", SitePermissions.ALLOW);
 
-  let permissions = SitePermissions.getAllPermissionDetailsForBrowser(tab.linkedBrowser);
+  let permissions = SitePermissions.getAllPermissionDetailsForBrowser(
+    tab.linkedBrowser
+  );
 
-  let camera = permissions.find(({id}) => id === "camera");
+  let camera = permissions.find(({ id }) => id === "camera");
   Assert.deepEqual(camera, {
     id: "camera",
     label: "Use the Camera",
@@ -71,12 +58,14 @@ add_task(async function testGetAllPermissionDetailsForBrowser() {
 
   // Check that removed permissions (State.UNKNOWN) are skipped.
   SitePermissions.remove(uri, "camera");
-  permissions = SitePermissions.getAllPermissionDetailsForBrowser(tab.linkedBrowser);
+  permissions = SitePermissions.getAllPermissionDetailsForBrowser(
+    tab.linkedBrowser
+  );
 
-  camera = permissions.find(({id}) => id === "camera");
+  camera = permissions.find(({ id }) => id === "camera");
   Assert.equal(camera, undefined);
 
-  let cookie = permissions.find(({id}) => id === "cookie");
+  let cookie = permissions.find(({ id }) => id === "cookie");
   Assert.deepEqual(cookie, {
     id: "cookie",
     label: "Set Cookies",
@@ -84,7 +73,7 @@ add_task(async function testGetAllPermissionDetailsForBrowser() {
     scope: SitePermissions.SCOPE_PERSISTENT,
   });
 
-  let popup = permissions.find(({id}) => id === "popup");
+  let popup = permissions.find(({ id }) => id === "popup");
   Assert.deepEqual(popup, {
     id: "popup",
     label: "Open Pop-up Windows",
@@ -92,7 +81,7 @@ add_task(async function testGetAllPermissionDetailsForBrowser() {
     scope: SitePermissions.SCOPE_PERSISTENT,
   });
 
-  let geo = permissions.find(({id}) => id === "geo");
+  let geo = permissions.find(({ id }) => id === "geo");
   Assert.deepEqual(geo, {
     id: "geo",
     label: "Access Your Location",
@@ -100,7 +89,7 @@ add_task(async function testGetAllPermissionDetailsForBrowser() {
     scope: SitePermissions.SCOPE_SESSION,
   });
 
-  let shortcuts = permissions.find(({id}) => id === "shortcuts");
+  let shortcuts = permissions.find(({ id }) => id === "shortcuts");
   Assert.deepEqual(shortcuts, {
     id: "shortcuts",
     label: "Override Keyboard Shortcuts",

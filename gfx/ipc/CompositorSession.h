@@ -11,10 +11,10 @@
 #include "mozilla/layers/CompositorTypes.h"
 #include "nsISupportsImpl.h"
 #if defined(MOZ_WIDGET_ANDROID)
-#include "mozilla/layers/UiCompositorControllerChild.h"
+#  include "mozilla/layers/UiCompositorControllerChild.h"
 #endif  // defined(MOZ_WIDGET_ANDROID)
 
-class nsIWidget;
+class nsBaseWidget;
 
 namespace mozilla {
 namespace widget {
@@ -80,14 +80,17 @@ class CompositorSession {
   RefPtr<UiCompositorControllerChild> GetUiCompositorControllerChild() {
     return mUiCompositorControllerChild;
   }
+
+  void NotifyDisablingWebRender();
 #endif  // defined(MOZ_WIDGET_ANDROID)
  protected:
-  CompositorSession(CompositorWidgetDelegate* aDelegate,
+  CompositorSession(nsBaseWidget* aWidget, CompositorWidgetDelegate* aDelegate,
                     CompositorBridgeChild* aChild,
                     const LayersId& aRootLayerTreeId);
   virtual ~CompositorSession();
 
  protected:
+  nsBaseWidget* mWidget;
   CompositorWidgetDelegate* mCompositorWidgetDelegate;
   RefPtr<CompositorBridgeChild> mCompositorBridgeChild;
   LayersId mRootLayerTreeId;

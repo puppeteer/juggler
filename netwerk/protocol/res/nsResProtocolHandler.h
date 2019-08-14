@@ -6,12 +6,11 @@
 #ifndef nsResProtocolHandler_h___
 #define nsResProtocolHandler_h___
 
-#include "SubstitutingProtocolHandler.h"
+#include "mozilla/net/SubstitutingProtocolHandler.h"
 
 #include "nsIResProtocolHandler.h"
 #include "nsInterfaceHashtable.h"
 #include "nsWeakReference.h"
-#include "nsStandardURL.h"
 
 class nsISubstitutionObserver;
 
@@ -24,6 +23,8 @@ class nsResProtocolHandler final
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIRESPROTOCOLHANDLER
 
+  static already_AddRefed<nsResProtocolHandler> GetSingleton();
+
   NS_FORWARD_NSIPROTOCOLHANDLER(mozilla::net::SubstitutingProtocolHandler::)
 
   nsResProtocolHandler()
@@ -33,21 +34,15 @@ class nsResProtocolHandler final
                 URI_IS_POTENTIALLY_TRUSTWORTHY,
             /* aEnforceFileOrJar = */ false) {}
 
-  MOZ_MUST_USE nsresult Init();
-
   NS_IMETHOD SetSubstitution(const nsACString& aRoot,
                              nsIURI* aBaseURI) override;
   NS_IMETHOD SetSubstitutionWithFlags(const nsACString& aRoot, nsIURI* aBaseURI,
                                       uint32_t aFlags) override;
+  NS_IMETHOD HasSubstitution(const nsACString& aRoot, bool* aResult) override;
 
   NS_IMETHOD GetSubstitution(const nsACString& aRoot,
                              nsIURI** aResult) override {
     return mozilla::net::SubstitutingProtocolHandler::GetSubstitution(aRoot,
-                                                                      aResult);
-  }
-
-  NS_IMETHOD HasSubstitution(const nsACString& aRoot, bool* aResult) override {
-    return mozilla::net::SubstitutingProtocolHandler::HasSubstitution(aRoot,
                                                                       aResult);
   }
 
@@ -75,9 +70,21 @@ class nsResProtocolHandler final
                                         const nsACString& aPathname,
                                         nsACString& aResult) override;
 
+  virtual MOZ_MUST_USE bool MustResolveJAR(const nsACString& aRoot) override {
+    return aRoot.EqualsLiteral("android");
+  }
+
  private:
+  MOZ_MUST_USE nsresult Init();
+  static mozilla::StaticRefPtr<nsResProtocolHandler> sSingleton;
+
   nsCString mAppURI;
   nsCString mGREURI;
+#ifdef ANDROID
+  // Used for resource://android URIs
+  nsCString mApkURI;
+  nsresult GetApkURI(nsACString& aResult);
+#endif
 };
 
 #endif /* nsResProtocolHandler_h___ */

@@ -3,10 +3,10 @@
 //! This module exports the `expand_call` function which transforms a `call`
 //! instruction into `func_addr` and `call_indirect` instructions.
 
-use cursor::{Cursor, FuncCursor};
-use flowgraph::ControlFlowGraph;
-use ir::{self, InstBuilder};
-use isa::TargetIsa;
+use crate::cursor::{Cursor, FuncCursor};
+use crate::flowgraph::ControlFlowGraph;
+use crate::ir::{self, InstBuilder};
+use crate::isa::TargetIsa;
 
 /// Expand a `call` instruction. This lowers it to a `call_indirect`, which
 /// is only done if the ABI doesn't support direct calls.
@@ -14,7 +14,7 @@ pub fn expand_call(
     inst: ir::Inst,
     func: &mut ir::Function,
     _cfg: &mut ControlFlowGraph,
-    isa: &TargetIsa,
+    isa: &dyn TargetIsa,
 ) {
     // Unpack the instruction.
     let (func_ref, old_args) = match func.dfg[inst] {

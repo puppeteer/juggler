@@ -8,6 +8,7 @@
 #define mozilla_dom_EventTarget_h_
 
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/DebuggerNotificationBinding.h"
 #include "mozilla/dom/Nullable.h"
 #include "nsISupports.h"
 #include "nsWrapperCache.h"
@@ -34,6 +35,7 @@ class EventListener;
 class EventListenerOptionsOrBoolean;
 class EventHandlerNonNull;
 class GlobalObject;
+class WindowProxyHolder;
 
 // IID for the dom::EventTarget interface
 #define NS_EVENTTARGET_IID                           \
@@ -175,7 +177,8 @@ class EventTarget : public nsISupports, public nsWrapperCache {
   // Returns an outer window that corresponds to the inner window this event
   // target is associated with.  Will return null if the inner window is not the
   // current inner or if there is no window around at all.
-  virtual nsPIDOMWindowOuter* GetOwnerGlobalForBindings() = 0;
+  Nullable<WindowProxyHolder> GetOwnerGlobalForBindings();
+  virtual nsPIDOMWindowOuter* GetOwnerGlobalForBindingsInternal() = 0;
 
   // The global object this event target is associated with, if any.
   // This may be an inner window or some other global object.  This
@@ -192,6 +195,11 @@ class EventTarget : public nsISupports, public nsWrapperCache {
    * exist.
    */
   virtual EventListenerManager* GetExistingListenerManager() const = 0;
+
+  virtual Maybe<EventCallbackDebuggerNotificationType>
+  GetDebuggerNotificationType() const {
+    return Nothing();
+  }
 
   // Called from AsyncEventDispatcher to notify it is running.
   virtual void AsyncEventRunning(AsyncEventDispatcher* aEvent) {}
@@ -244,6 +252,7 @@ class EventTarget : public nsISupports, public nsWrapperCache {
    * @see EventDispatcher.h for documentation about aVisitor.
    * @note Only EventDispatcher should call this method.
    */
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult PostHandleEvent(EventChainPostVisitor& aVisitor) = 0;
 
  protected:

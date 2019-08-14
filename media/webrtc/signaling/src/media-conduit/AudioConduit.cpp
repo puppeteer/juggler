@@ -6,9 +6,9 @@
 #include "nspr.h"
 
 #ifdef HAVE_NETINET_IN_H
-#include <netinet/in.h>
+#  include <netinet/in.h>
 #elif defined XP_WIN
-#include <winsock2.h>
+#  include <winsock2.h>
 #endif
 
 #include "AudioConduit.h"
@@ -34,14 +34,14 @@
 #include "webrtc/system_wrappers/include/clock.h"
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
+#  include "AndroidBridge.h"
 #endif
 
 namespace mozilla {
 
 static const char* acLogTag = "WebrtcAudioSessionConduit";
 #ifdef LOGTAG
-#undef LOGTAG
+#  undef LOGTAG
 #endif
 #define LOGTAG acLogTag
 
@@ -174,28 +174,25 @@ bool WebrtcAudioConduit::GetRecvPacketTypeStats(
   return mRecvChannelProxy->GetRTCPPacketTypeCounters(*aPacketCounts);
 }
 
-bool WebrtcAudioConduit::GetAVStats(int32_t* jitterBufferDelayMs,
-                                    int32_t* playoutBufferDelayMs,
-                                    int32_t* avSyncOffsetMs) {
-  // Called from GetAudioFrame and from STS thread
-  mRecvChannelProxy->GetDelayEstimates(jitterBufferDelayMs,
-                                       playoutBufferDelayMs, avSyncOffsetMs);
-  return true;
-}
-
-bool WebrtcAudioConduit::GetRTPStats(unsigned int* jitterMs,
-                                     unsigned int* cumulativeLost) {
+bool WebrtcAudioConduit::GetRTPReceiverStats(unsigned int* jitterMs,
+                                             unsigned int* cumulativeLost) {
   ASSERT_ON_THREAD(mStsThread);
   *jitterMs = 0;
   *cumulativeLost = 0;
-  return !mSendChannelProxy->GetRTPStatistics(*jitterMs, *cumulativeLost);
+  if (!mRecvStream) {
+    return false;
+  }
+  auto stats = mRecvStream->GetStats();
+  *jitterMs = stats.jitter_ms;
+  *cumulativeLost = stats.packets_lost;
+  return true;
 }
 
 bool WebrtcAudioConduit::GetRTCPReceiverReport(uint32_t* jitterMs,
                                                uint32_t* packetsReceived,
                                                uint64_t* bytesReceived,
                                                uint32_t* cumulativeLost,
-                                               int32_t* rttMs) {
+                                               Maybe<double>* aOutRttSec) {
   ASSERT_ON_THREAD(mStsThread);
   double fractionLost = 0.0;
   int64_t timestampTmp = 0;
@@ -206,22 +203,30 @@ bool WebrtcAudioConduit::GetRTCPReceiverReport(uint32_t* jitterMs,
         &timestampTmp, jitterMs, cumulativeLost, packetsReceived, bytesReceived,
         &fractionLost, &rttMsTmp);
   }
-  auto stats = mCall->Call()->GetStats();
-  int64_t rtt = stats.rtt_ms;
+
+  const auto stats = mCall->Call()->GetStats();
+  const auto rtt = stats.rtt_ms;
+  if (rtt > static_cast<decltype(stats.rtt_ms)>(INT32_MAX)) {
+    // If we get a bogus RTT we will keep using the previous RTT
 #ifdef DEBUG
-  if (rtt > INT32_MAX) {
     CSFLogError(LOGTAG,
-                "%s for VideoConduit:%p RTT is larger than the"
+                "%s for AudioConduit:%p RTT is larger than the"
                 " maximum size of an RTCP RTT.",
                 __FUNCTION__, this);
-  }
 #endif
-  if (rtt > 0) {
-    *rttMs = rtt;
   } else {
-    *rttMs = 0;
+    if (mRttSec && rtt < 0) {
+      CSFLogError(LOGTAG,
+                  "%s for AudioConduit:%p RTT returned an error after "
+                  " previously succeeding.",
+                  __FUNCTION__, this);
+      mRttSec = Nothing();
+    }
+    if (rtt >= 0) {
+      mRttSec = Some(static_cast<DOMHighResTimeStamp>(rtt) / 1000.0);
+    }
   }
-
+  *aOutRttSec = mRttSec;
   return res;
 }
 
@@ -266,7 +271,7 @@ bool WebrtcAudioConduit::InsertDTMFTone(int channel, int eventCode,
   return result != -1;
 }
 
-void WebrtcAudioConduit::OnRtpPacket(const webrtc::WebRtcRTPHeader* aHeader,
+void WebrtcAudioConduit::OnRtpPacket(const webrtc::RTPHeader& aHeader,
                                      const int64_t aTimestamp,
                                      const uint32_t aJitter) {
   ASSERT_ON_THREAD(mStsThread);
@@ -367,18 +372,6 @@ MediaConduitErrorCode WebrtcAudioConduit::ConfigureSendMediaCodec(
 
   mDtmfEnabled = codecConfig->mDtmfEnabled;
 
-  // TEMPORARY - see bug 694814 comment 2
-  nsresult rv;
-  nsCOMPtr<nsIPrefService> prefs =
-      do_GetService("@mozilla.org/preferences-service;1", &rv);
-  if (NS_SUCCEEDED(rv)) {
-    nsCOMPtr<nsIPrefBranch> branch = do_QueryInterface(prefs);
-
-    if (branch) {
-      branch->GetIntPref("media.peerconnection.capture_delay", &mCaptureDelay);
-    }
-  }
-
   condError = StartTransmitting();
   if (condError != kMediaConduitNoError) {
     return condError;
@@ -421,8 +414,12 @@ MediaConduitErrorCode WebrtcAudioConduit::ConfigureRecvMediaCodecs(
 
     webrtc::SdpAudioFormat::Parameters parameters;
     if (codec->mName == "opus") {
-      parameters = {{"stereo", "1"}};
-
+      if (codec->mChannels == 2) {
+        parameters = {{"stereo", "1"}};
+      }
+      if (codec->mFECEnabled) {
+        parameters["useinbandfec"] = "1";
+      }
       if (codec->mMaxPlaybackRate) {
         std::ostringstream o;
         o << codec->mMaxPlaybackRate;
@@ -570,7 +567,6 @@ MediaConduitErrorCode WebrtcAudioConduit::SendAudioFrame(
     return kMediaConduitSessionNotInited;
   }
 
-  capture_delay = mCaptureDelay;
   // Insert the samples
   mPtrVoEBase->audio_transport()->PushCaptureData(
       mSendChannel, audio_data,
@@ -622,32 +618,6 @@ MediaConduitErrorCode WebrtcAudioConduit::GetAudioFrame(int16_t speechData[],
   lengthSamples = mAudioFrame.samples_per_channel_ * mAudioFrame.num_channels_;
   MOZ_RELEASE_ASSERT(lengthSamples <= lengthSamplesAllowed);
   PodCopy(speechData, mAudioFrame.data(), lengthSamples);
-
-  // Not #ifdef DEBUG or on a log module so we can use it for about:webrtc/etc
-  mSamples += lengthSamples;
-  if (mSamples >= mLastSyncLog + samplingFreqHz) {
-    int jitter_buffer_delay_ms;
-    int playout_buffer_delay_ms;
-    int avsync_offset_ms;
-    if (GetAVStats(&jitter_buffer_delay_ms, &playout_buffer_delay_ms,
-                   &avsync_offset_ms)) {
-      if (avsync_offset_ms < 0) {
-        Telemetry::Accumulate(Telemetry::WEBRTC_AVSYNC_WHEN_VIDEO_LAGS_AUDIO_MS,
-                              -avsync_offset_ms);
-      } else {
-        Telemetry::Accumulate(Telemetry::WEBRTC_AVSYNC_WHEN_AUDIO_LAGS_VIDEO_MS,
-                              avsync_offset_ms);
-      }
-      CSFLogDebug(LOGTAG,
-                  "A/V sync: sync delta: %dms, audio jitter delay %dms, "
-                  "playout delay %dms",
-                  avsync_offset_ms, jitter_buffer_delay_ms,
-                  playout_buffer_delay_ms);
-    } else {
-      CSFLogError(LOGTAG, "A/V sync: GetAVStats failed");
-    }
-    mLastSyncLog = mSamples;
-  }
 
   CSFLogDebug(LOGTAG, "%s GetAudioFrame:Got samples: length %d ", __FUNCTION__,
               lengthSamples);
@@ -888,14 +858,18 @@ bool WebrtcAudioConduit::CodecConfigToWebRTCCodec(
   config.encoder_factory = webrtc::CreateBuiltinAudioEncoderFactory();
 
   webrtc::SdpAudioFormat::Parameters parameters;
-  if (codecInfo->mFECEnabled) {
-    parameters["useinbandfec"] = "1";
-  }
-
-  if (codecInfo->mName == "opus" && codecInfo->mMaxPlaybackRate) {
-    std::ostringstream o;
-    o << codecInfo->mMaxPlaybackRate;
-    parameters["maxplaybackrate"] = o.str();
+  if (codecInfo->mName == "opus") {
+    if (codecInfo->mChannels == 2) {
+      parameters["stereo"] = "1";
+    }
+    if (codecInfo->mFECEnabled) {
+      parameters["useinbandfec"] = "1";
+    }
+    if (codecInfo->mMaxPlaybackRate) {
+      std::ostringstream o;
+      o << codecInfo->mMaxPlaybackRate;
+      parameters["maxplaybackrate"] = o.str();
+    }
   }
 
   webrtc::SdpAudioFormat format(codecInfo->mName, codecInfo->mFreq,
@@ -957,6 +931,7 @@ MediaConduitErrorCode WebrtcAudioConduit::ValidateCodecConfig(
 }
 
 void WebrtcAudioConduit::DeleteSendStream() {
+  MOZ_ASSERT(NS_IsMainThread());
   mMutex.AssertCurrentThreadOwns();
   if (mSendStream) {
     mSendStream->Stop();
@@ -969,6 +944,7 @@ void WebrtcAudioConduit::DeleteSendStream() {
 }
 
 MediaConduitErrorCode WebrtcAudioConduit::CreateSendStream() {
+  MOZ_ASSERT(NS_IsMainThread());
   mMutex.AssertCurrentThreadOwns();
 
   mSendStream = mCall->Call()->CreateAudioSendStream(mSendStreamConfig);
@@ -980,6 +956,7 @@ MediaConduitErrorCode WebrtcAudioConduit::CreateSendStream() {
 }
 
 void WebrtcAudioConduit::DeleteRecvStream() {
+  MOZ_ASSERT(NS_IsMainThread());
   mMutex.AssertCurrentThreadOwns();
   if (mRecvStream) {
     mRecvStream->Stop();
@@ -992,6 +969,7 @@ void WebrtcAudioConduit::DeleteRecvStream() {
 }
 
 MediaConduitErrorCode WebrtcAudioConduit::CreateRecvStream() {
+  MOZ_ASSERT(NS_IsMainThread());
   mMutex.AssertCurrentThreadOwns();
 
   mRecvStreamConfig.rtcp_send_transport = this;
@@ -1096,6 +1074,7 @@ MediaConduitErrorCode WebrtcAudioConduit::CreateChannels() {
 
 void WebrtcAudioConduit::DeleteChannels() {
   MOZ_ASSERT(NS_IsMainThread());
+  mMutex.AssertCurrentThreadOwns();
 
   if (mSendChannel != -1) {
     mSendChannelProxy = nullptr;

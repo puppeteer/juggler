@@ -140,6 +140,14 @@ static bool ModuleInfoToJSObj(JSContext* cx, JS::MutableHandleObject aRet,
     return false;
   }
 
+  if (aModInfo.mLoadDurationMS.isSome()) {
+    jsval.setNumber(aModInfo.mLoadDurationMS.value());
+    if (!JS_DefineProperty(cx, modObj, "loadDurationMS", jsval,
+                           JSPROP_ENUMERATE)) {
+      return false;
+    }
+  }
+
   jsval.setNumber((uint32_t)aModInfo.mTrustFlags);
   if (!JS_DefineProperty(cx, modObj, "moduleTrustFlags", jsval,
                          JSPROP_ENUMERATE)) {
@@ -160,6 +168,8 @@ static bool ModuleInfoToJSObj(JSContext* cx, JS::MutableHandleObject aRet,
  */
 static bool ModuleLoadEventToJSArray(JSContext* cx, JS::MutableHandleValue aRet,
                                      const ModuleLoadEvent& aEvent) {
+  MOZ_ASSERT(NS_IsMainThread());
+
   JS::RootedValue jsval(cx);
   JS::RootedObject eObj(cx, JS_NewObject(cx, nullptr));
   if (!eObj) {
@@ -183,7 +193,12 @@ static bool ModuleLoadEventToJSArray(JSContext* cx, JS::MutableHandleValue aRet,
     return false;
   }
 
-  jsval.setString(Common::ToJSString(cx, aEvent.mThreadName));
+  // This function should always get called on the main thread
+  if (::GetCurrentThreadId() == aEvent.mThreadID) {
+    jsval.setString(Common::ToJSString(cx, NS_LITERAL_STRING("Main Thread")));
+  } else {
+    jsval.setString(Common::ToJSString(cx, aEvent.mThreadName));
+  }
   if (!JS_DefineProperty(cx, eObj, "threadName", jsval, JSPROP_ENUMERATE)) {
     return false;
   }
@@ -245,6 +260,14 @@ nsresult GetUntrustedModuleLoadEventsJSValue(
     return NS_ERROR_FAILURE;
   }
 
+  if (aData.mXULLoadDurationMS.isSome()) {
+    jsval.setNumber(aData.mXULLoadDurationMS.value());
+    if (!JS_DefineProperty(cx, mainObj, "xulLoadDurationMS", jsval,
+                           JSPROP_ENUMERATE)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
   JS::RootedObject eventsArray(cx);
   if (!VectorToJSArray(cx, &eventsArray, aData.mEvents,
                        &ModuleLoadEventToJSArray)) {
@@ -297,7 +320,7 @@ class GetUntrustedModulesMainThreadRunnable final : public Runnable {
     mWorkerThread->Shutdown();
 
     dom::AutoJSAPI jsapi;
-    if (NS_WARN_IF(!jsapi.Init(mPromise->GlobalJSObject()))) {
+    if (NS_WARN_IF(!jsapi.Init(mPromise->GetGlobalObject()))) {
       mPromise->MaybeReject(NS_ERROR_FAILURE);
       return NS_OK;
     }

@@ -5,25 +5,29 @@
 /* import-globals-from ../../../inspector/test/shared-head.js */
 
 /* global waitUntilState, gBrowser */
-/* exported addTestTab, checkTreeState, checkSidebarState, selectRow,
-            toggleRow, addA11yPanelTestsTask, reload, navigate */
+/* exported addTestTab, checkTreeState, checkSidebarState, checkAuditState, selectRow,
+            toggleRow, toggleFilter, addA11yPanelTestsTask, reload,
+            navigate */
 
 "use strict";
 
 // Import framework's shared head.
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-head.js",
-  this);
+  this
+);
 
 // Import inspector's shared head.
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/inspector/test/shared-head.js",
-  this);
+  this
+);
 
 // Load the shared Redux helpers into this compartment.
 Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/shared/test/shared-redux-head.js",
-  this);
+  this
+);
 
 const { ORDERED_PROPS } = require("devtools/client/accessibility/constants");
 
@@ -37,7 +41,8 @@ Services.prefs.setBoolPref("devtools.accessibility.enabled", true);
 async function initA11y() {
   if (Services.appinfo.accessibilityEnabled) {
     return Cc["@mozilla.org/accessibilityService;1"].getService(
-      Ci.nsIAccessibilityService);
+      Ci.nsIAccessibilityService
+    );
   }
 
   const initPromise = new Promise(resolve => {
@@ -49,7 +54,8 @@ async function initA11y() {
   });
 
   const a11yService = Cc["@mozilla.org/accessibilityService;1"].getService(
-    Ci.nsIAccessibilityService);
+    Ci.nsIAccessibilityService
+  );
   await initPromise;
   return a11yService;
 }
@@ -113,9 +119,13 @@ async function addTestTab(url) {
     EventUtils.sendMouseEvent({ type: "click" }, enableButton, win);
   }
 
-  await waitUntilState(store, state =>
-    state.accessibles.size === 1 && state.details.accessible &&
-    state.details.accessible.role === "document");
+  await waitUntilState(
+    store,
+    state =>
+      state.accessibles.size === 1 &&
+      state.details.accessible &&
+      state.details.accessible.role === "document"
+  );
 
   // Wait for inspector load here to avoid protocol errors on shutdown, since
   // accessibility panel test can be too fast.
@@ -141,8 +151,10 @@ async function disableAccessibilityInspector(env) {
   // Disable accessibility service through the panel and wait for the shutdown
   // event.
   const shutdown = panel.front.once("shutdown");
-  const disableButton = await BrowserTestUtils.waitForCondition(() =>
-    doc.getElementById("accessibility-disable-button"), "Wait for the disable button.");
+  const disableButton = await BrowserTestUtils.waitForCondition(
+    () => doc.getElementById("accessibility-disable-button"),
+    "Wait for the disable button."
+  );
   EventUtils.sendMouseEvent({ type: "click" }, disableButton, win);
   await shutdown;
 }
@@ -162,17 +174,123 @@ async function initAccessibilityPanel(tab = gBrowser.selectedTab) {
 }
 
 /**
+ * Compare text within the list of potential badges rendered for accessibility
+ * tree row when its accessible object has accessibility failures.
+ * @param {DOMNode} badges
+ *        Container element that contains badge elements.
+ * @param {Array|null} expected
+ *        List of expected badge labels for failing accessibility checks.
+ */
+function compareBadges(badges, expected = []) {
+  const badgeEls = badges ? [...badges.querySelectorAll(".badge")] : [];
+  return (
+    badgeEls.length === expected.length &&
+    badgeEls.every((badge, i) => badge.textContent === expected[i])
+  );
+}
+
+/**
+ * Find an ancestor that is scrolled for a given DOMNode.
+ *
+ * @param {DOMNode} node
+ *        DOMNode that to find an ancestor for that is scrolled.
+ */
+function closestScrolledParent(node) {
+  if (node == null) {
+    return null;
+  }
+
+  if (node.scrollHeight > node.clientHeight) {
+    return node;
+  }
+
+  return closestScrolledParent(node.parentNode);
+}
+
+/**
+ * Check if a given element is visible to the user and is not scrolled off
+ * because of the overflow.
+ *
+ * @param   {Element} element
+ *          Element to be checked whether it is visible and is not scrolled off.
+ *
+ * @returns {Boolean}
+ *          True if the element is visible.
+ */
+function isVisible(element) {
+  const { top, bottom } = element.getBoundingClientRect();
+  const scrolledParent = closestScrolledParent(element.parentNode);
+  const scrolledParentRect = scrolledParent
+    ? scrolledParent.getBoundingClientRect()
+    : null;
+  return (
+    !scrolledParent ||
+    (top >= scrolledParentRect.top && bottom <= scrolledParentRect.bottom)
+  );
+}
+
+/**
+ * Check selected styling and visibility for a given row in the accessibility
+ * tree.
+ * @param   {DOMNode} row
+ *          DOMNode for a given accessibility row.
+ * @param   {Boolean} expected
+ *          Expected selected state.
+ *
+ * @returns {Boolean}
+ *          True if visibility and styling matches expected selected state.
+ */
+function checkSelected(row, expected) {
+  if (!expected) {
+    return true;
+  }
+
+  if (row.classList.contains("selected") !== expected) {
+    return false;
+  }
+
+  return isVisible(row);
+}
+
+/**
+ * Check level for a given row in the accessibility tree.
+ * @param   {DOMNode} row
+ *          DOMNode for a given accessibility row.
+ * @param   {Boolean} expected
+ *          Expected row level (aria-level).
+ *
+ * @returns {Boolean}
+ *          True if the aria-level for the row is as expected.
+ */
+function checkLevel(row, expected) {
+  if (!expected) {
+    return true;
+  }
+
+  return parseInt(row.getAttribute("aria-level"), 10) === expected;
+}
+
+/**
  * Check the state of the accessibility tree.
  * @param  {document} doc       panel documnent.
  * @param  {Array}    expected  an array that represents an expected row list.
  */
 async function checkTreeState(doc, expected) {
   info("Checking tree state.");
-  const hasExpectedStructure = await BrowserTestUtils.waitForCondition(() =>
-    [...doc.querySelectorAll(".treeRow")].every((row, i) =>
-      row.querySelector(".treeLabelCell").textContent === expected[i].role &&
-      row.querySelector(".treeValueCell").textContent === expected[i].name),
-    "Wait for the right tree update.");
+  const hasExpectedStructure = await BrowserTestUtils.waitForCondition(
+    () =>
+      [...doc.querySelectorAll(".treeRow")].every((row, i) => {
+        const { role, name, badges, selected, level } = expected[i];
+        return (
+          row.querySelector(".treeLabelCell").textContent === role &&
+          row.querySelector(".treeValueCell").textContent === name &&
+          compareBadges(row.querySelector(".badges"), badges) &&
+          checkSelected(row, selected) &&
+          checkLevel(row, level)
+        );
+      }),
+    "Wait for the right tree update."
+  );
 
   ok(hasExpectedStructure, "Tree structure is correct.");
 }
@@ -194,14 +312,64 @@ function relationsMatch(relations, expected) {
     targets = Array.isArray(targets) ? targets : [targets];
 
     for (const index in expTargets) {
-      if (expTargets[index].name !== targets[index].name ||
-          expTargets[index].role !== targets[index].role) {
+      if (
+        expTargets[index].name !== targets[index].name ||
+        expTargets[index].role !== targets[index].role
+      ) {
         return false;
       }
     }
   }
 
   return true;
+}
+
+/**
+ * When comparing numerical values (for example contrast), we only care about the 2
+ * decimal points.
+ * @param  {String} _
+ *         Key of the property that is parsed.
+ * @param  {Any} value
+ *         Value of the property that is parsed.
+ * @return {Any}
+ *         Newly formatted value in case of the numeric value.
+ */
+function parseNumReplacer(_, value) {
+  if (typeof value === "number") {
+    return value.toFixed(2);
+  }
+
+  return value;
+}
+
+/**
+ * Check the state of the accessibility sidebar audit(checks).
+ * @param  {Object} store         React store for the panel (includes store for
+ *                                the audit).
+ * @param  {Object} expectedState Expected state of the sidebar audit(checks).
+ */
+async function checkAuditState(store, expectedState) {
+  info("Checking audit state.");
+  await waitUntilState(store, ({ details }) => {
+    const { audit } = details;
+
+    for (const key in expectedState) {
+      const expected = expectedState[key];
+      if (expected && typeof expected === "object") {
+        if (
+          JSON.stringify(audit[key], parseNumReplacer) !==
+          JSON.stringify(expected, parseNumReplacer)
+        ) {
+          return false;
+        }
+      } else if (audit && audit[key] !== expected) {
+        return false;
+      }
+    }
+
+    ok(true, "Audit state is correct.");
+    return true;
+  });
 }
 
 /**
@@ -224,7 +392,9 @@ async function checkSidebarState(store, expectedState) {
           return false;
         }
       } else if (EXPANDABLE_PROPS.includes(key)) {
-        if (JSON.stringify(details.accessible[key]) !== JSON.stringify(expected)) {
+        if (
+          JSON.stringify(details.accessible[key]) !== JSON.stringify(expected)
+        ) {
           return false;
         }
       } else if (details.accessible && details.accessible[key] !== expected) {
@@ -238,6 +408,26 @@ async function checkSidebarState(store, expectedState) {
 }
 
 /**
+ * Check the state of the accessibility checks toolbar.
+ * @param  {Object} store         React store for the panel (includes store for
+ *                                the sidebar).
+ * @param  {Object} expected      Expected active state of the filters in the
+ *                                toolbar.
+ */
+async function checkToolbarState(doc, expected) {
+  info("Checking toolbar state.");
+  const hasExpectedStructure = await BrowserTestUtils.waitForCondition(
+    () =>
+      [...doc.querySelectorAll("button.toggle-button.badge")].every(
+        (filter, i) => expected[i] === filter.classList.contains("checked")
+      ),
+    "Wait for the right toolbar state."
+  );
+
+  ok(hasExpectedStructure, "Toolbar state is correct.");
+}
+
+/**
  * Focus accessibility properties tree in the a11y inspector sidebar. If focused for the
  * first time, the tree will select first rendered node as defult selection for keyboard
  * purposes.
@@ -248,8 +438,10 @@ async function focusAccessibleProperties(doc) {
   const tree = doc.querySelector(".tree");
   if (doc.activeElement !== tree) {
     tree.focus();
-    await BrowserTestUtils.waitForCondition(() =>
-      tree.querySelector(".node.focused"), "Tree selected.");
+    await BrowserTestUtils.waitForCondition(
+      () => tree.querySelector(".node.focused"),
+      "Tree selected."
+    );
   }
 }
 
@@ -292,8 +484,11 @@ async function selectProperty(doc, id) {
  */
 function selectRow(doc, rowNumber) {
   info(`Selecting row ${rowNumber}.`);
-  EventUtils.sendMouseEvent({ type: "click" },
-    doc.querySelectorAll(".treeRow")[rowNumber], doc.defaultView);
+  EventUtils.sendMouseEvent(
+    { type: "click" },
+    doc.querySelectorAll(".treeRow")[rowNumber],
+    doc.defaultView
+  );
 }
 
 /**
@@ -303,24 +498,64 @@ function selectRow(doc, rowNumber) {
  */
 async function toggleRow(doc, rowNumber) {
   const win = doc.defaultView;
-  const twisty = doc.querySelectorAll(".theme-twisty")[rowNumber];
+  const row = doc.querySelectorAll(".treeRow")[rowNumber];
+  const twisty = row.querySelector(".theme-twisty");
   const expected = !twisty.classList.contains("open");
 
   info(`${expected ? "Expanding" : "Collapsing"} row ${rowNumber}.`);
 
   EventUtils.sendMouseEvent({ type: "click" }, twisty, win);
-  await BrowserTestUtils.waitForCondition(() =>
-    !twisty.classList.contains("devtools-throbber") &&
-    expected === twisty.classList.contains("open"), "Twisty updated.");
+  await BrowserTestUtils.waitForCondition(
+    () =>
+      !twisty.classList.contains("devtools-throbber") &&
+      expected === twisty.classList.contains("open"),
+    "Twisty updated."
+  );
 }
 
 /**
- * Iterate over actions/tests structure and test the state of the
+ * Toggle an accessibility audit filter based on its index in the toolbar.
+ * @param  {document} doc         panel documnent.
+ * @param  {Number}   filterIndex index of the filter to be toggled.
+ */
+async function toggleFilter(doc, filterIndex) {
+  const win = doc.defaultView;
+  const filter = doc.querySelectorAll(".devtools-toolbar .badge.toggle-button")[
+    filterIndex
+  ];
+  const expected = !filter.classList.contains("checked");
+
+  EventUtils.synthesizeMouseAtCenter(filter, {}, win);
+  await BrowserTestUtils.waitForCondition(
+    () => expected === filter.classList.contains("checked"),
+    "Filter updated."
+  );
+}
+
+async function findAccessibleFor(
+  { toolbox: { walker: domWalker }, panel: { walker: a11yWalker } },
+  selector
+) {
+  const node = await domWalker.querySelector(domWalker.rootNode, selector);
+  return a11yWalker.getAccessibleFor(node);
+}
+
+async function selectAccessibleForNode(env, selector) {
+  const { panel, win } = env;
+  const front = await findAccessibleFor(env, selector);
+  const { EVENTS } = win;
+  const onSelected = win.once(EVENTS.NEW_ACCESSIBLE_FRONT_SELECTED);
+  panel.selectAccessible(front);
+  await onSelected;
+}
+
+/**
+ * Iterate over setups/tests structure and test the state of the
  * accessibility panel.
  * @param  {JSON}   tests test data that has the format of:
  *                    {
  *                      desc     {String}    description for better logging
- *                      action   {Function}  An optional action that needs to be
+ *                      setup    {Function}  An optional setup that needs to be
  *                                           performed before the state of the
  *                                           tree and the sidebar can be checked
  *                      expected {JSON}      An expected states for the tree and
@@ -330,20 +565,28 @@ async function toggleRow(doc, rowNumber) {
  *                       structure as the return value of 'addTestTab' funciton)
  */
 async function runA11yPanelTests(tests, env) {
-  for (const { desc, action, expected } of tests) {
+  for (const { desc, setup, expected } of tests) {
     info(desc);
 
-    if (action) {
-      await action(env);
+    if (setup) {
+      await setup(env);
     }
 
-    const { tree, sidebar } = expected;
+    const { tree, sidebar, audit, toolbar } = expected;
     if (tree) {
       await checkTreeState(env.doc, tree);
     }
 
     if (sidebar) {
       await checkSidebarState(env.store, sidebar);
+    }
+
+    if (toolbar) {
+      await checkToolbarState(env.doc, toolbar);
+    }
+
+    if (typeof audit !== "undefined") {
+      await checkAuditState(env.store, audit);
     }
   }
 }
@@ -362,7 +605,7 @@ function buildURL(uri) {
  * @param  {JSON}   tests  test data that has the format of:
  *                    {
  *                      desc     {String}    description for better logging
- *                      action   {Function}  An optional action that needs to be
+ *                      setup   {Function}   An optional setup that needs to be
  *                                           performed before the state of the
  *                                           tree and the sidebar can be checked
  *                      expected {JSON}      An expected states for the tree and
@@ -397,7 +640,7 @@ function addA11YPanelTask(msg, uri, task) {
  * @param  {String} waitForTargetEvent Event to wait for after reload.
  */
 function reload(target, waitForTargetEvent = "navigate") {
-  executeSoon(() => target.activeTab.reload());
+  executeSoon(() => target.reload());
   return once(target, waitForTargetEvent);
 }
 
@@ -408,6 +651,6 @@ function reload(target, waitForTargetEvent = "navigate") {
  * @param  {String} waitForTargetEvent Event to wait for after reload.
  */
 function navigate(target, url, waitForTargetEvent = "navigate") {
-  executeSoon(() => target.activeTab.navigateTo({ url }));
+  executeSoon(() => target.navigateTo({ url }));
   return once(target, waitForTargetEvent);
 }

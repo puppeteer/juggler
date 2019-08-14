@@ -52,13 +52,12 @@ EXPORTS += [
     'nsIFrameTraversal.h',
     'nsILayoutDebugger.h',
     'nsIPercentBSizeObserver.h',
-    'nsIPresShell.h',
-    'nsIPresShellInlines.h',
     'nsIReflowCallback.h',
     'nsLayoutUtils.h',
     'nsPresArena.h',
     'nsPresArenaObjectList.h',
     'nsPresContext.h',
+    'nsPresContextInlines.h',
     'nsQuoteList.h',
     'nsRefreshDriver.h',
     'nsStyleChangeList.h',
@@ -74,13 +73,16 @@ EXPORTS += [
 EXPORTS.mozilla += [
     'AccessibleCaretEventHub.h',
     'ArenaObjectID.h',
-    'ArenaRefPtr.h',
-    'ArenaRefPtrInlines.h',
+    'GeckoMVMContext.h',
     'GeometryUtils.h',
+    'MVMContext.h',
     'OverflowChangedTracker.h',
     'PresShell.h',
+    'PresShellForwards.h',
+    'PresShellInlines.h',
     'RestyleManager.h',
     'ScrollStyles.h',
+    'ScrollTypes.h',
     'ShapeUtils.h',
     'StaticPresData.h',
 ]
@@ -89,6 +91,7 @@ UNIFIED_SOURCES += [
     'AccessibleCaret.cpp',
     'AccessibleCaretEventHub.cpp',
     'AccessibleCaretManager.cpp',
+    'GeckoMVMContext.cpp',
     'GeometryUtils.cpp',
     'LayoutLogging.cpp',
     'MobileViewportManager.cpp',
@@ -166,11 +169,6 @@ BROWSER_CHROME_MANIFESTS += ['tests/browser.ini']
 MARIONETTE_LAYOUT_MANIFESTS += ['tests/marionette/manifest.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome/chrome.ini']
-
-if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
-    # This is intended as a temporary hack to support building with VS2015.
-    # 'type cast': conversion from 'unsigned int' to 'void *' of greater size
-    CXXFLAGS += ['-wd4312']
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']

@@ -7,16 +7,17 @@
 #ifndef mozilla_dom_timeout_h
 #define mozilla_dom_timeout_h
 
+#include "mozilla/dom/PopupBlocker.h"
+#include "mozilla/dom/TimeoutHandler.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/TimeStamp.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsGlobalWindow.h"
-#include "nsITimeoutHandler.h"
 
 class nsIEventTarget;
 class nsIPrincipal;
 class nsIEventTarget;
+class nsGlobalWindowInner;
 
 namespace mozilla {
 namespace dom {
@@ -44,6 +45,8 @@ class Timeout final : public LinkedListElement<RefPtr<Timeout>> {
   // Can only be called when not frozen.
   const TimeStamp& When() const;
 
+  const TimeStamp& SubmitTime() const;
+
   // Can only be called when frozen.
   const TimeDuration& TimeRemaining() const;
 
@@ -57,6 +60,11 @@ class Timeout final : public LinkedListElement<RefPtr<Timeout>> {
   // Remaining time to wait.  Used only when timeouts are frozen.
   TimeDuration mTimeRemaining;
 
+  // Time that the timeout started, restarted, or was frozen.  Useful for
+  // logging time from (virtual) start of a timer until the time it fires
+  // (or is cancelled, etc)
+  TimeStamp mSubmitTime;
+
   ~Timeout() = default;
 
  public:
@@ -69,7 +77,7 @@ class Timeout final : public LinkedListElement<RefPtr<Timeout>> {
   RefPtr<nsGlobalWindowInner> mWindow;
 
   // The language-specific information about the callback.
-  nsCOMPtr<nsITimeoutHandler> mScriptHandler;
+  RefPtr<TimeoutHandler> mScriptHandler;
 
   // Interval
   TimeDuration mInterval;
@@ -81,9 +89,13 @@ class Timeout final : public LinkedListElement<RefPtr<Timeout>> {
   // when sync loops trigger nested firing.
   uint32_t mFiringId;
 
+#ifdef DEBUG
+  int64_t mFiringIndex;
+#endif
+
   // The popup state at timeout creation time if not created from
   // another timeout
-  PopupControlState mPopupState;
+  PopupBlocker::PopupControlState mPopupState;
 
   // Used to allow several reasons for setting a timeout, where each
   // 'Reason' value is using a possibly overlapping set of id:s.

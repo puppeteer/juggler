@@ -7,11 +7,13 @@
 #ifndef mozilla_dom_ScriptLoadRequest_h
 #define mozilla_dom_ScriptLoadRequest_h
 
+#include "mozilla/Assertions.h"
 #include "mozilla/CORSMode.h"
 #include "mozilla/dom/SRIMetadata.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/net/ReferrerPolicy.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 #include "mozilla/Variant.h"
 #include "mozilla/Vector.h"
 #include "nsCOMPtr.h"
@@ -50,6 +52,7 @@ class ScriptFetchOptions {
 
   const mozilla::CORSMode mCORSMode;
   const mozilla::net::ReferrerPolicy mReferrerPolicy;
+  bool mIsPreload;
   nsCOMPtr<nsIScriptElement> mElement;
   nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
 };
@@ -91,7 +94,10 @@ class ScriptLoadRequest
     Element()->ScriptEvaluated(aResult, Element(), mIsInline);
   }
 
-  bool IsPreload() { return Element() == nullptr; }
+  bool IsPreload() const {
+    MOZ_ASSERT_IF(mFetchOptions->mIsPreload, !Element());
+    return mFetchOptions->mIsPreload;
+  }
 
   virtual void Cancel();
 
@@ -155,17 +161,34 @@ class ScriptLoadRequest
   void SetBinASTSource();
   void SetBytecode();
 
-  using ScriptTextBuffer = Vector<char16_t, 0, JSMallocAllocPolicy>;
+  // Use a vector backed by the JS allocator for script text so that contents
+  // can be transferred in constant time to the JS engine, not copied in linear
+  // time.
+  template <typename Unit>
+  using ScriptTextBuffer = Vector<Unit, 0, JSMallocAllocPolicy>;
+
+  // BinAST data isn't transferred to the JS engine, so it doesn't need to use
+  // the JS allocator.
   using BinASTSourceBuffer = Vector<uint8_t>;
 
-  const ScriptTextBuffer& ScriptText() const {
-    MOZ_ASSERT(IsTextSource());
-    return mScriptData->as<ScriptTextBuffer>();
+  bool IsUTF16Text() const {
+    return mScriptData->is<ScriptTextBuffer<char16_t>>();
   }
-  ScriptTextBuffer& ScriptText() {
-    MOZ_ASSERT(IsTextSource());
-    return mScriptData->as<ScriptTextBuffer>();
+  bool IsUTF8Text() const {
+    return mScriptData->is<ScriptTextBuffer<Utf8Unit>>();
   }
+
+  template <typename Unit>
+  const ScriptTextBuffer<Unit>& ScriptText() const {
+    MOZ_ASSERT(IsTextSource());
+    return mScriptData->as<ScriptTextBuffer<Unit>>();
+  }
+  template <typename Unit>
+  ScriptTextBuffer<Unit>& ScriptText() {
+    MOZ_ASSERT(IsTextSource());
+    return mScriptData->as<ScriptTextBuffer<Unit>>();
+  }
+
   const BinASTSourceBuffer& ScriptBinASTData() const {
     MOZ_ASSERT(IsBinASTSource());
     return mScriptData->as<BinASTSourceBuffer>();
@@ -173,6 +196,18 @@ class ScriptLoadRequest
   BinASTSourceBuffer& ScriptBinASTData() {
     MOZ_ASSERT(IsBinASTSource());
     return mScriptData->as<BinASTSourceBuffer>();
+  }
+
+  size_t ScriptTextLength() const {
+    MOZ_ASSERT(IsTextSource());
+    return IsUTF16Text() ? ScriptText<char16_t>().length()
+                         : ScriptText<Utf8Unit>().length();
+  }
+
+  void ClearScriptText() {
+    MOZ_ASSERT(IsTextSource());
+    return IsUTF16Text() ? ScriptText<char16_t>().clearAndFree()
+                         : ScriptText<Utf8Unit>().clearAndFree();
   }
 
   enum class ScriptMode : uint8_t { eBlocking, eDeferred, eAsync };
@@ -199,16 +234,35 @@ class ScriptLoadRequest
     return mFetchOptions->mTriggeringPrincipal;
   }
 
-  void SetElement(nsIScriptElement* aElement) {
-    // Called when a preload request is later used for an actual request.
+  // Make this request a preload (speculative) request.
+  void SetIsPreloadRequest() {
+    MOZ_ASSERT(!Element());
+    MOZ_ASSERT(!IsPreload());
+    mFetchOptions->mIsPreload = true;
+  }
+
+  // Make a preload request into an actual load request for the given element.
+  void SetIsLoadRequest(nsIScriptElement* aElement) {
     MOZ_ASSERT(aElement);
     MOZ_ASSERT(!Element());
+    MOZ_ASSERT(IsPreload());
     mFetchOptions->mElement = aElement;
+    mFetchOptions->mIsPreload = false;
+  }
+
+  FromParser GetParserCreated() const {
+    nsIScriptElement* element = Element();
+    if (!element) {
+      return NOT_FROM_PARSER;
+    }
+    return element->GetParserCreated();
   }
 
   bool ShouldAcceptBinASTEncoding() const;
 
   void ClearScriptSource();
+
+  void SetScript(JSScript* aScript);
 
   void MaybeCancelOffThreadScript();
   void DropBytecodeCacheReferences();
@@ -216,8 +270,8 @@ class ScriptLoadRequest
   using super::getNext;
   using super::isInList;
 
-  const ScriptKind
-      mKind;  // Whether this is a classic script or a module script.
+  const ScriptKind mKind;  // Whether this is a classic script or a module
+                           // script.
   ScriptMode mScriptMode;  // Whether this is a blocking, defer or async script.
   Progress mProgress;      // Are we still waiting for a load to complete?
   DataType mDataType;      // Does this contain Source or Bytecode?
@@ -232,10 +286,10 @@ class ScriptLoadRequest
                                    // mNonAsyncExternalScriptInsertedRequests
   bool mIsXSLT;                    // True if we live in mXSLTRequests.
   bool mIsCanceled;                // True if we have been explicitly canceled.
-  bool
-      mWasCompiledOMT;  // True if the script has been compiled off main thread.
-  bool mIsTracking;  // True if the script comes from a source on our tracking
-                     // protection list.
+  bool mWasCompiledOMT;  // True if the script has been compiled off main
+                         // thread.
+  bool mIsTracking;      // True if the script comes from a source on our
+                         // tracking protection list.
 
   RefPtr<ScriptFetchOptions> mFetchOptions;
 
@@ -246,10 +300,10 @@ class ScriptLoadRequest
   // it is parsed, and planned to be saved in the bytecode cache.
   JS::Heap<JSScript*> mScript;
 
-  // Holds script source data for non-inline scripts. Don't use nsString so we
-  // can give ownership to jsapi. Holds either char16_t source text characters
-  // or BinAST encoded bytes depending on mSourceEncoding.
-  Maybe<Variant<ScriptTextBuffer, BinASTSourceBuffer>> mScriptData;
+  // Holds script source data for non-inline scripts.
+  Maybe<Variant<ScriptTextBuffer<char16_t>, ScriptTextBuffer<Utf8Unit>,
+                BinASTSourceBuffer>>
+      mScriptData;
 
   // The length of script source text, set when reading completes. This is used
   // since mScriptData is cleared when the source is passed to the JS engine.
@@ -271,6 +325,13 @@ class ScriptLoadRequest
   // Holds the Cache information, which is used to register the bytecode
   // on the cache entry, such that we can load it the next time.
   nsCOMPtr<nsICacheInfoChannel> mCacheInfo;
+
+  // The base URL used for resolving relative module imports.
+  nsCOMPtr<nsIURI> mBaseURL;
+
+  // For preload requests, we defer reporting errors to the console until the
+  // request is used.
+  nsresult mUnreportedPreloadError;
 };
 
 class ScriptLoadRequestList : private mozilla::LinkedList<ScriptLoadRequest> {

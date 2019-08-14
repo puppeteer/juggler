@@ -25,8 +25,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DAV1D_COMMON_ATTRIBUTES_H__
-#define __DAV1D_COMMON_ATTRIBUTES_H__
+#ifndef DAV1D_COMMON_ATTRIBUTES_H
+#define DAV1D_COMMON_ATTRIBUTES_H
 
 #include "config.h"
 
@@ -34,19 +34,24 @@
 
 #ifdef __GNUC__
 #define ATTR_ALIAS __attribute__((may_alias))
+#define ATTR_FORMAT_PRINTF(fmt, attr) __attribute__((__format__(__printf__, fmt, attr)))
+#define COLD __attribute__((cold))
 #else
 #define ATTR_ALIAS
+#define ATTR_FORMAT_PRINTF(fmt, attr)
+#define COLD
 #endif
 
-#if ARCH_X86
+#if ARCH_X86_64
+/* x86-64 needs 32-byte alignment for AVX2. */
 #define ALIGN_32_VAL 32
 #define ALIGN_16_VAL 16
-#elif ARCH_ARM || ARCH_AARCH64
-// ARM doesn't benefit from anything more than 16 byte alignment.
+#elif ARCH_X86_32 || ARCH_ARM || ARCH_AARCH64
+/* ARM doesn't benefit from anything more than 16-byte alignment. */
 #define ALIGN_32_VAL 16
 #define ALIGN_16_VAL 16
 #else
-// No need for extra alignment on platforms without assembly.
+/* No need for extra alignment on platforms without assembly. */
 #define ALIGN_32_VAL 8
 #define ALIGN_16_VAL 8
 #endif
@@ -136,4 +141,4 @@ static inline int clzll(const unsigned long long mask) {
 }
 #endif /* !_MSC_VER */
 
-#endif /* __DAV1D_COMMON_ATTRIBUTES_H__ */
+#endif /* DAV1D_COMMON_ATTRIBUTES_H */

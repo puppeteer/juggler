@@ -8,8 +8,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=410052
   <link rel="stylesheet" type="text/css"
         href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
 
   <script type="application/javascript"
           src="../common.js"></script>
@@ -141,6 +140,15 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=410052
         [0, 0, 1],
       ];
       testTableIndexes("tablewithcolspanandcelldisplayblock", idxes);
+
+      // ////////////////////////////////////////////////////////////////////////
+      // A table with all elements being display:block, including a row group.
+      // This makes us fall back to the ARIAGridRowAccessible, and we must
+      // make sure the index is 0. Crazy example from Gmail.
+      idxes = [
+        [0],
+      ];
+      testTableIndexes("tablealldisplayblock", idxes);
 
       SimpleTest.finish();
     }
@@ -434,5 +442,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=410052
     </tr>
   </table>
 
+  <table id="tablealldisplayblock" style="display:block;">
+    <tbody style="display:block;">
+      <tr style="display:block;">
+        <td style="display:block;">text</td>
+      </tr>
+    </tbody>
+  </table>
+  
 </body>
 </html>

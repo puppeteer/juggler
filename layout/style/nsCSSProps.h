@@ -13,7 +13,9 @@
 #define nsCSSProps_h___
 
 #include <limits>
+#include <ostream>
 #include <type_traits>
+
 #include "nsString.h"
 #include "nsCSSPropertyID.h"
 #include "nsStyleStructFwd.h"
@@ -165,6 +167,7 @@ class nsCSSProps {
 
   static nsCSSPropertyID Physicalize(nsCSSPropertyID aProperty,
                                      const mozilla::ComputedStyle& aStyle) {
+    MOZ_ASSERT(!IsShorthand(aProperty));
     if (PropHasFlags(aProperty, Flags::IsLogical)) {
       return Servo_ResolveLogicalProperty(aProperty, &aStyle);
     }
@@ -251,14 +254,14 @@ class nsCSSProps {
     if (IsEnabled(aProperty)) {
       return true;
     }
-    if (aEnabled == EnabledState::eIgnoreEnabledState) {
+    if (aEnabled == EnabledState::IgnoreEnabledState) {
       return true;
     }
-    if ((aEnabled & EnabledState::eInUASheets) &&
+    if ((aEnabled & EnabledState::InUASheets) &&
         PropHasFlags(aProperty, Flags::EnabledInUASheets)) {
       return true;
     }
-    if ((aEnabled & EnabledState::eInChrome) &&
+    if ((aEnabled & EnabledState::InChrome) &&
         PropHasFlags(aProperty, Flags::EnabledInChrome)) {
       return true;
     }
@@ -284,48 +287,19 @@ class nsCSSProps {
     if (nsCSSProps::IsEnabled(*it_, (mozilla::CSSEnabledState)es_))
 
   // Keyword/Enum value tables
-  // Not const because we modify its entries when the pref
-  // "layout.css.background-clip.text" changes:
-  static const KTableEntry kShapeRadiusKTable[];
-  static const KTableEntry kFilterFunctionKTable[];
-  static const KTableEntry kBoxShadowTypeKTable[];
   static const KTableEntry kCursorKTable[];
   // Not const because we modify its entries when various
   // "layout.css.*.enabled" prefs changes:
   static KTableEntry kDisplayKTable[];
-  // clang-format off
-  // -- tables for parsing the {align,justify}-{content,items,self} properties --
-  static const KTableEntry kAlignAllKeywords[];
-  static const KTableEntry kAlignOverflowPosition[];  // <overflow-position>
-  static const KTableEntry kAlignSelfPosition[];      // <self-position>
-  static const KTableEntry kAlignLegacy[];            // 'legacy'
-  static const KTableEntry kAlignLegacyPosition[];    // 'left/right/center'
-  static const KTableEntry kAlignAutoNormalStretchBaseline[];  // 'auto/normal/stretch/baseline'
-  static const KTableEntry kAlignNormalStretchBaseline[];  // 'normal/stretch/baseline'
-  static const KTableEntry kAlignNormalBaseline[];  // 'normal/baseline'
-  static const KTableEntry kAlignContentDistribution[];  // <content-distribution>
-  static const KTableEntry kAlignContentPosition[];  // <content-position>
-  // -- tables for auto-completion of the {align,justify}-{content,items,self} properties --
-  static const KTableEntry kAutoCompletionAlignJustifySelf[];
-  static const KTableEntry kAutoCompletionAlignItems[];
-  static const KTableEntry kAutoCompletionAlignJustifyContent[];
-  // ------------------------------------------------------------------
-  // clang-format on
   static const KTableEntry kFontSmoothingKTable[];
-  static const KTableEntry kGridAutoFlowKTable[];
-  static const KTableEntry kGridTrackBreadthKTable[];
-  static const KTableEntry kLineHeightKTable[];
-  static const KTableEntry kContainKTable[];
-  static const KTableEntry kOverflowSubKTable[];
   static const KTableEntry kTextAlignKTable[];
-  static const KTableEntry kTextDecorationLineKTable[];
   static const KTableEntry kTextDecorationStyleKTable[];
-  static const KTableEntry kTextEmphasisStyleShapeKTable[];
-  static const KTableEntry kTextOverflowKTable[];
-  static const KTableEntry kTouchActionKTable[];
-  static const KTableEntry kVerticalAlignKTable[];
-  static const KTableEntry kWidthKTable[];  // also min-width, max-width
-  static const KTableEntry kFlexBasisKTable[];
 };
+
+// MOZ_DBG support for nsCSSPropertyID
+
+inline std::ostream& operator<<(std::ostream& aOut, nsCSSPropertyID aProperty) {
+  return aOut << nsCSSProps::GetStringValue(aProperty);
+}
 
 #endif /* nsCSSProps_h___ */

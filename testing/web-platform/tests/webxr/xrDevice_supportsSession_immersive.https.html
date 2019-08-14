@@ -8,8 +8,7 @@
       "supportsSession resolves when immersive options supported",
       () => {
         return XRTest.simulateDeviceConnection({ supportsImmersive:true })
-          .then( (controller) => { return navigator.xr.requestDevice() })
-          .then( (device) => device.supportsSession({ immersive: true }));
+          .then( (controller) => navigator.xr.supportsSession('immersive-vr'));
       });
   </script>
 </body>

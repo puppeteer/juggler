@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Test Console with devtools preference</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
@@ -15,14 +15,14 @@ function consoleListener(expected) {
     let observer = {
       observe: function listener(aSubject, aTopic, aData) {
         var obj = aSubject.wrappedJSObject;
+        ok(!obj.chromeContext, "This is not a chrome context");
         messages.push(parseInt(obj.arguments[0]));
         if (messages.length == expected) {
           SpecialPowers.removeObserver(observer, "console-api-log-event");
           SpecialPowers.removeObserver(observer, "console-api-profiler");
           done(messages);
-          return;
         }
-      }
+      },
     };
     SpecialPowers.addObserver(observer, "console-api-log-event");
     SpecialPowers.addObserver(observer, "console-api-profiler");
@@ -30,7 +30,7 @@ function consoleListener(expected) {
 }
 
 SimpleTest.waitForExplicitFinish();
-(async function () {
+(async function() {
   var onMessages = consoleListener(4);
 
   await SpecialPowers.pushPrefEnv({set: [["devtools.enabled", false]]});

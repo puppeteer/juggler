@@ -32,8 +32,14 @@
               "gecko": {
                 "$ref": "FirefoxSpecificProperties",
                 "optional": true
+              },
+              "edge": {
+                "type": "object",
+                "additionalProperties": { "type": "any" },
+                "optional": true
               }
-            }
+            },
+            "additionalProperties": { "$ref": "UnrecognizedProperty" }
           },
 
           "name": {
@@ -95,15 +101,15 @@
             "type": "object",
             "optional": true,
             "patternProperties": {
-              "^[1-9]\\d*$": { "type": "string" }
+              "^[1-9]\\d*$": { "$ref": "ExtensionFileUrl" }
             }
           },
 
           "incognito": {
             "type": "string",
-            "enum": ["spanning"],
-            "optional": true,
-            "onError": "warn"
+            "enum": ["not_allowed", "spanning"],
+            "default": "spanning",
+            "optional": true
           },
 
           "background": {
@@ -407,6 +413,13 @@
         "format": "strictRelativeUrl"
       },
       {
+        "id": "ExtensionFileUrl",
+        "type": "string",
+        "format": "strictRelativeUrl",
+        "pattern": "\\S",
+        "preprocess": "localize"
+      },
+      {
         "id": "ImageDataOrExtensionURL",
         "type": "string",
         "format": "imageDataOrStrictRelativeUrl"
@@ -545,11 +558,11 @@
           {
             "type": "object",
             "patternProperties": {
-              "^[1-9]\\d*$": { "$ref": "ExtensionURL" }
+              "^[1-9]\\d*$": { "$ref": "ExtensionFileUrl" }
             },
             "additionalProperties": false
           },
-          { "$ref": "ExtensionURL" }
+          { "$ref": "ExtensionFileUrl" }
         ]
       },
       {
@@ -578,8 +591,17 @@
       },
       {
         "id": "PersistentBackgroundProperty",
-        "type": "boolean",
-        "deprecated": "Event pages are not currently supported. This will run as a persistent background page."
+        "choices": [
+          {
+            "type": "boolean",
+            "enum": [true]
+          },
+          {
+            "type": "boolean",
+            "enum": [false],
+            "deprecated": "Event pages are not currently supported. This will run as a persistent background page."
+          }
+        ]
       }
     ]
   }

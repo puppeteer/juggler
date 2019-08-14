@@ -8,9 +8,9 @@
 
 #include "SVGMotionSMILType.h"
 
-#include "gfx2DGlue.h"
+#include "mozilla/SMILValue.h"
 #include "mozilla/gfx/Point.h"
-#include "nsSMILValue.h"
+#include "gfx2DGlue.h"
 #include "nsDebug.h"
 #include "nsMathUtils.h"
 #include "nsISupportsUtils.h"
@@ -21,7 +21,8 @@ using namespace mozilla::gfx;
 
 namespace mozilla {
 
-/*static*/ SVGMotionSMILType SVGMotionSMILType::sSingleton;
+/*static*/
+SVGMotionSMILType SVGMotionSMILType::sSingleton;
 
 // Helper enum, for distinguishing between types of MotionSegment structs
 enum SegmentType { eSegmentType_Translation, eSegmentType_PathPoint };
@@ -44,9 +45,9 @@ struct PathPointParams {  // Point along a path
  * Helper Struct: MotionSegment
  *
  * Instances of this class represent the points that we move between during
- * <animateMotion>.  Each nsSMILValue will get a nsTArray of these (generally
+ * <animateMotion>.  Each SMILValue will get a nsTArray of these (generally
  * with at most 1 entry in the array, except for in SandwichAdd).  (This
- * matches our behavior in nsSVGTransformSMILType.)
+ * matches our behavior in SVGTransformListSMILType.)
  *
  * NOTE: In general, MotionSegments are represented as points on a path
  * (eSegmentType_PathPoint), so that we can easily interpolate and compute
@@ -146,38 +147,38 @@ struct MotionSegment {
 
 typedef FallibleTArray<MotionSegment> MotionSegmentArray;
 
-// Helper methods to cast nsSMILValue.mU.mPtr to the right pointer-type
-static MotionSegmentArray& ExtractMotionSegmentArray(nsSMILValue& aValue) {
+// Helper methods to cast SMILValue.mU.mPtr to the right pointer-type
+static MotionSegmentArray& ExtractMotionSegmentArray(SMILValue& aValue) {
   return *static_cast<MotionSegmentArray*>(aValue.mU.mPtr);
 }
 
 static const MotionSegmentArray& ExtractMotionSegmentArray(
-    const nsSMILValue& aValue) {
+    const SMILValue& aValue) {
   return *static_cast<const MotionSegmentArray*>(aValue.mU.mPtr);
 }
 
 // nsISMILType Methods
 // -------------------
 
-void SVGMotionSMILType::Init(nsSMILValue& aValue) const {
+void SVGMotionSMILType::Init(SMILValue& aValue) const {
   MOZ_ASSERT(aValue.IsNull(), "Unexpected SMIL type");
 
   aValue.mType = this;
   aValue.mU.mPtr = new MotionSegmentArray(1);
 }
 
-void SVGMotionSMILType::Destroy(nsSMILValue& aValue) const {
+void SVGMotionSMILType::Destroy(SMILValue& aValue) const {
   MOZ_ASSERT(aValue.mType == this, "Unexpected SMIL type");
 
   MotionSegmentArray* arr = static_cast<MotionSegmentArray*>(aValue.mU.mPtr);
   delete arr;
 
   aValue.mU.mPtr = nullptr;
-  aValue.mType = nsSMILNullType::Singleton();
+  aValue.mType = SMILNullType::Singleton();
 }
 
-nsresult SVGMotionSMILType::Assign(nsSMILValue& aDest,
-                                   const nsSMILValue& aSrc) const {
+nsresult SVGMotionSMILType::Assign(SMILValue& aDest,
+                                   const SMILValue& aSrc) const {
   MOZ_ASSERT(aDest.mType == aSrc.mType, "Incompatible SMIL types");
   MOZ_ASSERT(aDest.mType == this, "Unexpected SMIL type");
 
@@ -190,8 +191,8 @@ nsresult SVGMotionSMILType::Assign(nsSMILValue& aDest,
   return NS_OK;
 }
 
-bool SVGMotionSMILType::IsEqual(const nsSMILValue& aLeft,
-                                const nsSMILValue& aRight) const {
+bool SVGMotionSMILType::IsEqual(const SMILValue& aLeft,
+                                const SMILValue& aRight) const {
   MOZ_ASSERT(aLeft.mType == aRight.mType, "Incompatible SMIL types");
   MOZ_ASSERT(aLeft.mType == this, "Unexpected SMIL type");
 
@@ -236,8 +237,7 @@ inline static void GetAngleAndPointAtDistance(
   }
 }
 
-nsresult SVGMotionSMILType::Add(nsSMILValue& aDest,
-                                const nsSMILValue& aValueToAdd,
+nsresult SVGMotionSMILType::Add(SMILValue& aDest, const SMILValue& aValueToAdd,
                                 uint32_t aCount) const {
   MOZ_ASSERT(aDest.mType == aValueToAdd.mType, "Incompatible SMIL types");
   MOZ_ASSERT(aDest.mType == this, "Unexpected SMIL type");
@@ -288,8 +288,8 @@ nsresult SVGMotionSMILType::Add(nsSMILValue& aDest,
   return NS_OK;
 }
 
-nsresult SVGMotionSMILType::SandwichAdd(nsSMILValue& aDest,
-                                        const nsSMILValue& aValueToAdd) const {
+nsresult SVGMotionSMILType::SandwichAdd(SMILValue& aDest,
+                                        const SMILValue& aValueToAdd) const {
   MOZ_ASSERT(aDest.mType == aValueToAdd.mType, "Incompatible SMIL types");
   MOZ_ASSERT(aDest.mType == this, "Unexpected SMIL type");
   MotionSegmentArray& dstArr = ExtractMotionSegmentArray(aDest);
@@ -306,8 +306,8 @@ nsresult SVGMotionSMILType::SandwichAdd(nsSMILValue& aDest,
   return NS_OK;
 }
 
-nsresult SVGMotionSMILType::ComputeDistance(const nsSMILValue& aFrom,
-                                            const nsSMILValue& aTo,
+nsresult SVGMotionSMILType::ComputeDistance(const SMILValue& aFrom,
+                                            const SMILValue& aTo,
                                             double& aDistance) const {
   MOZ_ASSERT(aFrom.mType == aTo.mType, "Incompatible SMIL types");
   MOZ_ASSERT(aFrom.mType == this, "Unexpected SMIL type");
@@ -329,9 +329,7 @@ nsresult SVGMotionSMILType::ComputeDistance(const nsSMILValue& aFrom,
     const PathPointParams& toParams = to.mU.mPathPointParams;
     MOZ_ASSERT(fromParams.mPath == toParams.mPath,
                "Interpolation endpoints should be from same path");
-    MOZ_ASSERT(fromParams.mDistToPoint <= toParams.mDistToPoint,
-               "To value shouldn't be before from value on path");
-    aDistance = fabs(toParams.mDistToPoint - fromParams.mDistToPoint);
+    aDistance = std::fabs(toParams.mDistToPoint - fromParams.mDistToPoint);
   } else {
     const TranslationParams& fromParams = from.mU.mTranslationParams;
     const TranslationParams& toParams = to.mU.mTranslationParams;
@@ -350,10 +348,10 @@ static inline float InterpolateFloat(const float& aStartFlt,
   return aStartFlt + aUnitDistance * (aEndFlt - aStartFlt);
 }
 
-nsresult SVGMotionSMILType::Interpolate(const nsSMILValue& aStartVal,
-                                        const nsSMILValue& aEndVal,
+nsresult SVGMotionSMILType::Interpolate(const SMILValue& aStartVal,
+                                        const SMILValue& aEndVal,
                                         double aUnitDistance,
-                                        nsSMILValue& aResult) const {
+                                        SMILValue& aResult) const {
   MOZ_ASSERT(aStartVal.mType == aEndVal.mType,
              "Trying to interpolate different types");
   MOZ_ASSERT(aStartVal.mType == this, "Unexpected types for interpolation");
@@ -365,8 +363,6 @@ nsresult SVGMotionSMILType::Interpolate(const nsSMILValue& aStartVal,
   const MotionSegmentArray& endArr = ExtractMotionSegmentArray(aEndVal);
   MotionSegmentArray& resultArr = ExtractMotionSegmentArray(aResult);
 
-  MOZ_ASSERT(startArr.Length() <= 1,
-             "Invalid start-point for animateMotion interpolation");
   MOZ_ASSERT(endArr.Length() == 1,
              "Invalid end-point for animateMotion interpolation");
   MOZ_ASSERT(resultArr.IsEmpty(),
@@ -377,17 +373,29 @@ nsresult SVGMotionSMILType::Interpolate(const nsSMILValue& aStartVal,
              "Expecting to be interpolating along a path");
 
   const PathPointParams& endParams = endSeg.mU.mPathPointParams;
-  // NOTE: path & angle should match between start & end (since presumably
-  // start & end came from the same <animateMotion> element), unless start is
-  // empty. (as it would be for pure 'to' animation)
+  // NOTE: Ususally, path & angle should match between start & end (since
+  // presumably start & end came from the same <animateMotion> element),
+  // unless start is empty. (as it would be for pure 'to' animation)
+  // Notable exception: when a to-animation layers on top of lower priority
+  // animation(s) -- see comment below.
   Path* path = endParams.mPath;
   RotateType rotateType = endSeg.mRotateType;
   float rotateAngle = endSeg.mRotateAngle;
 
   float startDist;
-  if (startArr.IsEmpty()) {
+  if (startArr.IsEmpty() ||
+      startArr[0].mU.mPathPointParams.mPath != endParams.mPath) {
+    // When a to-animation follows other lower priority animation(s),
+    // the endParams will contain a different path from the animation(s)
+    // that it layers on top of.
+    // Per SMIL spec, we should interpolate from the value at startArr.
+    // However, neither Chrome nor Safari implements to-animation that way.
+    // For simplicity, we use the same behavior as other browsers: override
+    // previous animations and start at the initial underlying value.
     startDist = 0.0f;
   } else {
+    MOZ_ASSERT(startArr.Length() <= 1,
+               "Invalid start-point for animateMotion interpolation");
     const MotionSegment& startSeg = startArr[0];
     MOZ_ASSERT(startSeg.mSegmentType == eSegmentType_PathPoint,
                "Expecting to be interpolating along a path");
@@ -395,8 +403,6 @@ nsresult SVGMotionSMILType::Interpolate(const nsSMILValue& aStartVal,
     MOZ_ASSERT(startSeg.mRotateType == endSeg.mRotateType &&
                    startSeg.mRotateAngle == endSeg.mRotateAngle,
                "unexpected angle mismatch");
-    MOZ_ASSERT(startParams.mPath == endParams.mPath,
-               "unexpected path mismatch");
     startDist = startParams.mDistToPoint;
   }
 
@@ -412,7 +418,7 @@ nsresult SVGMotionSMILType::Interpolate(const nsSMILValue& aStartVal,
 }
 
 /* static */ gfx::Matrix SVGMotionSMILType::CreateMatrix(
-    const nsSMILValue& aSMILVal) {
+    const SMILValue& aSMILVal) {
   const MotionSegmentArray& arr = ExtractMotionSegmentArray(aSMILVal);
 
   gfx::Matrix matrix;
@@ -437,9 +443,11 @@ nsresult SVGMotionSMILType::Interpolate(const nsSMILValue& aStartVal,
   return matrix;
 }
 
-/* static */ nsSMILValue SVGMotionSMILType::ConstructSMILValue(
-    Path* aPath, float aDist, RotateType aRotateType, float aRotateAngle) {
-  nsSMILValue smilVal(&SVGMotionSMILType::sSingleton);
+/* static */
+SMILValue SVGMotionSMILType::ConstructSMILValue(Path* aPath, float aDist,
+                                                RotateType aRotateType,
+                                                float aRotateAngle) {
+  SMILValue smilVal(&SVGMotionSMILType::sSingleton);
   MotionSegmentArray& arr = ExtractMotionSegmentArray(smilVal);
 
   // AppendElement has guaranteed success here, since Init() allocates 1 slot.

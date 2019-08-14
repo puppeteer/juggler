@@ -1,12 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://services-sync/engines/bookmarks.js");
-ChromeUtils.import("resource://services-sync/keys.js");
-ChromeUtils.import("resource://services-sync/record.js");
-ChromeUtils.import("resource://services-sync/service.js");
-ChromeUtils.import("resource://services-sync/util.js");
+const { Bookmark, BookmarkQuery, PlacesItem } = ChromeUtils.import(
+  "resource://services-sync/engines/bookmarks.js"
+);
+const { Service } = ChromeUtils.import("resource://services-sync/service.js");
 
 function prepareBookmarkItem(collection, id) {
   let b = new Bookmark(collection, id);
@@ -43,13 +41,13 @@ add_task(async function test_bookmark_record() {
 
 add_task(async function test_query_foldername() {
   // Bug 1443388
-  let checks = [
-    ["foo", "foo"],
-    ["", undefined],
-  ];
+  let checks = [["foo", "foo"], ["", undefined]];
   for (let [inVal, outVal] of checks) {
     let bmk1 = new BookmarkQuery("bookmarks", Utils.makeGUID());
-    bmk1.fromSyncBookmark({url: Services.io.newURI("https://example.com"), folder: inVal});
+    bmk1.fromSyncBookmark({
+      url: Services.io.newURI("https://example.com"),
+      folder: inVal,
+    });
     Assert.strictEqual(bmk1.folderName, outVal);
 
     // other direction

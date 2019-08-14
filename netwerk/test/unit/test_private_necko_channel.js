@@ -2,8 +2,7 @@
 // Private channel test
 //
 
-ChromeUtils.import("resource://testing-common/httpd.js");
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 
 var httpserver = new HttpServer();
 var testpath = "/simple";
@@ -25,7 +24,7 @@ function run_test() {
   channel.QueryInterface(Ci.nsIPrivateBrowsingChannel);
   channel.setPrivate(true);
 
-  channel.asyncOpen2(new ChannelListener(checkRequest, channel));
+  channel.asyncOpen(new ChannelListener(checkRequest, channel));
 
   do_test_pending();
 }
@@ -33,7 +32,7 @@ function run_test() {
 function setupChannel(path) {
   return NetUtil.newChannel({
     uri: "http://localhost:" + httpserver.identity.primaryPort + path,
-    loadUsingSystemPrincipal: true
+    loadUsingSystemPrincipal: true,
   }).QueryInterface(Ci.nsIHttpChannel);
 }
 
@@ -44,8 +43,10 @@ function serverHandler(metadata, response) {
 
 function checkRequest(request, data, context) {
   get_device_entry_count("disk", null, function(count) {
-    Assert.equal(count, 0)
-    get_device_entry_count("disk", Services.loadContextInfo.private, function(count) {
+    Assert.equal(count, 0);
+    get_device_entry_count("disk", Services.loadContextInfo.private, function(
+      count
+    ) {
       Assert.equal(count, 1);
       httpserver.stop(do_test_finished);
     });

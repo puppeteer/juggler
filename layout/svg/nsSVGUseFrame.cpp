@@ -6,6 +6,7 @@
 
 #include "nsSVGUseFrame.h"
 
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/MutationEvent.h"
 #include "mozilla/dom/SVGUseElement.h"
 #include "SVGObserverUtils.h"
@@ -16,8 +17,8 @@ using namespace mozilla::dom;
 //----------------------------------------------------------------------
 // Implementation
 
-nsIFrame* NS_NewSVGUseFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsSVGUseFrame(aStyle);
+nsIFrame* NS_NewSVGUseFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell) nsSVGUseFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGUseFrame)
@@ -52,7 +53,7 @@ nsresult nsSVGUseFrame::AttributeChanged(int32_t aNamespaceID,
 void nsSVGUseFrame::PositionAttributeChanged() {
   // make sure our cached transform matrix gets (lazily) updated
   mCanvasTM = nullptr;
-  nsLayoutUtils::PostRestyleEvent(GetContent()->AsElement(), nsRestyleHint(0),
+  nsLayoutUtils::PostRestyleEvent(GetContent()->AsElement(), RestyleHint{0},
                                   nsChangeHint_InvalidateRenderingObservers);
   nsSVGUtils::ScheduleReflowSVG(this);
   nsSVGUtils::NotifyChildrenOfSVGChange(this, TRANSFORM_CHANGED);
@@ -67,14 +68,14 @@ void nsSVGUseFrame::DimensionAttributeChanged(bool aHadValidDimensions,
   }
 
   if (invalidate) {
-    nsLayoutUtils::PostRestyleEvent(GetContent()->AsElement(), nsRestyleHint(0),
+    nsLayoutUtils::PostRestyleEvent(GetContent()->AsElement(), RestyleHint{0},
                                     nsChangeHint_InvalidateRenderingObservers);
     nsSVGUtils::ScheduleReflowSVG(this);
   }
 }
 
 void nsSVGUseFrame::HrefChanged() {
-  nsLayoutUtils::PostRestyleEvent(GetContent()->AsElement(), nsRestyleHint(0),
+  nsLayoutUtils::PostRestyleEvent(GetContent()->AsElement(), RestyleHint{0},
                                   nsChangeHint_InvalidateRenderingObservers);
   nsSVGUtils::ScheduleReflowSVG(this);
 }

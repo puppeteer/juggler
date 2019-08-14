@@ -19,13 +19,12 @@ StaticRefPtr<InProcessParent> InProcessParent::sSingleton;
 StaticRefPtr<InProcessChild> InProcessChild::sSingleton;
 bool InProcessParent::sShutdown = false;
 
-
 //////////////////////////////////////////
 // InProcess actor lifecycle management //
 //////////////////////////////////////////
 
-/* static */ InProcessChild*
-InProcessChild::Singleton() {
+/* static */
+InProcessChild* InProcessChild::Singleton() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!sSingleton) {
@@ -34,8 +33,8 @@ InProcessChild::Singleton() {
   return sSingleton;
 }
 
-/* static */ InProcessParent*
-InProcessParent::Singleton() {
+/* static */
+InProcessParent* InProcessParent::Singleton() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!sSingleton) {
@@ -44,9 +43,8 @@ InProcessParent::Singleton() {
   return sSingleton;
 }
 
-/* static */ void
-InProcessParent::Startup()
-{
+/* static */
+void InProcessParent::Startup() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (sShutdown) {
@@ -87,10 +85,8 @@ InProcessParent::Startup()
   InProcessChild::sSingleton = child.forget();
 }
 
-
-/* static */ void
-InProcessParent::Shutdown()
-{
+/* static */
+void InProcessParent::Shutdown() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!sSingleton || sShutdown) {
@@ -109,37 +105,29 @@ InProcessParent::Shutdown()
 }
 
 NS_IMETHODIMP
-InProcessParent::Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData)
-{
+InProcessParent::Observe(nsISupports* aSubject, const char* aTopic,
+                         const char16_t* aData) {
   MOZ_ASSERT(!strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID));
   InProcessParent::Shutdown();
   return NS_OK;
 }
 
-void
-InProcessParent::ActorDestroy(ActorDestroyReason aWhy)
-{
+void InProcessParent::ActorDestroy(ActorDestroyReason aWhy) {
   InProcessParent::Shutdown();
 }
 
-void
-InProcessChild::ActorDestroy(ActorDestroyReason aWhy)
-{
+void InProcessChild::ActorDestroy(ActorDestroyReason aWhy) {
   InProcessParent::Shutdown();
 }
 
-void
-InProcessParent::DeallocPInProcessParent()
-{
+void InProcessParent::ActorDealloc() {
   MOZ_ASSERT(!InProcessParent::sSingleton);
-  Release(); // Release the reference taken in InProcessParent::Startup.
+  Release();  // Release the reference taken in InProcessParent::Startup.
 }
 
-void
-InProcessChild::DeallocPInProcessChild()
-{
+void InProcessChild::ActorDealloc() {
   MOZ_ASSERT(!InProcessChild::sSingleton);
-  Release(); // Release the reference taken in InProcessParent::Startup.
+  Release();  // Release the reference taken in InProcessParent::Startup.
 }
 
 ////////////////////////////////
@@ -147,21 +135,19 @@ InProcessChild::DeallocPInProcessChild()
 ////////////////////////////////
 
 // Helper method for implementing ParentActorFor and ChildActorFor.
-static IProtocol*
-GetOtherInProcessActor(IProtocol* aActor)
-{
+static IProtocol* GetOtherInProcessActor(IProtocol* aActor) {
   MOZ_ASSERT(aActor->GetSide() != UnknownSide, "bad unknown side");
 
   // Discover the manager of aActor which is PInProcess.
   IProtocol* current = aActor;
   while (current) {
-    if (current->GetProtocolTypeId() == PInProcessMsgStart) {
-      break; // Found the correct actor.
+    if (current->GetProtocolId() == PInProcessMsgStart) {
+      break;  // Found the correct actor.
     }
     current = current->Manager();
   }
   if (!current) {
-    return nullptr; // Not a PInProcess actor, return |nullptr|
+    return nullptr;  // Not a PInProcess actor, return |nullptr|
   }
 
   MOZ_ASSERT(current->GetSide() == aActor->GetSide(), "side changed?");
@@ -187,26 +173,24 @@ GetOtherInProcessActor(IProtocol* aActor)
   if (otherActor) {
     MOZ_ASSERT(otherActor->GetSide() != UnknownSide, "bad unknown side");
     MOZ_ASSERT(otherActor->GetSide() != aActor->GetSide(), "Wrong side!");
-    MOZ_ASSERT(otherActor->GetProtocolTypeId() == aActor->GetProtocolTypeId(),
+    MOZ_ASSERT(otherActor->GetProtocolId() == aActor->GetProtocolId(),
                "Wrong type of protocol!");
   }
 
   return otherActor;
 }
 
-/* static */ IProtocol*
-InProcessParent::ChildActorFor(IProtocol* aActor)
-{
+/* static */
+IProtocol* InProcessParent::ChildActorFor(IProtocol* aActor) {
   MOZ_ASSERT(aActor && aActor->GetSide() == ParentSide);
   return GetOtherInProcessActor(aActor);
 }
 
-/* static */ IProtocol*
-InProcessChild::ParentActorFor(IProtocol* aActor)
-{
+/* static */
+IProtocol* InProcessChild::ParentActorFor(IProtocol* aActor) {
   MOZ_ASSERT(aActor && aActor->GetSide() == ChildSide);
   return GetOtherInProcessActor(aActor);
 }
 
-} // namespace ipc
-} // namespace mozilla
+}  // namespace ipc
+}  // namespace mozilla

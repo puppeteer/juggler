@@ -4,10 +4,10 @@
 "use strict";
 
 module.exports = {
-  attachRefToHud: () => {},
+  attachRefToWebConsoleUI: () => {},
   canRewind: () => false,
   emitNewMessage: () => {},
-  hudProxy: {
+  proxy: {
     client: {},
     releaseActor: actor => console.log("Release actor", actor),
   },
@@ -15,6 +15,7 @@ module.exports = {
   onViewSourceInStyleEditor: () => {},
   onViewSourceInScratchpad: () => {},
   openNetworkPanel: () => {},
+  resendNetworkRequest: () => {},
   sourceMapService: {
     subscribe: () => {},
     originalPositionFor: () => {

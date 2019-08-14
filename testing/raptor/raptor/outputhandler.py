@@ -7,10 +7,10 @@ from __future__ import absolute_import
 
 import json
 
-from mozlog import get_proxy_logger
+from logger.logger import RaptorLogger
 
 
-LOG = get_proxy_logger(component='raptor-output-handler')
+LOG = RaptorLogger(component='raptor-output-handler')
 
 
 class OutputHandler(object):
@@ -34,5 +34,5 @@ class OutputHandler(object):
             self.process_output(json.dumps(data))
 
     def process_output(self, line):
-        if "error" in line or "warning" in line or "raptor" in line:
+        if "raptor" in line:
             LOG.process_output(self.proc.pid, line)

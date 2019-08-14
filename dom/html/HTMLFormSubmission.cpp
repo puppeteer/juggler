@@ -9,7 +9,7 @@
 #include "nsCOMPtr.h"
 #include "nsIForm.h"
 #include "nsILinkHandler.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsGkAtoms.h"
 #include "nsIFormControl.h"
 #include "nsError.h"
@@ -44,12 +44,11 @@ namespace dom {
 
 namespace {
 
-void SendJSWarning(nsIDocument* aDocument, const char* aWarningName,
-                   const char16_t** aWarningArgs, uint32_t aWarningArgsLen) {
-  nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                  NS_LITERAL_CSTRING("HTML"), aDocument,
-                                  nsContentUtils::eFORMS_PROPERTIES,
-                                  aWarningName, aWarningArgs, aWarningArgsLen);
+void SendJSWarning(Document* aDocument, const char* aWarningName,
+                   const nsTArray<nsString>& aWarningArgs) {
+  nsContentUtils::ReportToConsole(
+      nsIScriptError::warningFlag, NS_LITERAL_CSTRING("HTML"), aDocument,
+      nsContentUtils::eFORMS_PROPERTIES, aWarningName, aWarningArgs);
 }
 
 void RetrieveFileName(Blob* aBlob, nsAString& aFilename) {
@@ -85,7 +84,7 @@ class FSURLEncoded : public EncodingFormSubmission {
    */
   FSURLEncoded(nsIURI* aActionURL, const nsAString& aTarget,
                NotNull<const Encoding*> aEncoding, int32_t aMethod,
-               nsIDocument* aDocument, Element* aOriginatingElement)
+               Document* aDocument, Element* aOriginatingElement)
       : EncodingFormSubmission(aActionURL, aTarget, aEncoding,
                                aOriginatingElement),
         mMethod(aMethod),
@@ -127,7 +126,7 @@ class FSURLEncoded : public EncodingFormSubmission {
   nsCString mQueryString;
 
   /** The document whose URI to use when reporting errors */
-  nsCOMPtr<nsIDocument> mDocument;
+  nsCOMPtr<Document> mDocument;
 
   /** Whether or not we have warned about a file control not being submitted */
   bool mWarnedFileControl;
@@ -159,7 +158,7 @@ nsresult FSURLEncoded::AddNameValuePair(const nsAString& aName,
 nsresult FSURLEncoded::AddNameBlobOrNullPair(const nsAString& aName,
                                              Blob* aBlob) {
   if (!mWarnedFileControl) {
-    SendJSWarning(mDocument, "ForgotFileEnctypeWarning", nullptr, 0);
+    SendJSWarning(mDocument, "ForgotFileEnctypeWarning", nsTArray<nsString>());
     mWarnedFileControl = true;
   }
 
@@ -223,11 +222,10 @@ void HandleMailtoSubject(nsCString& aPath) {
     nsresult rv = nsContentUtils::GetLocalizedString(
         nsContentUtils::eBRAND_PROPERTIES, "brandShortName", brandName);
     if (NS_FAILED(rv)) return;
-    const char16_t* formatStrings[] = {brandName.get()};
     nsAutoString subjectStr;
     rv = nsContentUtils::FormatLocalizedString(
-        nsContentUtils::eFORMS_PROPERTIES, "DefaultFormSubject", formatStrings,
-        subjectStr);
+        subjectStr, nsContentUtils::eFORMS_PROPERTIES, "DefaultFormSubject",
+        brandName);
     if (NS_FAILED(rv)) return;
     aPath.AppendLiteral("subject=");
     nsCString subjectStrEscaped;
@@ -730,11 +728,11 @@ EncodingFormSubmission::EncodingFormSubmission(
   if (!aEncoding->CanEncodeEverything()) {
     nsAutoCString name;
     aEncoding->Name(name);
-    NS_ConvertUTF8toUTF16 nameUtf16(name);
-    const char16_t* namePtr = nameUtf16.get();
+    AutoTArray<nsString, 1> args;
+    CopyUTF8toUTF16(name, *args.AppendElement());
     SendJSWarning(
         aOriginatingElement ? aOriginatingElement->GetOwnerDocument() : nullptr,
-        "CannotEncodeAllUnicode", &namePtr, 1);
+        "CannotEncodeAllUnicode", args);
   }
 }
 
@@ -792,7 +790,7 @@ NotNull<const Encoding*> GetSubmitEncoding(nsGenericHTMLElement* aForm) {
   }
   // if there are no accept-charset or all the charset are not supported
   // Get the charset from document
-  nsIDocument* doc = aForm->GetComposedDoc();
+  Document* doc = aForm->GetComposedDoc();
   if (doc) {
     return doc->GetDocumentCharacterSet();
   }
@@ -809,7 +807,8 @@ void GetEnumAttr(nsGenericHTMLElement* aContent, nsAtom* atom,
 
 }  // anonymous namespace
 
-/* static */ nsresult HTMLFormSubmission::GetFromForm(
+/* static */
+nsresult HTMLFormSubmission::GetFromForm(
     HTMLFormElement* aForm, nsGenericHTMLElement* aOriginatingElement,
     HTMLFormSubmission** aFormSubmission) {
   // Get all the information necessary to encode the form data
@@ -822,6 +821,23 @@ void GetEnumAttr(nsGenericHTMLElement* aContent, nsAtom* atom,
   nsCOMPtr<nsIURI> actionURL;
   rv = aForm->GetActionURL(getter_AddRefs(actionURL), aOriginatingElement);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Check if CSP allows this form-action
+  nsCOMPtr<nsIContentSecurityPolicy> csp = aForm->GetCsp();
+  if (csp) {
+    bool permitsFormAction = true;
+
+    // form-action is only enforced if explicitly defined in the
+    // policy - do *not* consult default-src, see:
+    // http://www.w3.org/TR/CSP2/#directive-default-src
+    rv = csp->Permits(aForm, nullptr /* nsICSPEventListener */, actionURL,
+                      nsIContentSecurityPolicy::FORM_ACTION_DIRECTIVE, true,
+                      &permitsFormAction);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (!permitsFormAction) {
+      return NS_ERROR_CSP_FORM_ACTION_VIOLATION;
+    }
+  }
 
   // Get target
   // The target is the originating element formtarget attribute if the element
@@ -869,10 +885,11 @@ void GetEnumAttr(nsGenericHTMLElement* aContent, nsAtom* atom,
     *aFormSubmission =
         new FSTextPlain(actionURL, target, encoding, aOriginatingElement);
   } else {
-    nsIDocument* doc = aForm->OwnerDoc();
+    Document* doc = aForm->OwnerDoc();
     if (enctype == NS_FORM_ENCTYPE_MULTIPART ||
         enctype == NS_FORM_ENCTYPE_TEXTPLAIN) {
-      nsAutoString enctypeStr;
+      AutoTArray<nsString, 1> args;
+      nsString& enctypeStr = *args.AppendElement();
       if (aOriginatingElement &&
           aOriginatingElement->HasAttr(kNameSpaceID_None,
                                        nsGkAtoms::formenctype)) {
@@ -881,8 +898,8 @@ void GetEnumAttr(nsGenericHTMLElement* aContent, nsAtom* atom,
       } else {
         aForm->GetAttr(kNameSpaceID_None, nsGkAtoms::enctype, enctypeStr);
       }
-      const char16_t* enctypeStrPtr = enctypeStr.get();
-      SendJSWarning(doc, "ForgotPostWarning", &enctypeStrPtr, 1);
+
+      SendJSWarning(doc, "ForgotPostWarning", args);
     }
     *aFormSubmission = new FSURLEncoded(actionURL, target, encoding, method,
                                         doc, aOriginatingElement);

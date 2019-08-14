@@ -208,6 +208,8 @@ def find_program(file, paths=None):
                     "not %r", paths)
             paths = list(itertools.chain(
                 *(p.split(pathsep) for p in paths if p)))
+        else:
+            paths = environ['PATH'].split(pathsep)
         return normalize_path(which(file, path=paths, exts=exts))
     except WhichError:
         return None
@@ -222,7 +224,7 @@ def try_invoke_compiler(compiler, language, source, flags=None, onerror=None):
 
     if not isinstance(flags, (list, tuple)):
         die("Flags provided to try_compile must be a list of strings, "
-            "not %r", paths)
+            "not %r", flags)
 
     suffix = {
         'C': '.c',
@@ -486,13 +488,13 @@ def add_old_configure_assignment(var, value, when=None):
         if var is None or value is None:
             return
         if value is True:
-            assignments.append('%s=1' % var)
+            assignments.append((var, '1'))
         elif value is False:
-            assignments.append('%s=' % var)
+            assignments.append((var, ''))
         else:
             if isinstance(value, (list, tuple)):
                 value = quote(*value)
-            assignments.append('%s=%s' % (var, quote(str(value))))
+            assignments.append((var, str(value)))
 
 
 @template

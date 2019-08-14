@@ -17,7 +17,7 @@
 [ChromeOnly, Exposed=Window]
 interface MozQueryInterface {
   [Throws]
-  legacycaller any (IID aIID);
+  legacycaller any (any aIID);
 };
 
 /**
@@ -39,7 +39,7 @@ namespace ChromeUtils {
    *                          `\d+(\-\d+)?\.fxsnapshot`.
    */
   [Throws]
-  DOMString saveHeapSnapshot(optional HeapSnapshotBoundaries boundaries);
+  DOMString saveHeapSnapshot(optional HeapSnapshotBoundaries boundaries = {});
 
   /**
    * This is the same as saveHeapSnapshot, but with a different return value.
@@ -49,7 +49,7 @@ namespace ChromeUtils {
    *                          `.fxsnapshot`.
    */
   [Throws]
-  DOMString saveHeapSnapshotGetId(optional HeapSnapshotBoundaries boundaries);
+  DOMString saveHeapSnapshotGetId(optional HeapSnapshotBoundaries boundaries = {});
 
   /**
    * Deserialize a core dump into a HeapSnapshot.
@@ -105,6 +105,18 @@ namespace ChromeUtils {
   ArrayBuffer base64URLDecode(ByteString string,
                               Base64URLDecodeOptions options);
 
+  /**
+   * Cause the current process to fatally crash unless the given condition is
+   * true. This is similar to MOZ_RELEASE_ASSERT in C++ code.
+   *
+   * WARNING: This message is included publicly in the crash report, and must
+   * not contain private information.
+   *
+   * Crash report will be augmented with the current JS stack information.
+   */
+  void releaseAssert(boolean condition,
+                     optional DOMString message = "<no message>");
+
 #ifdef NIGHTLY_BUILD
 
   /**
@@ -156,7 +168,7 @@ partial namespace ChromeUtils {
    * @param originAttrs       The originAttributes from the caller.
    */
   ByteString
-  originAttributesToSuffix(optional OriginAttributesDictionary originAttrs);
+  originAttributesToSuffix(optional OriginAttributesDictionary originAttrs = {});
 
   /**
    * Returns true if the members of |originAttrs| match the provided members
@@ -166,8 +178,8 @@ partial namespace ChromeUtils {
    * @param pattern           The pattern to use for matching.
    */
   boolean
-  originAttributesMatchPattern(optional OriginAttributesDictionary originAttrs,
-                               optional OriginAttributesPatternDictionary pattern);
+  originAttributesMatchPattern(optional OriginAttributesDictionary originAttrs = {},
+                               optional OriginAttributesPatternDictionary pattern = {});
 
   /**
    * Returns an OriginAttributesDictionary with values from the |origin| suffix
@@ -192,14 +204,14 @@ partial namespace ChromeUtils {
    *                          default values.
    */
   OriginAttributesDictionary
-  fillNonDefaultOriginAttributes(optional OriginAttributesDictionary originAttrs);
+  fillNonDefaultOriginAttributes(optional OriginAttributesDictionary originAttrs = {});
 
   /**
    * Returns true if the 2 OriginAttributes are equal.
    */
   boolean
-  isOriginAttributesEqual(optional OriginAttributesDictionary aA,
-                          optional OriginAttributesDictionary aB);
+  isOriginAttributesEqual(optional OriginAttributesDictionary aA = {},
+                          optional OriginAttributesDictionary aB = {});
 
   /**
    * Loads and compiles the script at the given URL and returns an object
@@ -208,24 +220,21 @@ partial namespace ChromeUtils {
    */
   [NewObject]
   Promise<PrecompiledScript>
-  compileScript(DOMString url, optional CompileScriptOptionsDictionary options);
+  compileScript(DOMString url, optional CompileScriptOptionsDictionary options = {});
 
   /**
    * Returns an optimized QueryInterface method which, when called from
    * JavaScript, acts as an ordinary QueryInterface function call, and when
    * called from XPConnect, circumvents JSAPI entirely.
    *
-   * The list of interfaces may include a mix of nsIJSID objects and interface
-   * name strings. Strings for nonexistent interface names are silently
-   * ignored, as long as they don't refer to any non-IID property of the Ci
-   * global. Any non-IID value is implicitly coerced to a string, and treated
-   * as an interface name.
+   * The list of interfaces may include a mix of JS ID objects and interface
+   * name strings.
    *
    * nsISupports is implicitly supported, and must not be included in the
    * interface list.
    */
   [Affects=Nothing, NewObject, Throws]
-  MozQueryInterface generateQI(sequence<(DOMString or IID)> interfaces);
+  MozQueryInterface generateQI(sequence<any> interfaces);
 
   /**
    * Waive Xray on a given value. Identity op for primitives.
@@ -266,21 +275,24 @@ partial namespace ChromeUtils {
    */
   [Throws]
   void idleDispatch(IdleRequestCallback callback,
-                    optional IdleRequestOptions options);
+                    optional IdleRequestOptions options = {});
 
   /**
    * Synchronously loads and evaluates the js file located at
    * 'aResourceURI' with a new, fully privileged global object.
    *
-   * If 'aTargetObj' is specified and null, this method just returns
-   * the module's global object. Otherwise (if 'aTargetObj' is not
-   * specified, or 'aTargetObj' is != null) looks for a property
-   * 'EXPORTED_SYMBOLS' on the new global object. 'EXPORTED_SYMBOLS'
-   * is expected to be an array of strings identifying properties on
-   * the global object.  These properties will be installed as
-   * properties on 'targetObj', or, if 'aTargetObj' is not specified,
-   * on the caller's global object. If 'EXPORTED_SYMBOLS' is not
-   * found, an error is thrown.
+   * If `aTargetObj` is specified, and non-null, all properties exported by
+   * the module are copied to that object.
+   *
+   * If `aTargetObj` is not specified, or is non-null, an object is returned
+   * containing all of the module's exported properties. The same object is
+   * returned for every call.
+   *
+   * If `aTargetObj` is specified and null, the module's global object is
+   * returned, rather than its explicit exports. This behavior is deprecated,
+   * and will removed in the near future, since it is incompatible with the
+   * ES6 module semanitcs we intend to migrate to. It should not be used in
+   * new code.
    *
    * @param aResourceURI A resource:// URI string to load the module from.
    * @param aTargetObj the object to install the exported properties on or null.
@@ -347,8 +359,25 @@ partial namespace ChromeUtils {
   /**
    * Request performance metrics to the current process & all content processes.
    */
-  [Throws, Func="DOMPrefs::dom_performance_enable_scheduler_timing"]
+  [Throws]
   Promise<sequence<PerformanceInfoDictionary>> requestPerformanceMetrics();
+
+  /**
+   * Set the collection of specific detailed performance timing information.
+   * Selecting 0 for the mask will end existing collection. All metrics that
+   * are chosen will be cleared after updating the mask.
+   *
+   * @param aCollectionMask A bitmask where each bit corresponds to a metric
+   *        to be collected as listed in PerfStats::Metric.
+   */
+  void setPerfStatsCollectionMask(unsigned long long aCollectionMask);
+
+  /**
+   * Collect results of detailed performance timing information.
+   * The output is a JSON string containing performance timings.
+   */
+  [Throws]
+  Promise<DOMString> collectPerfStats();
 
   /**
   * Returns a Promise containing a sequence of I/O activities
@@ -357,26 +386,106 @@ partial namespace ChromeUtils {
   Promise<sequence<IOActivityDataDictionary>> requestIOActivity();
 
   /**
-   * Returns the BrowsingContext referred by the given id.
-   */
-  [ChromeOnly]
-  BrowsingContext? getBrowsingContext(unsigned long long id);
-
-  /**
-   * Returns all the root BrowsingContexts.
-   */
-  [ChromeOnly]
-  sequence<BrowsingContext> getRootBrowsingContexts();
+  * Returns a Promise containing all processes info
+  */
+  [Throws]
+  Promise<ParentProcInfoDictionary> requestProcInfo();
 
   [ChromeOnly, Throws]
   boolean hasReportingHeaderForOrigin(DOMString aOrigin);
+
+  [ChromeOnly]
+  PopupBlockerState getPopupControlState();
+
+  [ChromeOnly]
+  boolean isPopupTokenUnused();
+
+  /**
+   * Milliseconds from the last iframe loading an external protocol.
+   */
+  [ChromeOnly]
+  double lastExternalProtocolIframeAllowed();
+
+  /**
+   * For testing purpose we need to reset this value.
+   */
+  [ChromeOnly]
+  void resetLastExternalProtocolIframeAllowed();
+
+  /**
+   * Register a new toplevel window global actor. This method may only be
+   * called in the parent process. |name| must be globally unique.
+   *
+   * See JSWindowActor.webidl for WindowActorOptions fields documentation.
+   */
+  [ChromeOnly, Throws]
+  void registerWindowActor(DOMString aName, optional WindowActorOptions aOptions = {});
+
+  [ChromeOnly]
+  void unregisterWindowActor(DOMString aName);
+
+  [ChromeOnly]
+  // aError should a nsresult.
+  boolean isClassifierBlockingErrorCode(unsigned long aError);
+};
+
+/**
+ * Holds information about Firefox running processes & threads.
+ *
+ * See widget/ProcInfo.h for fields documentation.
+ */
+enum ProcType {
+ "web",
+ "file",
+ "extension",
+ "privilegedabout",
+ "webLargeAllocation",
+ "gpu",
+ "rdd",
+ "socket",
+ "browser",
+ "unknown"
+};
+
+dictionary ThreadInfoDictionary {
+  long long tid = 0;
+  DOMString name = "";
+  unsigned long long cpuUser = 0;
+  unsigned long long cpuKernel = 0;
+};
+
+dictionary ChildProcInfoDictionary {
+  // System info
+  long long pid = 0;
+  DOMString filename = "";
+  unsigned long long virtualMemorySize = 0;
+  long long residentSetSize = 0;
+  unsigned long long cpuUser = 0;
+  unsigned long long cpuKernel = 0;
+  sequence<ThreadInfoDictionary> threads = [];
+  // Firefox info
+  unsigned long long ChildID = 0;
+  ProcType type = "web";
+};
+
+dictionary ParentProcInfoDictionary {
+  // System info
+  long long pid = 0;
+  DOMString filename = "";
+  unsigned long long virtualMemorySize = 0;
+  long long residentSetSize = 0;
+  unsigned long long cpuUser = 0;
+  unsigned long long cpuKernel = 0;
+  sequence<ThreadInfoDictionary> threads = [];
+  sequence<ChildProcInfoDictionary> children = [];
+  // Firefox info
+  ProcType type = "browser";
 };
 
 /**
  * Dictionaries duplicating IPDL types in dom/ipc/DOMTypes.ipdlh
  * Used by requestPerformanceMetrics
  */
-
 dictionary MediaMemoryInfoDictionary {
   unsigned long long audioSize = 0;
   unsigned long long videoSize = 0;
@@ -434,14 +543,12 @@ dictionary IOActivityDataDictionary {
  * (3) Update the methods on mozilla::OriginAttributesPattern, including matching.
  */
 dictionary OriginAttributesDictionary {
-  unsigned long appId = 0;
   unsigned long userContextId = 0;
   boolean inIsolatedMozBrowser = false;
   unsigned long privateBrowsingId = 0;
   DOMString firstPartyDomain = "";
 };
 dictionary OriginAttributesPatternDictionary {
-  unsigned long appId;
   unsigned long userContextId;
   boolean inIsolatedMozBrowser;
   unsigned long privateBrowsingId;
@@ -527,4 +634,13 @@ enum Base64URLDecodePadding {
 dictionary Base64URLDecodeOptions {
   /** Specifies the padding mode for decoding the input. */
   required Base64URLDecodePadding padding;
+};
+
+// Keep this in sync with PopupBlocker::PopupControlState!
+enum PopupBlockerState {
+  "openAllowed",
+  "openControlled",
+  "openBlocked",
+  "openAbused",
+  "openOverridden",
 };

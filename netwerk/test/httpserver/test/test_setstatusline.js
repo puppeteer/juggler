@@ -30,21 +30,26 @@ function run_test() {
   runHttpTests(tests, testComplete(srv));
 }
 
-
 /** ***********
  * UTILITIES *
  *************/
 
-function checkStatusLine(channel, httpMaxVer, httpMinVer, httpCode, statusText) {
+function checkStatusLine(
+  channel,
+  httpMaxVer,
+  httpMinVer,
+  httpCode,
+  statusText
+) {
   Assert.equal(channel.responseStatus, httpCode);
   Assert.equal(channel.responseStatusText, statusText);
 
-  var respMaj = {}, respMin = {};
+  var respMaj = {},
+    respMin = {};
   channel.getResponseVersion(respMaj, respMin);
   Assert.equal(respMaj.value, httpMaxVer);
   Assert.equal(respMin.value, httpMinVer);
 }
-
 
 /** *******
  * TESTS *
@@ -63,35 +68,30 @@ XPCOMUtils.defineLazyGetter(this, "tests", function() {
   ];
 });
 
-
 // /no/setstatusline
-function noSetstatusline(metadata, response) {
-}
-function startNoSetStatusLine(ch, cx) {
+function noSetstatusline(metadata, response) {}
+function startNoSetStatusLine(ch) {
   checkStatusLine(ch, 1, 1, 200, "OK");
 }
-function stop(ch, cx, status, data) {
+function stop(ch, status, data) {
   Assert.ok(Components.isSuccessCode(status));
 }
-
 
 // /http1_0
 function http1_0(metadata, response) {
   response.setStatusLine("1.0", 200, "OK");
 }
-function startHttp1_0(ch, cx) {
+function startHttp1_0(ch) {
   checkStatusLine(ch, 1, 0, 200, "OK");
 }
-
 
 // /http1_1
 function http1_1(metadata, response) {
   response.setStatusLine("1.1", 200, "OK");
 }
-function startHttp1_1(ch, cx) {
+function startHttp1_1(ch) {
   checkStatusLine(ch, 1, 1, 200, "OK");
 }
-
 
 // /invalidVersion
 function invalidVersion(metadata, response) {
@@ -101,11 +101,10 @@ function invalidVersion(metadata, response) {
     response.setHeader("Passed", "true", false);
   }
 }
-function startPassedTrue(ch, cx) {
+function startPassedTrue(ch) {
   checkStatusLine(ch, 1, 1, 200, "OK");
   Assert.equal(ch.getResponseHeader("Passed"), "true");
 }
-
 
 // /invalidStatus
 function invalidStatus(metadata, response) {
@@ -116,7 +115,6 @@ function invalidStatus(metadata, response) {
   }
 }
 
-
 // /invalidDescription
 function invalidDescription(metadata, response) {
   try {
@@ -126,21 +124,19 @@ function invalidDescription(metadata, response) {
   }
 }
 
-
 // /crazyCode
 function crazyCode(metadata, response) {
   response.setStatusLine("1.1", 617, "Crazy");
 }
-function startCrazy(ch, cx) {
+function startCrazy(ch) {
   checkStatusLine(ch, 1, 1, 617, "Crazy");
 }
-
 
 // /nullVersion
 function nullVersion(metadata, response) {
   response.setStatusLine(null, 255, "NULL");
 }
-function startNullVersion(ch, cx) {
+function startNullVersion(ch) {
   // currently, this server implementation defaults to 1.1
   checkStatusLine(ch, 1, 1, 255, "NULL");
 }

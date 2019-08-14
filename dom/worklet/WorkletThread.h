@@ -11,6 +11,7 @@
 #include "mozilla/CondVar.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/dom/WorkletImpl.h"
 #include "nsThread.h"
 
 class nsIRunnable;
@@ -23,7 +24,13 @@ class WorkletThread final : public nsThread, public nsIObserver {
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIOBSERVER
 
-  static already_AddRefed<WorkletThread> Create();
+  static already_AddRefed<WorkletThread> Create(WorkletImpl* aWorkletImpl);
+
+  // Threads that call EnsureCycleCollectedJSContext must call
+  // DeleteCycleCollectedJSContext::Get() before terminating.  Clients of
+  // Create() do not need to do this as Terminate() will ensure this happens.
+  static void EnsureCycleCollectedJSContext(JSRuntime* aParentRuntime);
+  static void DeleteCycleCollectedJSContext();
 
   static bool IsOnWorkletThread();
 
@@ -34,10 +41,10 @@ class WorkletThread final : public nsThread, public nsIObserver {
   void Terminate();
 
  private:
-  WorkletThread();
+  explicit WorkletThread(WorkletImpl* aWorkletImpl);
   ~WorkletThread();
 
-  void RunEventLoop(JSRuntime* aParentRuntime);
+  void RunEventLoop();
   class PrimaryRunnable;
 
   void TerminateInternal();
@@ -53,6 +60,8 @@ class WorkletThread final : public nsThread, public nsIObserver {
 
   NS_IMETHOD
   DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t) override;
+
+  const RefPtr<WorkletImpl> mWorkletImpl;
 
   bool mExitLoop;  // worklet execution thread
 

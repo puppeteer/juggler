@@ -77,9 +77,17 @@ struct UniformBlockInfo final {
         mBinding(&webgl->mIndexedUniformBufferBindings[0]) {}
 };
 
+struct FragOutputInfo final {
+  const uint8_t loc;
+  const nsCString userName;
+  const nsCString mappedName;
+  const TextureBaseType baseType;
+};
+
 struct CachedDrawFetchLimits final {
-  uint64_t maxVerts;
-  uint64_t maxInstances;
+  uint64_t maxVerts = 0;
+  uint64_t maxInstances = 0;
+  std::vector<BufferAndIndex> usedBuffers;
 };
 
 struct LinkedProgramInfo final : public RefCounted<LinkedProgramInfo>,
@@ -99,6 +107,8 @@ struct LinkedProgramInfo final : public RefCounted<LinkedProgramInfo>,
   std::vector<UniformInfo*> uniforms;            // Owns its contents.
   std::vector<UniformBlockInfo*> uniformBlocks;  // Owns its contents.
   std::vector<RefPtr<WebGLActiveInfo>> transformFeedbackVaryings;
+  std::unordered_map<uint8_t, const FragOutputInfo> fragOutputs;
+  uint8_t zLayerCount = 1;
 
   // Needed for draw call validation.
   std::vector<UniformInfo*> uniformSamplers;
@@ -106,11 +116,6 @@ struct LinkedProgramInfo final : public RefCounted<LinkedProgramInfo>,
   mutable std::vector<size_t> componentsPerTFVert;
 
   bool attrib0Active;
-
-  //////
-
-  // The maps for the frag data names to the translated names.
-  std::map<nsCString, const nsCString> fragDataMap;
 
   //////
 
@@ -129,8 +134,6 @@ struct LinkedProgramInfo final : public RefCounted<LinkedProgramInfo>,
   bool FindUniform(const nsCString& userName, nsCString* const out_mappedName,
                    size_t* const out_arrayIndex,
                    UniformInfo** const out_info) const;
-  bool MapFragDataName(const nsCString& userName,
-                       nsCString* const out_mappedName) const;
 };
 
 }  // namespace webgl
@@ -206,6 +209,9 @@ class WebGLProgram final : public nsWrapperCache,
     return mMostRecentLinkInfo.get();
   }
 
+  const auto& VertShader() const { return mVertShader; }
+  const auto& FragShader() const { return mFragShader; }
+
   WebGLContext* GetParentObject() const { return mContext; }
 
   virtual JSObject* WrapObject(JSContext* js,
@@ -226,7 +232,7 @@ class WebGLProgram final : public nsWrapperCache,
   WebGLRefPtr<WebGLShader> mFragShader;
   size_t mNumActiveTFOs;
 
-  std::map<nsCString, GLuint> mNextLink_BoundAttribLocs;
+  std::map<std::string, GLuint> mNextLink_BoundAttribLocs;
 
   std::vector<nsString> mNextLink_TransformFeedbackVaryings;
   GLenum mNextLink_TransformFeedbackBufferMode;

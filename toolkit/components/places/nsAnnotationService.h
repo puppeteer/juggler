@@ -12,13 +12,22 @@
 #include "nsCOMPtr.h"
 #include "nsServiceManagerUtils.h"
 #include "nsWeakReference.h"
-#include "nsToolkitCompsCID.h"
 #include "Database.h"
 #include "nsString.h"
 #include "mozilla/Attributes.h"
 
+namespace mozilla {
+namespace places {
+
+struct BookmarkData;
+
+}  // namespace places
+}  // namespace mozilla
+
 class nsAnnotationService final : public nsIAnnotationService,
                                   public nsSupportsWeakReference {
+  using BookmarkData = mozilla::places::BookmarkData;
+
  public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIANNOTATIONSERVICE
@@ -97,8 +106,6 @@ class nsAnnotationService final : public nsIAnnotationService,
                                  nsIVariant** _retval);
 
  public:
-  nsresult GetItemAnnotationNamesTArray(int64_t aItemId,
-                                        nsTArray<nsCString>* _result);
   nsresult RemoveItemAnnotations(int64_t aItemId);
 };
 

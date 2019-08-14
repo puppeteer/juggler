@@ -27,6 +27,7 @@ struct IdleRequestOptions;
 class MozQueryInterface;
 class PrecompiledScript;
 class Promise;
+struct WindowActorOptions;
 
 class ChromeUtils {
  private:
@@ -69,6 +70,9 @@ class ChromeUtils {
                               JS::MutableHandle<JSObject*> aRetval,
                               ErrorResult& aRv);
 
+  static void ReleaseAssert(GlobalObject& aGlobal, bool aCondition,
+                            const nsAString& aMessage);
+
   static void OriginAttributesToSuffix(
       GlobalObject& aGlobal, const dom::OriginAttributesDictionary& aAttrs,
       nsCString& aSuffix);
@@ -96,8 +100,7 @@ class ChromeUtils {
   static bool IsOriginAttributesEqualIgnoringFPD(
       const dom::OriginAttributesDictionary& aA,
       const dom::OriginAttributesDictionary& aB) {
-    return aA.mAppId == aB.mAppId &&
-           aA.mInIsolatedMozBrowser == aB.mInIsolatedMozBrowser &&
+    return aA.mInIsolatedMozBrowser == aB.mInIsolatedMozBrowser &&
            aA.mUserContextId == aB.mUserContextId &&
            aA.mPrivateBrowsingId == aB.mPrivateBrowsingId;
   }
@@ -107,9 +110,9 @@ class ChromeUtils {
       GlobalObject& aGlobal, const nsAString& aUrl,
       const dom::CompileScriptOptionsDictionary& aOptions, ErrorResult& aRv);
 
-  static MozQueryInterface* GenerateQI(
-      const GlobalObject& global, const Sequence<OwningStringOrIID>& interfaces,
-      ErrorResult& aRv);
+  static MozQueryInterface* GenerateQI(const GlobalObject& global,
+                                       const Sequence<JS::Value>& interfaces,
+                                       ErrorResult& aRv);
 
   static void WaiveXrays(GlobalObject& aGlobal, JS::HandleValue aVal,
                          JS::MutableHandleValue aRetval, ErrorResult& aRv);
@@ -137,6 +140,14 @@ class ChromeUtils {
   static already_AddRefed<Promise> RequestPerformanceMetrics(
       GlobalObject& aGlobal, ErrorResult& aRv);
 
+  static void SetPerfStatsCollectionMask(GlobalObject& aGlobal, uint64_t aMask);
+
+  static already_AddRefed<Promise> CollectPerfStats(GlobalObject& aGlobal,
+                                                    ErrorResult& aRv);
+
+  static already_AddRefed<Promise> RequestProcInfo(GlobalObject& aGlobal,
+                                                   ErrorResult& aRv);
+
   static void Import(const GlobalObject& aGlobal, const nsAString& aResourceURI,
                      const Optional<JS::Handle<JSObject*>>& aTargetObj,
                      JS::MutableHandle<JSObject*> aRetval, ErrorResult& aRv);
@@ -159,16 +170,28 @@ class ChromeUtils {
   static already_AddRefed<Promise> RequestIOActivity(GlobalObject& aGlobal,
                                                      ErrorResult& aRv);
 
-  static already_AddRefed<BrowsingContext> GetBrowsingContext(
-      GlobalObject& aGlobal, uint64_t id);
-
-  static void GetRootBrowsingContexts(
-      GlobalObject& aGlobal,
-      nsTArray<RefPtr<BrowsingContext>>& aBrowsingContexts);
-
   static bool HasReportingHeaderForOrigin(GlobalObject& global,
                                           const nsAString& aOrigin,
                                           ErrorResult& aRv);
+
+  static PopupBlockerState GetPopupControlState(GlobalObject& aGlobal);
+
+  static bool IsPopupTokenUnused(GlobalObject& aGlobal);
+
+  static double LastExternalProtocolIframeAllowed(GlobalObject& aGlobal);
+
+  static void ResetLastExternalProtocolIframeAllowed(GlobalObject& aGlobal);
+
+  static void RegisterWindowActor(const GlobalObject& aGlobal,
+                                  const nsAString& aName,
+                                  const WindowActorOptions& aOptions,
+                                  ErrorResult& aRv);
+
+  static void UnregisterWindowActor(const GlobalObject& aGlobal,
+                                    const nsAString& aName);
+
+  static bool IsClassifierBlockingErrorCode(GlobalObject& aGlobal,
+                                            uint32_t aError);
 };
 
 }  // namespace dom

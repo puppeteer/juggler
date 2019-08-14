@@ -8,9 +8,10 @@
 
 "use strict";
 
-const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/mochitest/test-console.html?_date=" +
-                 Date.now();
+const TEST_URI =
+  "http://example.com/browser/devtools/client/webconsole/" +
+  "test/mochitest/test-console.html?_date=" +
+  Date.now();
 const CONTEXT_MENU_ID = "#console-menu-copy-url";
 
 add_task(async function() {
@@ -23,17 +24,30 @@ add_task(async function() {
   info("Test Copy URL menu item for text log");
 
   info("Logging a text message in the content window");
-  const onLogMessage = waitForMessage(hud, "simple text message");
+  const onLogMessage = waitForMessage(hud, "stringLog");
   await ContentTask.spawn(gBrowser.selectedBrowser, null, () => {
-    content.wrappedJSObject.console.log("simple text message");
+    content.wrappedJSObject.stringLog();
   });
   let message = await onLogMessage;
   ok(message, "Text log found in the console");
 
   info("Open and check the context menu for the logged text message");
   let menuPopup = await openContextMenu(hud, message.node);
+
   let copyURLItem = menuPopup.querySelector(CONTEXT_MENU_ID);
   ok(!copyURLItem, "Copy URL menu item is hidden for a simple text message");
+
+  info("Open and check the context menu for the logged text message");
+  const locationElement = message.node.querySelector(
+    ".frame-link-source-inner"
+  );
+  menuPopup = await openContextMenu(hud, locationElement);
+  copyURLItem = menuPopup.querySelector(CONTEXT_MENU_ID);
+  ok(copyURLItem, "The Copy Link Location entry is displayed");
+
+  info("Click on Copy URL menu item and wait for clipboard to be updated");
+  await waitForClipboardPromise(() => copyURLItem.click(), TEST_URI);
+  ok(true, "Expected text was copied to the clipboard.");
 
   await hideContextMenu(hud);
   hud.ui.clearOutput();

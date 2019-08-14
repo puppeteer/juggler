@@ -23,7 +23,6 @@ namespace cache {
 using mozilla::Unused;
 using mozilla::ipc::AutoIPCStream;
 using mozilla::ipc::IPCStream;
-using mozilla::ipc::OptionalIPCStream;
 
 // ----------------------------------------------------------------------------
 
@@ -34,7 +33,7 @@ class ReadStream::Inner final : public ReadStream::Controllable {
  public:
   Inner(StreamControl* aControl, const nsID& aId, nsIInputStream* aStream);
 
-  void Serialize(CacheReadStreamOrVoid* aReadStreamOut,
+  void Serialize(Maybe<CacheReadStream>* aReadStreamOut,
                  nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList,
                  ErrorResult& aRv);
 
@@ -194,12 +193,12 @@ ReadStream::Inner::Inner(StreamControl* aControl, const nsID& aId,
 }
 
 void ReadStream::Inner::Serialize(
-    CacheReadStreamOrVoid* aReadStreamOut,
+    Maybe<CacheReadStream>* aReadStreamOut,
     nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList, ErrorResult& aRv) {
   MOZ_ASSERT(mOwningEventTarget->IsOnCurrentThread());
   MOZ_DIAGNOSTIC_ASSERT(aReadStreamOut);
-  *aReadStreamOut = CacheReadStream();
-  Serialize(&aReadStreamOut->get_CacheReadStream(), aStreamCleanupList, aRv);
+  aReadStreamOut->emplace(CacheReadStream());
+  Serialize(&aReadStreamOut->ref(), aStreamCleanupList, aRv);
 }
 
 void ReadStream::Inner::Serialize(
@@ -223,10 +222,12 @@ void ReadStream::Inner::Serialize(
     mControl->SerializeStream(aReadStreamOut, mStream, aStreamCleanupList);
   }
 
-  MOZ_DIAGNOSTIC_ASSERT(aReadStreamOut->stream().type() ==
-                            OptionalIPCStream::Tvoid_t ||
-                        aReadStreamOut->stream().get_IPCStream().type() ==
-                            IPCStream::TInputStreamParamsWithFds);
+  MOZ_DIAGNOSTIC_ASSERT(
+      aReadStreamOut->stream().isNothing() ||
+      (aReadStreamOut->stream().ref().stream().type() !=
+           mozilla::ipc::InputStreamParams::TIPCRemoteStreamParams &&
+       aReadStreamOut->stream().ref().stream().type() !=
+           mozilla::ipc::InputStreamParams::T__None));
 
   // We're passing ownership across the IPC barrier with the control, so
   // do not signal that the stream is closed here.
@@ -501,12 +502,12 @@ NS_IMPL_ISUPPORTS(cache::ReadStream, nsIInputStream, ReadStream);
 
 // static
 already_AddRefed<ReadStream> ReadStream::Create(
-    const CacheReadStreamOrVoid& aReadStreamOrVoid) {
-  if (aReadStreamOrVoid.type() == CacheReadStreamOrVoid::Tvoid_t) {
+    const Maybe<CacheReadStream>& aMaybeReadStream) {
+  if (aMaybeReadStream.isNothing()) {
     return nullptr;
   }
 
-  return Create(aReadStreamOrVoid.get_CacheReadStream());
+  return Create(aMaybeReadStream.ref());
 }
 
 // static
@@ -519,10 +520,12 @@ already_AddRefed<ReadStream> ReadStream::Create(
     return nullptr;
   }
 
-  MOZ_DIAGNOSTIC_ASSERT(aReadStream.stream().type() ==
-                            OptionalIPCStream::Tvoid_t ||
-                        aReadStream.stream().get_IPCStream().type() ==
-                            IPCStream::TInputStreamParamsWithFds);
+  MOZ_DIAGNOSTIC_ASSERT(
+      aReadStream.stream().isNothing() ||
+      (aReadStream.stream().ref().stream().type() !=
+           mozilla::ipc::InputStreamParams::TIPCRemoteStreamParams &&
+       aReadStream.stream().ref().stream().type() !=
+           mozilla::ipc::InputStreamParams::T__None));
 
   // Control is guaranteed to survive this method as ActorDestroy() cannot
   // run on this thread until we complete.
@@ -565,7 +568,7 @@ already_AddRefed<ReadStream> ReadStream::Create(
 }
 
 void ReadStream::Serialize(
-    CacheReadStreamOrVoid* aReadStreamOut,
+    Maybe<CacheReadStream>* aReadStreamOut,
     nsTArray<UniquePtr<AutoIPCStream>>& aStreamCleanupList, ErrorResult& aRv) {
   mInner->Serialize(aReadStreamOut, aStreamCleanupList, aRv);
 }

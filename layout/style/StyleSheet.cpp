@@ -23,6 +23,8 @@
 #include "mozilla/StyleSheetInlines.h"
 
 #include "mozAutoDocUpdate.h"
+#include "nsLayoutStylesheetCache.h"
+#include "SheetLoadData.h"
 
 namespace mozilla {
 
@@ -84,12 +86,12 @@ bool StyleSheet::HasRules() const {
   return Servo_StyleSheet_HasRules(Inner().mContents);
 }
 
-nsIDocument* StyleSheet::GetAssociatedDocument() const {
+Document* StyleSheet::GetAssociatedDocument() const {
   return mDocumentOrShadowRoot ? mDocumentOrShadowRoot->AsNode().OwnerDoc()
                                : nullptr;
 }
 
-nsIDocument* StyleSheet::GetComposedDoc() const {
+Document* StyleSheet::GetComposedDoc() const {
   return mDocumentOrShadowRoot
              ? mDocumentOrShadowRoot->AsNode().GetComposedDoc()
              : nullptr;
@@ -199,19 +201,20 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(StyleSheet)
 
 mozilla::dom::CSSStyleSheetParsingMode StyleSheet::ParsingModeDOM() {
-#define CHECK(X, Y)                                 \
+#define CHECK_MODE(X, Y)                            \
   static_assert(                                    \
       static_cast<int>(X) == static_cast<int>(Y),   \
       "mozilla::dom::CSSStyleSheetParsingMode and " \
       "mozilla::css::SheetParsingMode should have identical values");
 
-  CHECK(mozilla::dom::CSSStyleSheetParsingMode::Agent,
-        css::eAgentSheetFeatures);
-  CHECK(mozilla::dom::CSSStyleSheetParsingMode::User, css::eUserSheetFeatures);
-  CHECK(mozilla::dom::CSSStyleSheetParsingMode::Author,
-        css::eAuthorSheetFeatures);
+  CHECK_MODE(mozilla::dom::CSSStyleSheetParsingMode::Agent,
+             css::eAgentSheetFeatures);
+  CHECK_MODE(mozilla::dom::CSSStyleSheetParsingMode::User,
+             css::eUserSheetFeatures);
+  CHECK_MODE(mozilla::dom::CSSStyleSheetParsingMode::Author,
+             css::eAuthorSheetFeatures);
 
-#undef CHECK
+#undef CHECK_MODE
 
   return static_cast<mozilla::dom::CSSStyleSheetParsingMode>(mParsingMode);
 }
@@ -240,6 +243,10 @@ void StyleSheet::ApplicableStateChanged(bool aApplicable) {
 }
 
 void StyleSheet::SetDisabled(bool aDisabled) {
+  if (IsReadOnly()) {
+    return;
+  }
+
   if (aDisabled == Disabled()) {
     return;
   }
@@ -255,11 +262,11 @@ void StyleSheet::SetDisabled(bool aDisabled) {
   }
 }
 
-already_AddRefed<URLExtraData> StyleSheet::CreateURLExtraData() const {
-  RefPtr<URLExtraData> data = new URLExtraData(
-      GetBaseURI(), GetSheetURI(), Principal(), GetReferrerPolicy());
-  return data.forget();
+void StyleSheet::SetURLExtraData() {
+  Inner().mURLData = new URLExtraData(GetBaseURI(), GetSheetURI(), Principal(),
+                                      GetReferrerPolicy());
 }
+
 StyleSheetInfo::StyleSheetInfo(CORSMode aCORSMode,
                                ReferrerPolicy aReferrerPolicy,
                                const SRIMetadata& aIntegrity,
@@ -289,14 +296,17 @@ StyleSheetInfo::StyleSheetInfo(StyleSheetInfo& aCopy, StyleSheet* aPrimarySheet)
       mCORSMode(aCopy.mCORSMode),
       mReferrerPolicy(aCopy.mReferrerPolicy),
       mIntegrity(aCopy.mIntegrity),
-      mFirstChild()  // We don't rebuild the child because we're making a copy
-                     // without children.
-      ,
+      mFirstChild(),  // We don't rebuild the child because we're making a copy
+                      // without children.
       mSourceMapURL(aCopy.mSourceMapURL),
       mSourceMapURLFromComment(aCopy.mSourceMapURLFromComment),
       mSourceURL(aCopy.mSourceURL),
       mContents(Servo_StyleSheet_Clone(aCopy.mContents.get(), aPrimarySheet)
                     .Consume()),
+      // Cloning aCopy.mContents will still leave us with some references to
+      // data in shared memory (for example, any SelectorList objects will still
+      // be shared), so continue to keep it alive.
+      mSharedMemory(aCopy.mSharedMemory),
       mURLData(aCopy.mURLData)
 #ifdef DEBUG
       ,
@@ -309,7 +319,12 @@ StyleSheetInfo::StyleSheetInfo(StyleSheetInfo& aCopy, StyleSheet* aPrimarySheet)
   MOZ_COUNT_CTOR(StyleSheetInfo);
 }
 
-StyleSheetInfo::~StyleSheetInfo() { MOZ_COUNT_DTOR(StyleSheetInfo); }
+StyleSheetInfo::~StyleSheetInfo() {
+  MOZ_COUNT_DTOR(StyleSheetInfo);
+
+  // Drop the sheet contents before the shared memory.
+  mContents = nullptr;
+}
 
 StyleSheetInfo* StyleSheetInfo::CloneFor(StyleSheet* aPrimarySheet) {
   return new StyleSheetInfo(*this, aPrimarySheet);
@@ -320,9 +335,15 @@ MOZ_DEFINE_MALLOC_ENCLOSING_SIZE_OF(ServoStyleSheetMallocEnclosingSizeOf)
 
 size_t StyleSheetInfo::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
   size_t n = aMallocSizeOf(this);
-  n += Servo_StyleSheet_SizeOfIncludingThis(
-      ServoStyleSheetMallocSizeOf, ServoStyleSheetMallocEnclosingSizeOf,
-      mContents);
+
+  // If this sheet came from shared memory, then it will be counted by
+  // nsLayoutStylesheetCache in the parent process.
+  if (!mSharedMemory) {
+    n += Servo_StyleSheet_SizeOfIncludingThis(
+        ServoStyleSheetMallocSizeOf, ServoStyleSheetMallocEnclosingSizeOf,
+        mContents);
+  }
+
   return n;
 }
 
@@ -390,23 +411,49 @@ void StyleSheet::GetTitle(nsAString& aTitle) {
 }
 
 void StyleSheet::WillDirty() {
+  MOZ_ASSERT(!IsReadOnly());
+
   if (IsComplete()) {
     EnsureUniqueInner();
   }
 }
 
 void StyleSheet::AddStyleSet(ServoStyleSet* aStyleSet) {
-  NS_ASSERTION(!mStyleSets.Contains(aStyleSet), "style set already registered");
+  MOZ_DIAGNOSTIC_ASSERT(!mStyleSets.Contains(aStyleSet),
+                        "style set already registered");
   mStyleSets.AppendElement(aStyleSet);
 }
 
 void StyleSheet::DropStyleSet(ServoStyleSet* aStyleSet) {
-  DebugOnly<bool> found = mStyleSets.RemoveElement(aStyleSet);
-  NS_ASSERTION(found, "didn't find style set");
+  bool found = mStyleSets.RemoveElement(aStyleSet);
+  MOZ_DIAGNOSTIC_ASSERT(found, "didn't find style set");
+#ifndef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  Unused << found;
+#endif
 }
+
+#define NOTIFY(function_, args_)                           \
+  do {                                                     \
+    StyleSheet* current = this;                            \
+    do {                                                   \
+      for (ServoStyleSet * handle : current->mStyleSets) { \
+        handle->function_ args_;                           \
+      }                                                    \
+      if (auto* shadow = current->GetContainingShadow()) { \
+        shadow->function_ args_;                           \
+      }                                                    \
+      current = current->mParent;                          \
+    } while (current);                                     \
+  } while (0)
 
 void StyleSheet::EnsureUniqueInner() {
   MOZ_ASSERT(mInner->mSheets.Length() != 0, "unexpected number of outers");
+
+  if (IsReadOnly()) {
+    // Sheets that can't be modified don't need a unique inner.
+    return;
+  }
+
   mState |= State::ForcedUniqueInner;
 
   if (HasUniqueInner()) {
@@ -427,9 +474,7 @@ void StyleSheet::EnsureUniqueInner() {
   // let our containing style sets know that if we call
   // nsPresContext::EnsureSafeToHandOutCSSRules we will need to restyle the
   // document
-  for (ServoStyleSet* setHandle : mStyleSets) {
-    setHandle->SetNeedsRestyleAfterEnsureUniqueInner();
-  }
+  NOTIFY(StyleSheetCloned, (*this));
 }
 
 void StyleSheet::AppendAllChildSheets(nsTArray<StyleSheet*>& aArray) {
@@ -478,7 +523,7 @@ css::Rule* StyleSheet::GetDOMOwnerRule() const { return mOwnerRule; }
 uint32_t StyleSheet::InsertRule(const nsAString& aRule, uint32_t aIndex,
                                 nsIPrincipal& aSubjectPrincipal,
                                 ErrorResult& aRv) {
-  if (!AreRulesAvailable(aSubjectPrincipal, aRv)) {
+  if (IsReadOnly() || !AreRulesAvailable(aSubjectPrincipal, aRv)) {
     return 0;
   }
   return InsertRuleInternal(aRule, aIndex, aRv);
@@ -486,10 +531,34 @@ uint32_t StyleSheet::InsertRule(const nsAString& aRule, uint32_t aIndex,
 
 void StyleSheet::DeleteRule(uint32_t aIndex, nsIPrincipal& aSubjectPrincipal,
                             ErrorResult& aRv) {
-  if (!AreRulesAvailable(aSubjectPrincipal, aRv)) {
+  if (IsReadOnly() || !AreRulesAvailable(aSubjectPrincipal, aRv)) {
     return;
   }
   return DeleteRuleInternal(aIndex, aRv);
+}
+
+int32_t StyleSheet::AddRule(const nsAString& aSelector, const nsAString& aBlock,
+                            const Optional<uint32_t>& aIndex,
+                            nsIPrincipal& aSubjectPrincipal, ErrorResult& aRv) {
+  if (IsReadOnly() || !AreRulesAvailable(aSubjectPrincipal, aRv)) {
+    return -1;
+  }
+
+  nsAutoString rule;
+  rule.Append(aSelector);
+  rule.AppendLiteral(" { ");
+  if (!aBlock.IsEmpty()) {
+    rule.Append(aBlock);
+    rule.Append(' ');
+  }
+  rule.Append('}');
+
+  auto index =
+      aIndex.WasPassed() ? aIndex.Value() : GetCssRulesInternal()->Length();
+
+  InsertRuleInternal(rule, index, aRv);
+  // Always return -1.
+  return -1;
 }
 
 nsresult StyleSheet::DeleteRuleFromGroup(css::GroupRule* aGroup,
@@ -502,6 +571,10 @@ nsresult StyleSheet::DeleteRuleFromGroup(css::GroupRule* aGroup,
   // check that the rule actually belongs to this sheet!
   if (this != rule->GetStyleSheet()) {
     return NS_ERROR_INVALID_ARG;
+  }
+
+  if (IsReadOnly()) {
+    return NS_OK;
   }
 
   WillDirty();
@@ -523,25 +596,11 @@ dom::ShadowRoot* StyleSheet::GetContainingShadow() const {
   return mOwningNode->AsContent()->GetContainingShadow();
 }
 
-#define NOTIFY(function_, args_)                           \
-  do {                                                     \
-    StyleSheet* current = this;                            \
-    do {                                                   \
-      for (ServoStyleSet * handle : current->mStyleSets) { \
-        handle->function_ args_;                           \
-      }                                                    \
-      if (auto* shadow = current->GetContainingShadow()) { \
-        shadow->function_ args_;                           \
-      }                                                    \
-      current = current->mParent;                          \
-    } while (current);                                     \
-  } while (0)
-
 void StyleSheet::RuleAdded(css::Rule& aRule) {
   mState |= State::ModifiedRules;
   NOTIFY(RuleAdded, (*this, aRule));
 
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->StyleRuleAdded(this, &aRule);
   }
 }
@@ -550,7 +609,7 @@ void StyleSheet::RuleRemoved(css::Rule& aRule) {
   mState |= State::ModifiedRules;
   NOTIFY(RuleRemoved, (*this, aRule));
 
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->StyleRuleRemoved(this, &aRule);
   }
 }
@@ -559,7 +618,7 @@ void StyleSheet::RuleChanged(css::Rule* aRule) {
   mState |= State::ModifiedRules;
   NOTIFY(RuleChanged, (*this, aRule));
 
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->StyleRuleChanged(this, aRule);
   }
 }
@@ -575,6 +634,10 @@ nsresult StyleSheet::InsertRuleIntoGroup(const nsAString& aRule,
     return NS_ERROR_INVALID_ARG;
   }
 
+  if (IsReadOnly()) {
+    return NS_OK;
+  }
+
   WillDirty();
 
   nsresult result = InsertRuleIntoGroupInternal(aRule, aGroup, aIndex);
@@ -585,7 +648,7 @@ nsresult StyleSheet::InsertRuleIntoGroup(const nsAString& aRule,
 
 uint64_t StyleSheet::FindOwningWindowInnerID() const {
   uint64_t windowID = 0;
-  if (nsIDocument* doc = GetAssociatedDocument()) {
+  if (Document* doc = GetAssociatedDocument()) {
     windowID = doc->InnerWindowID();
   }
 
@@ -703,6 +766,7 @@ void StyleSheet::PrependStyleSheet(StyleSheet* aSheet) {
 
 void StyleSheet::PrependStyleSheetSilently(StyleSheet* aSheet) {
   MOZ_ASSERT(aSheet);
+  MOZ_ASSERT(!IsReadOnly());
 
   aSheet->mNext = Inner().mFirstChild;
   Inner().mFirstChild = aSheet;
@@ -806,7 +870,8 @@ JSObject* StyleSheet::WrapObject(JSContext* aCx,
   return dom::CSSStyleSheet_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ bool StyleSheet::RuleHasPendingChildSheet(css::Rule* aRule) {
+/* static */
+bool StyleSheet::RuleHasPendingChildSheet(css::Rule* aRule) {
   MOZ_ASSERT(aRule->Type() == dom::CSSRule_Binding::IMPORT_RULE);
   auto rule = static_cast<dom::CSSImportRule*>(aRule);
   if (StyleSheet* childSheet = rule->GetStyleSheet()) {
@@ -867,7 +932,7 @@ static bool AllowParallelParse(css::Loader* aLoader, nsIURI* aSheetURI) {
 
   // If the browser is recording CSS errors, we need to use the sequential path
   // because the parallel path doesn't support that.
-  nsIDocument* doc = aLoader->GetDocument();
+  Document* doc = aLoader->GetDocument();
   if (doc && css::ErrorReporter::ShouldReportErrors(*doc)) {
     return false;
   }
@@ -893,7 +958,7 @@ RefPtr<StyleSheetParsePromise> StyleSheet::ParseSheet(
   MOZ_ASSERT(aLoadData);
   MOZ_ASSERT(mParsePromise.IsEmpty());
   RefPtr<StyleSheetParsePromise> p = mParsePromise.Ensure(__func__);
-  Inner().mURLData = CreateURLExtraData();  // RefPtr
+  SetURLExtraData();
 
   const StyleUseCounters* useCounters =
       aLoader->GetDocument() ? aLoader->GetDocument()->GetStyleUseCounters()
@@ -940,7 +1005,7 @@ void StyleSheet::ParseSheetSync(
           ? aLoader->GetDocument()->GetStyleUseCounters()
           : nullptr;
 
-  Inner().mURLData = CreateURLExtraData();  // RefPtr
+  SetURLExtraData();
   Inner().mContents =
       Servo_StyleSheet_FromUTF8Bytes(
           aLoader, this, aLoadData, &aBytes, mParsingMode, Inner().mURLData,
@@ -965,10 +1030,17 @@ nsresult StyleSheet::ReparseSheet(const nsAString& aInput) {
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
 
+  // Allowing to modify UA sheets is dangerous (in the sense that C++ code
+  // relies on rules in those sheets), plus they're probably going to be shared
+  // across processes in which case this is directly a no-go.
+  if (IsReadOnly()) {
+    return NS_OK;
+  }
+
   // Hold strong ref to the CSSLoader in case the document update
   // kills the document
   RefPtr<css::Loader> loader;
-  if (nsIDocument* doc = GetAssociatedDocument()) {
+  if (Document* doc = GetAssociatedDocument()) {
     loader = doc->CSSLoader();
     NS_ASSERTION(loader, "Document with no CSS loader!");
   } else {
@@ -1099,6 +1171,8 @@ ServoCSSRuleList* StyleSheet::GetCssRulesInternal() {
 
 uint32_t StyleSheet::InsertRuleInternal(const nsAString& aRule, uint32_t aIndex,
                                         ErrorResult& aRv) {
+  MOZ_ASSERT(!IsReadOnly());
+
   // Ensure mRuleList is constructed.
   GetCssRulesInternal();
 
@@ -1119,6 +1193,8 @@ uint32_t StyleSheet::InsertRuleInternal(const nsAString& aRule, uint32_t aIndex,
 }
 
 void StyleSheet::DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv) {
+  MOZ_ASSERT(!IsReadOnly());
+
   // Ensure mRuleList is constructed.
   GetCssRulesInternal();
   if (aIndex >= mRuleList->Length()) {
@@ -1141,14 +1217,50 @@ void StyleSheet::DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv) {
 nsresult StyleSheet::InsertRuleIntoGroupInternal(const nsAString& aRule,
                                                  css::GroupRule* aGroup,
                                                  uint32_t aIndex) {
+  MOZ_ASSERT(!IsReadOnly());
+
   auto rules = static_cast<ServoCSSRuleList*>(aGroup->CssRules());
   MOZ_ASSERT(rules->GetParentRule() == aGroup);
   return rules->InsertRule(aRule, aIndex);
 }
 
-OriginFlags StyleSheet::GetOrigin() {
-  return static_cast<OriginFlags>(
-      Servo_StyleSheet_GetOrigin(Inner().mContents));
+StyleOrigin StyleSheet::GetOrigin() const {
+  return Servo_StyleSheet_GetOrigin(Inner().mContents);
+}
+
+void StyleSheet::SetSharedContents(nsLayoutStylesheetCache::Shm* aSharedMemory,
+                                   const ServoCssRules* aSharedRules) {
+  MOZ_ASSERT(aSharedMemory);
+  MOZ_ASSERT(!IsComplete());
+
+  SetURLExtraData();
+
+  // Hold a strong reference to the shared memory that aSharedRules comes
+  // from, so that we don't end up releasing the shared memory before the
+  // StyleSheetInner.
+  Inner().mSharedMemory = aSharedMemory;
+
+  Inner().mContents =
+      Servo_StyleSheet_FromSharedData(Inner().mURLData, aSharedRules).Consume();
+
+  // Don't call FinishParse(), since that tries to set source map URLs,
+  // which we don't have.
+}
+
+const ServoCssRules* StyleSheet::ToShared(
+    RawServoSharedMemoryBuilder* aBuilder) {
+  // Assert some things we assume when creating a StyleSheet using shared
+  // memory.
+  MOZ_ASSERT(GetReferrerPolicy() == net::RP_Unset);
+  MOZ_ASSERT(GetCORSMode() == CORS_NONE);
+  MOZ_ASSERT(Inner().mIntegrity.IsEmpty());
+  MOZ_ASSERT(nsContentUtils::IsSystemPrincipal(Principal()));
+
+  return Servo_SharedMemoryBuilder_AddStylesheet(aBuilder, Inner().mContents);
+}
+
+bool StyleSheet::IsReadOnly() const {
+  return IsComplete() && GetOrigin() == StyleOrigin::UserAgent;
 }
 
 }  // namespace mozilla

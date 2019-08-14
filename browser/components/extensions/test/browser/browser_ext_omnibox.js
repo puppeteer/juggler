@@ -2,6 +2,10 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+const { UrlbarTestUtils } = ChromeUtils.import(
+  "resource://testing-common/UrlbarTestUtils.jsm"
+);
+
 add_task(async function() {
   // This keyword needs to be unique to prevent history entries from unrelated
   // tests from appearing in the suggestions list.
@@ -9,8 +13,8 @@ add_task(async function() {
 
   let extension = ExtensionTestUtils.loadExtension({
     manifest: {
-      "omnibox": {
-        "keyword": keyword,
+      omnibox: {
+        keyword: keyword,
       },
     },
 
@@ -29,7 +33,7 @@ add_task(async function() {
         } else {
           suggestCallback = suggest;
         }
-        browser.test.sendMessage("on-input-changed-fired", {text});
+        browser.test.sendMessage("on-input-changed-fired", { text });
       });
 
       browser.omnibox.onInputCancelled.addListener(() => {
@@ -37,7 +41,10 @@ add_task(async function() {
       });
 
       browser.omnibox.onInputEntered.addListener((text, disposition) => {
-        browser.test.sendMessage("on-input-entered-fired", {text, disposition});
+        browser.test.sendMessage("on-input-entered-fired", {
+          text,
+          disposition,
+        });
       });
 
       browser.test.onMessage.addListener((msg, data) => {
@@ -72,35 +79,51 @@ add_task(async function() {
   async function expectEvent(event, expected = {}) {
     let actual = await extension.awaitMessage(event);
     if (expected.text) {
-      is(actual.text, expected.text,
-         `Expected "${event}" to have fired with text: "${expected.text}".`);
+      is(
+        actual.text,
+        expected.text,
+        `Expected "${event}" to have fired with text: "${expected.text}".`
+      );
     }
     if (expected.disposition) {
-      is(actual.disposition, expected.disposition,
-         `Expected "${event}" to have fired with disposition: "${expected.disposition}".`);
+      is(
+        actual.disposition,
+        expected.disposition,
+        `Expected "${event}" to have fired with disposition: "${
+          expected.disposition
+        }".`
+      );
     }
   }
 
-  async function waitForAutocompleteResultAt(index) {
-    let searchString = gURLBar.controller.searchString;
-    await BrowserTestUtils.waitForCondition(
-      () => gURLBar.popup.richlistbox.itemChildren.length > index &&
-            gURLBar.popup.richlistbox.itemChildren[index].getAttribute("ac-text") == searchString,
-      `Waiting for the autocomplete result for "${searchString}" at [${index}] to appear`);
+  async function waitForResult(index, searchString) {
+    let result = await UrlbarTestUtils.getDetailsOfResultAt(window, index);
     // Ensure the addition is complete, for proper mouse events on the entries.
-    await new Promise(resolve => window.requestIdleCallback(resolve, {timeout: 1000}));
-    return gURLBar.popup.richlistbox.itemChildren[index];
+    await new Promise(resolve =>
+      window.requestIdleCallback(resolve, { timeout: 1000 })
+    );
+    return result;
   }
 
-  async function promiseClickOnItem(item, details) {
+  async function promiseClickOnItem(index, details) {
     // The Address Bar panel is animated and updated on a timer, thus it may not
     // yet be listening to events when we try to click on it.  This uses a
     // polling strategy to repeat the click, if it doesn't go through.
     let clicked = false;
-    item.addEventListener("mousedown", () => { clicked = true; }, {once: true});
+    let element = await UrlbarTestUtils.waitForAutocompleteResultAt(
+      window,
+      index
+    );
+    element.addEventListener(
+      "mousedown",
+      () => {
+        clicked = true;
+      },
+      { once: true }
+    );
     while (!clicked) {
-      EventUtils.synthesizeMouseAtCenter(item, details);
-      await new Promise(r => window.requestIdleCallback(r, {timeout: 1000}));
+      EventUtils.synthesizeMouseAtCenter(element, details);
+      await new Promise(r => window.requestIdleCallback(r, { timeout: 1000 }));
     }
   }
 
@@ -111,11 +134,11 @@ add_task(async function() {
     EventUtils.sendString(" ");
     await expectEvent("on-input-started-fired");
     // Always use a different input at every invokation, so that
-    // waitForAutocompleteResultAt can distinguish different cases.
-    let char = ((inputSessionSerial++) % 10).toString();
+    // waitForResult can distinguish different cases.
+    let char = (inputSessionSerial++ % 10).toString();
     EventUtils.sendString(char);
 
-    await expectEvent("on-input-changed-fired", {text: char});
+    await expectEvent("on-input-changed-fired", { text: char });
     return char;
   }
 
@@ -145,18 +168,18 @@ add_task(async function() {
 
     // We should expect input changed events now that the keyword is active.
     EventUtils.sendString("b");
-    await expectEvent("on-input-changed-fired", {text: "b"});
+    await expectEvent("on-input-changed-fired", { text: "b" });
 
     EventUtils.sendString("c");
-    await expectEvent("on-input-changed-fired", {text: "bc"});
+    await expectEvent("on-input-changed-fired", { text: "bc" });
 
     EventUtils.synthesizeKey("KEY_Backspace");
-    await expectEvent("on-input-changed-fired", {text: "b"});
+    await expectEvent("on-input-changed-fired", { text: "b" });
 
     // Even though the input is <keyword><space> We should not expect an
     // input started event to fire since the keyword is active.
     EventUtils.synthesizeKey("KEY_Backspace");
-    await expectEvent("on-input-changed-fired", {text: ""});
+    await expectEvent("on-input-changed-fired", { text: "" });
 
     // Make the keyword inactive by hitting backspace.
     EventUtils.synthesizeKey("KEY_Backspace");
@@ -169,7 +192,7 @@ add_task(async function() {
 
     // onInputChanged should fire even if a space is entered.
     EventUtils.sendString(" ");
-    await expectEvent("on-input-changed-fired", {text: " "});
+    await expectEvent("on-input-changed-fired", { text: " " });
 
     // The active session should cancel if the input blurs.
     gURLBar.blur();
@@ -187,78 +210,94 @@ add_task(async function() {
     }
 
     let text = await startInputSession();
-    await waitForAutocompleteResultAt(0);
+    let result = await waitForResult(0);
 
-    let item = gURLBar.popup.richlistbox.itemChildren[0];
+    Assert.equal(
+      result.displayed.title,
+      expectedText,
+      `Expected heuristic result to have title: "${expectedText}".`
+    );
 
-    is(item.getAttribute("title"), expectedText,
-       `Expected heuristic result to have title: "${expectedText}".`);
-
-    is(item.getAttribute("displayurl"), `${keyword} ${text}`,
-       `Expected heuristic result to have displayurl: "${keyword} ${text}".`);
+    Assert.equal(
+      result.displayed.action,
+      `${keyword} ${text}`,
+      `Expected heuristic result to have displayurl: "${keyword} ${text}".`
+    );
 
     let promiseEvent = expectEvent("on-input-entered-fired", {
       text,
       disposition: "currentTab",
     });
-    await promiseClickOnItem(item, {});
+    await promiseClickOnItem(0, {});
     await promiseEvent;
   }
 
-  async function testDisposition(suggestionIndex, expectedDisposition, expectedText) {
+  async function testDisposition(
+    suggestionIndex,
+    expectedDisposition,
+    expectedText
+  ) {
     await startInputSession();
-    await waitForAutocompleteResultAt(suggestionIndex);
+    await waitForResult(suggestionIndex);
 
     // Select the suggestion.
-    EventUtils.synthesizeKey("KEY_ArrowDown", {repeat: suggestionIndex});
+    EventUtils.synthesizeKey("KEY_ArrowDown", { repeat: suggestionIndex });
 
     let promiseEvent = expectEvent("on-input-entered-fired", {
       text: expectedText,
       disposition: expectedDisposition,
     });
 
-    let item = gURLBar.popup.richlistbox.itemChildren[suggestionIndex];
     if (expectedDisposition == "currentTab") {
-      await promiseClickOnItem(item, {});
+      await promiseClickOnItem(suggestionIndex, {});
     } else if (expectedDisposition == "newForegroundTab") {
-      await promiseClickOnItem(item, {accelKey: true});
+      await promiseClickOnItem(suggestionIndex, { accelKey: true });
     } else if (expectedDisposition == "newBackgroundTab") {
-      await promiseClickOnItem(item, {shiftKey: true, accelKey: true});
+      await promiseClickOnItem(suggestionIndex, {
+        shiftKey: true,
+        accelKey: true,
+      });
     }
     await promiseEvent;
   }
 
   async function testSuggestions(info) {
-    extension.sendMessage("set-synchronous", {synchronous: false});
+    extension.sendMessage("set-synchronous", { synchronous: false });
     await extension.awaitMessage("set-synchronous-set");
 
-    function expectSuggestion({content, description}, index) {
-      let item = gURLBar.popup.richlistbox.itemChildren[index + 1]; // Skip the heuristic result.
-
-      ok(!!item, "Expected item to exist");
-      is(item.getAttribute("title"), description,
-         `Expected suggestion to have title: "${description}".`);
-
-      is(item.getAttribute("displayurl"), `${keyword} ${content}`,
-         `Expected suggestion to have displayurl: "${keyword} ${content}".`);
-    }
-
     let text = await startInputSession();
-    // Even if the results are generated asynchronously,
-    // the heuristic result should always be present.
-    await waitForAutocompleteResultAt(0);
+    if (!UrlbarPrefs.get("quantumbar")) {
+      // TODO Bug 1530338: We can't yet wait for a specific result for the
+      // quantumbar. Therefore we just skip this for now.
+      await waitForResult(0);
+    }
 
     extension.sendMessage(info.test);
     await extension.awaitMessage("test-ready");
 
-    await waitForAutocompleteResultAt(info.suggestions.length - 1);
-    info.suggestions.forEach(expectSuggestion);
+    await waitForResult(info.suggestions.length - 1);
+    // Skip the heuristic result.
+    let index = 1;
+    for (let { content, description } of info.suggestions) {
+      let item = await UrlbarTestUtils.getDetailsOfResultAt(window, index);
+      Assert.equal(
+        item.displayed.title,
+        description,
+        `Expected suggestion to have title: "${description}".`
+      );
+      Assert.equal(
+        item.displayed.action,
+        `${keyword} ${content}`,
+        `Expected suggestion to have displayurl: "${keyword} ${content}".`
+      );
+      index++;
+    }
 
     let promiseEvent = expectEvent("on-input-entered-fired", {
       text,
       disposition: "currentTab",
     });
-    await promiseClickOnItem(gURLBar.popup.richlistbox.itemChildren[0], {});
+    await promiseClickOnItem(0, {});
     await promiseEvent;
   }
 
@@ -269,17 +308,20 @@ add_task(async function() {
   await testInputEvents();
 
   // Test the heuristic result with default suggestions.
-  await testHeuristicResult("Generated extension", false /* setDefaultSuggestion */);
+  await testHeuristicResult(
+    "Generated extension",
+    false /* setDefaultSuggestion */
+  );
   await testHeuristicResult("hello world", true /* setDefaultSuggestion */);
   await testHeuristicResult("foo bar", true /* setDefaultSuggestion */);
 
   let suggestions = [
-    {content: "a", description: "select a"},
-    {content: "b", description: "select b"},
-    {content: "c", description: "select c"},
+    { content: "a", description: "select a" },
+    { content: "b", description: "select b" },
+    { content: "c", description: "select c" },
   ];
 
-  extension.sendMessage("set-suggestions", {suggestions});
+  extension.sendMessage("set-suggestions", { suggestions });
   await extension.awaitMessage("suggestions-set");
 
   // Test each suggestion and search disposition.
@@ -287,7 +329,7 @@ add_task(async function() {
   await testDisposition(2, "newForegroundTab", suggestions[1].content);
   await testDisposition(3, "newBackgroundTab", suggestions[2].content);
 
-  extension.sendMessage("set-suggestions", {suggestions});
+  extension.sendMessage("set-suggestions", { suggestions });
   await extension.awaitMessage("suggestions-set");
 
   // Test adding suggestions asynchronously.
@@ -300,18 +342,26 @@ add_task(async function() {
     suggestions,
   });
 
+  // When we're the first task to be added, `waitForExplicitFinish()` may not have
+  // been called yet. Let's just do that, otherwise the `monitorConsole` will make
+  // the test fail with a failing assertion.
+  SimpleTest.waitForExplicitFinish();
   // Start monitoring the console.
   let waitForConsole = new Promise(resolve => {
-    SimpleTest.monitorConsole(resolve, [{
-      message: new RegExp(`The keyword provided is already registered: "${keyword}"`),
-    }]);
+    SimpleTest.monitorConsole(resolve, [
+      {
+        message: new RegExp(
+          `The keyword provided is already registered: "${keyword}"`
+        ),
+      },
+    ]);
   });
 
   // Try registering another extension with the same keyword
   let extension2 = ExtensionTestUtils.loadExtension({
     manifest: {
-      "omnibox": {
-        "keyword": keyword,
+      omnibox: {
+        keyword: keyword,
       },
     },
   });

@@ -12,7 +12,6 @@ TEST_DIRS += ['test']
 DIRS += [ 'featurepolicy' ]
 
 EXPORTS.mozilla.dom += [
-    'ContentVerifier.h',
     'CSPEvalChecker.h',
     'FramingChecker.h',
     'nsContentSecurityManager.h',
@@ -21,6 +20,7 @@ EXPORTS.mozilla.dom += [
     'nsCSPUtils.h',
     'nsMixedContentBlocker.h',
     'PolicyTokenizer.h',
+    'ReferrerInfo.h',
     'SRICheck.h',
     'SRILogHelper.h',
     'SRIMetadata.h',
@@ -29,10 +29,10 @@ EXPORTS.mozilla.dom += [
 EXPORTS += [
     'nsContentSecurityManager.h',
     'nsMixedContentBlocker.h',
+    'ReferrerInfo.h',
 ]
 
 UNIFIED_SOURCES += [
-    'ContentVerifier.cpp',
     'CSPEvalChecker.cpp',
     'FramingChecker.cpp',
     'nsContentSecurityManager.cpp',
@@ -42,6 +42,7 @@ UNIFIED_SOURCES += [
     'nsCSPUtils.cpp',
     'nsMixedContentBlocker.cpp',
     'PolicyTokenizer.cpp',
+    'ReferrerInfo.cpp',
     'SRICheck.cpp',
     'SRIMetadata.cpp',
 ]
@@ -54,6 +55,7 @@ LOCAL_INCLUDES += [
     '/docshell/base',  # for nsDocShell.h
     '/netwerk/base',
     '/netwerk/protocol/data', # for nsDataHandler.h
+    '/netwerk/protocol/http', # for HttpBaseChannel.h
 ]
 
 include('/tools/fuzzing/libfuzzer-config.mozbuild')

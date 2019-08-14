@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::{iter::Extend, ops, marker::PhantomData, u32};
-use util::recycle_vec;
+use crate::util::Recycler;
 
 #[derive(Debug, Hash)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
@@ -35,6 +35,7 @@ impl<T> Index<T> {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
 pub struct Range<T> {
     pub start: Index<T>,
     pub end: Index<T>,
@@ -60,10 +61,11 @@ impl<T> Range<T> {
 
     /// Check for an empty `Range`
     pub fn is_empty(&self) -> bool {
-        !(self.start.0 < self.end.0)
+        self.start.0 >= self.end.0
     }
 }
 
+#[cfg_attr(feature = "capture", derive(Serialize))]
 pub struct Storage<T> {
     data: Vec<T>,
 }
@@ -89,8 +91,8 @@ impl<T> Storage<T> {
         Index(index as u32, PhantomData)
     }
 
-    pub fn recycle(&mut self) {
-        recycle_vec(&mut self.data);
+    pub fn recycle(&mut self, recycler: &mut Recycler) {
+        recycler.recycle_vec(&mut self.data);
     }
 
     pub fn extend<II: IntoIterator<Item=T>>(&mut self, iter: II) -> Range<T> {

@@ -1,4 +1,4 @@
-// |reftest| skip-if(!Intl.hasOwnProperty('Segmenter')) -- Intl.Segmenter is not enabled unconditionally
+// |reftest| skip -- Intl.Segmenter is not supported
 // Copyright 2018 Igalia, S.L. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -10,13 +10,12 @@ features: [Intl.Segmenter]
 ---*/
 
 const options = new Intl.Segmenter([], {
-  "granularity": "line",
+  "granularity": "word",
 }).resolvedOptions();
 
 const expected = [
   "locale",
   "granularity",
-  "lineBreakStyle",
 ];
 
 assert.compareArray(Object.getOwnPropertyNames(options), expected);

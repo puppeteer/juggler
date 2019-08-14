@@ -2,15 +2,18 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-var {
-  ExtensionError,
-  promiseObserved,
-} = ExtensionUtils;
+var { ExtensionError, promiseObserved } = ExtensionUtils;
 
-ChromeUtils.defineModuleGetter(this, "AddonManagerPrivate",
-                               "resource://gre/modules/AddonManager.jsm");
-ChromeUtils.defineModuleGetter(this, "SessionStore",
-                               "resource:///modules/sessionstore/SessionStore.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "AddonManagerPrivate",
+  "resource://gre/modules/AddonManager.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "SessionStore",
+  "resource:///modules/sessionstore/SessionStore.jsm"
+);
 
 const SS_ON_CLOSED_OBJECTS_CHANGED = "sessionstore-closed-objects-changed";
 
@@ -18,20 +21,28 @@ const getRecentlyClosed = (maxResults, extension) => {
   let recentlyClosed = [];
 
   // Get closed windows
+  // Closed private windows are not stored in sessionstore, we do
+  // not need to check access for that.
   let closedWindowData = SessionStore.getClosedWindowData(false);
   for (let window of closedWindowData) {
     recentlyClosed.push({
       lastModified: window.closedAt,
-      window: Window.convertFromSessionStoreClosedData(extension, window)});
+      window: Window.convertFromSessionStoreClosedData(extension, window),
+    });
   }
 
   // Get closed tabs
+  // Private closed tabs are in sessionstore if the owning window is still open .
   for (let window of windowTracker.browserWindows()) {
+    if (!extension.canAccessWindow(window)) {
+      continue;
+    }
     let closedTabData = SessionStore.getClosedTabData(window, false);
     for (let tab of closedTabData) {
       recentlyClosed.push({
         lastModified: tab.closedAt,
-        tab: Tab.convertFromSessionStoreClosedData(extension, tab, window)});
+        tab: Tab.convertFromSessionStoreClosedData(extension, tab, window),
+      });
     }
   }
 
@@ -40,14 +51,25 @@ const getRecentlyClosed = (maxResults, extension) => {
   return recentlyClosed.slice(0, maxResults);
 };
 
-const createSession = async function createSession(restored, extension, sessionId) {
+const createSession = async function createSession(
+  restored,
+  extension,
+  sessionId
+) {
   if (!restored) {
-    throw new ExtensionError(`Could not restore object using sessionId ${sessionId}.`);
+    throw new ExtensionError(
+      `Could not restore object using sessionId ${sessionId}.`
+    );
   }
-  let sessionObj = {lastModified: Date.now()};
+  let sessionObj = { lastModified: Date.now() };
   if (restored instanceof Ci.nsIDOMChromeWindow) {
-    await promiseObserved("sessionstore-single-window-restored", subject => subject == restored);
-    sessionObj.window = extension.windowManager.convert(restored, {populate: true});
+    await promiseObserved(
+      "sessionstore-single-window-restored",
+      subject => subject == restored
+    );
+    sessionObj.window = extension.windowManager.convert(restored, {
+      populate: true,
+    });
     return sessionObj;
   }
   sessionObj.tab = extension.tabManager.convert(restored);
@@ -66,42 +88,49 @@ const getEncodedKey = function getEncodedKey(extensionId, key) {
   return `extension:${extensionId}:${key}`;
 };
 
-const getTabParams = function getTabParams(extensionId, key, id) {
-  let encodedKey = getEncodedKey(extensionId, key);
-  let tab = tabTracker.getTab(id);
-
-  return {encodedKey, tab};
-};
-
-const getWindowParams = function getWindowParams(extensionId, key, id, context) {
-  let encodedKey = getEncodedKey(extensionId, key);
-  let win = windowTracker.getWindow(id, context);
-
-  return {encodedKey, win};
-};
-
 this.sessions = class extends ExtensionAPI {
   getAPI(context) {
-    let {extension} = context;
+    let { extension } = context;
+
+    function getTabParams(key, id) {
+      let encodedKey = getEncodedKey(extension.id, key);
+      let tab = tabTracker.getTab(id);
+      if (!context.canAccessWindow(tab.ownerGlobal)) {
+        throw new ExtensionError(`Invalid tab ID: ${id}`);
+      }
+      return { encodedKey, tab };
+    }
+
+    function getWindowParams(key, id) {
+      let encodedKey = getEncodedKey(extension.id, key);
+      let win = windowTracker.getWindow(id, context);
+      return { encodedKey, win };
+    }
+
     return {
       sessions: {
         async getRecentlyClosed(filter) {
           await SessionStore.promiseInitialized;
-          let maxResults = filter.maxResults == undefined ? this.MAX_SESSION_RESULTS : filter.maxResults;
+          let maxResults =
+            filter.maxResults == undefined
+              ? this.MAX_SESSION_RESULTS
+              : filter.maxResults;
           return getRecentlyClosed(maxResults, extension);
         },
 
         async forgetClosedTab(windowId, sessionId) {
           await SessionStore.promiseInitialized;
-          let window = context.extension.windowManager.get(windowId).window;
+          let window = windowTracker.getWindow(windowId, context);
           let closedTabData = SessionStore.getClosedTabData(window, false);
 
-          let closedTabIndex = closedTabData.findIndex((closedTab) => {
+          let closedTabIndex = closedTabData.findIndex(closedTab => {
             return closedTab.closedId === parseInt(sessionId, 10);
           });
 
           if (closedTabIndex < 0) {
-            throw new ExtensionError(`Could not find closed tab using sessionId ${sessionId}.`);
+            throw new ExtensionError(
+              `Could not find closed tab using sessionId ${sessionId}.`
+            );
           }
 
           SessionStore.forgetClosedTab(window, closedTabIndex);
@@ -111,12 +140,14 @@ this.sessions = class extends ExtensionAPI {
           await SessionStore.promiseInitialized;
           let closedWindowData = SessionStore.getClosedWindowData(false);
 
-          let closedWindowIndex = closedWindowData.findIndex((closedWindow) => {
+          let closedWindowIndex = closedWindowData.findIndex(closedWindow => {
             return closedWindow.closedId === parseInt(sessionId, 10);
           });
 
           if (closedWindowIndex < 0) {
-            throw new ExtensionError(`Could not find closed window using sessionId ${sessionId}.`);
+            throw new ExtensionError(
+              `Could not find closed window using sessionId ${sessionId}.`
+            );
           }
 
           SessionStore.forgetClosedWindow(closedWindowIndex);
@@ -127,7 +158,10 @@ this.sessions = class extends ExtensionAPI {
           let session, closedId;
           if (sessionId) {
             closedId = sessionId;
-            session = SessionStore.undoCloseById(closedId);
+            session = SessionStore.undoCloseById(
+              closedId,
+              extension.privateBrowsingAllowed
+            );
           } else if (SessionStore.lastClosedObjectType == "window") {
             // If the most recently closed object is a window, just undo closing the most recent window.
             session = SessionStore.undoCloseWindow(0);
@@ -142,26 +176,33 @@ this.sessions = class extends ExtensionAPI {
               }
             }
 
-            // Sort the tabs.
-            recentlyClosedTabs.sort((a, b) => b.closedAt - a.closedAt);
+            if (recentlyClosedTabs.length > 0) {
+              // Sort the tabs.
+              recentlyClosedTabs.sort((a, b) => b.closedAt - a.closedAt);
 
-            // Use the closedId of the most recently closed tab to restore it.
-            closedId = recentlyClosedTabs[0].closedId;
-            session = SessionStore.undoCloseById(closedId);
+              // Use the closedId of the most recently closed tab to restore it.
+              closedId = recentlyClosedTabs[0].closedId;
+              session = SessionStore.undoCloseById(
+                closedId,
+                extension.privateBrowsingAllowed
+              );
+            }
           }
           return createSession(session, extension, closedId);
         },
 
         setTabValue(tabId, key, value) {
-          let {tab, encodedKey} =
-            getTabParams(extension.id, key, tabId);
+          let { tab, encodedKey } = getTabParams(key, tabId);
 
-          SessionStore.setCustomTabValue(tab, encodedKey, JSON.stringify(value));
+          SessionStore.setCustomTabValue(
+            tab,
+            encodedKey,
+            JSON.stringify(value)
+          );
         },
 
         async getTabValue(tabId, key) {
-          let {tab, encodedKey} =
-            getTabParams(extension.id, key, tabId);
+          let { tab, encodedKey } = getTabParams(key, tabId);
 
           let value = SessionStore.getCustomTabValue(tab, encodedKey);
           if (value) {
@@ -172,22 +213,23 @@ this.sessions = class extends ExtensionAPI {
         },
 
         removeTabValue(tabId, key) {
-          let {tab, encodedKey} =
-            getTabParams(extension.id, key, tabId);
+          let { tab, encodedKey } = getTabParams(key, tabId);
 
           SessionStore.deleteCustomTabValue(tab, encodedKey);
         },
 
         setWindowValue(windowId, key, value) {
-          let {win, encodedKey} =
-            getWindowParams(extension.id, key, windowId, context);
+          let { win, encodedKey } = getWindowParams(key, windowId);
 
-          SessionStore.setCustomWindowValue(win, encodedKey, JSON.stringify(value));
+          SessionStore.setCustomWindowValue(
+            win,
+            encodedKey,
+            JSON.stringify(value)
+          );
         },
 
         async getWindowValue(windowId, key) {
-          let {win, encodedKey} =
-            getWindowParams(extension.id, key, windowId, context);
+          let { win, encodedKey } = getWindowParams(key, windowId);
 
           let value = SessionStore.getCustomWindowValue(win, encodedKey);
           if (value) {
@@ -198,8 +240,7 @@ this.sessions = class extends ExtensionAPI {
         },
 
         removeWindowValue(windowId, key) {
-          let {win, encodedKey} =
-            getWindowParams(extension.id, key, windowId, context);
+          let { win, encodedKey } = getWindowParams(key, windowId);
 
           SessionStore.deleteCustomWindowValue(win, encodedKey);
         },
@@ -214,7 +255,10 @@ this.sessions = class extends ExtensionAPI {
 
             Services.obs.addObserver(observer, SS_ON_CLOSED_OBJECTS_CHANGED);
             return () => {
-              Services.obs.removeObserver(observer, SS_ON_CLOSED_OBJECTS_CHANGED);
+              Services.obs.removeObserver(
+                observer,
+                SS_ON_CLOSED_OBJECTS_CHANGED
+              );
             };
           },
         }).api(),

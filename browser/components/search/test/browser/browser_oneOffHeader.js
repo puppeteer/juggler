@@ -3,13 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 // Tests that keyboard navigation in the search panel works as designed.
 
-const isMac = ("nsILocalFileMac" in Ci);
+const isMac = "nsILocalFileMac" in Ci;
 
 const searchPopup = document.getElementById("PopupSearchAutoComplete");
 
-const oneOffsContainer =
-  document.getAnonymousElementByAttribute(searchPopup, "anonid",
-                                          "search-one-off-buttons");
+const oneOffsContainer = searchPopup.searchOneOffsContainer;
 const searchSettings = oneOffsContainer.querySelector(".search-setting-button");
 
 var header = oneOffsContainer.querySelector(".search-panel-one-offs-header");
@@ -67,24 +65,42 @@ add_task(async function test_notext() {
   EventUtils.synthesizeMouseAtCenter(searchIcon, {});
   await promise;
 
-  is(header.getAttribute("selectedIndex"), 0,
-     "Header has the correct index selected with no search terms.");
+  is(
+    header.getAttribute("selectedIndex"),
+    0,
+    "Header has the correct index selected with no search terms."
+  );
 
-  is(getHeaderText(), "Search with:",
-     "Search header string is correct when no search terms have been entered");
+  is(
+    getHeaderText(),
+    "Search with:",
+    "Search header string is correct when no search terms have been entered"
+  );
 
   await synthesizeNativeMouseMove(searchSettings);
-  is(header.getAttribute("selectedIndex"), 0,
-     "Header has the correct index when no search terms have been entered and the Change Search Settings button is selected.");
-  is(getHeaderText(), "Search with:",
-     "Header has the correct text when no search terms have been entered and the Change Search Settings button is selected.");
+  is(
+    header.getAttribute("selectedIndex"),
+    0,
+    "Header has the correct index when no search terms have been entered and the Change Search Settings button is selected."
+  );
+  is(
+    getHeaderText(),
+    "Search with:",
+    "Header has the correct text when no search terms have been entered and the Change Search Settings button is selected."
+  );
 
   let buttons = getOneOffs();
   await synthesizeNativeMouseMove(buttons[0]);
-  is(header.getAttribute("selectedIndex"), 2,
-     "Header has the correct index selected when a search engine has been selected");
-  is(getHeaderText(), "Search " + buttons[0].engine.name,
-     "Is the header text correct when a search engine is selected and no terms have been entered.");
+  is(
+    header.getAttribute("selectedIndex"),
+    2,
+    "Header has the correct index selected when a search engine has been selected"
+  );
+  is(
+    getHeaderText(),
+    "Search " + buttons[0].engine.name,
+    "Is the header text correct when a search engine is selected and no terms have been entered."
+  );
 
   promise = promiseEvent(searchPopup, "popuphidden");
   info("Closing search panel");
@@ -102,37 +118,53 @@ add_task(async function test_text() {
   });
   await promise;
 
-  is(header.getAttribute("selectedIndex"), 1,
-     "Header has the correct index selected with a search term.");
-  is(getHeaderText(), "Search for foo with:",
-     "Search header string is correct when a search term has been entered");
+  is(
+    header.getAttribute("selectedIndex"),
+    1,
+    "Header has the correct index selected with a search term."
+  );
+  is(
+    getHeaderText(),
+    "Search for foo with:",
+    "Search header string is correct when a search term has been entered"
+  );
 
   let buttons = getOneOffs();
   await synthesizeNativeMouseMove(buttons[0]);
-  is(header.getAttribute("selectedIndex"), 2,
-     "Header has the correct index selected when a search engine has been selected");
-  is(getHeaderText(), "Search " + buttons[0].engine.name,
-     "Is the header text correct when search terms are entered after a search engine has been selected.");
+  is(
+    header.getAttribute("selectedIndex"),
+    2,
+    "Header has the correct index selected when a search engine has been selected"
+  );
+  is(
+    getHeaderText(),
+    "Search " + buttons[0].engine.name,
+    "Is the header text correct when search terms are entered after a search engine has been selected."
+  );
 
   await synthesizeNativeMouseMove(searchSettings);
-  is(header.getAttribute("selectedIndex"), 1,
-     "Header has the correct index selected when search terms have been entered and the Change Search Settings button is selected.");
-  is(getHeaderText(), "Search for foo with:",
-     "Header has the correct text when search terms have been entered and the Change Search Settings button is selected.");
+  is(
+    header.getAttribute("selectedIndex"),
+    1,
+    "Header has the correct index selected when search terms have been entered and the Change Search Settings button is selected."
+  );
+  is(
+    getHeaderText(),
+    "Search for foo with:",
+    "Header has the correct text when search terms have been entered and the Change Search Settings button is selected."
+  );
 
   // Click the "Foo Search" header at the top of the popup and make sure it
   // loads the search results.
-  let searchbarEngine =
-    document.getAnonymousElementByAttribute(searchPopup, "anonid",
-                                            "searchbar-engine");
-
+  let searchbarEngine = searchPopup.searchbarEngine;
   await synthesizeNativeMouseMove(searchbarEngine);
   SimpleTest.executeSoon(() => {
     EventUtils.synthesizeMouseAtCenter(searchbarEngine, {});
   });
 
-  let url = Services.search.defaultEngine
-                           .getSubmission(searchbar.textbox.value).uri.spec;
+  let url = (await Services.search.getDefault()).getSubmission(
+    searchbar.textbox.value
+  ).uri.spec;
   await promiseTabLoadEvent(gBrowser.selectedTab, url);
 
   // Move the cursor out of the panel area to avoid messing with other tests.

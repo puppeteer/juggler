@@ -5,71 +5,48 @@
 "use strict";
 
 const { Cc, Ci } = require("chrome");
-loader.lazyImporter(this, "BrowserToolboxProcess",
-  "resource://devtools/client/framework/ToolboxProcess.jsm");
-loader.lazyImporter(this, "AddonManager", "resource://gre/modules/AddonManager.jsm");
+const Services = require("Services");
+loader.lazyImporter(
+  this,
+  "AddonManager",
+  "resource://gre/modules/AddonManager.jsm"
+);
+loader.lazyRequireGetter(
+  this,
+  "FileUtils",
+  "resource://gre/modules/FileUtils.jsm",
+  true
+);
 
-const {TargetFactory} = require("devtools/client/framework/target");
-const {Toolbox} = require("devtools/client/framework/toolbox");
+const { Toolbox } = require("devtools/client/framework/toolbox");
+const { gDevTools } = require("devtools/client/framework/devtools");
 
-const {gDevTools} = require("devtools/client/framework/devtools");
+const { PREFERENCES } = require("../constants");
 
-let browserToolboxProcess = null;
-let remoteAddonToolbox = null;
-function closeToolbox() {
-  if (browserToolboxProcess) {
-    browserToolboxProcess.close();
-  }
-
-  if (remoteAddonToolbox) {
-    remoteAddonToolbox.destroy();
-  }
-}
-
-/**
- * Start debugging an addon in the current instance of Firefox.
- *
- * @param {String} addonID
- *        String id of the addon to debug.
- */
-exports.debugLocalAddon = async function(addonID) {
-  // Close previous addon debugging toolbox.
-  closeToolbox();
-
-  browserToolboxProcess = BrowserToolboxProcess.init({
-    addonID,
-    onClose: () => {
-      browserToolboxProcess = null;
-    },
-  });
-};
+let addonToolbox = null;
 
 /**
- * Start debugging an addon in a remote instance of Firefox.
+ * Start debugging an addon.
  *
  * @param {String} id
  *        The addon id to debug.
  * @param {DebuggerClient} client
- *        Required for remote debugging.
+ *        Required for debugging.
  */
-exports.debugRemoteAddon = async function(id, client) {
-  const addonTargetFront = await client.mainRoot.getAddon({ id });
+exports.debugAddon = async function(id, client) {
+  const addonFront = await client.mainRoot.getAddon({ id });
+
+  const target = await addonFront.connect();
 
   // Close previous addon debugging toolbox.
-  closeToolbox();
-
-  const options = {
-    activeTab: addonTargetFront,
-    chrome: true,
-    client,
-  };
-
-  const target = await TargetFactory.forRemoteTab(options);
+  if (addonToolbox) {
+    addonToolbox.destroy();
+  }
 
   const hostType = Toolbox.HostType.WINDOW;
-  remoteAddonToolbox = await gDevTools.showToolbox(target, null, hostType);
-  remoteAddonToolbox.once("destroy", () => {
-    remoteAddonToolbox = null;
+  addonToolbox = await gDevTools.showToolbox(target, null, hostType);
+  addonToolbox.once("destroy", () => {
+    addonToolbox = null;
   });
 };
 
@@ -120,6 +97,19 @@ exports.openTemporaryExtension = function(win, message) {
   return new Promise(resolve => {
     const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
     fp.init(win, message, Ci.nsIFilePicker.modeOpen);
+
+    // Try to set the last directory used as "displayDirectory".
+    try {
+      const lastDirPath = Services.prefs.getCharPref(
+        PREFERENCES.TEMPORARY_EXTENSION_PATH,
+        ""
+      );
+      const lastDir = new FileUtils.File(lastDirPath);
+      fp.displayDirectory = lastDir;
+    } catch (e) {
+      // Empty or invalid value, nothing to handle.
+    }
+
     fp.open(res => {
       if (res == Ci.nsIFilePicker.returnCancel || !fp.file) {
         return;
@@ -127,10 +117,19 @@ exports.openTemporaryExtension = function(win, message) {
       let file = fp.file;
       // AddonManager.installTemporaryAddon accepts either
       // addon directory or final xpi file.
-      if (!file.isDirectory() &&
-          !file.leafName.endsWith(".xpi") && !file.leafName.endsWith(".zip")) {
+      if (
+        !file.isDirectory() &&
+        !file.leafName.endsWith(".xpi") &&
+        !file.leafName.endsWith(".zip")
+      ) {
         file = file.parent;
       }
+
+      // We are about to resolve, store the path to the file for the next call.
+      Services.prefs.setCharPref(
+        PREFERENCES.TEMPORARY_EXTENSION_PATH,
+        file.path
+      );
 
       resolve(file);
     });

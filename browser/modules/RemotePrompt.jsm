@@ -5,22 +5,33 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = [ "RemotePrompt" ];
+var EXPORTED_SYMBOLS = ["RemotePrompt"];
 
-ChromeUtils.defineModuleGetter(this, "PromptUtils",
-                               "resource://gre/modules/SharedPromptUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "Services",
-                               "resource://gre/modules/Services.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "PromptUtils",
+  "resource://gre/modules/SharedPromptUtils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "Services",
+  "resource://gre/modules/Services.jsm"
+);
 
 var RemotePrompt = {
-  // Listeners are added in nsBrowserGlue.js
+  // Listeners are added in BrowserGlue.jsm
   receiveMessage(message) {
     switch (message.name) {
       case "Prompt:Open":
-        if (message.data.uri) {
-          this.openModalWindow(message.data, message.target);
-        } else {
+        const COMMON_DIALOG = "chrome://global/content/commonDialog.xul";
+        const SELECT_DIALOG = "chrome://global/content/selectDialog.xul";
+
+        if (message.data.tabPrompt) {
           this.openTabPrompt(message.data, message.target);
+        } else {
+          let uri =
+            message.data.promptType == "select" ? SELECT_DIALOG : COMMON_DIALOG;
+          this.openModalWindow(uri, message.data, message.target);
         }
         break;
     }
@@ -38,27 +49,34 @@ var RemotePrompt = {
       // appendPrompt call below. In that case, newPrompt will be
       // undefined. We set the needRemove flag to remember to remove
       // it right after we've finished adding it.
-      if (newPrompt)
+      if (newPrompt) {
         tabPrompt.removePrompt(newPrompt);
-      else
+      } else {
         needRemove = true;
+      }
 
       PromptUtils.fireDialogEvent(window, "DOMModalDialogClosed", browser);
       browser.messageManager.sendAsyncMessage("Prompt:Close", args);
     }
 
-    browser.messageManager.addMessageListener("Prompt:ForceClose", function listener(message) {
-      // If this was for another prompt in the same tab, ignore it.
-      if (message.data._remoteId !== promptId) {
-        return;
-      }
+    browser.messageManager.addMessageListener(
+      "Prompt:ForceClose",
+      function listener(message) {
+        // If this was for another prompt in the same tab, ignore it.
+        if (message.data._remoteId !== promptId) {
+          return;
+        }
 
-      browser.messageManager.removeMessageListener("Prompt:ForceClose", listener);
+        browser.messageManager.removeMessageListener(
+          "Prompt:ForceClose",
+          listener
+        );
 
-      if (newPrompt) {
-        newPrompt.abortPrompt();
+        if (newPrompt) {
+          newPrompt.abortPrompt();
+        }
       }
-    });
+    );
 
     try {
       let eventDetail = {
@@ -66,7 +84,12 @@ var RemotePrompt = {
         promptPrincipal: args.promptPrincipal,
         inPermitUnload: args.inPermitUnload,
       };
-      PromptUtils.fireDialogEvent(window, "DOMWillOpenModalDialog", browser, eventDetail);
+      PromptUtils.fireDialogEvent(
+        window,
+        "DOMWillOpenModalDialog",
+        browser,
+        eventDetail
+      );
 
       args.promptActive = true;
 
@@ -80,18 +103,24 @@ var RemotePrompt = {
       // there's other stuff in nsWindowWatcher::OpenWindowInternal
       // that we might need to do here as well.
     } catch (ex) {
+      Cu.reportError(ex);
       onPromptClose(true);
     }
   },
 
-  openModalWindow(args, browser) {
+  openModalWindow(uri, args, browser) {
     let window = browser.ownerGlobal;
     try {
       PromptUtils.fireDialogEvent(window, "DOMWillOpenModalDialog", browser);
       let bag = PromptUtils.objectToPropBag(args);
 
-      Services.ww.openWindow(window, args.uri, "_blank",
-                             "centerscreen,chrome,modal,titlebar", bag);
+      Services.ww.openWindow(
+        window,
+        uri,
+        "_blank",
+        "centerscreen,chrome,modal,titlebar",
+        bag
+      );
 
       PromptUtils.propBagToObject(bag, args);
     } finally {

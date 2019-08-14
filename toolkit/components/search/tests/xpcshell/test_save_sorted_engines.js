@@ -13,24 +13,23 @@
  * and configuration of Firefox.
  */
 
-function run_test() {
+add_task(async function setup() {
   useHttpServer();
-
-  run_next_test();
-}
+  await AddonTestUtils.promiseStartupManager();
+});
 
 add_task(async function test_save_sorted_engines() {
   let [engine1, engine2] = await addTestEngines([
     { name: "Test search engine", xmlFileName: "engine.xml" },
-    { name: "A second test engine", xmlFileName: "engine2.xml"},
+    { name: "A second test engine", xmlFileName: "engine2.xml" },
   ]);
   await promiseAfterCache();
 
   let search = Services.search;
 
   // Test moving the engines
-  search.moveEngine(engine1, 0);
-  search.moveEngine(engine2, 1);
+  await search.moveEngine(engine1, 0);
+  await search.moveEngine(engine2, 1);
 
   // Changes should be commited immediately
   await promiseAfterCache();
@@ -51,8 +50,11 @@ add_task(async function test_save_sorted_engines() {
   Assert.equal(metadata["a-second-test-engine"].order, 1);
 
   // Test adding a new engine
-  search.addEngineWithDetails("foo", "", "foo", "", "GET",
-                              "http://searchget/?search={searchTerms}");
+  search.addEngineWithDetails("foo", {
+    alias: "foo",
+    method: "GET",
+    template: "http://searchget/?search={searchTerms}",
+  });
   await promiseAfterCache();
   info("Commit complete after addEngineWithDetails");
 

@@ -22,6 +22,7 @@ import android.os.Parcelable;
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
 import android.util.Log;
+import android.widget.Toast;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -90,6 +91,7 @@ public class FilePicker implements BundleEventListener {
                         // TODO: Figure out which permissions have been denied and use that
                         // knowledge for availPermissions. For now we assume we don't have any
                         // permissions at all (bug 1411014).
+                        Toast.makeText(context, context.getString(R.string.filepicker_permission_denied), Toast.LENGTH_LONG).show();
                         showFilePickerAsync(title, "*/*", new String[0], isModeOpenMultiple, new ResultHandler() {
                             @Override
                             public void gotFile(final String filename) {
@@ -114,13 +116,13 @@ public class FilePicker implements BundleEventListener {
 
     private static String[] getPermissionsForMimeType(final String mimeType) {
         if (mimeType.startsWith("audio/")) {
-            return new String[] { Manifest.permission.READ_EXTERNAL_STORAGE };
+            return new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE };
         } else if (mimeType.startsWith("image/")) {
-            return new String[] { Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE };
+            return new String[] { Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE };
         } else if (mimeType.startsWith("video/")) {
-            return new String[] { Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE };
+            return new String[] { Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE };
         }
-        return new String[] { Manifest.permission.CAMERA, Manifest.permission.READ_EXTERNAL_STORAGE };
+        return new String[] { Manifest.permission.CAMERA, Manifest.permission.WRITE_EXTERNAL_STORAGE };
     }
 
     private static boolean hasPermissionsForMimeType(final String mimeType, final String[] availPermissions) {

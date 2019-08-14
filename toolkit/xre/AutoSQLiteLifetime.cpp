@@ -7,11 +7,21 @@
 #include "AutoSQLiteLifetime.h"
 #include "sqlite3.h"
 
-#ifdef MOZ_STORAGE_MEMORY
-#include "mozmemory.h"
-#ifdef MOZ_DMD
-#include "DMD.h"
-#endif
+#ifdef MOZ_MEMORY
+#  include "mozmemory.h"
+#  ifdef MOZ_DMD
+#    include "nsIMemoryReporter.h"
+#    include "DMD.h"
+
+namespace mozilla {
+namespace storage {
+extern mozilla::Atomic<size_t> gSqliteMemoryUsed;
+}
+}  // namespace mozilla
+
+using mozilla::storage::gSqliteMemoryUsed;
+
+#  endif
 
 namespace {
 
@@ -33,7 +43,7 @@ namespace {
 // from the standard ones -- they use int instead of size_t.  But we don't need
 // a wrapper for free.
 
-#ifdef MOZ_DMD
+#  ifdef MOZ_DMD
 
 // sqlite does its own memory accounting, and we use its numbers in our memory
 // reporters.  But we don't want sqlite's heap blocks to show up in DMD's
@@ -51,27 +61,27 @@ namespace {
 MOZ_DEFINE_MALLOC_SIZE_OF_ON_ALLOC(SqliteMallocSizeOfOnAlloc)
 MOZ_DEFINE_MALLOC_SIZE_OF_ON_FREE(SqliteMallocSizeOfOnFree)
 
-#endif
+#  endif
 
-static void *sqliteMemMalloc(int n) {
-  void *p = ::malloc(n);
-#ifdef MOZ_DMD
+static void* sqliteMemMalloc(int n) {
+  void* p = ::malloc(n);
+#  ifdef MOZ_DMD
   gSqliteMemoryUsed += SqliteMallocSizeOfOnAlloc(p);
-#endif
+#  endif
   return p;
 }
 
-static void sqliteMemFree(void *p) {
-#ifdef MOZ_DMD
+static void sqliteMemFree(void* p) {
+#  ifdef MOZ_DMD
   gSqliteMemoryUsed -= SqliteMallocSizeOfOnFree(p);
-#endif
+#  endif
   ::free(p);
 }
 
-static void *sqliteMemRealloc(void *p, int n) {
-#ifdef MOZ_DMD
+static void* sqliteMemRealloc(void* p, int n) {
+#  ifdef MOZ_DMD
   gSqliteMemoryUsed -= SqliteMallocSizeOfOnFree(p);
-  void *pnew = ::realloc(p, n);
+  void* pnew = ::realloc(p, n);
   if (pnew) {
     gSqliteMemoryUsed += SqliteMallocSizeOfOnAlloc(pnew);
   } else {
@@ -79,12 +89,12 @@ static void *sqliteMemRealloc(void *p, int n) {
     gSqliteMemoryUsed += SqliteMallocSizeOfOnAlloc(p);
   }
   return pnew;
-#else
+#  else
   return ::realloc(p, n);
-#endif
+#  endif
 }
 
-static int sqliteMemSize(void *p) { return ::moz_malloc_usable_size(p); }
+static int sqliteMemSize(void* p) { return ::moz_malloc_usable_size(p); }
 
 static int sqliteMemRoundup(int n) {
   n = malloc_good_size(n);
@@ -95,9 +105,9 @@ static int sqliteMemRoundup(int n) {
   return n <= 8 ? 8 : n;
 }
 
-static int sqliteMemInit(void *p) { return 0; }
+static int sqliteMemInit(void* p) { return 0; }
 
-static void sqliteMemShutdown(void *p) {}
+static void sqliteMemShutdown(void* p) {}
 
 const sqlite3_mem_methods memMethods = {
     &sqliteMemMalloc,  &sqliteMemFree, &sqliteMemRealloc,  &sqliteMemSize,
@@ -105,7 +115,7 @@ const sqlite3_mem_methods memMethods = {
 
 }  // namespace
 
-#endif  // MOZ_STORAGE_MEMORY
+#endif  // MOZ_MEMORY
 
 namespace mozilla {
 
@@ -114,7 +124,7 @@ AutoSQLiteLifetime::AutoSQLiteLifetime() {
     MOZ_CRASH("multiple instances of AutoSQLiteLifetime constructed!");
   }
 
-#ifdef MOZ_STORAGE_MEMORY
+#ifdef MOZ_MEMORY
   sResult = ::sqlite3_config(SQLITE_CONFIG_MALLOC, &memMethods);
 #else
   sResult = SQLITE_OK;

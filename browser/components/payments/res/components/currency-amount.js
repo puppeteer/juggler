@@ -2,21 +2,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict";
-
 /**
  * <currency-amount value="7.5" currency="USD" display-code></currency-amount>
  */
 
 import ObservedPropertiesMixin from "../mixins/ObservedPropertiesMixin.js";
 
-export default class CurrencyAmount extends ObservedPropertiesMixin(HTMLElement) {
+export default class CurrencyAmount extends ObservedPropertiesMixin(
+  HTMLElement
+) {
   static get observedAttributes() {
-    return [
-      "currency",
-      "display-code",
-      "value",
-    ];
+    return ["currency", "display-code", "value"];
   }
 
   constructor() {

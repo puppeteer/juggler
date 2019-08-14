@@ -34,14 +34,14 @@
 #include "harfbuzz/hb.h"
 #include "mozilla/gfx/2D.h"
 #include "nsColor.h"
+#include "nsFontMetrics.h"
 #include "mozilla/ServoUtils.h"
 
 typedef struct _cairo cairo_t;
 typedef struct _cairo_scaled_font cairo_scaled_font_t;
-// typedef struct gr_face            gr_face;
 
 #ifdef DEBUG
-#include <stdio.h>
+#  include <stdio.h>
 #endif
 
 class gfxContext;
@@ -60,11 +60,11 @@ class gfxMathTable;
 // The skew factor used for synthetic-italic [oblique] fonts;
 // we use a platform-dependent value to harmonize with the platform's own APIs.
 #ifdef XP_WIN
-#define OBLIQUE_SKEW_FACTOR 0.3f
+#  define OBLIQUE_SKEW_FACTOR 0.3f
 #elif defined(MOZ_WIDGET_GTK)
-#define OBLIQUE_SKEW_FACTOR 0.2f
+#  define OBLIQUE_SKEW_FACTOR 0.2f
 #else
-#define OBLIQUE_SKEW_FACTOR 0.25f
+#  define OBLIQUE_SKEW_FACTOR 0.25f
 #endif
 
 struct gfxTextRunDrawCallbacks;
@@ -148,6 +148,11 @@ struct gfxFontStyle {
 
   // The style of font
   FontSlantStyle style;
+
+  // Whether face-selection properties weight/style/stretch are all 'normal'
+  bool IsNormalStyle() const {
+    return weight.IsNormal() && style.IsNormal() && stretch.IsNormal();
+  }
 
   // We pack these two small-integer fields into a single byte to avoid
   // overflowing an 8-byte boundary [in a 64-bit build] and ending up with
@@ -280,7 +285,7 @@ class gfxFontCacheExpirationTracker
  public:
   enum { FONT_TIMEOUT_SECONDS = 10 };
 
-  gfxFontCacheExpirationTracker(nsIEventTarget* aEventTarget)
+  explicit gfxFontCacheExpirationTracker(nsIEventTarget* aEventTarget)
       : ExpirationTrackerImpl<gfxFont, 3, Lock, AutoLock>(
             FONT_TIMEOUT_SECONDS * 1000, "gfxFontCache", aEventTarget) {}
 };
@@ -362,7 +367,7 @@ class gfxFontCache final : private gfxFontCacheExpirationTracker {
 
   // This gets called when the timeout has expired on a zero-refcount
   // font; we just delete it.
-  virtual void NotifyExpiredLocked(gfxFont* aFont, const AutoLock&) override {
+  void NotifyExpiredLocked(gfxFont* aFont, const AutoLock&) override {
     NotifyExpired(aFont);
   }
 
@@ -601,35 +606,6 @@ class gfxTextRunFactory {
   virtual ~gfxTextRunFactory();
 };
 
-struct gfxTextRange {
-  enum class MatchType : uint16_t {
-    // The CSS generic that mapped to this font, if any. This field of
-    // the MatchType stores a FontFamilyType value as defined in the enum
-    // in gfxFontFamilyList.h.
-    kGenericMask = 0x00ff,
-
-    // Flags for recording the kind of font-matching that was used.
-    // Note that multiple flags may be set on a single range.
-    kFontGroup = 0x0100,
-    kPrefsFallback = 0x0200,
-    kSystemFallback = 0x0400
-  };
-  gfxTextRange(uint32_t aStart, uint32_t aEnd, gfxFont* aFont,
-               MatchType aMatchType, mozilla::gfx::ShapedTextFlags aOrientation)
-      : start(aStart),
-        end(aEnd),
-        font(aFont),
-        matchType(aMatchType),
-        orientation(aOrientation) {}
-  uint32_t Length() const { return end - start; }
-  uint32_t start, end;
-  RefPtr<gfxFont> font;
-  MatchType matchType;
-  mozilla::gfx::ShapedTextFlags orientation;
-};
-
-MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(gfxTextRange::MatchType)
-
 /**
  * gfxFontShaper
  *
@@ -659,7 +635,7 @@ class gfxFontShaper {
     NS_ASSERTION(aFont, "shaper requires a valid font!");
   }
 
-  virtual ~gfxFontShaper() {}
+  virtual ~gfxFontShaper() = default;
 
   // Shape a piece of text and store the resulting glyph data into
   // aShapedText. Parameters aOffset/aLength indicate the range of
@@ -710,12 +686,12 @@ class gfxShapedText {
   typedef mozilla::unicode::Script Script;
 
   gfxShapedText(uint32_t aLength, mozilla::gfx::ShapedTextFlags aFlags,
-                int32_t aAppUnitsPerDevUnit)
+                uint16_t aAppUnitsPerDevUnit)
       : mLength(aLength),
         mFlags(aFlags),
         mAppUnitsPerDevUnit(aAppUnitsPerDevUnit) {}
 
-  virtual ~gfxShapedText() {}
+  virtual ~gfxShapedText() = default;
 
   /**
    * This class records the information associated with a character in the
@@ -1226,7 +1202,7 @@ class gfxShapedWord final : public gfxShapedText {
   // glyph data; the caller must call gfxFont::ShapeText() with appropriate
   // parameters to set up the glyphs.
   static gfxShapedWord* Create(const uint8_t* aText, uint32_t aLength,
-                               Script aRunScript, int32_t aAppUnitsPerDevUnit,
+                               Script aRunScript, uint16_t aAppUnitsPerDevUnit,
                                mozilla::gfx::ShapedTextFlags aFlags,
                                gfxFontShaper::RoundingFlags aRounding) {
     NS_ASSERTION(aLength <= gfxPlatform::GetPlatform()->WordCacheCharLimit(),
@@ -1247,7 +1223,7 @@ class gfxShapedWord final : public gfxShapedText {
   }
 
   static gfxShapedWord* Create(const char16_t* aText, uint32_t aLength,
-                               Script aRunScript, int32_t aAppUnitsPerDevUnit,
+                               Script aRunScript, uint16_t aAppUnitsPerDevUnit,
                                mozilla::gfx::ShapedTextFlags aFlags,
                                gfxFontShaper::RoundingFlags aRounding) {
     NS_ASSERTION(aLength <= gfxPlatform::GetPlatform()->WordCacheCharLimit(),
@@ -1278,10 +1254,10 @@ class gfxShapedWord final : public gfxShapedText {
   // allocated via malloc.
   void operator delete(void* p) { free(p); }
 
-  virtual const CompressedGlyph* GetCharacterGlyphs() const override {
+  const CompressedGlyph* GetCharacterGlyphs() const override {
     return &mCharGlyphsStorage[0];
   }
-  virtual CompressedGlyph* GetCharacterGlyphs() override {
+  CompressedGlyph* GetCharacterGlyphs() override {
     return &mCharGlyphsStorage[0];
   }
 
@@ -1319,7 +1295,7 @@ class gfxShapedWord final : public gfxShapedText {
 
   // Construct storage for a ShapedWord, ready to receive glyph data
   gfxShapedWord(const uint8_t* aText, uint32_t aLength, Script aRunScript,
-                int32_t aAppUnitsPerDevUnit,
+                uint16_t aAppUnitsPerDevUnit,
                 mozilla::gfx::ShapedTextFlags aFlags,
                 gfxFontShaper::RoundingFlags aRounding)
       : gfxShapedText(aLength,
@@ -1334,7 +1310,7 @@ class gfxShapedWord final : public gfxShapedText {
   }
 
   gfxShapedWord(const char16_t* aText, uint32_t aLength, Script aRunScript,
-                int32_t aAppUnitsPerDevUnit,
+                uint16_t aAppUnitsPerDevUnit,
                 mozilla::gfx::ShapedTextFlags aFlags,
                 gfxFontShaper::RoundingFlags aRounding)
       : gfxShapedText(aLength, aFlags, aAppUnitsPerDevUnit),
@@ -1565,15 +1541,17 @@ class gfxFont {
 
     gfxFloat aveCharWidth;
     gfxFloat spaceWidth;
-    gfxFloat zeroOrAveCharWidth;  // width of '0', or if there is
-                                  // no '0' glyph in this font,
-                                  // equal to .aveCharWidth
+    gfxFloat zeroWidth;  // -1 if there was no zero glyph
+
+    gfxFloat ZeroOrAveCharWidth() const {
+      return zeroWidth >= 0 ? zeroWidth : aveCharWidth;
+    }
   };
 
-  enum Orientation { eHorizontal, eVertical };
+  typedef nsFontMetrics::FontOrientation Orientation;
 
   const Metrics& GetMetrics(Orientation aOrientation) {
-    if (aOrientation == eHorizontal) {
+    if (aOrientation == nsFontMetrics::eHorizontal) {
       return GetHorizontalMetrics();
     }
     if (!mVerticalMetrics) {
@@ -1758,7 +1736,7 @@ class gfxFont {
   template <typename T>
   bool InitFakeSmallCapsRun(DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
                             const T* aText, uint32_t aOffset, uint32_t aLength,
-                            gfxTextRange::MatchType aMatchType,
+                            FontMatchType aMatchType,
                             mozilla::gfx::ShapedTextFlags aOrientation,
                             Script aScript, bool aSyntheticLower,
                             bool aSyntheticUpper);
@@ -1905,7 +1883,11 @@ class gfxFont {
   bool DrawGlyphs(const gfxShapedText* aShapedText,
                   uint32_t aOffset,  // offset in the textrun
                   uint32_t aCount,   // length of run to draw
-                  mozilla::gfx::Point* aPt, GlyphBufferAzure& aBuffer);
+                  mozilla::gfx::Point* aPt,
+                  // transform for mOffset field in DetailedGlyph records,
+                  // to account for rotations (may be null)
+                  const mozilla::gfx::Matrix* aOffsetMatrix,
+                  GlyphBufferAzure& aBuffer);
 
   // Output a single glyph at *aPt.
   // Normal glyphs are simply accumulated in aBuffer until it is full and
@@ -1940,9 +1922,7 @@ class gfxFont {
 
   // The return value is interpreted as a horizontal advance in 16.16 fixed
   // point format.
-  virtual int32_t GetGlyphWidth(DrawTarget& aDrawTarget, uint16_t aGID) {
-    return -1;
-  }
+  virtual int32_t GetGlyphWidth(uint16_t aGID) { return -1; }
 
   bool IsSpaceGlyphInvisible(DrawTarget* aRefDrawTarget,
                              const gfxTextRun* aTextRun);

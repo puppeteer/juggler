@@ -11,7 +11,6 @@
 #include "nsContentUtils.h"
 #include "nsDOMMutationObserver.h"
 #include "nsDOMNavigationTiming.h"
-#include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsRefreshDriver.h"
 
@@ -47,10 +46,11 @@ JSObject* DocumentTimeline::WrapObject(JSContext* aCx,
   return DocumentTimeline_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ already_AddRefed<DocumentTimeline> DocumentTimeline::Constructor(
+/* static */
+already_AddRefed<DocumentTimeline> DocumentTimeline::Constructor(
     const GlobalObject& aGlobal, const DocumentTimelineOptions& aOptions,
     ErrorResult& aRv) {
-  nsIDocument* doc = AnimationUtils::GetCurrentRealmDocument(aGlobal.Context());
+  Document* doc = AnimationUtils::GetCurrentRealmDocument(aGlobal.Context());
   if (!doc) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;
@@ -166,7 +166,7 @@ void DocumentTimeline::MostRecentRefreshTimeUpdated() {
     // order to dispatch events.
     animation->Tick();
 
-    if (!animation->IsRelevant() && !animation->NeedsTicks()) {
+    if (!animation->NeedsTicks()) {
       animationsToRemove.AppendElement(animation);
     }
   }
@@ -188,13 +188,6 @@ void DocumentTimeline::MostRecentRefreshTimeUpdated() {
 }
 
 void DocumentTimeline::WillRefresh(mozilla::TimeStamp aTime) {
-  // https://drafts.csswg.org/web-animations-1/#update-animations-and-send-events,
-  // step2.
-  // Note that this should be done before nsAutoAnimationMutationBatch which is
-  // inside MostRecentRefreshTimeUpdated().  If PerformMicroTaskCheckpoint was
-  // called before nsAutoAnimationMutationBatch is destroyed, some mutation
-  // records might not be delivered in this checkpoint.
-  nsAutoMicroTask mt;
   MostRecentRefreshTimeUpdated();
 }
 

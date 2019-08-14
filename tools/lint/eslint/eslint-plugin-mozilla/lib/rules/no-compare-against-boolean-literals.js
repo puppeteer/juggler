@@ -13,17 +13,21 @@
 // -----------------------------------------------------------------------------
 
 module.exports = function(context) {
-
   // ---------------------------------------------------------------------------
   // Public
   //  --------------------------------------------------------------------------
 
   return {
-    "BinaryExpression": function(node) {
-      if (["==", "!="].includes(node.operator) &&
-          (["true", "false"].includes(node.left.raw) ||
-           ["true", "false"].includes(node.right.raw))) {
-        context.report(node, "Don't compare for inexact equality against boolean literals");
+    BinaryExpression(node) {
+      if (
+        ["==", "!="].includes(node.operator) &&
+        (["true", "false"].includes(node.left.raw) ||
+          ["true", "false"].includes(node.right.raw))
+      ) {
+        context.report(
+          node,
+          "Don't compare for inexact equality against boolean literals"
+        );
       }
     },
   };

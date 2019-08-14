@@ -10,9 +10,8 @@ with Files("**"):
 if CONFIG['MOZ_BUILD_APP'] == 'browser':
     DEFINES['MOZ_BREAK_XUL_OVERLAYS'] = True
 
-MOCHITEST_MANIFESTS += ['test/mochitest.ini']
-
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome.ini']
+MOCHITEST_MANIFESTS += ['test/mochitest.ini']
 
 if CONFIG['MOZ_XUL']:
     EXPORTS += [
@@ -27,9 +26,9 @@ if CONFIG['MOZ_XUL']:
         'XULMenuElement.h',
         'XULPersist.h',
         'XULPopupElement.h',
-        'XULScrollElement.h',
         'XULTextElement.h',
         'XULTooltipElement.h',
+        'XULTreeElement.h',
     ]
 
     UNIFIED_SOURCES += [
@@ -47,9 +46,9 @@ if CONFIG['MOZ_XUL']:
         'XULMenuElement.cpp',
         'XULPersist.cpp',
         'XULPopupElement.cpp',
-        'XULScrollElement.cpp',
         'XULTextElement.cpp',
         'XULTooltipElement.cpp',
+        'XULTreeElement.cpp',
     ]
 
 XPIDL_SOURCES += [
@@ -73,7 +72,10 @@ LOCAL_INCLUDES += [
     '/layout/generic',
     '/layout/style',
     '/layout/xul',
+    '/layout/xul/tree',
 ]
+
+include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 

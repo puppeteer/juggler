@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import HandleEventMixin from "../mixins/HandleEventMixin.js";
 import PaymentRequestPage from "../components/payment-request-page.js";
 import PaymentStateSubscriberMixin from "../mixins/PaymentStateSubscriberMixin.js";
 import paymentRequest from "../paymentRequest.js";
@@ -15,7 +16,9 @@ import paymentRequest from "../paymentRequest.js";
  * as it will be much easier to implement and share the logic once we switch to Fluent.
  */
 
-export default class CompletionErrorPage extends PaymentStateSubscriberMixin(PaymentRequestPage) {
+export default class CompletionErrorPage extends HandleEventMixin(
+  PaymentStateSubscriberMixin(PaymentRequestPage)
+) {
   constructor() {
     super();
 
@@ -41,17 +44,28 @@ export default class CompletionErrorPage extends PaymentStateSubscriberMixin(Pay
     let { page } = state;
 
     if (this.id && page && page.id !== this.id) {
-      log.debug(`CompletionErrorPage: no need to further render inactive page: ${page.id}`);
+      log.debug(
+        `CompletionErrorPage: no need to further render inactive page: ${
+          page.id
+        }`
+      );
       return;
     }
 
-    let {request} = this.requestStore.getState();
-    let {displayHost} = request.topLevelPrincipal.URI;
+    let { request } = this.requestStore.getState();
+    let { displayHost } = request.topLevelPrincipal.URI;
     for (let key of [
-      "pageTitle", "suggestion-heading", "suggestion-1", "suggestion-2", "suggestion-3",
+      "pageTitle",
+      "suggestion-heading",
+      "suggestion-1",
+      "suggestion-2",
+      "suggestion-3",
     ]) {
       if (this.dataset[key] && displayHost) {
-        this.dataset[key] = this.dataset[key].replace("**host-name**", displayHost);
+        this.dataset[key] = this.dataset[key].replace(
+          "**host-name**",
+          displayHost
+        );
       }
     }
 
@@ -80,16 +94,14 @@ export default class CompletionErrorPage extends PaymentStateSubscriberMixin(Pay
     this.suggestionsList.appendChild(suggestionsFragment);
   }
 
-  handleEvent(event) {
-    if (event.type == "click") {
-      switch (event.target) {
-        case this.doneButton: {
-          this.onDoneButtonClick(event);
-          break;
-        }
-        default: {
-          throw new Error("Unexpected click target");
-        }
+  onClick(event) {
+    switch (event.target) {
+      case this.doneButton: {
+        this.onDoneButtonClick(event);
+        break;
+      }
+      default: {
+        throw new Error("Unexpected click target");
       }
     }
   }

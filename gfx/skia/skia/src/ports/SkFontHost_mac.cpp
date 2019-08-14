@@ -28,6 +28,7 @@
 #include "SkEndian.h"
 #include "SkFloatingPoint.h"
 #include "SkFontDescriptor.h"
+#include "SkFontMetrics.h"
 #include "SkFontMgr.h"
 #include "SkGlyph.h"
 #include "SkMakeUnique.h"
@@ -456,7 +457,8 @@ public:
     }
 
     CGRGBPixel* getCG(const SkScalerContext_Mac& context, const SkGlyph& glyph,
-                      CGGlyph glyphID, size_t* rowBytesPtr, bool generateA8FromLCD);
+                      CGGlyph glyphID, size_t* rowBytesPtr, bool generateA8FromLCD,
+                      bool lightOnDark);
 
 private:
     enum {
@@ -727,7 +729,7 @@ public:
 
 protected:
     int onGetUPEM() const override;
-    SkStreamAsset* onOpenStream(int* ttcIndex) const override;
+    std::unique_ptr<SkStreamAsset> onOpenStream(int* ttcIndex) const override;
     std::unique_ptr<SkFontData> onMakeFontData() const override;
     int onGetVariationDesignPosition(SkFontArguments::VariationPosition::Coordinate coordinates[],
                                      int coordinateCount) const override;
@@ -767,9 +769,10 @@ static sk_sp<SkTypeface> create_from_CTFontRef(SkUniqueCFRef<CTFontRef> font,
     SkASSERT(font);
 
     if (!isLocalStream) {
-        SkTypeface* face = SkTypefaceCache::FindByProcAndRef(find_by_CTFontRef, (void*)font.get());
+        sk_sp<SkTypeface> face = SkTypefaceCache::FindByProcAndRef(find_by_CTFontRef,
+                                                                   (void*)font.get());
         if (face) {
-            return sk_sp<SkTypeface>(face);
+            return face;
         }
     }
 
@@ -778,12 +781,12 @@ static sk_sp<SkTypeface> create_from_CTFontRef(SkUniqueCFRef<CTFontRef> font,
     CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(font.get());
     bool isFixedPitch = SkToBool(traits & kCTFontMonoSpaceTrait);
 
-    SkTypeface* face = new SkTypeface_Mac(std::move(font), std::move(resource),
-                                          style, isFixedPitch, isLocalStream);
+    sk_sp<SkTypeface> face(new SkTypeface_Mac(std::move(font), std::move(resource),
+                                              style, isFixedPitch, isLocalStream));
     if (!isLocalStream) {
         SkTypefaceCache::Add(face);
     }
-    return sk_sp<SkTypeface>(face);
+    return face;
 }
 
 /** Creates a typeface from a descriptor, searching the cache. */
@@ -823,7 +826,7 @@ static SkUniqueCFRef<CTFontDescriptorRef> create_descriptor(const char familyNam
         CFDictionaryAddValue(cfTraits.get(), kCTFontWeightTrait, cfFontWeight.get());
     }
     // CTFontTraits (width)
-    CGFloat ctWidth = fontstyle_to_ct_width(style.weight());
+    CGFloat ctWidth = fontstyle_to_ct_width(style.width());
     SkUniqueCFRef<CFNumberRef> cfFontWidth(
             CFNumberCreate(kCFAllocatorDefault, kCFNumberCGFloatType, &ctWidth));
     if (cfFontWidth) {
@@ -906,13 +909,10 @@ protected:
     void generateMetrics(SkGlyph* glyph) override;
     void generateImage(const SkGlyph& glyph) override;
     bool generatePath(SkGlyphID glyph, SkPath* path) override;
-    void generateFontMetrics(SkPaint::FontMetrics*) override;
+    void generateFontMetrics(SkFontMetrics*) override;
 
 private:
     static void CTPathElement(void *info, const CGPathElement *element);
-
-    /** Returns the offset from the horizontal origin to the vertical origin in SkGlyph units. */
-    void getVerticalOffset(CGGlyph glyphID, SkPoint* offset) const;
 
     Offscreen fOffscreen;
 
@@ -943,7 +943,6 @@ private:
     SkUniqueCFRef<CGFontRef> fCGFont;
     uint16_t fGlyphCount;
     const bool fDoSubPosition;
-    const bool fVertical;
 
     friend class Offscreen;
 
@@ -1048,7 +1047,6 @@ SkScalerContext_Mac::SkScalerContext_Mac(sk_sp<SkTypeface_Mac> typeface,
                                          const SkDescriptor* desc)
         : INHERITED(std::move(typeface), effects, desc)
         , fDoSubPosition(SkToBool(fRec.fFlags & kSubpixelPositioning_Flag))
-        , fVertical(SkToBool(fRec.fFlags & kVertical_Flag))
 
 {
     AUTO_CG_LOCK();
@@ -1082,7 +1080,7 @@ SkScalerContext_Mac::SkScalerContext_Mac(sk_sp<SkTypeface_Mac> typeface,
 
 CGRGBPixel* Offscreen::getCG(const SkScalerContext_Mac& context, const SkGlyph& glyph,
                              CGGlyph glyphID, size_t* rowBytesPtr,
-                             bool generateA8FromLCD) {
+                             bool generateA8FromLCD, bool lightOnDark) {
     if (!fRGBSpace) {
         //It doesn't appear to matter what color space is specified.
         //Regular blends and antialiased text are always (s*a + d*(1-a))
@@ -1144,7 +1142,8 @@ CGRGBPixel* Offscreen::getCG(const SkScalerContext_Mac& context, const SkGlyph& 
         CGContextSetTextDrawingMode(fCG.get(), kCGTextFill);
 
         // Draw black on white to create mask. (Special path exists to speed this up in CG.)
-        CGContextSetGrayFillColor(fCG.get(), 0.0f, 1.0f);
+        // If light-on-dark is requested, draw white on black.
+        CGContextSetGrayFillColor(fCG.get(), lightOnDark ? 1.0f : 0.0f, 1.0f);
 
         // force our checks below to happen
         fDoAA = !doAA;
@@ -1167,7 +1166,8 @@ CGRGBPixel* Offscreen::getCG(const SkScalerContext_Mac& context, const SkGlyph& 
     image += (fSize.fHeight - glyph.fHeight) * fSize.fWidth;
 
     // Erase to white (or transparent black if it's a color glyph, to not composite against white).
-    uint32_t bgColor = (SkMask::kARGB32_Format != glyph.fMaskFormat) ? 0xFFFFFFFF : 0x00000000;
+    // For light-on-dark, instead erase to black.
+    uint32_t bgColor = (SkMask::kARGB32_Format != glyph.fMaskFormat) ? (lightOnDark ? 0xFF000000 : 0xFFFFFFFF) : 0x00000000;
     sk_memset_rect32(image, bgColor, glyph.fWidth, glyph.fHeight, rowBytes);
 
     float subX = 0;
@@ -1175,14 +1175,6 @@ CGRGBPixel* Offscreen::getCG(const SkScalerContext_Mac& context, const SkGlyph& 
     if (context.fDoSubPosition) {
         subX = SkFixedToFloat(glyph.getSubXFixed());
         subY = SkFixedToFloat(glyph.getSubYFixed());
-    }
-
-    // CoreText and CoreGraphics always draw using the horizontal baseline origin.
-    if (context.fVertical) {
-        SkPoint offset;
-        context.getVerticalOffset(glyphID, &offset);
-        subX += offset.fX;
-        subY += offset.fY;
     }
 
     CGPoint point = CGPointMake(-glyph.fLeft + subX, glyph.fTop + glyph.fHeight - subY);
@@ -1200,17 +1192,6 @@ CGRGBPixel* Offscreen::getCG(const SkScalerContext_Mac& context, const SkGlyph& 
     SkASSERT(rowBytesPtr);
     *rowBytesPtr = rowBytes;
     return image;
-}
-
-void SkScalerContext_Mac::getVerticalOffset(CGGlyph glyphID, SkPoint* offset) const {
-    // CTFontGetVerticalTranslationsForGlyphs produces cgVertOffset in CG units (pixels, y up).
-    CGSize cgVertOffset;
-    CTFontGetVerticalTranslationsForGlyphs(fCTFont.get(), &glyphID, &cgVertOffset, 1);
-    cgVertOffset = CGSizeApplyAffineTransform(cgVertOffset, fTransform);
-    SkPoint skVertOffset = { CGToScalar(cgVertOffset.width), CGToScalar(cgVertOffset.height) };
-    // From CG units (pixels, y up) to SkGlyph units (pixels, y down).
-    skVertOffset.fY = -skVertOffset.fY;
-    *offset = skVertOffset;
 }
 
 unsigned SkScalerContext_Mac::generateGlyphCount(void) {
@@ -1248,17 +1229,8 @@ void SkScalerContext_Mac::generateMetrics(SkGlyph* glyph) {
 
     // The following block produces cgAdvance in CG units (pixels, y up).
     CGSize cgAdvance;
-    if (fVertical) {
-        CTFontGetAdvancesForGlyphs(fCTFont.get(), kCTFontOrientationVertical,
-                                   &cgGlyph, &cgAdvance, 1);
-        // Vertical advances are returned as widths instead of heights.
-        using std::swap;
-        swap(cgAdvance.height, cgAdvance.width);
-        cgAdvance.height = -cgAdvance.height;
-    } else {
-        CTFontGetAdvancesForGlyphs(fCTFont.get(), kCTFontOrientationHorizontal,
-                                   &cgGlyph, &cgAdvance, 1);
-    }
+    CTFontGetAdvancesForGlyphs(fCTFont.get(), kCTFontOrientationHorizontal,
+                               &cgGlyph, &cgAdvance, 1);
     cgAdvance = CGSizeApplyAffineTransform(cgAdvance, fTransform);
     glyph->fAdvanceX =  CGToFloat(cgAdvance.width);
     glyph->fAdvanceY = -CGToFloat(cgAdvance.height);
@@ -1298,14 +1270,6 @@ void SkScalerContext_Mac::generateMetrics(SkGlyph* glyph) {
         // Convert cgBounds to SkGlyph units (pixels, y down).
         skBounds = SkRect::MakeXYWH(cgBounds.origin.x, -cgBounds.origin.y - cgBounds.size.height,
                                     cgBounds.size.width, cgBounds.size.height);
-    }
-
-    if (fVertical) {
-        // Due to possible vertical bounds bugs and simplicity, skBounds is the horizontal bounds.
-        // Convert these horizontal bounds into vertical bounds.
-        SkPoint offset;
-        this->getVerticalOffset(cgGlyph, &offset);
-        skBounds.offset(offset);
     }
 
     // Currently the bounds are based on being rendered at (0,0).
@@ -1434,11 +1398,12 @@ void SkScalerContext_Mac::generateImage(const SkGlyph& glyph) {
     CGGlyph cgGlyph = SkTo<CGGlyph>(glyph.getGlyphID());
 
     // FIXME: lcd smoothed un-hinted rasterization unsupported.
-    bool requestSmooth = fRec.getHinting() != SkPaint::kNo_Hinting;
+    bool requestSmooth = fRec.getHinting() != kNo_SkFontHinting;
+    bool lightOnDark = (fRec.fFlags & SkScalerContext::kLightOnDark_Flag) != 0;
 
     // Draw the glyph
     size_t cgRowBytes;
-    CGRGBPixel* cgPixels = fOffscreen.getCG(*this, glyph, cgGlyph, &cgRowBytes, requestSmooth);
+    CGRGBPixel* cgPixels = fOffscreen.getCG(*this, glyph, cgGlyph, &cgRowBytes, requestSmooth, lightOnDark);
     if (cgPixels == nullptr) {
         return;
     }
@@ -1447,7 +1412,7 @@ void SkScalerContext_Mac::generateImage(const SkGlyph& glyph) {
     if ((glyph.fMaskFormat == SkMask::kLCD16_Format) ||
         (glyph.fMaskFormat == SkMask::kA8_Format
          && requestSmooth
-         && smooth_behavior() == SmoothBehavior::subpixel))
+         && smooth_behavior() != SmoothBehavior::none))
     {
         const uint8_t* linear = gLinearCoverageFromCGLCDValue.data();
 
@@ -1459,10 +1424,16 @@ void SkScalerContext_Mac::generateImage(const SkGlyph& glyph) {
         CGRGBPixel* addr = cgPixels;
         for (int y = 0; y < glyph.fHeight; ++y) {
             for (int x = 0; x < glyph.fWidth; ++x) {
-                int r = (addr[x] >> 16) & 0xFF;
-                int g = (addr[x] >>  8) & 0xFF;
-                int b = (addr[x] >>  0) & 0xFF;
-                addr[x] = (linear[r] << 16) | (linear[g] << 8) | linear[b];
+                int r = linear[(addr[x] >> 16) & 0xFF];
+                int g = linear[(addr[x] >>  8) & 0xFF];
+                int b = linear[(addr[x] >>  0) & 0xFF];
+                // If light-on-dark was requested, the mask is drawn inverted.
+                if (lightOnDark) {
+                    r = 255 - r;
+                    g = 255 - g;
+                    b = 255 - b;
+                }
+                addr[x] = (r << 16) | (g << 8) | b;
             }
             addr = SkTAddOffset<CGRGBPixel>(addr, cgRowBytes);
         }
@@ -1570,15 +1541,10 @@ bool SkScalerContext_Mac::generatePath(SkGlyphID glyph, SkPath* path) {
         m.setScale(SkScalarInvert(scaleX), SkScalarInvert(scaleY));
         path->transform(m);
     }
-    if (fVertical) {
-        SkPoint offset;
-        getVerticalOffset(cgGlyph, &offset);
-        path->offset(offset.fX, offset.fY);
-    }
     return true;
 }
 
-void SkScalerContext_Mac::generateFontMetrics(SkPaint::FontMetrics* metrics) {
+void SkScalerContext_Mac::generateFontMetrics(SkFontMetrics* metrics) {
     if (nullptr == metrics) {
         return;
     }
@@ -1602,8 +1568,8 @@ void SkScalerContext_Mac::generateFontMetrics(SkPaint::FontMetrics* metrics) {
     metrics->fUnderlinePosition = -CGToScalar( CTFontGetUnderlinePosition(fCTFont.get()));
 
     metrics->fFlags = 0;
-    metrics->fFlags |= SkPaint::FontMetrics::kUnderlineThicknessIsValid_Flag;
-    metrics->fFlags |= SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
+    metrics->fFlags |= SkFontMetrics::kUnderlineThicknessIsValid_Flag;
+    metrics->fFlags |= SkFontMetrics::kUnderlinePositionIsValid_Flag;
 
     // See https://bugs.chromium.org/p/skia/issues/detail?id=6203
     // At least on 10.12.3 with memory based fonts the x-height is always 0.6666 of the ascent and
@@ -1900,7 +1866,7 @@ static SK_SFNT_ULONG get_font_type_tag(CTFontRef ctFont) {
     }
 }
 
-SkStreamAsset* SkTypeface_Mac::onOpenStream(int* ttcIndex) const {
+std::unique_ptr<SkStreamAsset> SkTypeface_Mac::onOpenStream(int* ttcIndex) const {
     SK_SFNT_ULONG fontType = get_font_type_tag(fFontRef.get());
 
     // get table tags
@@ -1957,7 +1923,7 @@ SkStreamAsset* SkTypeface_Mac::onOpenStream(int* ttcIndex) const {
     }
 
     // reserve memory for stream, and zero it (tables must be zero padded)
-    SkMemoryStream* stream = new SkMemoryStream(totalSize);
+    std::unique_ptr<SkStreamAsset> stream(new SkMemoryStream(totalSize));
     char* dataStart = (char*)stream->getMemoryBase();
     sk_bzero(dataStart, totalSize);
     char* dataPtr = dataStart;
@@ -2335,7 +2301,7 @@ void SkTypeface_Mac::onFilterRec(SkScalerContextRec* rec) const {
         // The above turns off subpixel rendering, but the user requested it.
         // Normal hinting will cause the A8 masks to be generated from CoreGraphics subpixel masks.
         // See comments below for more details.
-        rec->setHinting(SkPaint::kNormal_Hinting);
+        rec->setHinting(kNormal_SkFontHinting);
     }
 
     unsigned flagsWeDontSupport = SkScalerContext::kForceAutohinting_Flag  |
@@ -2344,19 +2310,20 @@ void SkTypeface_Mac::onFilterRec(SkScalerContextRec* rec) const {
 
     rec->fFlags &= ~flagsWeDontSupport;
 
-    SmoothBehavior smoothBehavior = smooth_behavior();
+    const SmoothBehavior smoothBehavior = smooth_behavior();
 
     // Only two levels of hinting are supported.
-    // kNo_Hinting means avoid CoreGraphics outline dilation.
-    // kNormal_Hinting means CoreGraphics outline dilation is allowed.
-    // If there is no lcd support, hinting (dilation) cannot be supported.
-    SkPaint::Hinting hinting = rec->getHinting();
-    if (SkPaint::kSlight_Hinting == hinting || smoothBehavior == SmoothBehavior::none) {
-        hinting = SkPaint::kNo_Hinting;
-    } else if (SkPaint::kFull_Hinting == hinting) {
-        hinting = SkPaint::kNormal_Hinting;
+    // kNo_Hinting means avoid CoreGraphics outline dilation (smoothing).
+    // kNormal_Hinting means CoreGraphics outline dilation (smoothing) is allowed.
+    if (kSlight_SkFontHinting == rec->getHinting()) {
+        rec->setHinting(kNo_SkFontHinting);
+    } else if (kFull_SkFontHinting == rec->getHinting()) {
+        rec->setHinting(kNormal_SkFontHinting);
     }
-    rec->setHinting(hinting);
+    // If smoothing has no effect, don't request it.
+    if (smoothBehavior == SmoothBehavior::none) {
+        rec->setHinting(kNo_SkFontHinting);
+    }
 
     // FIXME: lcd smoothed un-hinted rasterization unsupported.
     // Tracked by http://code.google.com/p/skia/issues/detail?id=915 .
@@ -2376,16 +2343,15 @@ void SkTypeface_Mac::onFilterRec(SkScalerContextRec* rec) const {
     // [LCD][no-hint]: curently unable to honor, and must pick which to respect.
     // Currenly side with LCD, effectively ignoring the hinting setting.
     // [LCD][yes-hint]: generate LCD using CoreGraphic's LCD output.
-
     if (rec->fMaskFormat == SkMask::kLCD16_Format) {
         if (smoothBehavior == SmoothBehavior::subpixel) {
             //CoreGraphics creates 555 masks for smoothed text anyway.
             rec->fMaskFormat = SkMask::kLCD16_Format;
-            rec->setHinting(SkPaint::kNormal_Hinting);
+            rec->setHinting(kNormal_SkFontHinting);
         } else {
             rec->fMaskFormat = SkMask::kA8_Format;
-            if (smoothBehavior == SmoothBehavior::some) {
-                rec->setHinting(SkPaint::kNormal_Hinting);
+            if (smoothBehavior != SmoothBehavior::none) {
+                rec->setHinting(kNormal_SkFontHinting);
             }
         }
     }
@@ -2397,15 +2363,49 @@ void SkTypeface_Mac::onFilterRec(SkScalerContextRec* rec) const {
         rec->fMaskFormat = SkMask::kARGB32_Format;
     }
 
+    // Smoothing will be used if the format is either LCD or if there is hinting.
+    // In those cases, we need to choose the proper dilation mask based on the color.
+    if (rec->fMaskFormat == SkMask::kLCD16_Format ||
+        (rec->fMaskFormat == SkMask::kA8_Format && rec->getHinting() != kNo_SkFontHinting)) {
+        SkColor color = rec->getLuminanceColor();
+        int r = SkColorGetR(color);
+        int g = SkColorGetG(color);
+        int b = SkColorGetB(color);
+        // Choose whether to draw using a light-on-dark mask based on observed
+        // color/luminance thresholds that CoreText uses.
+        if (r >= 85 && g >= 85 && b >= 85 && r + g + b >= 2 * 255) {
+            rec->fFlags |= SkScalerContext::kLightOnDark_Flag;
+        }
+    }
+
     // Unhinted A8 masks (those not derived from LCD masks) must respect SK_GAMMA_APPLY_TO_A8.
     // All other masks can use regular gamma.
-    if (SkMask::kA8_Format == rec->fMaskFormat && SkPaint::kNo_Hinting == hinting) {
+    if (SkMask::kA8_Format == rec->fMaskFormat && kNo_SkFontHinting == rec->getHinting()) {
 #ifndef SK_GAMMA_APPLY_TO_A8
         // SRGBTODO: Is this correct? Do we want contrast boost?
         rec->ignorePreBlend();
 #endif
     } else {
-        //CoreGraphics dialates smoothed text as needed.
+#ifndef SK_IGNORE_MAC_BLENDING_MATCH_FIX
+        SkColor color = rec->getLuminanceColor();
+        if (smoothBehavior == SmoothBehavior::some) {
+            // CoreGraphics smoothed text without subpixel coverage blitting goes from a gamma of
+            // 2.0 for black foreground to a gamma of 1.0 for white foreground. Emulate this
+            // through the mask gamma by reducing the color values to 1/2.
+            color = SkColorSetRGB(SkColorGetR(color) * 1/2,
+                                  SkColorGetG(color) * 1/2,
+                                  SkColorGetB(color) * 1/2);
+        } else if (smoothBehavior == SmoothBehavior::subpixel) {
+            // CoreGraphics smoothed text with subpixel coverage blitting goes from a gamma of
+            // 2.0 for black foreground to a gamma of ~1.4? for white foreground. Emulate this
+            // through the mask gamma by reducing the color values to 3/4.
+            color = SkColorSetRGB(SkColorGetR(color) * 3/4,
+                                  SkColorGetG(color) * 3/4,
+                                  SkColorGetB(color) * 3/4);
+        }
+        rec->setLuminanceColor(color);
+#endif
+        // CoreGraphics dialates smoothed text to provide contrast.
         rec->setContrast(0);
     }
 }

@@ -3,6 +3,8 @@
 "use strict";
 
 add_task(async function test_is_allowed_incognito_access() {
+  Services.prefs.setBoolPref("extensions.allowPrivateBrowsingByDefault", false);
+
   async function background() {
     let allowed = await browser.extension.isAllowedIncognitoAccess();
 
@@ -12,23 +14,47 @@ add_task(async function test_is_allowed_incognito_access() {
 
   let extension = ExtensionTestUtils.loadExtension({
     background,
-    manifest: {},
+    incognitoOverride: "spanning",
   });
 
   await extension.startup();
   await extension.awaitFinish("isAllowedIncognitoAccess");
   await extension.unload();
+  Services.prefs.clearUserPref("extensions.allowPrivateBrowsingByDefault");
+});
+
+add_task(async function test_is_denied_incognito_access() {
+  Services.prefs.setBoolPref("extensions.allowPrivateBrowsingByDefault", false);
+
+  async function background() {
+    let allowed = await browser.extension.isAllowedIncognitoAccess();
+
+    browser.test.assertEq(false, allowed, "isAllowedIncognitoAccess is false");
+    browser.test.notifyPass("isNotAllowedIncognitoAccess");
+  }
+
+  let extension = ExtensionTestUtils.loadExtension({
+    background,
+  });
+
+  await extension.startup();
+  await extension.awaitFinish("isNotAllowedIncognitoAccess");
+  await extension.unload();
+  Services.prefs.clearUserPref("extensions.allowPrivateBrowsingByDefault");
 });
 
 add_task(async function test_in_incognito_context_false() {
   function background() {
-    browser.test.assertEq(false, browser.extension.inIncognitoContext, "inIncognitoContext returned false");
+    browser.test.assertEq(
+      false,
+      browser.extension.inIncognitoContext,
+      "inIncognitoContext returned false"
+    );
     browser.test.notifyPass("inIncognitoContext");
   }
 
   let extension = ExtensionTestUtils.loadExtension({
     background,
-    manifest: {},
   });
 
   await extension.startup();
@@ -46,7 +72,6 @@ add_task(async function test_is_allowed_file_scheme_access() {
 
   let extension = ExtensionTestUtils.loadExtension({
     background,
-    manifest: {},
   });
 
   await extension.startup();

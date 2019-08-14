@@ -9,22 +9,22 @@
 
 <dialog id="LanguagesDialog" type="child"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
         data-l10n-id="webpage-languages-window"
         data-l10n-attrs="title, style"
         buttons="accept,cancel,help"
         persist="lastSelected screenX screenY"
         role="dialog"
         onload="gLanguagesDialog.onLoad();"
-        helpTopic="prefs-languages"
-        ondialoghelp="openPrefsHelp()">
+        helpTopic="prefs-languages">
 
   <linkset>
-    <link rel="localization" href="browser/preferences/languages.ftl"/>
+    <html:link rel="localization" href="browser/preferences/languages.ftl"/>
   </linkset>
 
-  <script type="application/javascript" src="chrome://browser/content/utilityOverlay.js"/>
-  <script type="application/javascript" src="chrome://global/content/preferencesBindings.js"/>
-  <script type="application/javascript" src="chrome://browser/content/preferences/languages.js"/>
+  <script src="chrome://browser/content/utilityOverlay.js"/>
+  <script src="chrome://global/content/preferencesBindings.js"/>
+  <script src="chrome://browser/content/preferences/languages.js"/>
 
   <keyset>
     <key data-l10n-id="languages-close-key" modifiers="accel" oncommand="Preferences.close(event)"/>

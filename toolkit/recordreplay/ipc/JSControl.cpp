@@ -6,11 +6,17 @@
 
 #include "JSControl.h"
 
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/StaticPtr.h"
 #include "js/CharacterEncoding.h"
 #include "js/Conversions.h"
 #include "js/JSON.h"
+#include "js/PropertySpec.h"
 #include "ChildInternal.h"
 #include "ParentInternal.h"
+#include "nsImportModule.h"
+#include "rrIControl.h"
+#include "rrIReplay.h"
 #include "xpcprivate.h"
 
 using namespace JS;
@@ -28,7 +34,7 @@ static bool FillCharBufferCallback(const char16_t* buf, uint32_t len,
   return true;
 }
 
-static JSObject* NonNullObject(JSContext* aCx, HandleValue aValue) {
+static JSObject* RequireObject(JSContext* aCx, HandleValue aValue) {
   if (!aValue.isObject()) {
     JS_ReportErrorASCII(aCx, "Expected object");
     return nullptr;
@@ -36,134 +42,88 @@ static JSObject* NonNullObject(JSContext* aCx, HandleValue aValue) {
   return &aValue.toObject();
 }
 
-template <typename T>
-static bool MaybeGetNumberProperty(JSContext* aCx, HandleObject aObject,
-                                   const char* aProperty, T* aResult) {
-  RootedValue v(aCx);
-  if (!JS_GetProperty(aCx, aObject, aProperty, &v)) {
-    return false;
-  }
-  if (v.isNumber()) {
-    *aResult = v.toNumber();
-  }
-  return true;
-}
-
-template <typename T>
-static bool GetNumberProperty(JSContext* aCx, HandleObject aObject,
-                              const char* aProperty, T* aResult) {
-  RootedValue v(aCx);
-  if (!JS_GetProperty(aCx, aObject, aProperty, &v)) {
-    return false;
-  }
-  if (!v.isNumber()) {
-    JS_ReportErrorASCII(aCx, "Object missing required property");
-    return false;
-  }
-  *aResult = v.toNumber();
-  return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// BreakpointPosition Conversion
-///////////////////////////////////////////////////////////////////////////////
-
-// Names of properties which JS code uses to specify the contents of a
-// BreakpointPosition.
-static const char gKindProperty[] = "kind";
-static const char gScriptProperty[] = "script";
-static const char gOffsetProperty[] = "offset";
-static const char gFrameIndexProperty[] = "frameIndex";
-
-JSObject* BreakpointPosition::Encode(JSContext* aCx) const {
-  RootedString kindString(aCx, JS_NewStringCopyZ(aCx, KindString()));
-  RootedObject obj(aCx, JS_NewObject(aCx, nullptr));
-  if (!kindString || !obj ||
-      !JS_DefineProperty(aCx, obj, gKindProperty, kindString,
-                         JSPROP_ENUMERATE) ||
-      (mScript != BreakpointPosition::EMPTY_SCRIPT &&
-       !JS_DefineProperty(aCx, obj, gScriptProperty, mScript,
-                          JSPROP_ENUMERATE)) ||
-      (mOffset != BreakpointPosition::EMPTY_OFFSET &&
-       !JS_DefineProperty(aCx, obj, gOffsetProperty, mOffset,
-                          JSPROP_ENUMERATE)) ||
-      (mFrameIndex != BreakpointPosition::EMPTY_FRAME_INDEX &&
-       !JS_DefineProperty(aCx, obj, gFrameIndexProperty, mFrameIndex,
-                          JSPROP_ENUMERATE))) {
+static parent::ChildProcessInfo* GetChildById(JSContext* aCx,
+                                              const Value& aValue,
+                                              bool aAllowUnpaused = false) {
+  if (!aValue.isNumber()) {
+    JS_ReportErrorASCII(aCx, "Expected child ID");
     return nullptr;
   }
-  return obj;
-}
-
-bool BreakpointPosition::Decode(JSContext* aCx, HandleObject aObject) {
-  RootedValue v(aCx);
-  if (!JS_GetProperty(aCx, aObject, gKindProperty, &v)) {
-    return false;
-  }
-
-  RootedString str(aCx, ToString(aCx, v));
-  for (size_t i = BreakpointPosition::Invalid + 1;
-       i < BreakpointPosition::sKindCount; i++) {
-    BreakpointPosition::Kind kind = (BreakpointPosition::Kind)i;
-    bool match;
-    if (!JS_StringEqualsAscii(
-            aCx, str, BreakpointPosition::StaticKindString(kind), &match))
-      return false;
-    if (match) {
-      mKind = kind;
-      break;
-    }
-  }
-  if (mKind == BreakpointPosition::Invalid) {
-    JS_ReportErrorASCII(aCx, "Could not decode breakpoint position kind");
-    return false;
-  }
-
-  if (!MaybeGetNumberProperty(aCx, aObject, gScriptProperty, &mScript) ||
-      !MaybeGetNumberProperty(aCx, aObject, gOffsetProperty, &mOffset) ||
-      !MaybeGetNumberProperty(aCx, aObject, gFrameIndexProperty,
-                              &mFrameIndex)) {
-    return false;
-  }
-
-  return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// ExecutionPoint Conversion
-///////////////////////////////////////////////////////////////////////////////
-
-// Names of properties which JS code uses to specify the contents of an
-// ExecutionPoint.
-static const char gCheckpointProperty[] = "checkpoint";
-static const char gProgressProperty[] = "progress";
-static const char gPositionProperty[] = "position";
-
-JSObject* ExecutionPoint::Encode(JSContext* aCx) const {
-  RootedObject obj(aCx, JS_NewObject(aCx, nullptr));
-  RootedObject position(aCx, mPosition.Encode(aCx));
-  if (!obj || !position ||
-      !JS_DefineProperty(aCx, obj, gCheckpointProperty, (double)mCheckpoint,
-                         JSPROP_ENUMERATE) ||
-      !JS_DefineProperty(aCx, obj, gProgressProperty, (double)mProgress,
-                         JSPROP_ENUMERATE) ||
-      !JS_DefineProperty(aCx, obj, gPositionProperty, position,
-                         JSPROP_ENUMERATE)) {
+  parent::ChildProcessInfo* child = parent::GetChildProcess(aValue.toNumber());
+  if (!child || (!aAllowUnpaused && !child->IsPaused())) {
+    JS_ReportErrorASCII(aCx, "Unpaused or bad child ID");
     return nullptr;
   }
-  return obj;
+  return child;
 }
 
-bool ExecutionPoint::Decode(JSContext* aCx, HandleObject aObject) {
-  RootedValue v(aCx);
-  if (!JS_GetProperty(aCx, aObject, gPositionProperty, &v)) {
-    return false;
+///////////////////////////////////////////////////////////////////////////////
+// Middleman Control
+///////////////////////////////////////////////////////////////////////////////
+
+static StaticRefPtr<rrIControl> gControl;
+
+void SetupMiddlemanControl(const Maybe<size_t>& aRecordingChildId) {
+  MOZ_RELEASE_ASSERT(!gControl);
+
+  nsCOMPtr<rrIControl> control =
+      do_ImportModule("resource://devtools/server/actors/replay/control.js");
+  gControl = control.forget();
+  ClearOnShutdown(&gControl);
+
+  MOZ_RELEASE_ASSERT(gControl);
+
+  AutoSafeJSContext cx;
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
+
+  RootedValue recordingChildValue(cx);
+  if (aRecordingChildId.isSome()) {
+    recordingChildValue.setInt32(aRecordingChildId.ref());
+  }
+  if (NS_FAILED(gControl->Initialize(recordingChildValue))) {
+    MOZ_CRASH("SetupMiddlemanControl");
+  }
+}
+
+void ForwardManifestFinished(parent::ChildProcessInfo* aChild,
+                             const Message& aMsg) {
+  MOZ_RELEASE_ASSERT(gControl);
+  const auto& nmsg = static_cast<const ManifestFinishedMessage&>(aMsg);
+
+  AutoSafeJSContext cx;
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
+
+  RootedValue value(cx);
+  if (nmsg.BufferSize() &&
+      !JS_ParseJSON(cx, nmsg.Buffer(), nmsg.BufferSize(), &value)) {
+    MOZ_CRASH("ForwardManifestFinished");
   }
 
-  RootedObject positionObject(aCx, NonNullObject(aCx, v));
-  return positionObject && mPosition.Decode(aCx, positionObject) &&
-         GetNumberProperty(aCx, aObject, gCheckpointProperty, &mCheckpoint) &&
-         GetNumberProperty(aCx, aObject, gProgressProperty, &mProgress);
+  if (NS_FAILED(gControl->ManifestFinished(aChild->GetId(), value))) {
+    MOZ_CRASH("ForwardManifestFinished");
+  }
+}
+
+void BeforeSaveRecording() {
+  MOZ_RELEASE_ASSERT(gControl);
+
+  AutoSafeJSContext cx;
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
+
+  if (NS_FAILED(gControl->BeforeSaveRecording())) {
+    MOZ_CRASH("BeforeSaveRecording");
+  }
+}
+
+void AfterSaveRecording() {
+  MOZ_RELEASE_ASSERT(gControl);
+
+  AutoSafeJSContext cx;
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
+
+  if (NS_FAILED(gControl->AfterSaveRecording())) {
+    MOZ_CRASH("AfterSaveRecording");
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -179,15 +139,31 @@ static bool Middleman_RegisterReplayDebugger(JSContext* aCx, unsigned aArgc,
 
   if (gReplayDebugger) {
     args.rval().setObject(**gReplayDebugger);
-    return true;
+    return JS_WrapValue(aCx, args.rval());
   }
 
-  RootedObject obj(aCx, NonNullObject(aCx, args.get(0)));
+  RootedObject obj(aCx, RequireObject(aCx, args.get(0)));
   if (!obj) {
     return false;
   }
 
-  obj = ::js::CheckedUnwrap(obj);
+  {
+    JSAutoRealm ar(aCx, xpc::PrivilegedJunkScope());
+
+    RootedValue debuggerValue(aCx, ObjectValue(*obj));
+    if (!JS_WrapValue(aCx, &debuggerValue)) {
+      return false;
+    }
+
+    if (NS_FAILED(gControl->ConnectDebugger(debuggerValue))) {
+      JS_ReportErrorASCII(aCx, "ConnectDebugger failed\n");
+      return false;
+    }
+  }
+
+  // Who knows what values are being passed here.  Play it safe and do
+  // CheckedUnwrapDynamic.
+  obj = ::js::CheckedUnwrapDynamic(obj, aCx);
   if (!obj) {
     ::js::ReportAccessDenied(aCx);
     return false;
@@ -200,114 +176,44 @@ static bool Middleman_RegisterReplayDebugger(JSContext* aCx, unsigned aArgc,
   return true;
 }
 
-static bool CallReplayDebuggerHook(const char* aMethod) {
-  if (!gReplayDebugger) {
-    return false;
-  }
-
-  AutoSafeJSContext cx;
-  JSAutoRealm ar(cx, *gReplayDebugger);
-  RootedValue rval(cx);
-  if (!JS_CallFunctionName(cx, *gReplayDebugger, aMethod,
-                           HandleValueArray::empty(), &rval)) {
-    Print("Warning: ReplayDebugger hook %s threw an exception\n", aMethod);
-  }
-  return true;
-}
-
-bool DebuggerOnPause() { return CallReplayDebuggerHook("_onPause"); }
-
-void DebuggerOnSwitchChild() { CallReplayDebuggerHook("_onSwitchChild"); }
-
 static bool Middleman_CanRewind(JSContext* aCx, unsigned aArgc, Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
   args.rval().setBoolean(parent::CanRewind());
   return true;
 }
 
-static bool Middleman_Resume(JSContext* aCx, unsigned aArgc, Value* aVp) {
+static bool Middleman_SpawnReplayingChild(JSContext* aCx, unsigned aArgc,
+                                          Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
-  bool forward = ToBoolean(args.get(0));
 
-  parent::Resume(forward);
-
-  args.rval().setUndefined();
+  size_t id = parent::SpawnReplayingChild();
+  args.rval().setInt32(id);
   return true;
 }
 
-static bool Middleman_TimeWarp(JSContext* aCx, unsigned aArgc, Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-  RootedObject targetObject(aCx, NonNullObject(aCx, args.get(0)));
-  if (!targetObject) {
-    return false;
-  }
-
-  ExecutionPoint target;
-  if (!target.Decode(aCx, targetObject)) {
-    return false;
-  }
-
-  parent::TimeWarp(target);
-
-  args.rval().setUndefined();
-  return true;
-}
-
-static bool Middleman_SendRequest(JSContext* aCx, unsigned aArgc, Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-  RootedObject requestObject(aCx, NonNullObject(aCx, args.get(0)));
-  if (!requestObject) {
-    return false;
-  }
-
-  CharBuffer requestBuffer;
-  if (!ToJSONMaybeSafely(aCx, requestObject, FillCharBufferCallback,
-                         &requestBuffer)) {
-    return false;
-  }
-
-  CharBuffer responseBuffer;
-  parent::SendRequest(requestBuffer, &responseBuffer);
-
-  return JS_ParseJSON(aCx, responseBuffer.begin(), responseBuffer.length(),
-                      args.rval());
-}
-
-static bool Middleman_AddBreakpoint(JSContext* aCx, unsigned aArgc,
-                                    Value* aVp) {
+static bool Middleman_SendManifest(JSContext* aCx, unsigned aArgc, Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
-  RootedObject positionObject(aCx, NonNullObject(aCx, args.get(0)));
-  if (!positionObject) {
+  RootedObject manifestObject(aCx, RequireObject(aCx, args.get(1)));
+  if (!manifestObject) {
     return false;
   }
 
-  BreakpointPosition position;
-  if (!position.Decode(aCx, positionObject)) {
+  CharBuffer manifestBuffer;
+  if (!ToJSONMaybeSafely(aCx, manifestObject, FillCharBufferCallback,
+                         &manifestBuffer)) {
     return false;
   }
 
-  parent::AddBreakpoint(position);
+  parent::ChildProcessInfo* child = GetChildById(aCx, args.get(0));
+  if (!child) {
+    return false;
+  }
 
-  args.rval().setUndefined();
-  return true;
-}
-
-/* static */ bool Middleman_ClearBreakpoints(JSContext* aCx, unsigned aArgc,
-                                             Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-
-  parent::ClearBreakpoints();
-
-  args.rval().setUndefined();
-  return true;
-}
-
-static bool Middleman_MaybeSwitchToReplayingChild(JSContext* aCx,
-                                                  unsigned aArgc, Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-
-  parent::MaybeSwitchToReplayingChild();
+  ManifestStartMessage* msg = ManifestStartMessage::New(
+      manifestBuffer.begin(), manifestBuffer.length());
+  child->SendMessage(std::move(*msg));
+  free(msg);
 
   args.rval().setUndefined();
   return true;
@@ -324,7 +230,7 @@ static bool Middleman_HadRepaint(JSContext* aCx, unsigned aArgc, Value* aVp) {
   size_t width = args.get(0).toNumber();
   size_t height = args.get(1).toNumber();
 
-  PaintMessage message(CheckpointId::Invalid, width, height);
+  PaintMessage message(InvalidCheckpointId, width, height);
   parent::UpdateGraphicsInUIProcess(&message);
 
   args.rval().setUndefined();
@@ -341,58 +247,40 @@ static bool Middleman_HadRepaintFailure(JSContext* aCx, unsigned aArgc,
   return true;
 }
 
-static bool Middleman_ChildIsRecording(JSContext* aCx, unsigned aArgc,
-                                       Value* aVp) {
+static bool Middleman_InRepaintStressMode(JSContext* aCx, unsigned aArgc,
+                                          Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
-  args.rval().setBoolean(parent::ActiveChildIsRecording());
+
+  args.rval().setBoolean(parent::InRepaintStressMode());
   return true;
 }
 
-static bool Middleman_MarkExplicitPause(JSContext* aCx, unsigned aArgc,
-                                        Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-
-  parent::MarkActiveChildExplicitPause();
-
-  args.rval().setUndefined();
-  return true;
+// Recording children can idle indefinitely while waiting for input, without
+// creating a checkpoint. If this might be a problem, this method induces the
+// child to create a new checkpoint and pause.
+static void MaybeCreateCheckpointInChild(parent::ChildProcessInfo* aChild) {
+  if (aChild->IsRecording() && !aChild->IsPaused()) {
+    aChild->SendMessage(CreateCheckpointMessage());
+  }
 }
 
 static bool Middleman_WaitUntilPaused(JSContext* aCx, unsigned aArgc,
                                       Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
-  parent::WaitUntilActiveChildIsPaused();
+  parent::ChildProcessInfo* child = GetChildById(aCx, args.get(0),
+                                                 /* aAllowUnpaused = */ true);
+  if (!child) {
+    return false;
+  }
+
+  if (ToBoolean(args.get(1))) {
+    MaybeCreateCheckpointInChild(child);
+  }
+
+  child->WaitUntilPaused();
 
   args.rval().setUndefined();
-  return true;
-}
-
-static bool Middleman_PositionSubsumes(JSContext* aCx, unsigned aArgc,
-                                       Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-
-  RootedObject firstPositionObject(aCx, NonNullObject(aCx, args.get(0)));
-  if (!firstPositionObject) {
-    return false;
-  }
-
-  BreakpointPosition firstPosition;
-  if (!firstPosition.Decode(aCx, firstPositionObject)) {
-    return false;
-  }
-
-  RootedObject secondPositionObject(aCx, NonNullObject(aCx, args.get(1)));
-  if (!secondPositionObject) {
-    return false;
-  }
-
-  BreakpointPosition secondPosition;
-  if (!secondPosition.Decode(aCx, secondPositionObject)) {
-    return false;
-  }
-
-  args.rval().setBoolean(firstPosition.Subsumes(secondPosition));
   return true;
 }
 
@@ -400,7 +288,7 @@ static bool Middleman_PositionSubsumes(JSContext* aCx, unsigned aArgc,
 // Devtools Sandbox
 ///////////////////////////////////////////////////////////////////////////////
 
-static PersistentRootedObject* gDevtoolsSandbox;
+static StaticRefPtr<rrIReplay> gReplay;
 
 // URL of the root script that runs when recording/replaying.
 #define ReplayScriptURL "resource://devtools/server/actors/replay/replay.js"
@@ -408,39 +296,24 @@ static PersistentRootedObject* gDevtoolsSandbox;
 // Whether to expose chrome:// and resource:// scripts to the debugger.
 static bool gIncludeSystemScripts;
 
+static void InitializeScriptHits();
+
 void SetupDevtoolsSandbox() {
-  MOZ_RELEASE_ASSERT(!gDevtoolsSandbox);
+  MOZ_RELEASE_ASSERT(!gReplay);
 
-  dom::AutoJSAPI jsapi;
-  if (!jsapi.Init(xpc::PrivilegedJunkScope())) {
-    MOZ_CRASH("SetupDevtoolsSandbox");
-  }
+  nsCOMPtr<rrIReplay> replay = do_ImportModule(ReplayScriptURL);
+  gReplay = replay.forget();
+  ClearOnShutdown(&gReplay);
 
-  JSContext* cx = jsapi.cx();
-
-  xpc::SandboxOptions options;
-  options.sandboxName.AssignLiteral("Record/Replay Devtools Sandbox");
-  options.invisibleToDebugger = true;
-  RootedValue v(cx);
-  nsresult rv =
-      CreateSandboxObject(cx, &v, nsXPConnect::SystemPrincipal(), options);
-  MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-
-  gDevtoolsSandbox = new PersistentRootedObject(cx);
-  *gDevtoolsSandbox = ::js::UncheckedUnwrap(&v.toObject());
-
-  JSAutoRealm ar(cx, *gDevtoolsSandbox);
-
-  ErrorResult er;
-  dom::GlobalObject global(cx, *gDevtoolsSandbox);
-  RootedObject obj(cx);
-  dom::ChromeUtils::Import(global, NS_LITERAL_STRING(ReplayScriptURL),
-                           dom::Optional<HandleObject>(), &obj, er);
-  MOZ_RELEASE_ASSERT(!er.Failed());
+  MOZ_RELEASE_ASSERT(gReplay);
 
   gIncludeSystemScripts =
       Preferences::GetBool("devtools.recordreplay.includeSystemScripts");
+
+  InitializeScriptHits();
 }
+
+bool IsInitialized() { return !!gReplay; }
 
 extern "C" {
 
@@ -463,111 +336,85 @@ MOZ_EXPORT bool RecordReplayInterface_ShouldUpdateProgressCounter(
 
 #undef ReplayScriptURL
 
-void ProcessRequest(const char16_t* aRequest, size_t aRequestLength,
-                    CharBuffer* aResponse) {
+void ManifestStart(const CharBuffer& aContents) {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoRealm ar(cx, *gDevtoolsSandbox);
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
 
-  RootedValue requestValue(cx);
-  if (!JS_ParseJSON(cx, aRequest, aRequestLength, &requestValue)) {
-    MOZ_CRASH("ProcessRequest: ParseJSON failed");
+  RootedValue value(cx);
+  if (!JS_ParseJSON(cx, aContents.begin(), aContents.length(), &value)) {
+    MOZ_CRASH("ManifestStart: ParseJSON failed");
   }
 
-  RootedValue responseValue(cx);
-  if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "ProcessRequest",
-                           HandleValueArray(requestValue), &responseValue)) {
-    MOZ_CRASH("ProcessRequest: Handler failed");
+  if (NS_FAILED(gReplay->ManifestStart(value))) {
+    MOZ_CRASH("ManifestStart: Handler failed");
   }
 
-  // Processing the request may have called into MaybeDivergeFromRecording.
-  // Now that we've finished processing it, don't tolerate future events that
+  // Processing the manifest may have called into MaybeDivergeFromRecording.
+  // If it did so, we should already have finished any processing that required
+  // diverging from the recording. Don't tolerate future events that
   // would otherwise cause us to rewind to the last checkpoint.
   DisallowUnhandledDivergeFromRecording();
-
-  if (!responseValue.isObject()) {
-    MOZ_CRASH("ProcessRequest: Response must be an object");
-  }
-
-  RootedObject responseObject(cx, &responseValue.toObject());
-  if (!ToJSONMaybeSafely(cx, responseObject, FillCharBufferCallback,
-                         aResponse)) {
-    MOZ_CRASH("ProcessRequest: ToJSONMaybeSafely failed");
-  }
 }
 
-void EnsurePositionHandler(const BreakpointPosition& aPosition) {
+void BeforeCheckpoint() {
+  if (!IsInitialized()) {
+    SetupDevtoolsSandbox();
+  }
+
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoRealm ar(cx, *gDevtoolsSandbox);
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
 
-  RootedObject obj(cx, aPosition.Encode(cx));
-  if (!obj) {
-    MOZ_CRASH("EnsurePositionHandler");
-  }
-
-  RootedValue objValue(cx, ObjectValue(*obj));
-  RootedValue rval(cx);
-  if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "EnsurePositionHandler",
-                           HandleValueArray(objValue), &rval)) {
-    MOZ_CRASH("EnsurePositionHandler");
+  if (NS_FAILED(gReplay->BeforeCheckpoint())) {
+    MOZ_CRASH("BeforeCheckpoint");
   }
 }
 
-void ClearPositionHandlers() {
+void AfterCheckpoint(size_t aCheckpoint, bool aRestoredCheckpoint) {
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoRealm ar(cx, *gDevtoolsSandbox);
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
 
-  RootedValue rval(cx);
-  if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "ClearPositionHandlers",
-                           HandleValueArray::empty(), &rval)) {
-    MOZ_CRASH("ClearPositionHandlers");
+  if (NS_FAILED(gReplay->AfterCheckpoint(aCheckpoint, aRestoredCheckpoint))) {
+    MOZ_CRASH("AfterCheckpoint");
   }
 }
 
-void ClearPausedState() {
+static ProgressCounter gProgressCounter;
+
+extern "C" {
+
+MOZ_EXPORT ProgressCounter* RecordReplayInterface_ExecutionProgressCounter() {
+  return &gProgressCounter;
+}
+
+MOZ_EXPORT ProgressCounter RecordReplayInterface_NewTimeWarpTarget() {
+  if (AreThreadEventsDisallowed()) {
+    return 0;
+  }
+
+  // NewTimeWarpTarget() must be called at consistent points between recording
+  // and replaying.
+  RecordReplayAssert("NewTimeWarpTarget");
+
+  if (!IsInitialized()) {
+    return 0;
+  }
+
   AutoDisallowThreadEvents disallow;
   AutoSafeJSContext cx;
-  JSAutoRealm ar(cx, *gDevtoolsSandbox);
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
 
-  RootedValue rval(cx);
-  if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "ClearPausedState",
-                           HandleValueArray::empty(), &rval)) {
-    MOZ_CRASH("ClearPausedState");
+  int32_t counter = 0;
+  if (NS_FAILED(gReplay->NewTimeWarpTarget(&counter))) {
+    MOZ_CRASH("NewTimeWarpTarget");
   }
+
+  return counter;
 }
 
-Maybe<BreakpointPosition> GetEntryPosition(
-    const BreakpointPosition& aPosition) {
-  AutoDisallowThreadEvents disallow;
-  AutoSafeJSContext cx;
-  JSAutoRealm ar(cx, *gDevtoolsSandbox);
-
-  RootedObject positionObject(cx, aPosition.Encode(cx));
-  if (!positionObject) {
-    MOZ_CRASH("GetEntryPosition");
-  }
-
-  RootedValue rval(cx);
-  RootedValue positionValue(cx, ObjectValue(*positionObject));
-  if (!JS_CallFunctionName(cx, *gDevtoolsSandbox, "GetEntryPosition",
-                           HandleValueArray(positionValue), &rval)) {
-    MOZ_CRASH("GetEntryPosition");
-  }
-
-  if (!rval.isObject()) {
-    return Nothing();
-  }
-
-  RootedObject rvalObject(cx, &rval.toObject());
-  BreakpointPosition entryPosition;
-  if (!entryPosition.Decode(cx, rvalObject)) {
-    MOZ_CRASH("GetEntryPosition");
-  }
-
-  return Some(entryPosition);
-}
+}  // extern "C"
 
 ///////////////////////////////////////////////////////////////////////////////
 // Replaying process content
@@ -725,10 +572,18 @@ static bool RecordReplay_AreThreadEventsDisallowed(JSContext* aCx,
   return true;
 }
 
-static bool RecordReplay_MaybeDivergeFromRecording(JSContext* aCx,
-                                                   unsigned aArgc, Value* aVp) {
+static bool RecordReplay_DivergeFromRecording(JSContext* aCx, unsigned aArgc,
+                                              Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
-  args.rval().setBoolean(navigation::MaybeDivergeFromRecording());
+  DivergeFromRecording();
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool RecordReplay_ProgressCounter(JSContext* aCx, unsigned aArgc,
+                                         Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+  args.rval().setNumber((double)gProgressCounter);
   return true;
 }
 
@@ -770,22 +625,309 @@ static bool RecordReplay_ShouldUpdateProgressCounter(JSContext* aCx,
   return true;
 }
 
-static bool RecordReplay_PositionHit(JSContext* aCx, unsigned aArgc,
-                                     Value* aVp) {
+static bool RecordReplay_ManifestFinished(JSContext* aCx, unsigned aArgc,
+                                          Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
-  RootedObject obj(aCx, NonNullObject(aCx, args.get(0)));
-  if (!obj) {
-    return false;
+
+  CharBuffer responseBuffer;
+  if (args.hasDefined(0)) {
+    RootedObject responseObject(aCx, RequireObject(aCx, args.get(0)));
+    if (!responseObject) {
+      return false;
+    }
+
+    if (!ToJSONMaybeSafely(aCx, responseObject, FillCharBufferCallback,
+                           &responseBuffer)) {
+      return false;
+    }
   }
 
-  BreakpointPosition position;
-  if (!position.Decode(aCx, obj)) {
-    return false;
-  }
-
-  navigation::PositionHit(position);
+  child::ManifestFinished(responseBuffer);
 
   args.rval().setUndefined();
+  return true;
+}
+
+static bool RecordReplay_ResumeExecution(JSContext* aCx, unsigned aArgc,
+                                         Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  ResumeExecution();
+
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool RecordReplay_RestoreCheckpoint(JSContext* aCx, unsigned aArgc,
+                                           Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  if (!args.get(0).isNumber()) {
+    JS_ReportErrorASCII(aCx, "Bad checkpoint ID");
+    return false;
+  }
+
+  size_t checkpoint = args.get(0).toNumber();
+  if (!HasSavedCheckpoint(checkpoint)) {
+    JS_ReportErrorASCII(aCx, "Only saved checkpoints can be restored");
+    return false;
+  }
+
+  RestoreCheckpointAndResume(checkpoint);
+
+  JS_ReportErrorASCII(aCx, "Unreachable!");
+  return false;
+}
+
+// The total amount of time this process has spent idling.
+static double gIdleTimeTotal;
+
+// When recording and we are idle, the time when we became idle.
+static double gIdleTimeStart;
+
+void BeginIdleTime() {
+  if (IsRecording() && Thread::CurrentIsMainThread()) {
+    MOZ_RELEASE_ASSERT(!gIdleTimeStart);
+    gIdleTimeStart = CurrentTime();
+  }
+}
+
+void EndIdleTime() {
+  if (IsRecording() && Thread::CurrentIsMainThread()) {
+    MOZ_RELEASE_ASSERT(!!gIdleTimeStart);
+    gIdleTimeTotal += CurrentTime() - gIdleTimeStart;
+    gIdleTimeStart = 0;
+  }
+}
+
+static bool RecordReplay_CurrentExecutionTime(JSContext* aCx, unsigned aArgc,
+                                              Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  // Get a current timestamp biased by the amount of time the process has spent
+  // idling. Comparing these timestamps gives the elapsed non-idle time between
+  // them.
+  args.rval().setNumber((CurrentTime() - gIdleTimeTotal) / 1000.0);
+  return true;
+}
+
+static bool RecordReplay_FlushRecording(JSContext* aCx, unsigned aArgc,
+                                        Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  FlushRecording();
+
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool RecordReplay_SetMainChild(JSContext* aCx, unsigned aArgc,
+                                      Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  SetMainChild();
+  size_t endpoint = RecordingEndpoint();
+
+  args.rval().setInt32(endpoint);
+  return true;
+}
+
+static bool RecordReplay_SaveCheckpoint(JSContext* aCx, unsigned aArgc,
+                                        Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  if (!args.get(0).isNumber()) {
+    JS_ReportErrorASCII(aCx, "Bad checkpoint ID");
+    return false;
+  }
+
+  size_t checkpoint = args.get(0).toNumber();
+  if (checkpoint <= GetLastCheckpoint()) {
+    JS_ReportErrorASCII(aCx, "Can't save checkpoint in the past");
+    return false;
+  }
+
+  SetSaveCheckpoint(checkpoint, true);
+
+  args.rval().setUndefined();
+  return true;
+}
+
+// How many hits on a script location we will precisely track for a checkpoint.
+static const size_t MaxHitsPerCheckpoint = 10;
+
+struct ScriptHitInfo {
+  // Information about a location where a script offset has been hit, or an
+  // aggregate set of hits.
+  struct ScriptHit {
+    // The most recent checkpoint prior to the hit.
+    uint32_t mCheckpoint;
+
+    // Index of the frame where the hit occurred, or UINT32_MAX if this
+    // represents an aggregate set of hits after the checkpoint.
+    uint32_t mFrameIndex;
+
+    // Progress counter when the hit occurred, invalid if this represents an
+    // aggregate set of hits.
+    ProgressCounter mProgress;
+
+    explicit ScriptHit(uint32_t aCheckpoint)
+        : mCheckpoint(aCheckpoint), mFrameIndex(UINT32_MAX), mProgress(0) {}
+
+    ScriptHit(uint32_t aCheckpoint, uint32_t aFrameIndex,
+              ProgressCounter aProgress)
+        : mCheckpoint(aCheckpoint),
+          mFrameIndex(aFrameIndex),
+          mProgress(aProgress) {}
+  };
+
+  struct ScriptHitChunk {
+    ScriptHit mHits[7];
+    ScriptHitChunk* mPrevious;
+  };
+
+  struct ScriptHitKey {
+    uint32_t mScript;
+    uint32_t mOffset;
+
+    ScriptHitKey(uint32_t aScript, uint32_t aOffset)
+        : mScript(aScript), mOffset(aOffset) {}
+
+    typedef ScriptHitKey Lookup;
+
+    static HashNumber hash(const ScriptHitKey& aKey) {
+      return HashGeneric(aKey.mScript, aKey.mOffset);
+    }
+
+    static bool match(const ScriptHitKey& aFirst, const ScriptHitKey& aSecond) {
+      return aFirst.mScript == aSecond.mScript &&
+             aFirst.mOffset == aSecond.mOffset;
+    }
+  };
+
+  typedef HashMap<ScriptHitKey, ScriptHitChunk*, ScriptHitKey,
+                  AllocPolicy<MemoryKind::ScriptHits>>
+      ScriptHitMap;
+  ScriptHitMap mTable;
+  ScriptHitChunk* mFreeChunk;
+
+  ScriptHitInfo() : mFreeChunk(nullptr) {}
+
+  ScriptHitChunk* FindHits(uint32_t aScript, uint32_t aOffset) {
+    ScriptHitKey key(aScript, aOffset);
+    ScriptHitMap::Ptr p = mTable.lookup(key);
+    return p ? p->value() : nullptr;
+  }
+
+  void AddHit(uint32_t aScript, uint32_t aOffset, uint32_t aCheckpoint,
+              uint32_t aFrameIndex, ProgressCounter aProgress) {
+    ScriptHitKey key(aScript, aOffset);
+    ScriptHitMap::AddPtr p = mTable.lookupForAdd(key);
+    if (!p && !mTable.add(p, key, NewChunk(nullptr))) {
+      MOZ_CRASH("ScriptHitInfo::AddScriptHit");
+    }
+
+    ScriptHitChunk* chunk = p->value();
+    p->value() = AddHit(chunk, ScriptHit(aCheckpoint, aFrameIndex, aProgress));
+  }
+
+  ScriptHitChunk* AddHit(ScriptHitChunk* aChunk, const ScriptHit& aHit) {
+    for (int i = ArrayLength(aChunk->mHits) - 1; i >= 0; i--) {
+      if (!aChunk->mHits[i].mCheckpoint) {
+        aChunk->mHits[i] = aHit;
+        return aChunk;
+      }
+    }
+    ScriptHitChunk* newChunk = NewChunk(aChunk);
+    newChunk->mHits[ArrayLength(newChunk->mHits) - 1] = aHit;
+    return newChunk;
+  }
+
+  ScriptHitChunk* NewChunk(ScriptHitChunk* aPrevious) {
+    if (!mFreeChunk) {
+      void* mem = AllocateMemory(PageSize, MemoryKind::ScriptHits);
+      ScriptHitChunk* chunks = reinterpret_cast<ScriptHitChunk*>(mem);
+      size_t numChunks = PageSize / sizeof(ScriptHitChunk);
+      for (size_t i = 0; i < numChunks - 1; i++) {
+        chunks[i].mPrevious = &chunks[i + 1];
+      }
+      mFreeChunk = chunks;
+    }
+    ScriptHitChunk* result = mFreeChunk;
+    mFreeChunk = mFreeChunk->mPrevious;
+    result->mPrevious = aPrevious;
+    return result;
+  }
+};
+
+static ScriptHitInfo* gScriptHits;
+
+static void InitializeScriptHits() {
+  void* mem = AllocateMemory(sizeof(ScriptHitInfo), MemoryKind::ScriptHits);
+  gScriptHits = new (mem) ScriptHitInfo();
+}
+
+static bool RecordReplay_AddScriptHit(JSContext* aCx, unsigned aArgc,
+                                      Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  if (!args.get(0).isNumber() || !args.get(1).isNumber() ||
+      !args.get(2).isNumber()) {
+    JS_ReportErrorASCII(aCx, "Bad parameters");
+    return false;
+  }
+
+  uint32_t script = args.get(0).toNumber();
+  uint32_t offset = args.get(1).toNumber();
+  uint32_t frameIndex = args.get(2).toNumber();
+
+  gScriptHits->AddHit(script, offset, GetLastCheckpoint(), frameIndex,
+                      gProgressCounter);
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool RecordReplay_FindScriptHits(JSContext* aCx, unsigned aArgc,
+                                        Value* aVp) {
+  CallArgs args = CallArgsFromVp(aArgc, aVp);
+
+  if (!args.get(0).isNumber() || !args.get(1).isNumber()) {
+    JS_ReportErrorASCII(aCx, "Bad parameters");
+    return false;
+  }
+
+  uint32_t script = args.get(0).toNumber();
+  uint32_t offset = args.get(1).toNumber();
+
+  RootedValueVector values(aCx);
+
+  ScriptHitInfo::ScriptHitChunk* chunk =
+      gScriptHits ? gScriptHits->FindHits(script, offset) : nullptr;
+  while (chunk) {
+    for (const auto& hit : chunk->mHits) {
+      if (hit.mCheckpoint) {
+        RootedObject hitObject(aCx, JS_NewObject(aCx, nullptr));
+        if (!hitObject ||
+            !JS_DefineProperty(aCx, hitObject, "checkpoint", hit.mCheckpoint,
+                               JSPROP_ENUMERATE) ||
+            !JS_DefineProperty(aCx, hitObject, "progress",
+                               (double)hit.mProgress, JSPROP_ENUMERATE) ||
+            !JS_DefineProperty(aCx, hitObject, "frameIndex", hit.mFrameIndex,
+                               JSPROP_ENUMERATE) ||
+            !values.append(ObjectValue(*hitObject))) {
+          return false;
+        }
+      }
+    }
+    chunk = chunk->mPrevious;
+  }
+
+  JSObject* array = JS_NewArrayObject(aCx, values);
+  if (!array) {
+    return false;
+  }
+
+  args.rval().setObject(*array);
   return true;
 }
 
@@ -808,67 +950,6 @@ static bool RecordReplay_GetContent(JSContext* aCx, unsigned aArgc,
   }
 
   args.rval().setObject(*obj);
-  return true;
-}
-
-static bool RecordReplay_CurrentExecutionPoint(JSContext* aCx, unsigned aArgc,
-                                               Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-
-  Maybe<BreakpointPosition> position;
-  if (!args.get(0).isUndefined()) {
-    RootedObject obj(aCx, NonNullObject(aCx, args.get(0)));
-    if (!obj) {
-      return false;
-    }
-
-    position.emplace();
-    if (!position.ref().Decode(aCx, obj)) {
-      return false;
-    }
-  }
-
-  ExecutionPoint point = navigation::CurrentExecutionPoint(position);
-  RootedObject result(aCx, point.Encode(aCx));
-  if (!result) {
-    return false;
-  }
-
-  args.rval().setObject(*result);
-  return true;
-}
-
-static bool RecordReplay_TimeWarpTargetExecutionPoint(JSContext* aCx,
-                                                      unsigned aArgc,
-                                                      Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-  double timeWarpTarget;
-  if (!ToNumber(aCx, args.get(0), &timeWarpTarget)) {
-    return false;
-  }
-
-  ExecutionPoint point =
-      navigation::TimeWarpTargetExecutionPoint((ProgressCounter)timeWarpTarget);
-  RootedObject result(aCx, point.Encode(aCx));
-  if (!result) {
-    return false;
-  }
-
-  args.rval().setObject(*result);
-  return true;
-}
-
-static bool RecordReplay_RecordingEndpoint(JSContext* aCx, unsigned aArgc,
-                                           Value* aVp) {
-  CallArgs args = CallArgsFromVp(aArgc, aVp);
-
-  ExecutionPoint point = navigation::GetRecordingEndpoint();
-  RootedObject result(aCx, point.Encode(aCx));
-  if (!result) {
-    return false;
-  }
-
-  args.rval().setObject(*result);
   return true;
 }
 
@@ -917,35 +998,32 @@ static bool RecordReplay_Dump(JSContext* aCx, unsigned aArgc, Value* aVp) {
 static const JSFunctionSpec gMiddlemanMethods[] = {
     JS_FN("registerReplayDebugger", Middleman_RegisterReplayDebugger, 1, 0),
     JS_FN("canRewind", Middleman_CanRewind, 0, 0),
-    JS_FN("resume", Middleman_Resume, 1, 0),
-    JS_FN("timeWarp", Middleman_TimeWarp, 1, 0),
-    JS_FN("sendRequest", Middleman_SendRequest, 1, 0),
-    JS_FN("addBreakpoint", Middleman_AddBreakpoint, 1, 0),
-    JS_FN("clearBreakpoints", Middleman_ClearBreakpoints, 0, 0),
-    JS_FN("maybeSwitchToReplayingChild", Middleman_MaybeSwitchToReplayingChild,
-          0, 0),
+    JS_FN("spawnReplayingChild", Middleman_SpawnReplayingChild, 0, 0),
+    JS_FN("sendManifest", Middleman_SendManifest, 2, 0),
     JS_FN("hadRepaint", Middleman_HadRepaint, 2, 0),
     JS_FN("hadRepaintFailure", Middleman_HadRepaintFailure, 0, 0),
-    JS_FN("childIsRecording", Middleman_ChildIsRecording, 0, 0),
-    JS_FN("markExplicitPause", Middleman_MarkExplicitPause, 0, 0),
-    JS_FN("waitUntilPaused", Middleman_WaitUntilPaused, 0, 0),
-    JS_FN("positionSubsumes", Middleman_PositionSubsumes, 2, 0),
+    JS_FN("inRepaintStressMode", Middleman_InRepaintStressMode, 0, 0),
+    JS_FN("waitUntilPaused", Middleman_WaitUntilPaused, 1, 0),
     JS_FS_END};
 
 static const JSFunctionSpec gRecordReplayMethods[] = {
     JS_FN("areThreadEventsDisallowed", RecordReplay_AreThreadEventsDisallowed,
           0, 0),
-    JS_FN("maybeDivergeFromRecording", RecordReplay_MaybeDivergeFromRecording,
-          0, 0),
+    JS_FN("divergeFromRecording", RecordReplay_DivergeFromRecording, 0, 0),
+    JS_FN("progressCounter", RecordReplay_ProgressCounter, 0, 0),
     JS_FN("advanceProgressCounter", RecordReplay_AdvanceProgressCounter, 0, 0),
     JS_FN("shouldUpdateProgressCounter",
           RecordReplay_ShouldUpdateProgressCounter, 1, 0),
-    JS_FN("positionHit", RecordReplay_PositionHit, 1, 0),
+    JS_FN("manifestFinished", RecordReplay_ManifestFinished, 1, 0),
+    JS_FN("resumeExecution", RecordReplay_ResumeExecution, 0, 0),
+    JS_FN("restoreCheckpoint", RecordReplay_RestoreCheckpoint, 1, 0),
+    JS_FN("currentExecutionTime", RecordReplay_CurrentExecutionTime, 0, 0),
+    JS_FN("flushRecording", RecordReplay_FlushRecording, 0, 0),
+    JS_FN("setMainChild", RecordReplay_SetMainChild, 0, 0),
+    JS_FN("saveCheckpoint", RecordReplay_SaveCheckpoint, 1, 0),
+    JS_FN("addScriptHit", RecordReplay_AddScriptHit, 3, 0),
+    JS_FN("findScriptHits", RecordReplay_FindScriptHits, 2, 0),
     JS_FN("getContent", RecordReplay_GetContent, 1, 0),
-    JS_FN("currentExecutionPoint", RecordReplay_CurrentExecutionPoint, 1, 0),
-    JS_FN("timeWarpTargetExecutionPoint",
-          RecordReplay_TimeWarpTargetExecutionPoint, 1, 0),
-    JS_FN("recordingEndpoint", RecordReplay_RecordingEndpoint, 0, 0),
     JS_FN("repaint", RecordReplay_Repaint, 0, 0),
     JS_FN("dump", RecordReplay_Dump, 1, 0),
     JS_FS_END};

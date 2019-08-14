@@ -175,17 +175,17 @@
 //!
 //! There is some room for improvement.
 
-use entity::SparseMap;
-use flowgraph::{BasicBlock, ControlFlowGraph};
-use ir::dfg::ValueDef;
-use ir::{Ebb, Function, Inst, Layout, ProgramPoint, Value};
-use isa::{EncInfo, OperandConstraint, TargetIsa};
-use regalloc::affinity::Affinity;
-use regalloc::liverange::{LiveRange, LiveRangeContext, LiveRangeForest};
-use std::mem;
-use std::ops::Index;
+use crate::entity::SparseMap;
+use crate::flowgraph::{BasicBlock, ControlFlowGraph};
+use crate::ir::dfg::ValueDef;
+use crate::ir::{Ebb, Function, Inst, Layout, ProgramPoint, Value};
+use crate::isa::{EncInfo, OperandConstraint, TargetIsa};
+use crate::regalloc::affinity::Affinity;
+use crate::regalloc::liverange::{LiveRange, LiveRangeContext, LiveRangeForest};
+use crate::timing;
+use core::mem;
+use core::ops::Index;
 use std::vec::Vec;
-use timing;
 
 /// A set of live ranges, indexed by value number.
 type LiveRangeSet = SparseMap<Value, LiveRange>;
@@ -195,7 +195,7 @@ type LiveRangeSet = SparseMap<Value, LiveRange>;
 fn get_or_create<'a>(
     lrset: &'a mut LiveRangeSet,
     value: Value,
-    isa: &TargetIsa,
+    isa: &dyn TargetIsa,
     func: &Function,
     encinfo: &EncInfo,
 ) -> &'a mut LiveRange {
@@ -220,7 +220,8 @@ fn get_or_create<'a>(
                         func.dfg
                             .call_signature(inst)
                             .map(|sig| Affinity::abi(&func.dfg.signatures[sig].returns[rnum], isa))
-                    }).unwrap_or_default();
+                    })
+                    .unwrap_or_default();
             }
             ValueDef::Param(ebb, num) => {
                 def = ebb.into();
@@ -313,6 +314,11 @@ impl Liveness {
         }
     }
 
+    /// Current live ranges.
+    pub fn ranges(&self) -> &LiveRangeSet {
+        &self.ranges
+    }
+
     /// Get a context needed for working with a `LiveRange`.
     pub fn context<'a>(&'a self, layout: &'a Layout) -> LiveRangeContext<'a, Layout> {
         LiveRangeContext::new(layout, &self.forest)
@@ -383,7 +389,7 @@ impl Liveness {
 
     /// Compute the live ranges of all SSA values used in `func`.
     /// This clears out any existing analysis stored in this data structure.
-    pub fn compute(&mut self, isa: &TargetIsa, func: &mut Function, cfg: &ControlFlowGraph) {
+    pub fn compute(&mut self, isa: &dyn TargetIsa, func: &mut Function, cfg: &ControlFlowGraph) {
         let _tt = timing::ra_liveness();
         self.ranges.clear();
 

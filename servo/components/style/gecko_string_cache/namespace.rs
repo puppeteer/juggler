@@ -11,6 +11,8 @@ use std::borrow::Borrow;
 use std::fmt;
 use std::ops::Deref;
 
+/// In Gecko namespaces are just regular atoms, so this is a simple macro to
+/// forward one macro to the other.
 #[macro_export]
 macro_rules! ns {
     () => {
@@ -22,7 +24,7 @@ macro_rules! ns {
 }
 
 /// A Gecko namespace is just a wrapped atom.
-#[derive(Clone, Debug, Default, Eq, Hash, MallocSizeOf, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, MallocSizeOf, PartialEq, ToShmem)]
 pub struct Namespace(pub Atom);
 
 impl PrecomputedHash for Namespace {

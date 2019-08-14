@@ -13,13 +13,13 @@
 #include <algorithm>
 
 #ifdef DEBUG_brendan
-#define METERING
+#  define METERING
 #endif
 
 #ifdef METERING
-#include <stdio.h>
-#define METER(x) x
-#define MAX_BIG_SEEKS 20
+#  include <stdio.h>
+#  define METER(x) x
+#  define MAX_BIG_SEEKS 20
 
 static struct {
   uint32_t mSeeksWithinBuffer;
@@ -34,11 +34,12 @@ static struct {
   } mBigSeek[MAX_BIG_SEEKS];
 } bufstats;
 #else
-#define METER(x) /* nothing */
+#  define METER(x) /* nothing */
 #endif
 
 using namespace mozilla::ipc;
 using mozilla::Maybe;
+using mozilla::MutexAutoLock;
 using mozilla::Nothing;
 using mozilla::Some;
 
@@ -60,11 +61,10 @@ nsBufferedStream::~nsBufferedStream() { Close(); }
 
 NS_IMPL_ISUPPORTS(nsBufferedStream, nsITellableStream, nsISeekableStream)
 
-nsresult nsBufferedStream::Init(nsISupports* stream, uint32_t bufferSize) {
-  NS_ASSERTION(stream, "need to supply a stream");
+nsresult nsBufferedStream::Init(nsISupports* aStream, uint32_t bufferSize) {
+  NS_ASSERTION(aStream, "need to supply a stream");
   NS_ASSERTION(mStream == nullptr, "already inited");
-  mStream = stream;
-  NS_IF_ADDREF(mStream);
+  mStream = aStream;  // we keep a reference until nsBufferedStream::Close
   mBufferSize = bufferSize;
   mBufferStartOffset = 0;
   mCursor = 0;
@@ -76,7 +76,8 @@ nsresult nsBufferedStream::Init(nsISupports* stream, uint32_t bufferSize) {
 }
 
 nsresult nsBufferedStream::Close() {
-  NS_IF_RELEASE(mStream);
+  // Drop the reference from nsBufferedStream::Init()
+  mStream = nullptr;
   if (mBuffer) {
     delete[] mBuffer;
     mBuffer = nullptr;
@@ -260,8 +261,8 @@ nsBufferedStream::SetEOF() {
 }
 
 nsresult nsBufferedStream::GetData(nsISupports** aResult) {
-  nsCOMPtr<nsISupports> rv(mStream);
-  *aResult = rv.forget().take();
+  nsCOMPtr<nsISupports> stream(mStream);
+  stream.forget(aResult);
   return NS_OK;
 }
 
@@ -310,14 +311,8 @@ nsresult nsBufferedInputStream::Create(nsISupports* aOuter, REFNSIID aIID,
                                        void** aResult) {
   NS_ENSURE_NO_AGGREGATION(aOuter);
 
-  nsBufferedInputStream* stream = new nsBufferedInputStream();
-  if (stream == nullptr) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  NS_ADDREF(stream);
-  nsresult rv = stream->QueryInterface(aIID, aResult);
-  NS_RELEASE(stream);
-  return rv;
+  RefPtr<nsBufferedInputStream> stream = new nsBufferedInputStream();
+  return stream->QueryInterface(aIID, aResult);
 }
 
 NS_IMETHODIMP
@@ -365,7 +360,6 @@ nsBufferedInputStream::Close() {
           "bsBuffedInputStream::Close().");
     };
 #endif
-    NS_RELEASE(mStream);
   }
 
   rv2 = nsBufferedStream::Close();
@@ -584,13 +578,54 @@ nsBufferedInputStream::GetUnbufferedStream(nsISupports** aStream) {
   mBufferStartOffset += mCursor;
   mFillPoint = mCursor = 0;
 
-  *aStream = mStream;
-  NS_IF_ADDREF(*aStream);
+  nsCOMPtr<nsISupports> stream = mStream;
+  stream.forget(aStream);
   return NS_OK;
 }
 
 void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
-                                      FileDescriptorArray& aFileDescriptors) {
+                                      FileDescriptorArray& aFileDescriptors,
+                                      bool aDelayedStart, uint32_t aMaxSize,
+                                      uint32_t* aSizeUsed,
+                                      mozilla::dom::ContentChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
+                                      FileDescriptorArray& aFileDescriptors,
+                                      bool aDelayedStart, uint32_t aMaxSize,
+                                      uint32_t* aSizeUsed,
+                                      PBackgroundChild* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
+                                      FileDescriptorArray& aFileDescriptors,
+                                      bool aDelayedStart, uint32_t aMaxSize,
+                                      uint32_t* aSizeUsed,
+                                      mozilla::dom::ContentParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
+                                      FileDescriptorArray& aFileDescriptors,
+                                      bool aDelayedStart, uint32_t aMaxSize,
+                                      uint32_t* aSizeUsed,
+                                      PBackgroundParent* aManager) {
+  SerializeInternal(aParams, aFileDescriptors, aDelayedStart, aMaxSize,
+                    aSizeUsed, aManager);
+}
+
+template <typename M>
+void nsBufferedInputStream::SerializeInternal(
+    InputStreamParams& aParams, FileDescriptorArray& aFileDescriptors,
+    bool aDelayedStart, uint32_t aMaxSize, uint32_t* aSizeUsed, M* aManager) {
+  MOZ_ASSERT(aSizeUsed);
+  *aSizeUsed = 0;
+
   BufferedInputStreamParams params;
 
   if (mStream) {
@@ -599,11 +634,10 @@ void nsBufferedInputStream::Serialize(InputStreamParams& aParams,
 
     InputStreamParams wrappedParams;
     InputStreamHelper::SerializeInputStream(stream, wrappedParams,
-                                            aFileDescriptors);
+                                            aFileDescriptors, aDelayedStart,
+                                            aMaxSize, aSizeUsed, aManager);
 
-    params.optionalStream() = wrappedParams;
-  } else {
-    params.optionalStream() = mozilla::void_t();
+    params.optionalStream().emplace(wrappedParams);
   }
 
   params.bufferSize() = mBufferSize;
@@ -621,33 +655,22 @@ bool nsBufferedInputStream::Deserialize(
 
   const BufferedInputStreamParams& params =
       aParams.get_BufferedInputStreamParams();
-  const OptionalInputStreamParams& wrappedParams = params.optionalStream();
+  const Maybe<InputStreamParams>& wrappedParams = params.optionalStream();
 
   nsCOMPtr<nsIInputStream> stream;
-  if (wrappedParams.type() == OptionalInputStreamParams::TInputStreamParams) {
-    stream = InputStreamHelper::DeserializeInputStream(
-        wrappedParams.get_InputStreamParams(), aFileDescriptors);
+  if (wrappedParams.isSome()) {
+    stream = InputStreamHelper::DeserializeInputStream(wrappedParams.ref(),
+                                                       aFileDescriptors);
     if (!stream) {
       NS_WARNING("Failed to deserialize wrapped stream!");
       return false;
     }
-  } else {
-    NS_ASSERTION(wrappedParams.type() == OptionalInputStreamParams::Tvoid_t,
-                 "Unknown type for OptionalInputStreamParams!");
   }
 
   nsresult rv = Init(stream, params.bufferSize());
   NS_ENSURE_SUCCESS(rv, false);
 
   return true;
-}
-
-Maybe<uint64_t> nsBufferedInputStream::ExpectedSerializedLength() {
-  nsCOMPtr<nsIIPCSerializableInputStream> stream = do_QueryInterface(mStream);
-  if (stream) {
-    return stream->ExpectedSerializedLength();
-  }
-  return Nothing();
 }
 
 NS_IMETHODIMP
@@ -699,7 +722,7 @@ nsBufferedInputStream::GetData(nsIInputStream** aResult) {
   nsCOMPtr<nsISupports> stream;
   nsBufferedStream::GetData(getter_AddRefs(stream));
   nsCOMPtr<nsIInputStream> inputStream = do_QueryInterface(stream);
-  *aResult = inputStream.forget().take();
+  inputStream.forget(aResult);
   return NS_OK;
 }
 
@@ -813,14 +836,8 @@ nsresult nsBufferedOutputStream::Create(nsISupports* aOuter, REFNSIID aIID,
                                         void** aResult) {
   NS_ENSURE_NO_AGGREGATION(aOuter);
 
-  nsBufferedOutputStream* stream = new nsBufferedOutputStream();
-  if (stream == nullptr) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-  NS_ADDREF(stream);
-  nsresult rv = stream->QueryInterface(aIID, aResult);
-  NS_RELEASE(stream);
-  return rv;
+  RefPtr<nsBufferedOutputStream> stream = new nsBufferedOutputStream();
+  return stream->QueryInterface(aIID, aResult);
 }
 
 NS_IMETHODIMP
@@ -857,7 +874,6 @@ nsBufferedOutputStream::Close() {
           "returned error (rv2).");
     }
 #endif
-    NS_RELEASE(mStream);
   }
   rv3 = nsBufferedStream::Close();
 
@@ -1141,8 +1157,8 @@ nsBufferedOutputStream::GetUnbufferedStream(nsISupports** aStream) {
     }
   }
 
-  *aStream = mStream;
-  NS_IF_ADDREF(*aStream);
+  nsCOMPtr<nsISupports> stream = mStream;
+  stream.forget(aStream);
   return NS_OK;
 }
 
@@ -1151,7 +1167,7 @@ nsBufferedOutputStream::GetData(nsIOutputStream** aResult) {
   nsCOMPtr<nsISupports> stream;
   nsBufferedStream::GetData(getter_AddRefs(stream));
   nsCOMPtr<nsIOutputStream> outputStream = do_QueryInterface(stream);
-  *aResult = outputStream.forget().take();
+  outputStream.forget(aResult);
   return NS_OK;
 }
 #undef METER

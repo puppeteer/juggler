@@ -18,7 +18,9 @@ PYTHON_UNITTEST_MANIFESTS += [
     'moznetwork/tests/manifest.ini',
     'mozprocess/tests/manifest.ini',
     'mozprofile/tests/manifest.ini',
+    'mozproxy/tests/manifest.ini',
     'mozrunner/tests/manifest.ini',
+    'mozsystemmonitor/tests/manifest.ini',
     'moztest/tests/manifest.ini',
     'mozversion/tests/manifest.ini',
 ]
@@ -37,6 +39,7 @@ python_modules = [
     'moznetwork',
     'mozprocess',
     'mozprofile',
+    'mozproxy',
     'mozrunner',
     'mozscreenshot',
     'mozsystemmonitor',

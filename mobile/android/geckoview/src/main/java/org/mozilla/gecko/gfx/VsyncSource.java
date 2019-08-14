@@ -7,8 +7,10 @@ package org.mozilla.gecko.gfx;
 
 import android.content.Context;
 import android.hardware.display.DisplayManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.support.annotation.RequiresApi;
 import android.view.Choreographer;
 import android.view.Display;
 import org.mozilla.gecko.annotation.WrapForJNI;
@@ -43,7 +45,7 @@ import org.mozilla.gecko.GeckoAppShell;
     private static native void nativeNotifyVsync();
 
     // Choreographer callback implementation.
-    public void doFrame(long frameTimeNanos) {
+    public void doFrame(final long frameTimeNanos) {
         if (mObservingVsync) {
             mChoreographer.postFrameCallback(this);
             nativeNotifyVsync();
@@ -56,7 +58,7 @@ import org.mozilla.gecko.GeckoAppShell;
      * @return true if observing and false if not.
      */
     @WrapForJNI
-    public synchronized boolean observeVsync(boolean enable) {
+    public synchronized boolean observeVsync(final boolean enable) {
         if (mObservingVsync != enable) {
             mObservingVsync = enable;
 
@@ -71,7 +73,15 @@ import org.mozilla.gecko.GeckoAppShell;
         return mObservingVsync;
     }
 
-    /** Gets the refresh rate of default display in frames per second. */
+    /**
+     * Gets the refresh rate of default display in frames per second.
+     *
+     * The {@link DisplayManager} used by this method to determine the refresh rate
+     * was introduced in API level 17.
+     *
+     * @return the refresh rate of default display in frames per second.
+     **/
+    @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN_MR1)
     @WrapForJNI
     public float getRefreshRate() {
         DisplayManager dm = (DisplayManager)

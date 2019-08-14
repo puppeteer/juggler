@@ -7,6 +7,10 @@ node_js:
 python:
   - "2.7"
 
+addons:
+  # Run unit tests in Nightly to be in line with what Firefox tests would run against
+  firefox: "latest-nightly"
+
 cache:
   directories:
     - node_modules
@@ -21,10 +25,6 @@ before_install:
 install:
   - npm config set spin false
   - npm install
-
-before_script:
-  - bash bin/download-firefox-travis.sh release-linux64-add-on-devel
-  - export FIREFOX_BIN=./firefox/firefox
 
 script:
   - npm test

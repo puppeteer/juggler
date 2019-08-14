@@ -12,11 +12,11 @@
 #include "jit/shared/Assembler-shared.h"
 
 #if defined(JS_CODEGEN_X86)
-#include "jit/x86/BaseAssembler-x86.h"
+#  include "jit/x86/BaseAssembler-x86.h"
 #elif defined(JS_CODEGEN_X64)
-#include "jit/x64/BaseAssembler-x64.h"
+#  include "jit/x64/BaseAssembler-x64.h"
 #else
-#error "Unknown architecture!"
+#  error "Unknown architecture!"
 #endif
 
 namespace js {
@@ -209,6 +209,19 @@ class CPUInfo {
 
   static void SetSSEVersion();
 
+  // The flags can become set at startup when we JIT non-JS code eagerly; thus
+  // we reset the flags before setting any flags explicitly during testing, so
+  // that the flags can be in a consistent state.
+
+  static void reset() {
+    maxSSEVersion = UnknownSSE;
+    maxEnabledSSEVersion = UnknownSSE;
+    avxPresent = false;
+    avxEnabled = false;
+    popcntPresent = false;
+    needAmdBugWorkaround = false;
+  }
+
  public:
   static bool IsSSE2Present() {
 #ifdef JS_CODEGEN_X64
@@ -228,14 +241,19 @@ class CPUInfo {
   static bool NeedAmdBugWorkaround() { return needAmdBugWorkaround; }
 
   static void SetSSE3Disabled() {
+    reset();
     maxEnabledSSEVersion = SSE2;
     avxEnabled = false;
   }
   static void SetSSE4Disabled() {
+    reset();
     maxEnabledSSEVersion = SSSE3;
     avxEnabled = false;
   }
-  static void SetAVXEnabled() { avxEnabled = true; }
+  static void SetAVXEnabled() {
+    reset();
+    avxEnabled = true;
+  }
 };
 
 class AssemblerX86Shared : public AssemblerShared {
@@ -254,6 +272,8 @@ class AssemblerX86Shared : public AssemblerShared {
   CompactBufferWriter dataRelocations_;
 
   void writeDataRelocation(ImmGCPtr ptr) {
+    // Raw GC pointer relocations and Value relocations both end up in
+    // Assembler::TraceDataRelocations.
     if (ptr.value) {
       if (gc::IsInsideNursery(ptr.value)) {
         embedsNurseryPointers_ = true;
@@ -391,6 +411,9 @@ class AssemblerX86Shared : public AssemblerShared {
 #endif
   }
 
+  void setUnlimitedBuffer() {
+    // No-op on this platform
+  }
   bool oom() const {
     return AssemblerShared::oom() || masm.oom() || jumpRelocations_.oom() ||
            dataRelocations_.oom();

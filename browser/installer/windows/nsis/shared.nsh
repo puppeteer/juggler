@@ -60,10 +60,6 @@
     ${EndIf}
   ${EndIf}
 
-  ; Migrate the application's Start Menu directory to a single shortcut in the
-  ; root of the Start Menu Programs directory.
-  ${MigrateStartMenuShortcut}
-
   ; Adds a pinned Task Bar shortcut (see MigrateTaskBarShortcut for details).
   ${MigrateTaskBarShortcut}
 
@@ -128,11 +124,13 @@
     ; Since the Maintenance service can be installed either x86 or x64,
     ; always use the 64-bit registry for checking if an attempt was made.
     ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
       SetRegView 64
     ${EndIf}
     ReadRegDWORD $5 HKLM "Software\Mozilla\MaintenanceService" "Attempted"
     ClearErrors
     ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
       SetRegView lastused
     ${EndIf}
 
@@ -160,12 +158,16 @@
     ${EndIf}
   ${EndIf}
 !endif
+
+!ifdef MOZ_LAUNCHER_PROCESS
+  ${ResetLauncherProcessDefaults}
+!endif
+
 !macroend
 !define PostUpdate "!insertmacro PostUpdate"
 
 ; Update the last modified time on the Start Menu shortcut, so that its icon
-; gets refreshed. Should be called on Win8+ after MigrateStartMenuShortcut
-; and UpdateShortcutBranding.
+; gets refreshed. Should be called on Win8+ after UpdateShortcutBranding.
 !macro TouchStartMenuShortcut
   ${If} ${FileExists} "$SMPROGRAMS\${BrandShortName}.lnk"
     FileOpen $0 "$SMPROGRAMS\${BrandShortName}.lnk" a
@@ -344,8 +346,7 @@
 ; to BrandShortName (which is what we now name shortcuts). We only rename
 ; desktop and start menu shortcuts, because touching taskbar pins often
 ; (but inconsistently) triggers various broken behaviors in the shell.
-; This should only be called sometime after MigrateStartMenuShortcut,
-; and it assumes SHCTX is set correctly.
+; This assumes SHCTX is set correctly.
 !macro UpdateShortcutsBranding
   ${UpdateOneShortcutBranding} "STARTMENU" "$SMPROGRAMS"
   ${UpdateOneShortcutBranding} "DESKTOP" "$DESKTOP"
@@ -590,6 +591,7 @@
 
   ; Running Firefox 32 bit
   ${If} ${RunningX64}
+  ${OrIf} ${IsNativeARM64}
     ; Running Firefox 32 bit on a Windows 64 bit system
     ClearErrors
     ReadRegDWORD $2 HKLM "Software\Mozilla\${AppName}\32to64DidMigrate" "$1"
@@ -903,6 +905,7 @@
     ; if the binary is replaced with a different certificate.
     ; We always use the 64bit registry for certs.
     ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
       SetRegView 64
     ${EndIf}
 
@@ -925,6 +928,7 @@
     WriteRegStr HKLM "$R0\1" "name" "${CERTIFICATE_NAME_PREVIOUS}"
     WriteRegStr HKLM "$R0\1" "issuer" "${CERTIFICATE_ISSUER_PREVIOUS}"
     ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
       SetRegView lastused
     ${EndIf}
     ClearErrors
@@ -1177,9 +1181,22 @@
               InvokeShellVerb::DoIt "$SMPROGRAMS" "$1" "5381"
             ${EndUnless}
 
-            ; Pin the shortcut to the TaskBar. 5386 is the shell32.dll resource
-            ; id for the "Pin to Taskbar" string.
-            InvokeShellVerb::DoIt "$SMPROGRAMS" "$1" "5386"
+            ${If} ${AtMostWin2012R2}
+              ; Pin the shortcut to the TaskBar. 5386 is the shell32.dll
+              ; resource id for the "Pin to Taskbar" string.
+              InvokeShellVerb::DoIt "$SMPROGRAMS" "$1" "5386"
+            ${Else}
+              ; In Windows 10 the "Pin to Taskbar" resource was removed, so we
+              ; can't access the verb that way anymore. We have a create a
+              ; command key using the GUID that's assigned to this action and
+              ; then invoke that as a verb.
+              ReadRegStr $R9 HKLM \
+                "Software\Microsoft\Windows\CurrentVersion\Explorer\CommandStore\shell\Windows.taskbarpin" \
+                "ExplorerCommandHandler"
+              WriteRegStr HKCU "Software\Classes\*\shell\${AppRegName}-$AppUserModelID" "ExplorerCommandHandler" $R9
+              InvokeShellVerb::DoIt "$SMPROGRAMS" "$1" "${AppRegName}-$AppUserModelID"
+              DeleteRegKey HKCU "Software\Classes\*\shell\${AppRegName}-$AppUserModelID"
+            ${EndIf}
 
             ; Delete the shortcut if it was created
             ${If} "$8" == "true"
@@ -1198,56 +1215,6 @@
   ${EndIf}
 !macroend
 !define PinToTaskBar "!insertmacro PinToTaskBar"
-
-; Adds a shortcut to the root of the Start Menu Programs directory if the
-; application's Start Menu Programs directory exists with a shortcut pointing to
-; this installation directory. This will also remove the old shortcuts and the
-; application's Start Menu Programs directory by calling the RemoveStartMenuDir
-; macro.
-!macro MigrateStartMenuShortcut
-  ${GetShortcutsLogPath} $0
-  ${If} ${FileExists} "$0"
-    ClearErrors
-    ReadINIStr $5 "$0" "SMPROGRAMS" "RelativePathToDir"
-    ${Unless} ${Errors}
-      ClearErrors
-      ReadINIStr $1 "$0" "STARTMENU" "Shortcut0"
-      ${If} ${Errors}
-        ; The STARTMENU ini section doesn't exist.
-        ${LogStartMenuShortcut} "${BrandShortName}.lnk"
-        ${GetLongPath} "$SMPROGRAMS" $2
-        ${GetLongPath} "$2\$5" $1
-        ${If} "$1" != ""
-          ClearErrors
-          ReadINIStr $3 "$0" "SMPROGRAMS" "Shortcut0"
-          ${Unless} ${Errors}
-            ${If} ${FileExists} "$1\$3"
-              ShellLink::GetShortCutTarget "$1\$3"
-              Pop $4
-              ${If} "$INSTDIR\${FileMainEXE}" == "$4"
-                CreateShortCut "$SMPROGRAMS\${BrandShortName}.lnk" \
-                               "$INSTDIR\${FileMainEXE}"
-                ${If} ${FileExists} "$SMPROGRAMS\${BrandShortName}.lnk"
-                  ShellLink::SetShortCutWorkingDirectory "$SMPROGRAMS\${BrandShortName}.lnk" \
-                                                         "$INSTDIR"
-                  ${If} ${AtLeastWin7}
-                  ${AndIf} "$AppUserModelID" != ""
-                    ApplicationID::Set "$SMPROGRAMS\${BrandShortName}.lnk" \
-                                       "$AppUserModelID" "true"
-                  ${EndIf}
-                ${EndIf}
-              ${EndIf}
-            ${EndIf}
-          ${EndUnless}
-        ${EndIf}
-      ${EndIf}
-      ; Remove the application's Start Menu Programs directory, shortcuts, and
-      ; ini section.
-      ${RemoveStartMenuDir}
-    ${EndUnless}
-  ${EndIf}
-!macroend
-!define MigrateStartMenuShortcut "!insertmacro MigrateStartMenuShortcut"
 
 ; Removes the application's start menu directory along with its shortcuts if
 ; they exist and if they exist creates a start menu shortcut in the root of the
@@ -1602,3 +1569,15 @@ FunctionEnd
 !define SetAsDefaultAppUser "Call SetAsDefaultAppUser"
 
 !endif ; NO_LOG
+
+!ifdef MOZ_LAUNCHER_PROCESS
+!macro ResetLauncherProcessDefaults
+  # By deleting these values, we remove remnants of any force-disable settings
+  # that may have been set during the SHIELD study in 67. Note that this setting
+  # was only intended to distinguish between test and control groups for the
+  # purposes of the study, not as a user preference.
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Launcher"
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Browser"
+!macroend
+!define ResetLauncherProcessDefaults "!insertmacro ResetLauncherProcessDefaults"
+!endif

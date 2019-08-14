@@ -9,6 +9,8 @@ with Files("**"):
 
 BROWSER_CHROME_MANIFESTS += ['test/browser/browser.ini']
 
+SPHINX_TREES['docs'] = 'docs'
+
 XPCSHELL_TESTS_MANIFESTS += [
     'test/xpcshell/xpcshell.ini',
 ]
@@ -19,9 +21,12 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'browser-newtab'
 
-EXTRA_COMPONENTS += [
-    'aboutNewTabService.js',
-    'NewTabComponents.manifest',
+EXTRA_JS_MODULES += [
+    'AboutNewTabService.jsm',
+]
+
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 JAR_MANIFESTS += ['jar.mn']

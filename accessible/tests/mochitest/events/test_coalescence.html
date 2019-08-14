@@ -6,10 +6,8 @@
   <link rel="stylesheet" type="text/css"
         href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
 
   <script type="application/javascript"
           src="../common.js"></script>
@@ -90,6 +88,8 @@
           default:
             return INVOKER_ACTION_FAILED;
         }
+        // 0 means the action succeeded.
+        return 0;
       };
 
       this.getEventType = function coalescenceBase_getEventType(aAction) {
@@ -99,6 +99,7 @@
           case kAddElm: case kShowElm:
             return EVENT_SHOW;
         }
+        return 0;
       };
 
       this.getActionName = function coalescenceBase_getActionName(aAction) {

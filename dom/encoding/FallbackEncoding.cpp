@@ -29,11 +29,12 @@ static NotNull<const Encoding*> SearchEncodingProp(
     const EncodingProp (&aProperties)[N], const nsACString& aKey) {
   const nsCString& flat = PromiseFlatCString(aKey);
   size_t index;
-  if (!BinarySearchIf(aProperties, 0, ArrayLength(aProperties),
-                      [&flat](const EncodingProp& aProperty) {
-                        return flat.Compare(aProperty.mKey);
-                      },
-                      &index)) {
+  if (!BinarySearchIf(
+          aProperties, 0, ArrayLength(aProperties),
+          [&flat](const EncodingProp& aProperty) {
+            return flat.Compare(aProperty.mKey);
+          },
+          &index)) {
     return WINDOWS_1252_ENCODING;
   }
   return aProperties[index].mValue;
@@ -55,7 +56,6 @@ NS_IMPL_ISUPPORTS(FallbackEncoding, nsIObserver)
 
 StaticRefPtr<FallbackEncoding> FallbackEncoding::sInstance;
 bool FallbackEncoding::sGuessFallbackFromTopLevelDomain = true;
-bool FallbackEncoding::sFallbackToUTF8ForFile = false;
 
 FallbackEncoding::FallbackEncoding() : mFallback(nullptr) {
   MOZ_ASSERT(!FallbackEncoding::sInstance, "Singleton already exists.");
@@ -141,8 +141,6 @@ void FallbackEncoding::Initialize() {
                                 "intl.charset.fallback.override");
   Preferences::AddBoolVarCache(&sGuessFallbackFromTopLevelDomain,
                                "intl.charset.fallback.tld");
-  Preferences::AddBoolVarCache(&sFallbackToUTF8ForFile,
-                               "intl.charset.fallback.utf8_for_file");
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {

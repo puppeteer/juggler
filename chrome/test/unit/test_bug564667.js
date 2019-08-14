@@ -6,8 +6,9 @@
 const UNPACKAGED_ADDON = do_get_file("data/test_bug564667");
 const PACKAGED_ADDON = do_get_file("data/test_bug564667.xpi");
 
-var gCR = Cc["@mozilla.org/chrome/chrome-registry;1"].
-          getService(Ci.nsIChromeRegistry);
+var gCR = Cc["@mozilla.org/chrome/chrome-registry;1"].getService(
+  Ci.nsIChromeRegistry
+);
 
 /*
  * Checks that a mapping was added
@@ -37,7 +38,6 @@ function test_removed_mapping(chromeURL, target) {
 }
 
 function testManifest(manifestPath, baseURI) {
-
   // ------------------  Add manifest file ------------------------
   Components.manager.addBootstrappedManifestLocation(manifestPath);
 
@@ -79,5 +79,8 @@ function run_test() {
   testManifest(UNPACKAGED_ADDON, Services.io.newFileURI(UNPACKAGED_ADDON).spec);
 
   // Test a packaged addon
-  testManifest(PACKAGED_ADDON, "jar:" + Services.io.newFileURI(PACKAGED_ADDON).spec + "!/");
+  testManifest(
+    PACKAGED_ADDON,
+    "jar:" + Services.io.newFileURI(PACKAGED_ADDON).spec + "!/"
+  );
 }

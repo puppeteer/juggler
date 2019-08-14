@@ -65,8 +65,8 @@ BlobURL::Write(nsIObjectOutputStream* aStream) {
   return NS_OK;
 }
 
-// nsIIPCSerializableURI methods:
-void BlobURL::Serialize(mozilla::ipc::URIParams& aParams) {
+NS_IMETHODIMP_(void)
+BlobURL::Serialize(mozilla::ipc::URIParams& aParams) {
   using namespace mozilla::ipc;
 
   HostObjectURIParams hostParams;
@@ -126,7 +126,8 @@ nsresult BlobURL::CloneInternal(
   return NS_OK;
 }
 
-/* virtual */ nsresult BlobURL::EqualsInternal(
+/* virtual */
+nsresult BlobURL::EqualsInternal(
     nsIURI* aOther, mozilla::net::nsSimpleURI::RefHandlingEnum aRefHandlingMode,
     bool* aResult) {
   if (!aOther) {
@@ -151,7 +152,7 @@ nsresult BlobURL::CloneInternal(
 
 // Queries this list of interfaces. If none match, it queries mURI.
 NS_IMPL_NSIURIMUTATOR_ISUPPORTS(BlobURL::Mutator, nsIURISetters, nsIURIMutator,
-                                nsISerializable)
+                                nsISerializable, nsIBlobURLMutator)
 
 NS_IMETHODIMP
 BlobURL::Mutate(nsIURIMutator** aMutator) {
@@ -166,9 +167,8 @@ BlobURL::Mutate(nsIURIMutator** aMutator) {
 
 // nsIClassInfo methods:
 NS_IMETHODIMP
-BlobURL::GetInterfaces(uint32_t* count, nsIID*** array) {
-  *count = 0;
-  *array = nullptr;
+BlobURL::GetInterfaces(nsTArray<nsIID>& array) {
+  array.Clear();
   return NS_OK;
 }
 

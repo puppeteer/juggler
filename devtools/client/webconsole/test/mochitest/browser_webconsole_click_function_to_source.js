@@ -7,21 +7,17 @@
 
 "use strict";
 
-// Import helpers for the new debugger
-/* import-globals-from ../../../debugger/new/test/mochitest/helpers.js */
-Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers.js",
-  this);
-
 requestLongerTimeout(5);
 
-const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/mochitest/" +
-                 "test-click-function-to-source.html";
+const TEST_URI =
+  "http://example.com/browser/devtools/client/webconsole/" +
+  "test/mochitest/" +
+  "test-click-function-to-source.html";
 
-const TEST_SCRIPT_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/mochitest/" +
-                 "test-click-function-to-source.js";
+const TEST_SCRIPT_URI =
+  "http://example.com/browser/devtools/client/webconsole/" +
+  "test/mochitest/" +
+  "test-click-function-to-source.js";
 
 add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
@@ -37,7 +33,7 @@ add_task(async function() {
   ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
     content.wrappedJSObject.foo();
   });
-  const {node} = await onLoggedFunction;
+  const { node } = await onLoggedFunction;
   const jumpIcon = node.querySelector(".jump-definition");
   ok(jumpIcon, "A jump to definition button is rendered, as expected");
 
@@ -48,7 +44,7 @@ add_task(async function() {
   const dbg = createDebuggerContext(toolbox);
   await waitForSelectedSource(dbg, TEST_SCRIPT_URI);
 
-  const pendingLocation = dbg.selectors.getPendingSelectedLocation(dbg.getState());
-  const {line} = pendingLocation;
+  const pendingLocation = dbg.selectors.getPendingSelectedLocation();
+  const { line } = pendingLocation;
   is(line, 9, "Debugger is open at the expected line");
 });

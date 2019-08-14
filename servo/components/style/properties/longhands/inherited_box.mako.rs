@@ -14,6 +14,7 @@ ${helpers.single_keyword(
     gecko_ffi_name="mVisible",
     animation_value_type="ComputedValue",
     spec="https://drafts.csswg.org/css-box/#propdef-visibility",
+    flags="APPLIES_TO_CUE",
 )}
 
 // CSS Writing Modes Level 3
@@ -28,6 +29,7 @@ ${helpers.single_keyword(
     servo_pref="layout.writing-mode.enabled",
     animation_value_type="none",
     spec="https://drafts.csswg.org/css-writing-modes/#propdef-writing-mode",
+    flags="APPLIES_TO_CUE",
     servo_restyle_damage="rebuild_and_reflow",
 )}
 
@@ -37,6 +39,7 @@ ${helpers.single_keyword(
     animation_value_type="none",
     spec="https://drafts.csswg.org/css-writing-modes/#propdef-direction",
     needs_conversion=True,
+    flags="APPLIES_TO_MARKER",
     servo_restyle_damage="rebuild_and_reflow",
 )}
 
@@ -54,7 +57,7 @@ ${helpers.single_keyword(
 ${helpers.single_keyword(
     "color-adjust",
     "economy exact", products="gecko",
-    gecko_pref="layout.css.color-adjust.enabled",
+    gecko_enum_prefix="StyleColorAdjust",
     animation_value_type="discrete",
     spec="https://drafts.csswg.org/css-color/#propdef-color-adjust",
 )}
@@ -77,6 +80,5 @@ ${helpers.single_keyword(
     products="gecko",
     gecko_enum_prefix="StyleImageOrientation",
     animation_value_type="discrete",
-    gecko_pref="layout.css.image-orientation.enabled",
     spec="https://drafts.csswg.org/css-images/#propdef-image-orientation",
 )}

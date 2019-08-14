@@ -16,6 +16,7 @@
 
 class nsTableRowFrame;
 namespace mozilla {
+class PresShell;
 struct TableRowGroupReflowInput;
 }  // namespace mozilla
 
@@ -44,7 +45,7 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
    * @return           the frame that was created
    */
   friend nsTableRowGroupFrame* NS_NewTableRowGroupFrame(
-      nsIPresShell* aPresShell, ComputedStyle* aStyle);
+      mozilla::PresShell* aPresShell, ComputedStyle* aStyle);
   virtual ~nsTableRowGroupFrame();
 
   // nsIFrame overrides
@@ -291,8 +292,9 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
 
   /**
    * Get the first row that might contain y-coord 'aY', or nullptr if you must
-   * search all rows. The actual row returned might not contain 'aY', but if
-   * not, it is guaranteed to be before any row which does contain 'aY'.
+   * search all rows.
+   * The actual row returned might not contain 'aY', but if not, it is
+   * guaranteed to be before any row which does contain 'aY'.
    * aOverflowAbove is the maximum over all rows of -row.GetOverflowRect().y.
    * To find all rows that intersect the vertical interval aY/aYMost, call
    * GetFirstRowContaining(aY, &overflowAbove), and then iterate through all
@@ -330,7 +332,8 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
   }
 
  protected:
-  explicit nsTableRowGroupFrame(ComputedStyle* aStyle);
+  explicit nsTableRowGroupFrame(ComputedStyle* aStyle,
+                                nsPresContext* aPresContext);
 
   void InitChildReflowInput(nsPresContext& aPresContext, bool aBorderCollapse,
                             ReflowInput& aReflowInput);

@@ -9,15 +9,12 @@
 const TEST_URI = `data:text/html,<meta charset=utf8>Test reverse search`;
 
 add_task(async function() {
-  // Force reverse search on.
-  await pushPref("devtools.webconsole.jsterm.reverse-search", true);
-
   const hud = await openNewTabAndConsole(TEST_URI);
 
   const jstermHistory = [
     `document`,
     `document
-       .querySelectorAll("*")
+       .querySelectorAll("span")
        .forEach(console.log)`,
     `Dog = "Snoopy"`,
   ];
@@ -31,11 +28,18 @@ add_task(async function() {
   await openReverseSearch(hud);
   EventUtils.sendString("d");
   const infoElement = await waitFor(() => getReverseSearchInfoElement(hud));
-  is(infoElement.textContent, "3 of 3 results", "The reverse info has the expected text");
+  is(
+    infoElement.textContent,
+    "3 of 3 results",
+    "The reverse info has the expected text"
+  );
 
-  is(hud.jsterm.getInputValue(), jstermHistory[2], "JsTerm has the expected input");
-  is(hud.jsterm.autocompletePopup.isOpen, false,
-    "Setting the input value did not trigger the autocompletion");
+  is(getInputValue(hud), jstermHistory[2], "JsTerm has the expected input");
+  is(
+    hud.jsterm.autocompletePopup.isOpen,
+    false,
+    "Setting the input value did not trigger the autocompletion"
+  );
 
   await navigateResultsAndCheckState(hud, {
     direction: "previous",
@@ -49,7 +53,9 @@ add_task(async function() {
     expectedJsTermInputValue: jstermHistory[0],
   });
 
-  info("Check that we go back to the last matching item if we were at the first");
+  info(
+    "Check that we go back to the last matching item if we were at the first"
+  );
   await navigateResultsAndCheckState(hud, {
     direction: "previous",
     expectedInfoText: "3 of 3 results",
@@ -75,11 +81,10 @@ add_task(async function() {
   });
 });
 
-async function navigateResultsAndCheckState(hud, {
-  direction,
-  expectedInfoText,
-  expectedJsTermInputValue,
-}) {
+async function navigateResultsAndCheckState(
+  hud,
+  { direction, expectedInfoText, expectedJsTermInputValue }
+) {
   const onJsTermValueChanged = hud.jsterm.once("set-input-value");
   if (direction === "previous") {
     clickPreviousButton(hud);
@@ -88,11 +93,19 @@ async function navigateResultsAndCheckState(hud, {
   }
   await onJsTermValueChanged;
 
-  is(hud.jsterm.getInputValue(), expectedJsTermInputValue, "JsTerm has expected value");
+  is(getInputValue(hud), expectedJsTermInputValue, "JsTerm has expected value");
 
   const infoElement = getReverseSearchInfoElement(hud);
-  is(infoElement.textContent, expectedInfoText, "The reverse info has the expected text");
-  is(isReverseSearchInputFocused(hud), true, "reverse search input is still focused");
+  is(
+    infoElement.textContent,
+    expectedInfoText,
+    "The reverse info has the expected text"
+  );
+  is(
+    isReverseSearchInputFocused(hud),
+    true,
+    "reverse search input is still focused"
+  );
 }
 
 function clickPreviousButton(hud) {
@@ -100,7 +113,9 @@ function clickPreviousButton(hud) {
   if (!reverseSearchElement) {
     return;
   }
-  const button = reverseSearchElement.querySelector(".search-result-button-prev");
+  const button = reverseSearchElement.querySelector(
+    ".search-result-button-prev"
+  );
   if (!button) {
     return;
   }
@@ -113,7 +128,9 @@ function clickNextButton(hud) {
   if (!reverseSearchElement) {
     return;
   }
-  const button = reverseSearchElement.querySelector(".search-result-button-next");
+  const button = reverseSearchElement.querySelector(
+    ".search-result-button-next"
+  );
   if (!button) {
     return;
   }

@@ -31,7 +31,7 @@ class DeadObjectProxy : public BaseProxyHandler {
                               Handle<PropertyDescriptor> desc,
                               ObjectOpResult& result) const override;
   virtual bool ownPropertyKeys(JSContext* cx, HandleObject wrapper,
-                               AutoIdVector& props) const override;
+                               MutableHandleIdVector props) const override;
   virtual bool delete_(JSContext* cx, HandleObject wrapper, HandleId id,
                        ObjectOpResult& result) const override;
   virtual bool getPrototype(JSContext* cx, HandleObject proxy,
@@ -49,9 +49,7 @@ class DeadObjectProxy : public BaseProxyHandler {
                          const CallArgs& args) const override;
 
   /* SpiderMonkey extensions. */
-  // BaseProxyHandler::getPropertyDescriptor will throw by calling
-  // getOwnPropertyDescriptor. BaseProxyHandler::enumerate will throw by calling
-  // ownKeys.
+  // BaseProxyHandler::enumerate will throw by calling ownKeys.
   virtual bool nativeCall(JSContext* cx, IsAcceptableThis test, NativeImpl impl,
                           const CallArgs& args) const override;
   virtual bool hasInstance(JSContext* cx, HandleObject proxy,
@@ -90,6 +88,12 @@ bool IsDeadProxyObject(JSObject* obj);
 Value DeadProxyTargetValue(ProxyObject* obj);
 
 JSObject* NewDeadProxyObject(JSContext* cx, JSObject* origObj = nullptr);
+
+enum class IsCallableFlag : bool { False, True };
+enum class IsConstructorFlag : bool { False, True };
+
+JSObject* NewDeadProxyObject(JSContext* cx, IsCallableFlag isCallable,
+                             IsConstructorFlag isConstructor);
 
 } /* namespace js */
 

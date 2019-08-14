@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function run_test() {
   test_methods_presence();
@@ -23,7 +23,6 @@ function test_methods_calling() {
   Services.intl.getCalendarInfo("pl");
   Services.intl.getDisplayNames("ar");
   Services.intl.getLocaleInfo("de");
-  Services.intl.getLocaleDisplayNames(undefined, ["en-US", "sr-Cyrl-RU"]);
   new Services.intl.DateTimeFormat("fr");
   new Services.intl.RelativeTimeFormat("fr");
   ok(true);
@@ -31,7 +30,11 @@ function test_methods_calling() {
 
 function test_constructors() {
   let constructors = [
-    "DateTimeFormat", "NumberFormat", "PluralRules", "Collator"];
+    "DateTimeFormat",
+    "NumberFormat",
+    "PluralRules",
+    "Collator",
+  ];
 
   constructors.forEach(constructor => {
     let obj = new Intl[constructor]();
@@ -57,7 +60,7 @@ function test_constructors() {
 
 function testRTFBestUnit(anchor, value, expected) {
   let rtf = new Services.intl.RelativeTimeFormat("en-US");
-  deepEqual(rtf.formatBestUnit(new Date(value), {now: anchor}), expected);
+  deepEqual(rtf.formatBestUnit(new Date(value), { now: anchor }), expected);
 }
 
 function test_rtf_formatBestUnit() {

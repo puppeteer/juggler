@@ -6,7 +6,7 @@
 
 const {
   getAllMessagesUiById,
-  getAllMessagesTableDataById,
+  getAllMessagesPayloadById,
   getAllNetworkMessagesUpdateById,
   getAllRepeatById,
   getCurrentGroup,
@@ -21,7 +21,9 @@ const {
   setupActions,
   setupStore,
 } = require("devtools/client/webconsole/test/helpers");
-const { stubPackets } = require("devtools/client/webconsole/test/fixtures/stubs/index");
+const {
+  stubPackets,
+} = require("devtools/client/webconsole/test/fixtures/stubs/index");
 
 const expect = require("expect");
 
@@ -34,12 +36,14 @@ describe("private messages", () => {
   it("removes private messages on PRIVATE_MESSAGES_CLEAR action", () => {
     const { dispatch, getState } = setupStore();
 
-    dispatch(actions.messagesAdd([
-      getPrivatePacket("console.trace()"),
-      stubPackets.get("console.log('mymap')"),
-      getPrivatePacket("console.log(undefined)"),
-      getPrivatePacket("GET request"),
-    ]));
+    dispatch(
+      actions.messagesAdd([
+        getPrivatePacket("console.trace()"),
+        stubPackets.get("console.log('mymap')"),
+        getPrivatePacket("console.log(undefined)"),
+        getPrivatePacket("GET request"),
+      ])
+    );
 
     let state = getState();
     const messages = getAllMessagesById(state);
@@ -55,10 +59,12 @@ describe("private messages", () => {
   it("cleans messagesUiById on PRIVATE_MESSAGES_CLEAR action", () => {
     const { dispatch, getState } = setupStore();
 
-    dispatch(actions.messagesAdd([
-      getPrivatePacket("console.trace()"),
-      stubPackets.get("console.trace()"),
-    ]));
+    dispatch(
+      actions.messagesAdd([
+        getPrivatePacket("console.trace()"),
+        stubPackets.get("console.trace()"),
+      ])
+    );
 
     let state = getState();
     expect(getAllMessagesUiById(state).length).toBe(2);
@@ -72,12 +78,14 @@ describe("private messages", () => {
   it("cleans repeatsById on PRIVATE_MESSAGES_CLEAR action", () => {
     const { dispatch, getState } = setupStore();
 
-    dispatch(actions.messagesAdd([
-      getPrivatePacket("console.log(undefined)"),
-      getPrivatePacket("console.log(undefined)"),
-      stubPackets.get("console.log(undefined)"),
-      stubPackets.get("console.log(undefined)"),
-    ]));
+    dispatch(
+      actions.messagesAdd([
+        getPrivatePacket("console.log(undefined)"),
+        getPrivatePacket("console.log(undefined)"),
+        stubPackets.get("console.log(undefined)"),
+        stubPackets.get("console.log(undefined)"),
+      ])
+    );
 
     let state = getState();
     expect(getAllRepeatById(state)).toEqual({
@@ -94,42 +102,51 @@ describe("private messages", () => {
     });
   });
 
-  it("cleans messagesTableDataById on PRIVATE_MESSAGES_CLEAR action", () => {
+  it("cleans messagesPayloadById on PRIVATE_MESSAGES_CLEAR action", () => {
     const { dispatch, getState } = setupStore();
 
-    dispatch(actions.messagesAdd([
-      getPrivatePacket("console.table(['a', 'b', 'c'])"),
-      stubPackets.get("console.table(['a', 'b', 'c'])"),
-    ]));
+    dispatch(
+      actions.messagesAdd([
+        getPrivatePacket("console.table(['a', 'b', 'c'])"),
+        stubPackets.get("console.table(['a', 'b', 'c'])"),
+      ])
+    );
 
     const privateTableData = Symbol("privateTableData");
     const publicTableData = Symbol("publicTableData");
-    dispatch(actions.messageTableDataReceive(
-      getFirstMessage(getState()).id,
-      privateTableData
-    ));
-    dispatch(actions.messageTableDataReceive(
-      getLastMessage(getState()).id,
-      publicTableData
-    ));
+    dispatch(
+      actions.messageUpdatePayload(
+        getFirstMessage(getState()).id,
+        privateTableData
+      )
+    );
+    dispatch(
+      actions.messageUpdatePayload(
+        getLastMessage(getState()).id,
+        publicTableData
+      )
+    );
 
     let state = getState();
-    expect(getAllMessagesTableDataById(state).size).toBe(2);
+    expect(getAllMessagesPayloadById(state).size).toBe(2);
 
     dispatch(actions.privateMessagesClear());
 
     state = getState();
-    expect(getAllMessagesTableDataById(state).size).toBe(1);
-    expect(getAllMessagesTableDataById(state).get(getFirstMessage(getState()).id))
-      .toBe(publicTableData);
+    expect(getAllMessagesPayloadById(state).size).toBe(1);
+    expect(
+      getAllMessagesPayloadById(state).get(getFirstMessage(getState()).id)
+    ).toBe(publicTableData);
   });
 
   it("cleans group properties on PRIVATE_MESSAGES_CLEAR action", () => {
     const { dispatch, getState } = setupStore();
-    dispatch(actions.messagesAdd([
-      stubPackets.get("console.group()"),
-      getPrivatePacket("console.group()"),
-    ]));
+    dispatch(
+      actions.messagesAdd([
+        stubPackets.get("console.group()"),
+        getPrivatePacket("console.group()"),
+      ])
+    );
 
     let state = getState();
     const publicMessageId = getFirstMessage(state).id;
@@ -147,25 +164,27 @@ describe("private messages", () => {
 
   it("cleans networkMessagesUpdateById on PRIVATE_MESSAGES_CLEAR action", () => {
     const { dispatch, getState } = setupStore();
-    dispatch(actions.messagesAdd([
-      stubPackets.get("GET request"),
-      getPrivatePacket("XHR GET request"),
-    ]));
 
-    const state = getState();
-    const publicMessageId = getFirstMessage(state).id;
-    const privateMessageId = getLastMessage(state).id;
+    const publicActor = "network/public";
+    const privateActor = "network/private";
+    const publicPacket = {
+      ...stubPackets.get("GET request"),
+      actor: publicActor,
+    };
+    const privatePacket = {
+      ...getPrivatePacket("XHR GET request"),
+      actor: privateActor,
+    };
 
-    dispatch(actions.networkUpdateRequest(publicMessageId, {}));
-    dispatch(actions.networkUpdateRequest(privateMessageId, {}));
+    dispatch(actions.messagesAdd([publicPacket, privatePacket]));
 
     let networkUpdates = getAllNetworkMessagesUpdateById(getState());
-    expect(Object.keys(networkUpdates)).toEqual([publicMessageId, privateMessageId]);
+    expect(Object.keys(networkUpdates)).toEqual([publicActor, privateActor]);
 
     dispatch(actions.privateMessagesClear());
 
     networkUpdates = getAllNetworkMessagesUpdateById(getState());
-    expect(Object.keys(networkUpdates)).toEqual([publicMessageId]);
+    expect(Object.keys(networkUpdates)).toEqual([publicActor]);
   });
 
   it("releases private backend actors on PRIVATE_MESSAGES_CLEAR action", () => {
@@ -173,7 +192,7 @@ describe("private messages", () => {
     const { dispatch, getState } = setupStore([], {
       hud: {
         proxy: {
-          releaseActor: (actor) => {
+          releaseActor: actor => {
             releasedActors.push(actor);
           },
         },
@@ -181,10 +200,12 @@ describe("private messages", () => {
     });
 
     // Add a log message.
-    dispatch(actions.messagesAdd([
-      stubPackets.get("console.log('myarray', ['red', 'green', 'blue'])"),
-      getPrivatePacket("console.log('mymap')"),
-    ]));
+    dispatch(
+      actions.messagesAdd([
+        stubPackets.get("console.log('myarray', ['red', 'green', 'blue'])"),
+        getPrivatePacket("console.log('mymap')"),
+      ])
+    );
 
     const firstMessage = getFirstMessage(getState());
     const firstMessageActor = firstMessage.parameters[1].actor;

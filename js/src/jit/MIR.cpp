@@ -12,8 +12,6 @@
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MathAlgorithms.h"
 
-#include <ctype.h>
-
 #include "jslibmath.h"
 
 #include "builtin/RegExp.h"
@@ -26,6 +24,7 @@
 #include "jit/RangeAnalysis.h"
 #include "js/Conversions.h"
 #include "util/Text.h"
+#include "util/Unicode.h"
 #include "wasm/WasmCode.h"
 
 #include "builtin/Boolean-inl.h"
@@ -33,7 +32,6 @@
 #include "vm/JSAtom-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/JSScript-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -71,9 +69,9 @@ static bool CheckUsesAreFloat32Consumers(const MInstruction* ins) {
 #ifdef JS_JITSPEW
 static const char* OpcodeName(MDefinition::Opcode op) {
   static const char* const names[] = {
-#define NAME(x) #x,
+#  define NAME(x) #  x,
       MIR_OPCODE_LIST(NAME)
-#undef NAME
+#  undef NAME
   };
   return names[unsigned(op)];
 }
@@ -82,7 +80,7 @@ void MDefinition::PrintOpcodeName(GenericPrinter& out, Opcode op) {
   const char* name = OpcodeName(op);
   size_t len = strlen(name);
   for (size_t i = 0; i < len; i++) {
-    out.printf("%c", tolower(name[i]));
+    out.printf("%c", unicode::ToLowerCase(name[i]));
   }
 }
 #endif
@@ -459,33 +457,6 @@ static bool MaybeCallable(CompilerConstraintList* constraints,
   return types->maybeCallable(constraints);
 }
 
-/* static */ const char* AliasSet::Name(size_t flag) {
-  switch (flag) {
-    case 0:
-      return "ObjectFields";
-    case 1:
-      return "Element";
-    case 2:
-      return "UnboxedElement";
-    case 3:
-      return "DynamicSlot";
-    case 4:
-      return "FixedSlot";
-    case 5:
-      return "DOMProperty";
-    case 6:
-      return "FrameArgument";
-    case 7:
-      return "WasmGlobalVar";
-    case 8:
-      return "WasmHeap";
-    case 9:
-      return "TypedArrayLength";
-    default:
-      MOZ_CRASH("Unknown flag");
-  }
-}
-
 void MTest::cacheOperandMightEmulateUndefined(
     CompilerConstraintList* constraints) {
   MOZ_ASSERT(operandMightEmulateUndefined());
@@ -635,6 +606,7 @@ void MDefinition::printOpcode(GenericPrinter& out) const {
     out.printf(" ");
     if (getUseFor(j)->hasProducer()) {
       getOperand(j)->printName(out);
+      out.printf(":%s", StringFromMIRType(getOperand(j)->type()));
     } else {
       out.printf("(null)");
     }
@@ -643,6 +615,7 @@ void MDefinition::printOpcode(GenericPrinter& out) const {
 
 void MDefinition::dump(GenericPrinter& out) const {
   printName(out);
+  out.printf(":%s", StringFromMIRType(type()));
   out.printf(" = ");
   printOpcode(out);
   out.printf("\n");
@@ -966,6 +939,9 @@ MConstant::MConstant(TempAllocator& alloc, const js::Value& vp,
     case MIRType::Symbol:
       payload_.sym = vp.toSymbol();
       break;
+    case MIRType::BigInt:
+      payload_.bi = vp.toBigInt();
+      break;
     case MIRType::Object:
       payload_.obj = &vp.toObject();
       // Create a singleton type set for the object. This isn't necessary for
@@ -1024,18 +1000,18 @@ void MConstant::assertInitializedPayload() const {
   switch (type()) {
     case MIRType::Int32:
     case MIRType::Float32:
-#if MOZ_LITTLE_ENDIAN
+#  if MOZ_LITTLE_ENDIAN
       MOZ_ASSERT((payload_.asBits >> 32) == 0);
-#else
+#  else
       MOZ_ASSERT((payload_.asBits << 32) == 0);
-#endif
+#  endif
       break;
     case MIRType::Boolean:
-#if MOZ_LITTLE_ENDIAN
+#  if MOZ_LITTLE_ENDIAN
       MOZ_ASSERT((payload_.asBits >> 1) == 0);
-#else
+#  else
       MOZ_ASSERT((payload_.asBits & ~(1ULL << 56)) == 0);
-#endif
+#  endif
       break;
     case MIRType::Double:
     case MIRType::Int64:
@@ -1043,11 +1019,12 @@ void MConstant::assertInitializedPayload() const {
     case MIRType::String:
     case MIRType::Object:
     case MIRType::Symbol:
-#if MOZ_LITTLE_ENDIAN
+    case MIRType::BigInt:
+#  if MOZ_LITTLE_ENDIAN
       MOZ_ASSERT_IF(JS_BITS_PER_WORD == 32, (payload_.asBits >> 32) == 0);
-#else
+#  else
       MOZ_ASSERT_IF(JS_BITS_PER_WORD == 32, (payload_.asBits << 32) == 0);
-#endif
+#  endif
       break;
     default:
       MOZ_ASSERT(IsNullOrUndefined(type()) || IsMagicType(type()));
@@ -1134,6 +1111,9 @@ void MConstant::printOpcode(GenericPrinter& out) const {
     case MIRType::Symbol:
       out.printf("symbol at %p", (void*)toSymbol());
       break;
+    case MIRType::BigInt:
+      out.printf("BigInt at %p", (void*)toBigInt());
+      break;
     case MIRType::String:
       out.printf("string %p", (void*)toString());
       break;
@@ -1195,6 +1175,8 @@ Value MConstant::toJSValue() const {
       return StringValue(toString());
     case MIRType::Symbol:
       return SymbolValue(toSymbol());
+    case MIRType::BigInt:
+      return BigIntValue(toBigInt());
     case MIRType::Object:
       return ObjectValue(toObject());
     case MIRType::MagicOptimizedArguments:
@@ -1236,6 +1218,9 @@ bool MConstant::valueToBoolean(bool* res) const {
     case MIRType::Symbol:
       *res = true;
       return true;
+    case MIRType::BigInt:
+      *res = !toBigInt()->isZero();
+      return true;
     case MIRType::String:
       *res = toString()->length() != 0;
       return true;
@@ -1258,6 +1243,10 @@ HashNumber MWasmFloatConstant::valueHash() const {
 bool MWasmFloatConstant::congruentTo(const MDefinition* ins) const {
   return ins->isWasmFloatConstant() && type() == ins->type() &&
          u.bits_ == ins->toWasmFloatConstant()->u.bits_;
+}
+
+HashNumber MWasmNullConstant::valueHash() const {
+  return ConstantValueHash(MIRType::RefOrNull, 0);
 }
 
 #ifdef JS_JITSPEW
@@ -1534,7 +1523,8 @@ WrappedFunction::WrappedFunction(JSFunction* fun)
       isNativeWithJitEntry_(fun->isNativeWithJitEntry()),
       isConstructor_(fun->isConstructor()),
       isClassConstructor_(fun->isClassConstructor()),
-      isSelfHostedBuiltin_(fun->isSelfHostedBuiltin()) {}
+      isSelfHostedBuiltin_(fun->isSelfHostedBuiltin()),
+      isExtended_(fun->isExtended()) {}
 
 MCall* MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc,
                   size_t numActualArgs, bool construct, bool ignoresReturnValue,
@@ -1776,6 +1766,9 @@ void MUnbox::printOpcode(GenericPrinter& out) const {
       break;
     case MIRType::Symbol:
       out.printf("to Symbol");
+      break;
+    case MIRType::BigInt:
+      out.printf("to BigInt");
       break;
     case MIRType::Object:
       out.printf("to Object");
@@ -2255,6 +2248,7 @@ bool jit::TypeSetIncludes(TypeSet* types, MIRType input, TypeSet* inputTypes) {
     case MIRType::Float32:
     case MIRType::String:
     case MIRType::Symbol:
+    case MIRType::BigInt:
     case MIRType::MagicOptimizedArguments:
       return types->hasType(
           TypeSet::PrimitiveType(ValueTypeFromMIRType(input)));
@@ -2321,12 +2315,6 @@ bool jit::CanStoreUnboxedType(TempAllocator& alloc, JSValueType unboxedType,
   }
 
   return TypeSetIncludes(&types, input, inputTypes);
-}
-
-static bool CanStoreUnboxedType(TempAllocator& alloc, JSValueType unboxedType,
-                                MDefinition* value) {
-  return CanStoreUnboxedType(alloc, unboxedType, value->type(),
-                             value->resultTypeSet());
 }
 
 bool MPhi::specializeType(TempAllocator& alloc) {
@@ -2515,8 +2503,10 @@ MDefinition* MBinaryBitwiseInstruction::foldUnnecessaryBitop() {
 void MBinaryBitwiseInstruction::infer(BaselineInspector*, jsbytecode*) {
   if (getOperand(0)->mightBeType(MIRType::Object) ||
       getOperand(0)->mightBeType(MIRType::Symbol) ||
+      getOperand(0)->mightBeType(MIRType::BigInt) ||
       getOperand(1)->mightBeType(MIRType::Object) ||
-      getOperand(1)->mightBeType(MIRType::Symbol)) {
+      getOperand(1)->mightBeType(MIRType::Symbol) ||
+      getOperand(1)->mightBeType(MIRType::BigInt)) {
     specialization_ = MIRType::None;
     setResultType(MIRType::Value);
   } else {
@@ -2540,7 +2530,9 @@ void MShiftInstruction::infer(BaselineInspector*, jsbytecode*) {
   if (getOperand(0)->mightBeType(MIRType::Object) ||
       getOperand(1)->mightBeType(MIRType::Object) ||
       getOperand(0)->mightBeType(MIRType::Symbol) ||
-      getOperand(1)->mightBeType(MIRType::Symbol)) {
+      getOperand(1)->mightBeType(MIRType::Symbol) ||
+      getOperand(0)->mightBeType(MIRType::BigInt) ||
+      getOperand(1)->mightBeType(MIRType::BigInt)) {
     specialization_ = MIRType::None;
     setResultType(MIRType::Value);
   } else {
@@ -2553,7 +2545,9 @@ void MUrsh::infer(BaselineInspector* inspector, jsbytecode* pc) {
   if (getOperand(0)->mightBeType(MIRType::Object) ||
       getOperand(1)->mightBeType(MIRType::Object) ||
       getOperand(0)->mightBeType(MIRType::Symbol) ||
-      getOperand(1)->mightBeType(MIRType::Symbol)) {
+      getOperand(1)->mightBeType(MIRType::Symbol) ||
+      getOperand(0)->mightBeType(MIRType::BigInt) ||
+      getOperand(1)->mightBeType(MIRType::BigInt)) {
     specialization_ = MIRType::None;
     setResultType(MIRType::Value);
     return;
@@ -2764,23 +2758,6 @@ MBinaryArithInstruction* MBinaryArithInstruction::New(TempAllocator& alloc,
   }
 }
 
-void MBinaryArithInstruction::setNumberSpecialization(
-    TempAllocator& alloc, BaselineInspector* inspector, jsbytecode* pc) {
-  setSpecialization(MIRType::Double);
-
-  // Try to specialize as int32.
-  if (getOperand(0)->type() == MIRType::Int32 &&
-      getOperand(1)->type() == MIRType::Int32) {
-    bool seenDouble = inspector->hasSeenDoubleResult(pc);
-
-    // Use int32 specialization if the operation doesn't overflow on its
-    // constant operands and if the operation has never overflowed.
-    if (!seenDouble && !constantDoubleResult(alloc)) {
-      setInt32Specialization();
-    }
-  }
-}
-
 bool MBinaryArithInstruction::constantDoubleResult(TempAllocator& alloc) {
   bool typeChange = false;
   EvaluateConstantOperands(alloc, this, &typeChange);
@@ -2961,6 +2938,9 @@ void MMinMax::trySpecializeFloat32(TempAllocator& alloc) {
 }
 
 MDefinition* MMinMax::foldsTo(TempAllocator& alloc) {
+  if (lhs() == rhs()) {
+    return lhs();
+  }
   if (!lhs()->isConstant() && !rhs()->isConstant()) {
     return this;
   }
@@ -3025,13 +3005,15 @@ MDefinition* MMinMax::foldsTo(TempAllocator& alloc) {
     }
   }
 
-  if (operand->isArrayLength() && constant->type() == MIRType::Int32) {
+  if ((operand->isArrayLength() || operand->isTypedArrayLength()) &&
+      constant->type() == MIRType::Int32) {
     MOZ_ASSERT(operand->type() == MIRType::Int32);
 
-    // max(array.length, 0) = array.length
-    // ArrayLength is always >= 0, so just return it.
-    if (isMax() && constant->toInt32() <= 0) {
-      return operand;
+    // (Typed)ArrayLength is always >= 0.
+    // max(array.length, cte <= 0) = array.length
+    // min(array.length, cte <= 0) = cte
+    if (constant->toInt32() <= 0) {
+      return isMax() ? operand : constant;
     }
   }
 
@@ -3408,8 +3390,9 @@ static inline bool MustBeUInt32(MDefinition* def, MDefinition** pwrapped) {
   return false;
 }
 
-/* static */ bool MBinaryInstruction::unsignedOperands(MDefinition* left,
-                                                       MDefinition* right) {
+/* static */
+bool MBinaryInstruction::unsignedOperands(MDefinition* left,
+                                          MDefinition* right) {
   MDefinition* replace;
   if (!MustBeUInt32(left, &replace)) {
     return false;
@@ -3490,13 +3473,12 @@ MCompare::CompareType MCompare::determineCompareType(JSOp op, MDefinition* left,
     return Compare_Object;
   }
 
-  // Handle string comparisons. (Relational string compares are still
-  // unsupported).
-  if (!relationalEq && lhs == MIRType::String && rhs == MIRType::String) {
+  // Handle string comparisons.
+  if (lhs == MIRType::String && rhs == MIRType::String) {
     return Compare_String;
   }
 
-  // Handle symbol comparisons. (Relaational compare will throw)
+  // Handle symbol comparisons. (Relational compare will throw)
   if (!relationalEq && lhs == MIRType::Symbol && rhs == MIRType::Symbol) {
     return Compare_Symbol;
   }
@@ -3588,6 +3570,9 @@ MDefinition* MTypeOf::foldsTo(TempAllocator& alloc) {
       break;
     case MIRType::Symbol:
       type = JSTYPE_SYMBOL;
+      break;
+    case MIRType::BigInt:
+      type = JSTYPE_BIGINT;
       break;
     case MIRType::Null:
       type = JSTYPE_OBJECT;
@@ -3848,6 +3833,21 @@ bool MResumePoint::isObservableOperand(size_t index) const {
 
 bool MResumePoint::isRecoverableOperand(MUse* u) const {
   return block()->info().isRecoverableOperand(indexOf(u));
+}
+
+MDefinition* MToNumeric::foldsTo(TempAllocator& alloc) {
+  MDefinition* input = getOperand(0);
+
+  if (input->isBox()) {
+    MDefinition* unboxed = input->getOperand(0);
+    if (IsNumericType(unboxed->type())) {
+      // If the argument is an MBox and we can see that it boxes a numeric
+      // value, ToNumeric can be elided.
+      return input;
+    }
+  }
+
+  return this;
 }
 
 MDefinition* MToNumberInt32::foldsTo(TempAllocator& alloc) {
@@ -4188,6 +4188,11 @@ bool MCompare::tryFoldTypeOf(bool* result) {
     }
   } else if (constant->toString() == TypeName(JSTYPE_SYMBOL, names)) {
     if (!typeOf->input()->mightBeType(MIRType::Symbol)) {
+      *result = (jsop() == JSOP_STRICTNE || jsop() == JSOP_NE);
+      return true;
+    }
+  } else if (constant->toString() == TypeName(JSTYPE_BIGINT, names)) {
+    if (!typeOf->input()->mightBeType(MIRType::BigInt)) {
       *result = (jsop() == JSOP_STRICTNE || jsop() == JSOP_NE);
       return true;
     }
@@ -4567,71 +4572,32 @@ void MBeta::printOpcode(GenericPrinter& out) const {
 #endif
 
 bool MCreateThisWithTemplate::canRecoverOnBailout() const {
-  MOZ_ASSERT(templateObject()->is<PlainObject>() ||
-             templateObject()->is<UnboxedPlainObject>());
-  MOZ_ASSERT_IF(
-      templateObject()->is<PlainObject>(),
+  MOZ_ASSERT(templateObject()->is<PlainObject>());
+  MOZ_ASSERT(
       !templateObject()->as<PlainObject>().denseElementsAreCopyOnWrite());
-  return true;
-}
-
-bool OperandIndexMap::init(TempAllocator& alloc, JSObject* templateObject) {
-  const UnboxedLayout& layout =
-      templateObject->as<UnboxedPlainObject>().layoutDontCheckGeneration();
-
-  const UnboxedLayout::PropertyVector& properties = layout.properties();
-  MOZ_ASSERT(properties.length() < 255);
-
-  // Allocate an array of indexes, where the top of each field correspond to
-  // the index of the operand in the MObjectState instance.
-  if (!map.init(alloc, layout.size())) {
-    return false;
-  }
-
-  // Reset all indexes to 0, which is an error code.
-  for (size_t i = 0; i < map.length(); i++) {
-    map[i] = 0;
-  }
-
-  // Map the property offsets to the indexes of MObjectState operands.
-  uint8_t index = 1;
-  for (size_t i = 0; i < properties.length(); i++, index++) {
-    map[properties[i].offset] = index;
-  }
-
   return true;
 }
 
 MObjectState::MObjectState(MObjectState* state)
     : MVariadicInstruction(classOpcode),
       numSlots_(state->numSlots_),
-      numFixedSlots_(state->numFixedSlots_),
-      operandIndex_(state->operandIndex_) {
+      numFixedSlots_(state->numFixedSlots_) {
   // This instruction is only used as a summary for bailout paths.
   setResultType(MIRType::Object);
   setRecoveredOnBailout();
 }
 
-MObjectState::MObjectState(JSObject* templateObject,
-                           OperandIndexMap* operandIndex)
+MObjectState::MObjectState(JSObject* templateObject)
     : MVariadicInstruction(classOpcode) {
   // This instruction is only used as a summary for bailout paths.
   setResultType(MIRType::Object);
   setRecoveredOnBailout();
 
-  if (templateObject->is<NativeObject>()) {
-    NativeObject* nativeObject = &templateObject->as<NativeObject>();
-    numSlots_ = nativeObject->slotSpan();
-    numFixedSlots_ = nativeObject->numFixedSlots();
-  } else {
-    const UnboxedLayout& layout =
-        templateObject->as<UnboxedPlainObject>().layoutDontCheckGeneration();
-    // Same as UnboxedLayout::makeNativeGroup
-    numSlots_ = layout.properties().length();
-    numFixedSlots_ = gc::GetGCKindSlots(layout.getAllocKind());
-  }
+  MOZ_ASSERT(templateObject->is<NativeObject>());
 
-  operandIndex_ = operandIndex;
+  NativeObject* nativeObject = &templateObject->as<NativeObject>();
+  numSlots_ = nativeObject->slotSpan();
+  numFixedSlots_ = nativeObject->numFixedSlots();
 }
 
 JSObject* MObjectState::templateObjectOf(MDefinition* obj) {
@@ -4665,42 +4631,24 @@ bool MObjectState::initFromTemplateObject(TempAllocator& alloc,
   // the template object. This is needed to account values which are baked in
   // the template objects and not visible in IonMonkey, such as the
   // uninitialized-lexical magic value of call objects.
-  if (templateObject->is<UnboxedPlainObject>()) {
-    UnboxedPlainObject& unboxedObject =
-        templateObject->as<UnboxedPlainObject>();
-    const UnboxedLayout& layout = unboxedObject.layoutDontCheckGeneration();
-    const UnboxedLayout::PropertyVector& properties = layout.properties();
 
-    for (size_t i = 0; i < properties.length(); i++) {
-      Value val = unboxedObject.getValue(properties[i],
-                                         /* maybeUninitialized = */ true);
-      MDefinition* def = undefinedVal;
-      if (!val.isUndefined()) {
-        MConstant* ins = val.isObject() ? MConstant::NewConstraintlessObject(
-                                              alloc, &val.toObject())
-                                        : MConstant::New(alloc, val);
-        block()->insertBefore(this, ins);
-        def = ins;
-      }
-      initSlot(i, def);
-    }
-  } else {
-    NativeObject& nativeObject = templateObject->as<NativeObject>();
-    MOZ_ASSERT(nativeObject.slotSpan() == numSlots());
+  MOZ_ASSERT(templateObject->is<NativeObject>());
+  NativeObject& nativeObject = templateObject->as<NativeObject>();
+  MOZ_ASSERT(nativeObject.slotSpan() == numSlots());
 
-    for (size_t i = 0; i < numSlots(); i++) {
-      Value val = nativeObject.getSlot(i);
-      MDefinition* def = undefinedVal;
-      if (!val.isUndefined()) {
-        MConstant* ins = val.isObject() ? MConstant::NewConstraintlessObject(
-                                              alloc, &val.toObject())
-                                        : MConstant::New(alloc, val);
-        block()->insertBefore(this, ins);
-        def = ins;
-      }
-      initSlot(i, def);
+  for (size_t i = 0; i < numSlots(); i++) {
+    Value val = nativeObject.getSlot(i);
+    MDefinition* def = undefinedVal;
+    if (!val.isUndefined()) {
+      MConstant* ins = val.isObject() ? MConstant::NewConstraintlessObject(
+                                            alloc, &val.toObject())
+                                      : MConstant::New(alloc, val);
+      block()->insertBefore(this, ins);
+      def = ins;
     }
+    initSlot(i, def);
   }
+
   return true;
 }
 
@@ -4708,15 +4656,7 @@ MObjectState* MObjectState::New(TempAllocator& alloc, MDefinition* obj) {
   JSObject* templateObject = templateObjectOf(obj);
   MOZ_ASSERT(templateObject, "Unexpected object creation.");
 
-  OperandIndexMap* operandIndex = nullptr;
-  if (templateObject->is<UnboxedPlainObject>()) {
-    operandIndex = new (alloc) OperandIndexMap;
-    if (!operandIndex || !operandIndex->init(alloc, templateObject)) {
-      return nullptr;
-    }
-  }
-
-  MObjectState* res = new (alloc) MObjectState(templateObject, operandIndex);
+  MObjectState* res = new (alloc) MObjectState(templateObject);
   if (!res || !res->init(alloc, obj)) {
     return nullptr;
   }
@@ -5084,11 +5024,13 @@ void MStoreSlot::printOpcode(GenericPrinter& out) const {
 #endif
 
 MDefinition* MFunctionEnvironment::foldsTo(TempAllocator& alloc) {
-  if (!input()->isLambda()) {
-    return this;
+  if (input()->isLambda()) {
+    return input()->toLambda()->environmentChain();
   }
-
-  return input()->toLambda()->environmentChain();
+  if (input()->isLambdaArrow()) {
+    return input()->toLambdaArrow()->environmentChain();
+  }
+  return this;
 }
 
 static bool AddIsANonZeroAdditionOf(MAdd* add, MDefinition* ins) {
@@ -5436,6 +5378,8 @@ bool MConstant::appendRoots(MRootList& roots) const {
       return roots.append(toString());
     case MIRType::Symbol:
       return roots.append(toSymbol());
+    case MIRType::BigInt:
+      return roots.append(toBigInt());
     case MIRType::Object:
       return roots.append(&toObject());
     case MIRType::Undefined:
@@ -5477,9 +5421,11 @@ MDefinition* MWasmUnsignedToFloat32::foldsTo(TempAllocator& alloc) {
 
 MWasmCall* MWasmCall::New(TempAllocator& alloc, const wasm::CallSiteDesc& desc,
                           const wasm::CalleeDesc& callee, const Args& args,
-                          MIRType resultType, uint32_t spIncrement,
+                          MIRType resultType,
+                          uint32_t stackArgAreaSizeUnaligned,
                           MDefinition* tableIndex) {
-  MWasmCall* call = new (alloc) MWasmCall(desc, callee, spIncrement);
+  MWasmCall* call =
+      new (alloc) MWasmCall(desc, callee, stackArgAreaSizeUnaligned);
   call->setResultType(resultType);
 
   if (!call->argRegs_.init(alloc, args.length())) {
@@ -5506,17 +5452,19 @@ MWasmCall* MWasmCall::New(TempAllocator& alloc, const wasm::CallSiteDesc& desc,
 
 MWasmCall* MWasmCall::NewBuiltinInstanceMethodCall(
     TempAllocator& alloc, const wasm::CallSiteDesc& desc,
-    const wasm::SymbolicAddress builtin, const ABIArg& instanceArg,
-    const Args& args, MIRType resultType, uint32_t spIncrement) {
+    const wasm::SymbolicAddress builtin, wasm::FailureMode failureMode,
+    const ABIArg& instanceArg, const Args& args, MIRType resultType,
+    uint32_t stackArgAreaSizeUnaligned) {
   auto callee = wasm::CalleeDesc::builtinInstanceMethod(builtin);
   MWasmCall* call = MWasmCall::New(alloc, desc, callee, args, resultType,
-                                   spIncrement, nullptr);
+                                   stackArgAreaSizeUnaligned, nullptr);
   if (!call) {
     return nullptr;
   }
 
   MOZ_ASSERT(instanceArg != ABIArg());
   call->instanceArg_ = instanceArg;
+  call->builtinMethodFailureMode_ = failureMode;
   return call;
 }
 
@@ -5672,40 +5620,6 @@ MDefinition* MGetFirstDollarIndex::foldsTo(TempAllocator& alloc) {
   return MConstant::New(alloc, Int32Value(index));
 }
 
-MConvertUnboxedObjectToNative* MConvertUnboxedObjectToNative::New(
-    TempAllocator& alloc, MDefinition* obj, ObjectGroup* group) {
-  MConvertUnboxedObjectToNative* res =
-      new (alloc) MConvertUnboxedObjectToNative(obj, group);
-
-  AutoSweepObjectGroup sweep(group);
-  ObjectGroup* nativeGroup = group->unboxedLayout(sweep).nativeGroup();
-
-  // Make a new type set for the result of this instruction which replaces
-  // the input group with the native group we will convert it to.
-  TemporaryTypeSet* types = obj->resultTypeSet();
-  if (types && !types->unknownObject()) {
-    TemporaryTypeSet* newTypes = types->cloneWithoutObjects(alloc.lifoAlloc());
-    if (newTypes) {
-      for (size_t i = 0; i < types->getObjectCount(); i++) {
-        TypeSet::ObjectKey* key = types->getObject(i);
-        if (!key) {
-          continue;
-        }
-        if (key->unknownProperties() || !key->isGroup() ||
-            key->group() != group) {
-          newTypes->addType(TypeSet::ObjectType(key), alloc.lifoAlloc());
-        } else {
-          newTypes->addType(TypeSet::ObjectType(nativeGroup),
-                            alloc.lifoAlloc());
-        }
-      }
-      res->setResultTypeSet(newTypes);
-    }
-  }
-
-  return res;
-}
-
 bool jit::ElementAccessIsDenseNative(CompilerConstraintList* constraints,
                                      MDefinition* obj, MDefinition* id) {
   if (obj->mightBeType(MIRType::String)) {
@@ -5743,7 +5657,14 @@ bool jit::ElementAccessIsTypedArray(CompilerConstraintList* constraints,
   }
 
   *arrayType = types->getTypedArrayType(constraints);
-  return *arrayType != Scalar::MaxTypedArrayViewType;
+
+  // FIXME: https://bugzil.la/1536699
+  if (*arrayType == Scalar::MaxTypedArrayViewType ||
+      Scalar::isBigIntType(*arrayType)) {
+    return false;
+  }
+
+  return true;
 }
 
 bool jit::ElementAccessIsPacked(CompilerConstraintList* constraints,
@@ -6052,16 +5973,6 @@ AbortReasonOr<bool> PrototypeHasIndexedProperty(IonBuilder* builder,
   return false;
 }
 
-// Whether Array.prototype, or an object on its proto chain, has an indexed
-// property.
-AbortReasonOr<bool> jit::ArrayPrototypeHasIndexedProperty(IonBuilder* builder,
-                                                          JSScript* script) {
-  if (JSObject* proto = script->global().maybeGetArrayPrototype()) {
-    return PrototypeHasIndexedProperty(builder, proto);
-  }
-  return true;
-}
-
 // Whether obj or any of its prototypes have an indexed property.
 AbortReasonOr<bool> jit::TypeCanHaveExtraIndexedProperties(
     IonBuilder* builder, TemporaryTypeSet* types) {
@@ -6172,7 +6083,8 @@ static bool TryAddTypeBarrierForWrite(TempAllocator& alloc,
     case MIRType::Int32:
     case MIRType::Double:
     case MIRType::String:
-    case MIRType::Symbol: {
+    case MIRType::Symbol:
+    case MIRType::BigInt: {
       // The property is a particular primitive type, guard by unboxing the
       // value before the write.
       if (!(*pvalue)->mightBeType(propertyType)) {
@@ -6283,8 +6195,12 @@ bool jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc,
   bool success = true;
   for (size_t i = 0; i < types->getObjectCount(); i++) {
     TypeSet::ObjectKey* key = types->getObject(i);
-    if (!key || key->unknownProperties()) {
+    if (!key) {
       continue;
+    }
+
+    if (!key->hasStableClassAndProto(constraints)) {
+      return true;
     }
 
     // TI doesn't track TypedArray indexes and should never insert a type
@@ -6310,24 +6226,6 @@ bool jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc,
     }
   }
 
-  // Perform additional filtering to make sure that any unboxed property
-  // being written can accommodate the value.
-  for (size_t i = 0; i < types->getObjectCount(); i++) {
-    TypeSet::ObjectKey* key = types->getObject(i);
-    if (!key || !key->isGroup()) {
-      continue;
-    }
-    AutoSweepObjectGroup sweep(key->group());
-    if (const auto* layout = key->group()->maybeUnboxedLayout(sweep)) {
-      if (name) {
-        const UnboxedLayout::Property* property = layout->lookup(name);
-        if (property && !CanStoreUnboxedType(alloc, property->type, *pvalue)) {
-          return true;
-        }
-      }
-    }
-  }
-
   if (success) {
     return false;
   }
@@ -6343,9 +6241,14 @@ bool jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc,
   TypeSet::ObjectKey* excluded = nullptr;
   for (size_t i = 0; i < types->getObjectCount(); i++) {
     TypeSet::ObjectKey* key = types->getObject(i);
-    if (!key || key->unknownProperties()) {
+    if (!key) {
       continue;
     }
+
+    if (!key->hasStableClassAndProto(constraints)) {
+      return true;
+    }
+
     if (!name && IsTypedArrayClass(key->clasp())) {
       continue;
     }
@@ -6364,19 +6267,6 @@ bool jit::PropertyWriteNeedsTypeBarrier(TempAllocator& alloc,
   }
 
   MOZ_ASSERT(excluded);
-
-  // If the excluded object is a group with an unboxed layout, make sure it
-  // does not have a corresponding native group. Objects with the native
-  // group might appear even though they are not in the type set.
-  if (excluded->isGroup()) {
-    AutoSweepObjectGroup sweep(excluded->group());
-    if (UnboxedLayout* layout = excluded->group()->maybeUnboxedLayout(sweep)) {
-      if (layout->nativeGroup()) {
-        return true;
-      }
-      excluded->watchStateChangeForUnboxedConvertedToNative(constraints);
-    }
-  }
 
   *pobj = AddGroupGuard(alloc, current, *pobj, excluded,
                         /* bailOnEquality = */ true);

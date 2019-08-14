@@ -11,21 +11,13 @@ config = {
     ],
     "replacements": [
         # File, from, to
-        ("{}{}".format(d, f),
-        "ac_add_options --with-branding=mobile/android/branding/nightly",
-        "ac_add_options --with-branding=mobile/android/branding/beta")
-        for d in ["mobile/android/config/mozconfigs/android-api-16/",
-                  "mobile/android/config/mozconfigs/android-x86/",
-                  "mobile/android/config/mozconfigs/android-aarch64/"]
-        for f in ["debug", "nightly"]
-    ] + [
-        # File, from, to
         (f, "ac_add_options --with-branding=browser/branding/nightly",
         "ac_add_options --enable-official-branding")
         for f in ["browser/config/mozconfigs/linux32/l10n-mozconfig",
                   "browser/config/mozconfigs/linux64/l10n-mozconfig",
                   "browser/config/mozconfigs/win32/l10n-mozconfig",
                   "browser/config/mozconfigs/win64/l10n-mozconfig",
+                  "browser/config/mozconfigs/win64-aarch64/l10n-mozconfig",
                   "browser/config/mozconfigs/macosx64/l10n-mozconfig"]
     ] + [
         # File, from, to
@@ -47,8 +39,6 @@ config = {
 
     "vcs_share_base": os.path.join(ABS_WORK_DIR, 'hg-shared'),
     # "hg_share_base": None,
-    "tools_repo_url": "https://hg.mozilla.org/build/tools",
-    "tools_repo_branch": "default",
     "from_repo_url": "https://hg.mozilla.org/mozilla-central",
     "to_repo_url": "https://hg.mozilla.org/releases/mozilla-beta",
 

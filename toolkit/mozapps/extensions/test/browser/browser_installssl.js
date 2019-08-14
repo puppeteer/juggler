@@ -14,7 +14,8 @@ const SELFSIGNED = "https://self-signed.example.com/";
 const UNTRUSTED = "https://untrusted.example.com/";
 const EXPIRED = "https://expired.example.com/";
 
-const PREF_INSTALL_REQUIREBUILTINCERTS = "extensions.install.requireBuiltInCerts";
+const PREF_INSTALL_REQUIREBUILTINCERTS =
+  "extensions.install.requireBuiltInCerts";
 
 var gTests = [];
 var gStart = 0;
@@ -27,8 +28,9 @@ function test() {
   waitForExplicitFinish();
 
   registerCleanupFunction(function() {
-    var cos = Cc["@mozilla.org/security/certoverride;1"].
-              getService(Ci.nsICertOverrideService);
+    var cos = Cc["@mozilla.org/security/certoverride;1"].getService(
+      Ci.nsICertOverrideService
+    );
     cos.clearValidityOverride("nocert.example.com", -1);
     cos.clearValidityOverride("self-signed.example.com", -1);
     cos.clearValidityOverride("untrusted.example.com", -1);
@@ -36,16 +38,18 @@ function test() {
 
     try {
       Services.prefs.clearUserPref(PREF_INSTALL_REQUIREBUILTINCERTS);
-    } catch (e) {
-    }
+    } catch (e) {}
 
     if (gPendingInstall) {
       gTests = [];
-      ok(false, "Timed out in the middle of downloading " + gPendingInstall.sourceURI.spec);
+      ok(
+        false,
+        "Timed out in the middle of downloading " +
+          gPendingInstall.sourceURI.spec
+      );
       try {
         gPendingInstall.cancel();
-      } catch (e) {
-      }
+      } catch (e) {}
     }
   });
 
@@ -72,15 +76,18 @@ function run_install_tests(callback) {
     let [mainURL, redirectURL, expectedStatus] = gTests.shift();
     if (redirectURL) {
       var url = mainURL + redirect + redirectURL + xpi;
-      var message = "Should have seen the right result for an install redirected from " +
-                    mainURL + " to " + redirectURL;
+      var message =
+        "Should have seen the right result for an install redirected from " +
+        mainURL +
+        " to " +
+        redirectURL;
     } else {
       url = mainURL + xpi;
-      message = "Should have seen the right result for an install from " +
-                mainURL;
+      message =
+        "Should have seen the right result for an install from " + mainURL;
     }
 
-    let install = await AddonManager.getInstallForURL(url, "application/x-xpinstall");
+    let install = await AddonManager.getInstallForURL(url);
     gPendingInstall = install;
     install.addListener({
       onDownloadEnded(install) {
@@ -104,14 +111,6 @@ function run_install_tests(callback) {
   }
 
   run_next_install_test();
-}
-
-// Add overrides for the bad certificates
-function addCertOverrides() {
-  addCertOverride("nocert.example.com", Ci.nsICertOverrideService.ERROR_MISMATCH);
-  addCertOverride("self-signed.example.com", Ci.nsICertOverrideService.ERROR_UNTRUSTED);
-  addCertOverride("untrusted.example.com", Ci.nsICertOverrideService.ERROR_UNTRUSTED);
-  addCertOverride("expired.example.com", Ci.nsICertOverrideService.ERROR_TIME);
 }
 
 // Runs tests with built-in certificates required, no certificate exceptions
@@ -240,11 +239,15 @@ add_test(function() {
   run_install_tests(run_next_test);
 });
 
+// Set up overrides for the next test.
+add_test(() => {
+  addCertOverrides().then(run_next_test);
+});
+
 // Runs tests with built-in certificates required, all certificate exceptions
 // and no hashes
 add_test(function() {
   Services.prefs.clearUserPref(PREF_INSTALL_REQUIREBUILTINCERTS);
-  addCertOverrides();
 
   // Tests that a simple install works as expected.
   add_install_test(HTTP, null, SUCCESS);

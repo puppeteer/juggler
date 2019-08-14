@@ -8,27 +8,27 @@
 
 #include "mozilla/MaybeOneOf.h"
 
-#ifdef ENABLE_BIGINT
 #include "builtin/BigInt.h"
-#endif
 #include "builtin/Eval.h"
 #include "builtin/SelfHostingDefines.h"
 #include "builtin/String.h"
 #include "frontend/BytecodeCompiler.h"
 #include "jit/InlinableNatives.h"
+#include "js/PropertySpec.h"
 #include "js/UniquePtr.h"
 #include "util/StringBuffer.h"
 #include "vm/AsyncFunction.h"
+#include "vm/DateObject.h"
+#include "vm/EqualityOperations.h"  // js::SameValue
 #include "vm/JSContext.h"
 #include "vm/RegExpObject.h"
 
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/Shape-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 #ifdef FUZZING
-#include "builtin/TestingFunctions.h"
+#  include "builtin/TestingFunctions.h"
 #endif
 
 using namespace js;
@@ -238,7 +238,7 @@ JSString* js::ObjectToSource(JSContext* cx, HandleObject obj) {
     return NewStringCopyZ<CanGC>(cx, "{}");
   }
 
-  StringBuffer buf(cx);
+  JSStringBuilder buf(cx);
   if (outermost && !buf.append('(')) {
     return nullptr;
   }
@@ -246,7 +246,7 @@ JSString* js::ObjectToSource(JSContext* cx, HandleObject obj) {
     return nullptr;
   }
 
-  AutoIdVector idv(cx);
+  RootedIdVector idv(cx);
   if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY | JSITER_SYMBOLS, &idv)) {
     return nullptr;
   }
@@ -368,7 +368,7 @@ JSString* js::ObjectToSource(JSContext* cx, HandleObject obj) {
           return false;
         }
       } else if (kind == PropertyKind::Method && fun) {
-        if (IsWrappedAsyncFunction(fun)) {
+        if (fun->isAsync()) {
           if (!buf.append("async ")) {
             return false;
           }
@@ -412,7 +412,6 @@ JSString* js::ObjectToSource(JSContext* cx, HandleObject obj) {
   RootedId id(cx);
   Rooted<PropertyDescriptor> desc(cx);
   RootedValue val(cx);
-  RootedFunction fun(cx);
   for (size_t i = 0; i < idv.length(); ++i) {
     id = idv[i];
     if (!GetOwnPropertyDescriptor(cx, obj, id, &desc)) {
@@ -440,17 +439,13 @@ JSString* js::ObjectToSource(JSContext* cx, HandleObject obj) {
     }
 
     val.set(desc.value());
-    if (IsFunctionObject(val, fun.address())) {
-      if (IsWrappedAsyncFunction(fun)) {
-        fun = GetUnwrappedAsyncFunction(fun);
-      }
 
-      if (fun->isMethod()) {
-        if (!AddProperty(id, val, PropertyKind::Method)) {
-          return nullptr;
-        }
-        continue;
+    JSFunction* fun;
+    if (IsFunctionObject(val, &fun) && fun->isMethod()) {
+      if (!AddProperty(id, val, PropertyKind::Method)) {
+        return nullptr;
       }
+      continue;
     }
 
     if (!AddProperty(id, val, PropertyKind::Normal)) {
@@ -513,7 +508,7 @@ static bool GetBuiltinTagSlow(JSContext* cx, HandleObject obj,
     default:
       if (obj->isCallable()) {
         // Non-standard: Prevent <object> from showing up as Function.
-        RootedObject unwrapped(cx, CheckedUnwrap(obj));
+        RootedObject unwrapped(cx, CheckedUnwrapDynamic(obj, cx));
         if (!unwrapped || !unwrapped->getClass()->isDOMClass()) {
           builtinTag.set(cx->names().objectFunction);
           return true;
@@ -531,7 +526,7 @@ static MOZ_ALWAYS_INLINE JSString* GetBuiltinTagFast(JSObject* obj,
   MOZ_ASSERT(!clasp->isProxy());
 
   // Optimize the non-proxy case to bypass GetBuiltinClass.
-  if (clasp == &PlainObject::class_ || clasp == &UnboxedPlainObject::class_) {
+  if (clasp == &PlainObject::class_) {
     // This is not handled by GetBuiltinTagSlow, but this case is by far
     // the most common so we optimize it here.
     return cx->names().objectObject;
@@ -619,7 +614,7 @@ bool js::obj_toString(JSContext* cx, unsigned argc, Value* vp) {
     if (!GetBuiltinTagSlow(cx, obj, &builtinTagSlow)) {
       return false;
     }
-    if (clasp == &PlainObject::class_ || clasp == &UnboxedPlainObject::class_) {
+    if (clasp == &PlainObject::class_) {
       MOZ_ASSERT(!builtinTagSlow);
     } else {
       MOZ_ASSERT(builtinTagSlow == builtinTag);
@@ -693,10 +688,7 @@ JSString* js::ObjectClassToString(JSContext* cx, HandleObject obj) {
 static bool obj_setPrototypeOf(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (args.length() < 2) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "Object.setPrototypeOf",
-                              "1", "");
+  if (!args.requireAtLeast(cx, "Object.setPrototypeOf", 2)) {
     return false;
   }
 
@@ -806,8 +798,7 @@ static bool TryAssignNative(JSContext* cx, HandleObject to, HandleObject from,
     shape = shapes[i - 1];
     nextKey = shape->propid();
 
-    // Ensure |from| is still native: a getter/setter might have turned
-    // |from| or |to| into an unboxed object or it could have been swapped
+    // Ensure |from| is still native: a getter/setter might have been swapped
     // with a non-native object.
     if (MOZ_LIKELY(from->isNative() &&
                    from->as<NativeObject>().lastProperty() == fromShape &&
@@ -844,69 +835,9 @@ static bool TryAssignNative(JSContext* cx, HandleObject to, HandleObject from,
   return true;
 }
 
-static bool TryAssignFromUnboxed(JSContext* cx, HandleObject to,
-                                 HandleObject from, bool* optimized) {
-  *optimized = false;
-
-  if (!from->is<UnboxedPlainObject>() || !to->isNative()) {
-    return true;
-  }
-
-  // Don't use the fast path for unboxed objects with expandos.
-  UnboxedPlainObject* fromUnboxed = &from->as<UnboxedPlainObject>();
-  if (fromUnboxed->maybeExpando()) {
-    return true;
-  }
-
-  *optimized = true;
-
-  RootedObjectGroup fromGroup(cx, from->group());
-
-  RootedValue propValue(cx);
-  RootedId nextKey(cx);
-  RootedValue toReceiver(cx, ObjectValue(*to));
-
-  const UnboxedLayout& layout = fromUnboxed->layout();
-  for (size_t i = 0; i < layout.properties().length(); i++) {
-    const UnboxedLayout::Property& property = layout.properties()[i];
-    nextKey = NameToId(property.name);
-
-    // All unboxed properties are enumerable.
-    // Guard on the group to ensure that the object stays unboxed.
-    // We can ignore expando properties added after the loop starts.
-    if (MOZ_LIKELY(from->group() == fromGroup)) {
-      propValue = from->as<UnboxedPlainObject>().getValue(property);
-    } else {
-      // |from| changed so we have to do the slower enumerability check
-      // and GetProp.
-      bool enumerable;
-      if (!PropertyIsEnumerable(cx, from, nextKey, &enumerable)) {
-        return false;
-      }
-      if (!enumerable) {
-        continue;
-      }
-      if (!GetProperty(cx, from, from, nextKey, &propValue)) {
-        return false;
-      }
-    }
-
-    ObjectOpResult result;
-    if (MOZ_UNLIKELY(
-            !SetProperty(cx, to, nextKey, propValue, toReceiver, result))) {
-      return false;
-    }
-    if (MOZ_UNLIKELY(!result.checkStrict(cx, to, nextKey))) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 static bool AssignSlow(JSContext* cx, HandleObject to, HandleObject from) {
   // Step 4.b.ii.
-  AutoIdVector keys(cx);
+  RootedIdVector keys(cx);
   if (!GetPropertyKeys(
           cx, from, JSITER_OWNONLY | JSITER_HIDDEN | JSITER_SYMBOLS, &keys)) {
     return false;
@@ -941,6 +872,19 @@ static bool AssignSlow(JSContext* cx, HandleObject to, HandleObject from) {
   return true;
 }
 
+JS_PUBLIC_API bool JS_AssignObject(JSContext* cx, JS::HandleObject target,
+                                   JS::HandleObject src) {
+  bool optimized;
+  if (!TryAssignNative(cx, target, src, &optimized)) {
+    return false;
+  }
+  if (optimized) {
+    return true;
+  }
+
+  return AssignSlow(cx, target, src);
+}
+
 // ES2018 draft rev 48ad2688d8f964da3ea8c11163ef20eb126fb8a4
 // 19.1.2.1 Object.assign(target, ...sources)
 static bool obj_assign(JSContext* cx, unsigned argc, Value* vp) {
@@ -970,22 +914,7 @@ static bool obj_assign(JSContext* cx, unsigned argc, Value* vp) {
     }
 
     // Steps 4.b.ii, 4.c.
-    bool optimized;
-    if (!TryAssignNative(cx, to, from, &optimized)) {
-      return false;
-    }
-    if (optimized) {
-      continue;
-    }
-
-    if (!TryAssignFromUnboxed(cx, to, from, &optimized)) {
-      return false;
-    }
-    if (optimized) {
-      continue;
-    }
-
-    if (!AssignSlow(cx, to, from)) {
+    if (!JS_AssignObject(cx, to, from)) {
       return false;
     }
   }
@@ -1057,7 +986,8 @@ PlainObject* js::ObjectCreateWithTemplate(JSContext* cx,
 
 // ES 2017 draft 19.1.2.3.1
 static bool ObjectDefineProperties(JSContext* cx, HandleObject obj,
-                                   HandleValue properties) {
+                                   HandleValue properties,
+                                   bool* failedOnWindowProxy) {
   // Step 1. implicit
   // Step 2.
   RootedObject props(cx, ToObject(cx, properties));
@@ -1066,7 +996,7 @@ static bool ObjectDefineProperties(JSContext* cx, HandleObject obj,
   }
 
   // Step 3.
-  AutoIdVector keys(cx);
+  RootedIdVector keys(cx);
   if (!GetPropertyKeys(
           cx, props, JSITER_OWNONLY | JSITER_SYMBOLS | JSITER_HIDDEN, &keys)) {
     return false;
@@ -1079,7 +1009,7 @@ static bool ObjectDefineProperties(JSContext* cx, HandleObject obj,
   // Step 4.
   Rooted<PropertyDescriptorVector> descriptors(cx,
                                                PropertyDescriptorVector(cx));
-  AutoIdVector descriptorKeys(cx);
+  RootedIdVector descriptorKeys(cx);
 
   // Step 5.
   for (size_t i = 0, len = keys.length(); i < len; i++) {
@@ -1101,9 +1031,19 @@ static bool ObjectDefineProperties(JSContext* cx, HandleObject obj,
   }
 
   // Step 6.
+  *failedOnWindowProxy = false;
   for (size_t i = 0, len = descriptors.length(); i < len; i++) {
-    if (!DefineProperty(cx, obj, descriptorKeys[i], descriptors[i])) {
+    ObjectOpResult result;
+    if (!DefineProperty(cx, obj, descriptorKeys[i], descriptors[i], result)) {
       return false;
+    }
+
+    if (!result.ok()) {
+      if (result.failureCode() == JSMSG_CANT_DEFINE_WINDOW_NC) {
+        *failedOnWindowProxy = true;
+      } else if (!result.checkStrict(cx, obj, descriptorKeys[i])) {
+        return false;
+      }
     }
   }
 
@@ -1115,10 +1055,7 @@ bool js::obj_create(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
   // Step 1.
-  if (args.length() == 0) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "Object.create", "0",
-                              "s");
+  if (!args.requireAtLeast(cx, "Object.create", 1)) {
     return false;
   }
 
@@ -1144,9 +1081,13 @@ bool js::obj_create(JSContext* cx, unsigned argc, Value* vp) {
 
   // Step 3.
   if (args.hasDefined(1)) {
-    if (!ObjectDefineProperties(cx, obj, args[1])) {
+    // we can't ever end up with failures to define on a WindowProxy
+    // here, because "obj" is never a WindowProxy.
+    bool failedOnWindowProxy = false;
+    if (!ObjectDefineProperties(cx, obj, args[1], &failedOnWindowProxy)) {
       return false;
     }
+    MOZ_ASSERT(!failedOnWindowProxy, "How did we get a WindowProxy here?");
   }
 
   // Step 4.
@@ -1320,7 +1261,7 @@ static bool TryEnumerableOwnPropertiesNative(JSContext* cx, HandleObject obj,
 
   *optimized = true;
 
-  AutoValueVector properties(cx);
+  RootedValueVector properties(cx);
   RootedValue key(cx);
   RootedValue value(cx);
 
@@ -1392,10 +1333,14 @@ static bool TryEnumerableOwnPropertiesNative(JSContext* cx, HandleObject obj,
           kind == EnumerableOwnPropertiesKind::Names) {
         value.setString(str);
       } else if (kind == EnumerableOwnPropertiesKind::Values) {
-        value.set(tobj->getElement(i));
+        if (!tobj->getElement<CanGC>(cx, i, &value)) {
+          return false;
+        }
       } else {
         key.setString(str);
-        value.set(tobj->getElement(i));
+        if (!tobj->getElement<CanGC>(cx, i, &value)) {
+          return false;
+        }
         if (!NewValuePair(cx, key, value, &value)) {
           return false;
         }
@@ -1491,8 +1436,7 @@ static bool TryEnumerableOwnPropertiesNative(JSContext* cx, HandleObject obj,
       Shape* shape = shapes[i - 1];
       id = shape->propid();
 
-      // Ensure |obj| is still native: a getter might have turned it
-      // into an unboxed object or it could have been swapped with a
+      // Ensure |obj| is still native: a getter might have been swapped with a
       // non-native object.
       if (obj->isNative() &&
           obj->as<NativeObject>().lastProperty() == objShape &&
@@ -1540,62 +1484,6 @@ static bool TryEnumerableOwnPropertiesNative(JSContext* cx, HandleObject obj,
   return true;
 }
 
-template <EnumerableOwnPropertiesKind kind>
-static bool TryEnumerableOwnPropertiesUnboxed(JSContext* cx, HandleObject obj,
-                                              MutableHandleValue rval,
-                                              bool* optimized) {
-  *optimized = false;
-
-  if (!obj->is<UnboxedPlainObject>()) {
-    return true;
-  }
-
-  Handle<UnboxedPlainObject*> uobj = obj.as<UnboxedPlainObject>();
-  if (uobj->maybeExpando()) {
-    return true;
-  }
-
-  *optimized = true;
-
-  AutoValueVector properties(cx);
-  RootedValue key(cx);
-  RootedValue value(cx);
-
-  const UnboxedLayout& layout = uobj->layout();
-
-  for (size_t i = 0, len = layout.properties().length(); i < len; i++) {
-    MOZ_ASSERT(obj->is<UnboxedPlainObject>(), "Object should still be unboxed");
-
-    const UnboxedLayout::Property& property = layout.properties()[i];
-
-    if (kind == EnumerableOwnPropertiesKind::Keys ||
-        kind == EnumerableOwnPropertiesKind::Names) {
-      value.setString(property.name);
-    } else if (kind == EnumerableOwnPropertiesKind::Values) {
-      value.set(uobj->getValue(property));
-    } else {
-      key.setString(property.name);
-      value.set(uobj->getValue(property));
-      if (!NewValuePair(cx, key, value, &value)) {
-        return false;
-      }
-    }
-
-    if (!properties.append(value)) {
-      return false;
-    }
-  }
-
-  JSObject* array =
-      NewDenseCopiedArray(cx, properties.length(), properties.begin());
-  if (!array) {
-    return false;
-  }
-
-  rval.setObject(*array);
-  return true;
-}
-
 // ES2018 draft rev c164be80f7ea91de5526b33d54e5c9321ed03d3f
 // 7.3.21 EnumerableOwnProperties ( O, kind )
 template <EnumerableOwnPropertiesKind kind>
@@ -1619,25 +1507,17 @@ static bool EnumerableOwnProperties(JSContext* cx, const JS::CallArgs& args) {
     return true;
   }
 
-  if (!TryEnumerableOwnPropertiesUnboxed<kind>(cx, obj, args.rval(),
-                                               &optimized)) {
-    return false;
-  }
-  if (optimized) {
-    return true;
-  }
-
   // Typed arrays are always handled in the fast path.
   MOZ_ASSERT(!obj->is<TypedArrayObject>());
 
   // Step 2.
-  AutoIdVector ids(cx);
+  RootedIdVector ids(cx);
   if (!GetPropertyKeys(cx, obj, JSITER_OWNONLY | JSITER_HIDDEN, &ids)) {
     return false;
   }
 
   // Step 3.
-  AutoValueVector properties(cx);
+  RootedValueVector properties(cx);
   size_t len = ids.length();
   if (!properties.resize(len)) {
     return false;
@@ -1666,7 +1546,10 @@ static bool EnumerableOwnProperties(JSContext* cx, const JS::CallArgs& args) {
     if (obj->is<NativeObject>()) {
       HandleNativeObject nobj = obj.as<NativeObject>();
       if (JSID_IS_INT(id) && nobj->containsDenseElement(JSID_TO_INT(id))) {
-        value = nobj->getDenseOrTypedArrayElement(JSID_TO_INT(id));
+        if (!nobj->getDenseOrTypedArrayElement<CanGC>(cx, JSID_TO_INT(id),
+                                                      &value)) {
+          return false;
+        }
       } else {
         shape = nobj->lookup(cx, id);
         if (!shape || !shape->enumerable()) {
@@ -1742,14 +1625,6 @@ static bool obj_keys(JSContext* cx, unsigned argc, Value* vp) {
     return true;
   }
 
-  if (!TryEnumerableOwnPropertiesUnboxed<kind>(cx, obj, args.rval(),
-                                               &optimized)) {
-    return false;
-  }
-  if (optimized) {
-    return true;
-  }
-
   // Steps 2-3.
   return GetOwnPropertyKeys(cx, obj, JSITER_OWNONLY, args.rval());
 }
@@ -1809,7 +1684,7 @@ bool js::GetOwnPropertyKeys(JSContext* cx, HandleObject obj, unsigned flags,
   // Step 1 (Performed in caller).
 
   // Steps 2-4.
-  AutoIdVector keys(cx);
+  RootedIdVector keys(cx);
   if (!GetPropertyKeys(cx, obj, flags, &keys)) {
     return false;
   }
@@ -1857,14 +1732,6 @@ bool js::obj_getOwnPropertyNames(JSContext* cx, unsigned argc, Value* vp) {
     return true;
   }
 
-  if (!TryEnumerableOwnPropertiesUnboxed<kind>(cx, obj, args.rval(),
-                                               &optimized)) {
-    return false;
-  }
-  if (optimized) {
-    return true;
-  }
-
   return GetOwnPropertyKeys(cx, obj, JSITER_OWNONLY | JSITER_HIDDEN,
                             args.rval());
 }
@@ -1889,23 +1756,30 @@ static bool obj_getOwnPropertySymbols(JSContext* cx, unsigned argc, Value* vp) {
 static bool obj_defineProperties(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  /* Steps 1 and 7. */
+  /* Step 1. */
   RootedObject obj(cx);
   if (!GetFirstArgumentAsObject(cx, args, "Object.defineProperties", &obj)) {
     return false;
   }
-  args.rval().setObject(*obj);
 
   /* Step 2. */
-  if (args.length() < 2) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_MORE_ARGS_NEEDED, "Object.defineProperties",
-                              "0", "s");
+  if (!args.requireAtLeast(cx, "Object.defineProperties", 2)) {
     return false;
   }
 
   /* Steps 3-6. */
-  return ObjectDefineProperties(cx, obj, args[1]);
+  bool failedOnWindowProxy = false;
+  if (!ObjectDefineProperties(cx, obj, args[1], &failedOnWindowProxy)) {
+    return false;
+  }
+
+  /* Step 7, but modified to deal with WindowProxy mess */
+  if (failedOnWindowProxy) {
+    args.rval().setNull();
+  } else {
+    args.rval().setObject(*obj);
+  }
+  return true;
 }
 
 // ES6 20141014 draft 19.1.2.15 Object.preventExtensions(O)
@@ -2180,7 +2054,7 @@ static bool FinishObjectClassInit(JSContext* cx, JS::HandleObject ctor,
    */
   Rooted<TaggedProto> tagged(cx, TaggedProto(proto));
   if (global->shouldSplicePrototype()) {
-    if (!JSObject::splicePrototype(cx, global, global->getClass(), tagged)) {
+    if (!JSObject::splicePrototype(cx, global, tagged)) {
       return false;
     }
   }

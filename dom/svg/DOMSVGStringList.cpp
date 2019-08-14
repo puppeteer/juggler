@@ -8,10 +8,10 @@
 
 #include "mozilla/dom/SVGStringListBinding.h"
 #include "mozilla/dom/SVGTests.h"
-#include "nsError.h"
 #include "nsCOMPtr.h"
-#include "nsSVGAttrTearoffTable.h"
+#include "nsError.h"
 #include "nsQueryObject.h"
+#include "SVGAttrTearoffTable.h"
 #include <algorithm>
 
 // See the architecture comment in this file's header.
@@ -20,9 +20,9 @@ namespace mozilla {
 
 using namespace dom;
 
-static inline nsSVGAttrTearoffTable<SVGStringList, DOMSVGStringList>&
+static inline SVGAttrTearoffTable<SVGStringList, DOMSVGStringList>&
 SVGStringListTearoffTable() {
-  static nsSVGAttrTearoffTable<SVGStringList, DOMSVGStringList>
+  static SVGAttrTearoffTable<SVGStringList, DOMSVGStringList>
       sSVGStringListTearoffTable;
   return sSVGStringListTearoffTable;
 }
@@ -64,8 +64,9 @@ class MOZ_RAII AutoChangeStringListNotifier {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-/* static */ already_AddRefed<DOMSVGStringList> DOMSVGStringList::GetDOMWrapper(
-    SVGStringList* aList, nsSVGElement* aElement,
+/* static */
+already_AddRefed<DOMSVGStringList> DOMSVGStringList::GetDOMWrapper(
+    SVGStringList* aList, SVGElement* aElement,
     bool aIsConditionalProcessingAttribute, uint8_t aAttrEnum) {
   RefPtr<DOMSVGStringList> wrapper =
       SVGStringListTearoffTable().GetTearoff(aList);
@@ -82,8 +83,9 @@ DOMSVGStringList::~DOMSVGStringList() {
   SVGStringListTearoffTable().RemoveTearoff(&InternalList());
 }
 
-/* virtual */ JSObject* DOMSVGStringList::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* DOMSVGStringList::WrapObject(JSContext* aCx,
+                                       JS::Handle<JSObject*> aGivenProto) {
   return SVGStringList_Binding::Wrap(aCx, this, aGivenProto);
 }
 

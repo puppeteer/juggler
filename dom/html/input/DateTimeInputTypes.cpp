@@ -8,8 +8,8 @@
 
 #include "js/Date.h"
 #include "mozilla/AsyncEventDispatcher.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/dom/HTMLInputElement.h"
-#include "nsDateTimeControlFrame.h"
 #include "nsDOMTokenList.h"
 
 const double DateTimeInputTypeBase::kMinimumYear = 1;
@@ -20,18 +20,6 @@ const double DateTimeInputTypeBase::kMsPerDay = 24 * 60 * 60 * 1000;
 
 using namespace mozilla;
 using namespace mozilla::dom;
-
-/* static */ bool DateTimeInputTypeBase::IsInputDateTimeEnabled() {
-  static bool sDateTimeEnabled = false;
-  static bool sDateTimePrefCached = false;
-  if (!sDateTimePrefCached) {
-    sDateTimePrefCached = true;
-    mozilla::Preferences::AddBoolVarCache(&sDateTimeEnabled,
-                                          "dom.forms.datetime", false);
-  }
-
-  return sDateTimeEnabled;
-}
 
 bool DateTimeInputTypeBase::IsMutable() const {
   return !mInputElement->IsDisabled() &&
@@ -100,19 +88,13 @@ bool DateTimeInputTypeBase::HasStepMismatch(bool aUseZeroIfValueNaN) const {
 }
 
 bool DateTimeInputTypeBase::HasBadInput() const {
-  Element* editWrapperElement = nullptr;
-  nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
-  if (frame && frame->GetInputAreaContent()) {
-    // edit-wrapper is inside an XBL binding
-    editWrapperElement =
-        mInputElement->GetComposedDoc()->GetAnonymousElementByAttribute(
-            frame->GetInputAreaContent(), nsGkAtoms::anonid,
-            NS_LITERAL_STRING("edit-wrapper"));
-  } else if (mInputElement->GetShadowRoot()) {
-    // edit-wrapper is inside an UA Widget Shadow DOM
-    editWrapperElement = mInputElement->GetShadowRoot()->GetElementById(
-        NS_LITERAL_STRING("edit-wrapper"));
+  if (!mInputElement->GetShadowRoot()) {
+    return false;
   }
+
+  Element* editWrapperElement = mInputElement->GetShadowRoot()->GetElementById(
+      NS_LITERAL_STRING("edit-wrapper"));
+
   if (!editWrapperElement) {
     return false;
   }
@@ -142,34 +124,26 @@ nsresult DateTimeInputTypeBase::GetRangeOverflowMessage(nsAString& aMessage) {
   nsAutoString maxStr;
   mInputElement->GetAttr(kNameSpaceID_None, nsGkAtoms::max, maxStr);
 
-  const char16_t* params[] = {maxStr.get()};
   return nsContentUtils::FormatLocalizedString(
-      nsContentUtils::eDOM_PROPERTIES, "FormValidationDateTimeRangeOverflow",
-      params, aMessage);
+      aMessage, nsContentUtils::eDOM_PROPERTIES,
+      "FormValidationDateTimeRangeOverflow", maxStr);
 }
 
 nsresult DateTimeInputTypeBase::GetRangeUnderflowMessage(nsAString& aMessage) {
   nsAutoString minStr;
   mInputElement->GetAttr(kNameSpaceID_None, nsGkAtoms::min, minStr);
 
-  const char16_t* params[] = {minStr.get()};
   return nsContentUtils::FormatLocalizedString(
-      nsContentUtils::eDOM_PROPERTIES, "FormValidationDateTimeRangeUnderflow",
-      params, aMessage);
+      aMessage, nsContentUtils::eDOM_PROPERTIES,
+      "FormValidationDateTimeRangeUnderflow", minStr);
 }
 
 nsresult DateTimeInputTypeBase::MinMaxStepAttrChanged() {
-  if (Element* dateTimeBoxElement =
-          mInputElement->GetDateTimeBoxElementInUAWidget()) {
+  if (Element* dateTimeBoxElement = mInputElement->GetDateTimeBoxElement()) {
     AsyncEventDispatcher* dispatcher = new AsyncEventDispatcher(
         dateTimeBoxElement, NS_LITERAL_STRING("MozNotifyMinMaxStepAttrChanged"),
         CanBubble::eNo, ChromeOnlyDispatch::eNo);
     dispatcher->RunDOMEventWhenSafe();
-  } else {
-    nsDateTimeControlFrame* frame = do_QueryFrame(GetPrimaryFrame());
-    if (frame) {
-      frame->OnMinMaxStepAttrChanged();
-    }
   }
 
   return NS_OK;
@@ -201,7 +175,7 @@ bool DateTimeInputTypeBase::GetTimeFromMs(double aValue, uint16_t* aHours,
 // input type=date
 
 nsresult DateInputType::GetBadInputMessage(nsAString& aMessage) {
-  if (!IsInputDateTimeEnabled()) {
+  if (!StaticPrefs::dom_forms_datetime()) {
     return NS_ERROR_UNEXPECTED;
   }
 

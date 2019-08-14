@@ -9,13 +9,17 @@
  * in a stepped-over function.
  */
 
-add_task(threadClientTest(({ threadClient, debuggee }) => {
-  return new Promise(resolve => {
-    threadClient.addOneTimeListener("paused", function(event, packet) {
-      const source = threadClient.source(packet.frame.where.source);
-      const location = { line: debuggee.line0 + 2 };
+add_task(
+  threadClientTest(({ threadClient, debuggee }) => {
+    return new Promise(resolve => {
+      threadClient.once("paused", async function(packet) {
+        const source = await getSourceById(
+          threadClient,
+          packet.frame.where.actor
+        );
+        const location = { sourceUrl: source.url, line: debuggee.line0 + 2 };
 
-      source.setBreakpoint(location).then(async function([response, bpClient]) {
+        threadClient.setBreakpoint(location, {});
         const testCallbacks = [
           function(packet) {
             // Check that the stepping worked.
@@ -27,11 +31,6 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
             Assert.equal(packet.frame.where.line, location.line);
             Assert.equal(packet.why.type, "breakpoint");
             Assert.notEqual(packet.why.type, "resumeLimit");
-          },
-          function(packet) {
-            // Stepped to the closing brace of the function.
-            Assert.equal(packet.frame.where.line, debuggee.line0 + 3);
-            Assert.equal(packet.why.type, "resumeLimit");
           },
           function(packet) {
             // The frame is about to be popped while stepping.
@@ -68,11 +67,11 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
         const waiter = waitForPause(threadClient);
         threadClient.stepOver();
         await waiter;
-        bpClient.remove(() => threadClient.resume(resolve));
+        threadClient.removeBreakpoint(location);
+        threadClient.resume().then(resolve);
       });
-    });
 
-    /* eslint-disable */
+      /* eslint-disable */
     Cu.evalInSandbox("var line0 = Error().lineNumber;\n" +
                      "function foo() {\n" + // line0 + 1
                      "  this.a = 1;\n" +    // line0 + 2 <-- Breakpoint is set here.
@@ -83,5 +82,6 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
                      "var b = 2;\n",        // line0 + 7
                      debuggee);
     /* eslint-enable */
-  });
-}));
+    });
+  })
+);

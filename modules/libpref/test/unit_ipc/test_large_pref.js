@@ -5,21 +5,22 @@
 // Large preferences should not be set in the child process.
 // Non-string preferences are not tested here, because their behavior
 // should not be affected by this filtering.
+//
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 function isParentProcess() {
-    let appInfo = Cc["@mozilla.org/xre/app-info;1"];
-    return (!appInfo || appInfo.getService(Ci.nsIXULRuntime).processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT);
+  return Services.appinfo.processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
 }
 
 function makeBuffer(length) {
-    let string = "x";
-    while (string.length < length) {
-      string = string + string;
-    }
-    if (string.length > length) {
-      string = string.substring(length - string.length);
-    }
-    return string;
+  let string = "x";
+  while (string.length < length) {
+    string = string + string;
+  }
+  if (string.length > length) {
+    string = string.substring(length - string.length);
+  }
+  return string;
 }
 
 // from prefapi.h
@@ -29,9 +30,9 @@ const largeString = makeBuffer(MAX_ADVISABLE_PREF_LENGTH + 1);
 const smallString = makeBuffer(4);
 
 const testValues = [
-  {name: "None", value: undefined},
-  {name: "Small", value: smallString},
-  {name: "Large", value: largeString},
+  { name: "None", value: undefined },
+  { name: "Small", value: smallString },
+  { name: "Large", value: largeString },
 ];
 
 function prefName(def, user) {
@@ -46,9 +47,8 @@ function expectedPrefValue(def, user) {
 }
 
 function run_test() {
-  let pb = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch);
-  let ps = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefService);
-  let defaultBranch = ps.getDefaultBranch("");
+  const pb = Services.prefs;
+  let defaultBranch = pb.getDefaultBranch("");
 
   let isParent = isParentProcess();
   if (isParent) {
@@ -92,11 +92,13 @@ function run_test() {
         try {
           let val = pb.getCharPref(pref_name);
           prefExists = val.length > 128;
-        } catch(e) {
+        } catch (e) {
           prefExists = false;
         }
-        ok(!prefExists,
-           "Pref " + pref_name + " should not be set in the child");
+        ok(
+          !prefExists,
+          "Pref " + pref_name + " should not be set in the child"
+        );
       }
     }
   }

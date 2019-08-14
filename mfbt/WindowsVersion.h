@@ -154,6 +154,14 @@ MOZ_ALWAYS_INLINE bool IsWin10April2018UpdateOrLater() {
   return IsWindows10BuildOrLater(17134);
 }
 
+MOZ_ALWAYS_INLINE bool IsWin10Sep2018UpdateOrLater() {
+  return IsWindows10BuildOrLater(17763);
+}
+
+MOZ_ALWAYS_INLINE bool IsWin10May2019UpdateOrLater() {
+  return IsWindows10BuildOrLater(18362);
+}
+
 MOZ_ALWAYS_INLINE bool IsNotWin7PreRTM() {
   return IsWin7SP1OrLater() || IsWindowsBuildOrLater(7600);
 }

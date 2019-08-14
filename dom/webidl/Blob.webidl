@@ -13,7 +13,7 @@
 typedef (BufferSource or Blob or USVString) BlobPart;
 
 [Constructor(optional sequence<BlobPart> blobParts,
-             optional BlobPropertyBag options),
+             optional BlobPropertyBag options = {}),
  Exposed=(Window,Worker)]
 interface Blob {
 
@@ -25,9 +25,14 @@ interface Blob {
   //slice Blob into byte-ranged chunks
 
   [Throws]
-  Blob slice([Clamp] optional long long start,
-             [Clamp] optional long long end,
+  Blob slice(optional [Clamp] long long start,
+             optional [Clamp] long long end,
              optional DOMString contentType);
+
+  // read from the Blob.
+  [NewObject] ReadableStream stream();
+  [NewObject] Promise<USVString> text();
+  [NewObject] Promise<ArrayBuffer> arrayBuffer();
 };
 
 enum EndingTypes { "transparent", "native" };
@@ -36,3 +41,10 @@ dictionary BlobPropertyBag {
   DOMString type = "";
   EndingTypes endings = "transparent";
 };
+
+partial interface Blob {
+  // This returns the type of BlobImpl used for this Blob.
+  [ChromeOnly]
+  readonly attribute DOMString blobImplType;
+};
+

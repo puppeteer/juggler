@@ -4,21 +4,23 @@
 
 "use strict";
 
-const protocol = require("devtools/shared/protocol");
-const {changesSpec} = require("devtools/shared/specs/changes");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
+const { changesSpec } = require("devtools/shared/specs/changes");
 
 /**
  * ChangesFront, the front object for the ChangesActor
  */
-const ChangesFront = protocol.FrontClassWithSpec(changesSpec, {
-  initialize: function(client, {changesActor}) {
-    protocol.Front.prototype.initialize.call(this, client, {actor: changesActor});
-    this.manage(this);
-  },
+class ChangesFront extends FrontClassWithSpec(changesSpec) {
+  constructor(client) {
+    super(client);
 
-  destroy: function() {
-    protocol.Front.prototype.destroy.call(this);
-  },
-});
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "changesActor";
+  }
+}
 
 exports.ChangesFront = ChangesFront;
+registerFront(ChangesFront);

@@ -2,21 +2,28 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include "mozilla/dom/MediaIPCUtils.h";
+
+using mozilla::media::TimeUnit from "TimeUnits.h";
+
 namespace mozilla {
 
+// used for both SendInput/RecvInput and ProcessDecodedData/RecvOutput
 struct MediaDataIPDL
 {
   int64_t offset;
-  int64_t time;
-  int64_t timecode;
-  int64_t duration;
-  uint32_t frames;
+  TimeUnit time;
+  TimeUnit timecode;
+  TimeUnit duration;
   bool keyframe;
 };
 
+// used for SendInput/RecvInput
 struct MediaRawDataIPDL
 {
   MediaDataIPDL base;
+  bool eos;
+  uint32_t discardPadding;
   Shmem buffer;
 };
 

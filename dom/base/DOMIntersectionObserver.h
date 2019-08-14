@@ -7,8 +7,9 @@
 #ifndef DOMIntersectionObserver_h
 #define DOMIntersectionObserver_h
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/IntersectionObserverBinding.h"
-#include "nsStyleCoord.h"
+#include "mozilla/ServoStyleConsts.h"
 #include "nsTArray.h"
 
 using mozilla::dom::DOMRect;
@@ -131,8 +132,8 @@ class DOMIntersectionObserver final : public nsISupports,
 
   bool SetRootMargin(const nsAString& aString);
 
-  void Update(nsIDocument* aDocument, DOMHighResTimeStamp time);
-  void Notify();
+  void Update(Document* aDocument, DOMHighResTimeStamp time);
+  MOZ_CAN_RUN_SCRIPT void Notify();
 
  protected:
   void Connect();
@@ -144,10 +145,10 @@ class DOMIntersectionObserver final : public nsISupports,
                                       double aIntersectionRatio);
 
   nsCOMPtr<nsPIDOMWindowInner> mOwner;
-  RefPtr<nsIDocument> mDocument;
+  RefPtr<Document> mDocument;
   RefPtr<mozilla::dom::IntersectionCallback> mCallback;
   RefPtr<Element> mRoot;
-  nsStyleSides mRootMargin;
+  StyleRect<LengthPercentage> mRootMargin;
   nsTArray<double> mThresholds;
 
   // Holds raw pointers which are explicitly cleared by UnlinkTarget().

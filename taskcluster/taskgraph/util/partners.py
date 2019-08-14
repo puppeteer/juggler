@@ -8,6 +8,8 @@ from redo import retry
 import requests
 import xml.etree.ElementTree as ET
 
+from taskgraph.util.attributes import release_level
+from taskgraph.util.schema import resolve_keyed_by
 
 # Suppress chatty requests logging
 logging.getLogger("requests").setLevel(logging.WARNING)
@@ -15,20 +17,6 @@ logging.getLogger("requests").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 GITHUB_API_ENDPOINT = "https://api.github.com/graphql"
-PARTNER_BRANCHES = {
-    'mozilla-beta': 'release',
-    'mozilla-release': 'release',
-    'maple': 'release',
-    'birch': 'release',
-    'jamun': 'release',
-}
-EMEFREE_BRANCHES = {
-    'mozilla-beta': 'release',
-    'mozilla-release': 'release',
-    'maple': 'release',
-    'birch': 'release',
-    'jamun': 'release',
-}
 
 """
 LOGIN_QUERY, MANIFEST_QUERY, and REPACK_CFG_QUERY are all written to the Github v4 API,
@@ -75,7 +63,7 @@ MANIFEST_QUERY = """query {
 # Returns the contents of desktop/*/repack.cfg for a partner repository
 REPACK_CFG_QUERY = """query{
   repository(owner:"%(owner)s", name:"%(repo)s") {
-    object(expression: "master:desktop/"){
+    object(expression: "%(revision)s:desktop/"){
       ... on Tree {
         entries {
           name
@@ -133,11 +121,12 @@ REPACK_CFG_QUERY = """query{
 
 # Map platforms in repack.cfg into their equivalents in taskcluster
 TC_PLATFORM_PER_FTP = {
-    'linux-i686': 'linux-nightly',
-    'linux-x86_64': 'linux64-nightly',
-    'mac': 'macosx64-nightly',
-    'win32': 'win32-nightly',
-    'win64': 'win64-nightly',
+    'linux-i686': 'linux-shippable',
+    'linux-x86_64': 'linux64-shippable',
+    'mac': 'macosx64-shippable',
+    'win32': 'win32-shippable',
+    'win64': 'win64-shippable',
+    'win64-aarch64': 'win64-aarch64-shippable',
 }
 
 TASKCLUSTER_PROXY_SECRET_ROOT = 'http://taskcluster/secrets/v1/secret'
@@ -151,8 +140,6 @@ LOCALES_FILE = os.path.join(
 partner_configs = {}
 
 
-# TODO - grant private repo access to P.A.T.
-# TODO - add level-3 as well, cleanup as of level
 def get_token(params):
     """ We use a Personal Access Token from Github to lookup partner config. No extra scopes are
     needed on the token to read public repositories, but need the 'repo' scope to see private
@@ -161,8 +148,7 @@ def get_token(params):
     """
 
     # The 'usual' method - via taskClusterProxy for decision tasks
-    # TODO use {level}? Or allow the token to level 1 and remove level from the path?
-    url = "{secret_root}/project/releng/gecko/build/level-2/partner-github-api".format(
+    url = "{secret_root}/project/releng/gecko/build/level-{level}/partner-github-api".format(
         secret_root=TASKCLUSTER_PROXY_SECRET_ROOT, **params
     )
     try:
@@ -226,31 +212,37 @@ def get_partners(manifestRepo, token):
             name = child.attrib['name']
             url = child.attrib['fetch']
             remotes[name] = url
-            log.debug('Added remote %s from %s', name, url)
+            log.debug('Added remote %s at %s', name, url)
         elif child.tag == 'project':
             # we don't need to check any code repos
             if 'scripts' in child.attrib['path']:
                 continue
-            partner_url = "%s%s" % (remotes[child.attrib['remote']],
-                                    child.attrib['name'])
+            owner, _ = get_repo_params(remotes[child.attrib['remote']] + '_')
+            partner_url = {
+                'owner': owner,
+                'repo': child.attrib['name'],
+                'revision': child.attrib['revision'],
+            }
             partners[child.attrib['name']] = partner_url
-            log.debug("Added partner %s" % partner_url)
+            log.debug("Added partner %s at revision %s" % (partner_url['repo'],
+                                                           partner_url['revision']))
     return partners
 
 
 def parse_config(data):
     """ Parse a single repack.cfg file into a python dictionary.
     data is contents of the file, in "foo=bar\nbaz=buzz" style. We do some translation on
-    locales and platforms data, otherewise passthrough
+    locales and platforms data, otherwise passthrough
     """
-    ALLOWED_KEYS = ('locales', 'upload_to_candidates', 'platforms')
+    ALLOWED_KEYS = ('locales', 'platforms', 'upload_to_candidates', 'repack_stub_installer',
+                    'publish_to_releases')
     config = {'platforms': []}
     for l in data.splitlines():
         if '=' in l:
             l = str(l)
-            key, value = l.split('=', 2)
+            key, value = l.split('=', 1)
             value = value.strip('\'"').rstrip('\'"')
-            if key in ('linux-i686', 'linux-x86_64', 'mac', 'win32', 'win64'):
+            if key in TC_PLATFORM_PER_FTP.keys():
                 if value.lower() == 'true':
                     config['platforms'].append(TC_PLATFORM_PER_FTP[key])
                 continue
@@ -266,8 +258,7 @@ def parse_config(data):
 def get_repack_configs(repackRepo, token):
     """ For a partner repository, retrieve all the repack.cfg files and parse them into a dict """
     log.debug("Querying for configs in %s", repackRepo)
-    owner, repo = get_repo_params(repackRepo)
-    query = REPACK_CFG_QUERY % {'owner': owner, 'repo': repo}
+    query = REPACK_CFG_QUERY % repackRepo
     raw_configs = query_api(query, token)
     raw_configs = raw_configs['data']['repository']['object']['entries']
 
@@ -291,6 +282,8 @@ def get_partner_config_by_url(manifest_url, kind, token, partner_subset=None):
     Supports caching data by kind to avoid repeated requests, relying on the related kinds for
     partner repacking, signing, repackage, repackage signing all having the same kind prefix.
     """
+    if not manifest_url:
+        raise RuntimeError('Manifest url for {} not defined'.format(kind))
     if kind not in partner_configs:
         log.info('Looking up data for %s from %s', kind, manifest_url)
         check_login(token)
@@ -335,7 +328,7 @@ def get_partner_config_by_kind(config, kind):
     else:
         return {}
     # if we're only interested in a subset of partners we remove the rest
-    if isinstance(partner_subset, (list, tuple)):
+    if partner_subset:
         # TODO - should be fatal to have an unknown partner in partner_subset
         for partner in kind_config.keys():
             if partner not in partner_subset:
@@ -376,6 +369,8 @@ def fix_partner_config(orig_config):
 def get_ftp_platform(platform):
     if platform.startswith('win32'):
         return 'win32'
+    elif platform.startswith('win64-aarch64'):
+        return 'win64-aarch64'
     elif platform.startswith('win64'):
         return 'win64'
     elif platform.startswith('macosx'):
@@ -397,15 +392,26 @@ def locales_per_build_platform(build_platform, locales):
     return [locale for locale in locales if locale not in exclude]
 
 
-def get_partner_url_config(parameters, graph_config, enable_emefree=True, enable_partners=True):
-    partner_url_config = {}
-    project = parameters['project']
-    if enable_emefree:
-        alias = EMEFREE_BRANCHES[project]
-        partner_url_config['release-eme-free-repack'] = \
-            graph_config['partner'][alias]['release-eme-free-repack']
-    if enable_partners:
-        alias = PARTNER_BRANCHES[project]
-        partner_url_config['release-partner-repack'] = \
-            graph_config['partner'][alias]['release-partner-repack']
+def get_partner_url_config(parameters, graph_config):
+    partner_url_config = deepcopy(graph_config['partner-urls'])
+    substitutions = {
+        'release-product': parameters['release_product'],
+        'release-level': release_level(parameters['project']),
+        'release-type': parameters["release_type"]
+    }
+    resolve_keyed_by(partner_url_config, 'release-eme-free-repack', 'eme-free manifest_url',
+                     **substitutions)
+    resolve_keyed_by(partner_url_config, 'release-partner-repack', 'partner manifest url',
+                     **substitutions)
     return partner_url_config
+
+
+def get_partners_to_be_published(config):
+    # hardcoded kind because release-bouncer-aliases doesn't match otherwise
+    partner_config = get_partner_config_by_kind(config, 'release-partner-repack')
+    partners = []
+    for partner, subconfigs in partner_config.items():
+        for sub_config_name, sub_config in subconfigs.items():
+            if sub_config.get("publish_to_releases"):
+                partners.append((partner, sub_config_name, sub_config['platforms']))
+    return partners

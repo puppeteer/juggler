@@ -30,15 +30,15 @@
 #include "nsNetCID.h"
 
 #ifdef ANDROID
-#include "cutils/properties.h"
+#  include "cutils/properties.h"
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-#include <glib.h>
-#ifdef MOZ_WAYLAND
-#include <gdk/gdk.h>
-#include <gdk/gdkx.h>
-#endif
+#  include <glib.h>
+#  ifdef MOZ_WAYLAND
+#    include <gdk/gdk.h>
+#    include <gdk/gdkx.h>
+#  endif
 #endif
 
 #include <dirent.h>
@@ -46,12 +46,11 @@
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #ifndef ANDROID
-#include <glob.h>
+#  include <glob.h>
 #endif
 
 namespace mozilla {
 
-#if defined(MOZ_CONTENT_SANDBOX)
 namespace {
 static const int rdonly = SandboxBroker::MAY_READ;
 static const int wronly = SandboxBroker::MAY_WRITE;
@@ -59,7 +58,6 @@ static const int rdwr = rdonly | wronly;
 static const int rdwrcr = rdwr | SandboxBroker::MAY_CREATE;
 static const int access = SandboxBroker::MAY_ACCESS;
 }  // namespace
-#endif
 
 static void AddMesaSysfsPaths(SandboxBroker::Policy* aPolicy) {
   // Bug 1384178: Mesa driver loader
@@ -107,30 +105,54 @@ static void AddMesaSysfsPaths(SandboxBroker::Policy* aPolicy) {
   }
 }
 
+static void JoinPathIfRelative(const nsACString& aCwd, const nsACString& inPath,
+                               nsACString& outPath) {
+  if (inPath.Length() < 1) {
+    outPath.Assign(aCwd);
+    SANDBOX_LOG_ERROR("Unjoinable path: %s", PromiseFlatCString(aCwd).get());
+    return;
+  }
+  const char* startChar = inPath.BeginReading();
+  if (*startChar != '/') {
+    // Relative path, copy basepath in front
+    outPath.Assign(aCwd);
+    outPath.Append("/");
+    outPath.Append(inPath);
+  } else {
+    // Absolute path, it's ok like this
+    outPath.Assign(inPath);
+  }
+}
+
 static void AddPathsFromFile(SandboxBroker::Policy* aPolicy,
-                             nsACString& aPath) {
+                             const nsACString& aPath);
+
+static void AddPathsFromFileInternal(SandboxBroker::Policy* aPolicy,
+                                     const nsACString& aCwd,
+                                     const nsACString& aPath) {
   nsresult rv;
   nsCOMPtr<nsIFile> ldconfig(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv));
   if (NS_FAILED(rv)) {
     return;
   }
   rv = ldconfig->InitWithNativePath(aPath);
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
   nsCOMPtr<nsIFileInputStream> fileStream(
       do_CreateInstance(NS_LOCALFILEINPUTSTREAM_CONTRACTID, &rv));
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
   rv = fileStream->Init(ldconfig, -1, -1, 0);
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
   nsCOMPtr<nsILineInputStream> lineStream(do_QueryInterface(fileStream, &rv));
-  if (NS_FAILED(rv)) {
+  if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
+
   nsAutoCString line;
   bool more = true;
   do {
@@ -160,8 +182,11 @@ static void AddPathsFromFile(SandboxBroker::Policy* aPolicy,
     if (FindInReadable(NS_LITERAL_CSTRING("include "), start, token_end)) {
       nsAutoCString includes(Substring(token_end, end));
       for (const nsACString& includeGlob : includes.Split(' ')) {
+        // Glob path might be relative, so add cwd if so.
+        nsAutoCString includeFile;
+        JoinPathIfRelative(aCwd, includeGlob, includeFile);
         glob_t globbuf;
-        if (!glob(PromiseFlatCString(includeGlob).get(), GLOB_NOSORT, nullptr,
+        if (!glob(PromiseFlatCString(includeFile).get(), GLOB_NOSORT, nullptr,
                   &globbuf)) {
           for (size_t fileIdx = 0; fileIdx < globbuf.gl_pathc; fileIdx++) {
             nsAutoCString filePath(globbuf.gl_pathv[fileIdx]);
@@ -171,10 +196,7 @@ static void AddPathsFromFile(SandboxBroker::Policy* aPolicy,
         }
       }
     }
-    // Skip anything left over that isn't an absolute path
-    if (line.First() != '/') {
-      continue;
-    }
+
     // Cut off anything behind an = sign, used by dirname=TYPE directives
     int32_t equals = line.FindChar('=');
     if (equals >= 0) {
@@ -188,15 +210,57 @@ static void AddPathsFromFile(SandboxBroker::Policy* aPolicy,
   } while (more);
 }
 
+static void AddPathsFromFile(SandboxBroker::Policy* aPolicy,
+                             const nsACString& aPath) {
+  // Find the new base path where that file sits in.
+  nsresult rv;
+  nsCOMPtr<nsIFile> includeFile(
+      do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv));
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  rv = includeFile->InitWithNativePath(aPath);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+  if (SandboxInfo::Get().Test(SandboxInfo::kVerbose)) {
+    SANDBOX_LOG_ERROR("Adding paths from %s to policy.",
+                      PromiseFlatCString(aPath).get());
+  }
+
+  // Find the parent dir where this file sits in.
+  nsCOMPtr<nsIFile> parentDir;
+  rv = includeFile->GetParent(getter_AddRefs(parentDir));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+  nsAutoCString parentPath;
+  rv = parentDir->GetNativePath(parentPath);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+  if (SandboxInfo::Get().Test(SandboxInfo::kVerbose)) {
+    SANDBOX_LOG_ERROR("Parent path is %s",
+                      PromiseFlatCString(parentPath).get());
+  }
+  AddPathsFromFileInternal(aPolicy, parentPath, aPath);
+}
+
 static void AddLdconfigPaths(SandboxBroker::Policy* aPolicy) {
-  nsAutoCString ldconfigPath(NS_LITERAL_CSTRING("/etc/ld.so.conf"));
-  AddPathsFromFile(aPolicy, ldconfigPath);
+  nsAutoCString ldConfig(NS_LITERAL_CSTRING("/etc/ld.so.conf"));
+  AddPathsFromFile(aPolicy, ldConfig);
+}
+
+static void AddSharedMemoryPaths(SandboxBroker::Policy* aPolicy, pid_t aPid) {
+  std::string shmPath("/dev/shm");
+  if (base::SharedMemory::AppendPosixShmPrefix(&shmPath, aPid)) {
+    aPolicy->AddPrefix(rdwrcr, shmPath.c_str());
+  }
 }
 
 SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
   // Policy entries that are the same in every process go here, and
   // are cached over the lifetime of the factory.
-#if defined(MOZ_CONTENT_SANDBOX)
   SandboxBroker::Policy* policy = new SandboxBroker::Policy;
   // Write permssions
   //
@@ -393,23 +457,21 @@ SandboxBrokerPolicyFactory::SandboxBrokerPolicyFactory() {
 #if defined(MOZ_WIDGET_GTK)
   // Allow local X11 connections, for Primus and VirtualGL to contact
   // the secondary X server. No exception for Wayland.
-#if defined(MOZ_WAYLAND)
+#  if defined(MOZ_WAYLAND)
   if (GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
     policy->AddPrefix(SandboxBroker::MAY_CONNECT, "/tmp/.X11-unix/X");
   }
-#else
+#  else
   policy->AddPrefix(SandboxBroker::MAY_CONNECT, "/tmp/.X11-unix/X");
-#endif
+#  endif
   if (const auto xauth = PR_GetEnv("XAUTHORITY")) {
     policy->AddPath(rdonly, xauth);
   }
 #endif
 
   mCommonContentPolicy.reset(policy);
-#endif
 }
 
-#ifdef MOZ_CONTENT_SANDBOX
 UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
     int aPid, bool aFileProcess) {
   // Policy entries that vary per-process (currently the only reason
@@ -418,8 +480,8 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
   // in early startup.
 
   MOZ_ASSERT(NS_IsMainThread());
-  // File broker usage is controlled through a pref.
-  if (!IsContentSandboxEnabled()) {
+  // The file broker is used at level 2 and up.
+  if (GetEffectiveContentSandboxLevel() <= 1) {
     return nullptr;
   }
 
@@ -524,10 +586,7 @@ UniquePtr<SandboxBroker::Policy> SandboxBrokerPolicyFactory::GetContentPolicy(
   if (allowPulse) {
     policy->AddDir(rdwrcr, "/dev/shm");
   } else {
-    std::string shmPath("/dev/shm");
-    if (base::SharedMemory::AppendPosixShmPrefix(&shmPath, aPid)) {
-      policy->AddPrefix(rdwrcr, shmPath.c_str());
-    }
+    AddSharedMemoryPaths(policy.get(), aPid);
   }
 
 #ifdef MOZ_WIDGET_GTK
@@ -581,5 +640,16 @@ void SandboxBrokerPolicyFactory::AddDynamicPathList(
   }
 }
 
-#endif  // MOZ_CONTENT_SANDBOX
+/* static */ UniquePtr<SandboxBroker::Policy>
+SandboxBrokerPolicyFactory::GetUtilityPolicy(int aPid) {
+  auto policy = MakeUnique<SandboxBroker::Policy>();
+
+  AddSharedMemoryPaths(policy.get(), aPid);
+
+  if (policy->IsEmpty()) {
+    policy = nullptr;
+  }
+  return policy;
+}
+
 }  // namespace mozilla

@@ -5,8 +5,13 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 BROWSER_CHROME_MANIFESTS += [
+    'test/allocations/browser_allocations_target.ini',
+    'test/browser-rtl.ini',
     'test/browser.ini',
-    'test/metrics/browser_metrics_inspector.ini'
+    'test/metrics/browser_metrics_debugger.ini',
+    'test/metrics/browser_metrics_inspector.ini',
+    'test/metrics/browser_metrics_netmonitor.ini',
+    'test/metrics/browser_metrics_webconsole.ini',
 ]
 XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
 
@@ -15,7 +20,6 @@ DIRS += [
 ]
 
 DevToolsModules(
-    'attach-thread.js',
     'browser-menus.js',
     'devtools-browser.js',
     'devtools.js',
@@ -28,7 +32,6 @@ DevToolsModules(
     'target-from-url.js',
     'target.js',
     'toolbox-context-menu.js',
-    'toolbox-highlighter-utils.js',
     'toolbox-host-manager.js',
     'toolbox-hosts.js',
     'toolbox-options.js',

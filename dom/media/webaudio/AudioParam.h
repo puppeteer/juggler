@@ -37,6 +37,11 @@ class AudioParam final : public nsWrapperCache, public AudioParamTimeline {
   JSObject* WrapObject(JSContext* aCx,
                        JS::Handle<JSObject*> aGivenProto) override;
 
+  float Value() {
+    return AudioParamTimeline::GetValueAtTime<double>(
+        GetParentObject()->CurrentTime());
+  }
+
   // We override SetValueCurveAtTime to convert the Float32Array to the wrapper
   // object.
   AudioParam* SetValueCurveAtTime(const nsTArray<float>& aValues,
@@ -148,6 +153,10 @@ class AudioParam final : public nsWrapperCache, public AudioParamTimeline {
 
   float MaxValue() const { return mMaxValue; }
 
+  bool IsStreamSuspended() const {
+    return mStream ? mStream->IsSuspended() : false;
+  }
+
   const nsTArray<AudioNode::InputNode>& InputNodes() const {
     return mInputNodes;
   }
@@ -160,6 +169,9 @@ class AudioParam final : public nsWrapperCache, public AudioParamTimeline {
 
   // May create the stream if it doesn't exist
   MediaStream* Stream();
+
+  // Return nullptr if stream doesn't exist.
+  MediaStream* GetStream() const;
 
   size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override {
     size_t amount = AudioParamTimeline::SizeOfExcludingThis(aMallocSizeOf);

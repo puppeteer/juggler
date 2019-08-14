@@ -6,34 +6,52 @@
 #ifndef include_dom_media_ipc_RemoteDecoderManagerParent_h
 #define include_dom_media_ipc_RemoteDecoderManagerParent_h
 #include "mozilla/PRemoteDecoderManagerParent.h"
+#include "mozilla/layers/VideoBridgeChild.h"
 
 namespace mozilla {
 
 class RemoteDecoderManagerThreadHolder;
 
 class RemoteDecoderManagerParent final : public PRemoteDecoderManagerParent {
+  friend class PRemoteDecoderManagerParent;
+
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(RemoteDecoderManagerParent)
 
   static bool CreateForContent(
       Endpoint<PRemoteDecoderManagerParent>&& aEndpoint);
 
+  static bool CreateVideoBridgeToParentProcess(
+      Endpoint<layers::PVideoBridgeChild>&& aEndpoint);
+
+  // Can be called from any thread
+  SurfaceDescriptorGPUVideo StoreImage(layers::Image* aImage,
+                                       layers::TextureClient* aTexture);
+
   static bool StartupThreads();
   static void ShutdownThreads();
+
+  static void ShutdownVideoBridge();
 
   bool OnManagerThread();
 
  protected:
-  PRemoteVideoDecoderParent* AllocPRemoteVideoDecoderParent(
-      const VideoInfo& aVideoInfo, const float& aFramerate,
-      const CreateDecoderParams::OptionSet& aOptions, bool* aSuccess,
-      nsCString* aErrorDescription) override;
-  bool DeallocPRemoteVideoDecoderParent(
-      PRemoteVideoDecoderParent* actor) override;
+  PRemoteDecoderParent* AllocPRemoteDecoderParent(
+      const RemoteDecoderInfoIPDL& aRemoteDecoderInfo,
+      const CreateDecoderParams::OptionSet& aOptions,
+      const Maybe<layers::TextureFactoryIdentifier>& aIdentifier,
+      bool* aSuccess, nsCString* aBlacklistedD3D11Driver,
+      nsCString* aBlacklistedD3D9Driver, nsCString* aErrorDescription);
+  bool DeallocPRemoteDecoderParent(PRemoteDecoderParent* actor);
+
+  mozilla::ipc::IPCResult RecvReadback(const SurfaceDescriptorGPUVideo& aSD,
+                                       SurfaceDescriptor* aResult);
+  mozilla::ipc::IPCResult RecvDeallocateSurfaceDescriptorGPUVideo(
+      const SurfaceDescriptorGPUVideo& aSD);
 
   void ActorDestroy(mozilla::ipc::IProtocol::ActorDestroyReason) override;
 
-  void DeallocPRemoteDecoderManagerParent() override;
+  void ActorDealloc() override;
 
  private:
   explicit RemoteDecoderManagerParent(
@@ -41,6 +59,9 @@ class RemoteDecoderManagerParent final : public PRemoteDecoderManagerParent {
   ~RemoteDecoderManagerParent();
 
   void Open(Endpoint<PRemoteDecoderManagerParent>&& aEndpoint);
+
+  std::map<uint64_t, RefPtr<layers::Image>> mImageMap;
+  std::map<uint64_t, RefPtr<layers::TextureClient>> mTextureMap;
 
   RefPtr<RemoteDecoderManagerThreadHolder> mThreadHolder;
 };

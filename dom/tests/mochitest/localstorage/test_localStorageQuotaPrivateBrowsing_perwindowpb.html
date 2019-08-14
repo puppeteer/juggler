@@ -2,13 +2,13 @@
 <head>
 <title>localStorage and DOM quota test</title>
 
-<script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+<script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
 <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"?>
 
 <script type="text/javascript">
 SimpleTest.waitForExplicitFinish();
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const CONTENT_PAGE = "http://mochi.test:8888/chrome/dom/tests/mochitest/localstorage/page_blank.html";
 const slavePath = "/chrome/dom/tests/mochitest/localstorage/";

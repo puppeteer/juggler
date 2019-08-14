@@ -5,7 +5,7 @@
     <string name="username">Username</string>
     <string name="password">Password</string>
     <string name="clear_field">Clear</string>
-    <string name="request_autoplay">Allow media to play on "%1$s"?</string>
+    <string name="request_storage">Allow access to device storage for "%1$s"?</string>
     <string name="request_geolocation">Share location with "%1$s"?</string>
     <string name="request_notification">Allow notifications for "%1$s"?</string>
     <string name="request_video">Share video with "%1$s"</string>
@@ -22,9 +22,15 @@
     <string name="multiprocess">Multiprocess</string>
     <string name="tracking_protection">Tracking Protection</string>
     <string name="private_browsing">Private Browsing</string>
+    <string name="remote_debugging">Remote Debugging</string>
     <string name="forward">Forward</string>
     <string name="reload">Reload</string>
     <string name="crashed_title">GeckoView Example Crashed</string>
     <string name="crashed_text">Tap to report to Mozilla.</string>
     <string name="crashed_ignore">Ignore</string>
+    <string name="device_sharing_microphone">Microphone is on</string>
+    <string name="device_sharing_camera">Camera is on</string>
+    <string name="device_sharing_camera_and_mic">Camera and microphone are on</string>
+    <string name="new_tab">New tab</string>
+    <string name="close_tab">Close tab</string>
 </resources>

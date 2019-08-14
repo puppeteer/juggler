@@ -14,47 +14,35 @@
 
 using namespace mozilla;
 
-static nsStaticAtom* GetAtomBase() {
-  return const_cast<nsStaticAtom*>(
-      nsGkAtoms::GetAtomByIndex(kAtomIndex_AnonBoxes));
-}
-
-bool nsCSSAnonBoxes::IsAnonBox(nsAtom* aAtom) {
-  return nsStaticAtomUtils::IsMember(aAtom, GetAtomBase(),
-                                     kAtomCount_AnonBoxes);
-}
-
 #ifdef MOZ_XUL
-/* static */ bool nsCSSAnonBoxes::IsTreePseudoElement(nsAtom* aPseudo) {
-  MOZ_ASSERT(nsCSSAnonBoxes::IsAnonBox(aPseudo));
+/* static */
+bool nsCSSAnonBoxes::IsTreePseudoElement(nsAtom* aPseudo) {
   return StringBeginsWith(nsDependentAtomString(aPseudo),
                           NS_LITERAL_STRING(":-moz-tree-"));
 }
 #endif
 
-/* static*/ nsCSSAnonBoxes::NonInheriting
-nsCSSAnonBoxes::NonInheritingTypeForPseudoTag(nsAtom* aPseudo) {
-  MOZ_ASSERT(IsNonInheritingAnonBox(aPseudo));
-  Maybe<uint32_t> index =
-      nsStaticAtomUtils::Lookup(aPseudo, GetAtomBase(), kAtomCount_AnonBoxes);
-  MOZ_RELEASE_ASSERT(index.isSome());
-  return static_cast<NonInheriting>(*index);
+#ifdef DEBUG
+/* static */
+nsStaticAtom* nsCSSAnonBoxes::GetAtomBase() {
+  return const_cast<nsStaticAtom*>(
+      nsGkAtoms::GetAtomByIndex(kAtomIndex_AnonBoxes));
 }
 
-#ifdef DEBUG
-/* static */ void nsCSSAnonBoxes::AssertAtoms() {
+/* static */
+void nsCSSAnonBoxes::AssertAtoms() {
   nsStaticAtom* base = GetAtomBase();
   size_t index = 0;
-#define CSS_ANON_BOX(name_, value_)                                 \
-  {                                                                 \
-    RefPtr<nsAtom> atom = NS_Atomize(value_);                       \
-    MOZ_ASSERT(atom == nsGkAtoms::AnonBox_##name_,                  \
-               "Static atom for " #name_ " has incorrect value");   \
-    MOZ_ASSERT(atom == &base[index],                                \
-               "Static atom for " #name_ " not at expected index"); \
-    ++index;                                                        \
-  }
-#include "nsCSSAnonBoxList.h"
-#undef CSS_ANON_BOX
+#  define CSS_ANON_BOX(name_, value_)                                 \
+    {                                                                 \
+      RefPtr<nsAtom> atom = NS_Atomize(value_);                       \
+      MOZ_ASSERT(atom == nsGkAtoms::AnonBox_##name_,                  \
+                 "Static atom for " #name_ " has incorrect value");   \
+      MOZ_ASSERT(atom == &base[index],                                \
+                 "Static atom for " #name_ " not at expected index"); \
+      ++index;                                                        \
+    }
+#  include "nsCSSAnonBoxList.h"
+#  undef CSS_ANON_BOX
 }
 #endif

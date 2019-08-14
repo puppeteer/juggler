@@ -12,11 +12,11 @@ XPCOMUtils.defineLazyGetter(this, "BASE", function() {
 
 var file = do_get_file("test_registerfile.js");
 
-function onStart(ch, cx) {
+function onStart(ch) {
   Assert.equal(ch.responseStatus, 200);
 }
 
-function onStop(ch, cx, status, data) {
+function onStop(ch, status, data) {
   // not sufficient for equality, but not likely to be wrong!
   Assert.equal(data.length, file.fileSize);
 }
@@ -32,7 +32,7 @@ function run_test() {
 
   try {
     srv.registerFile("/foo", do_get_profile());
-    throw "registerFile succeeded!";
+    throw new Error("registerFile succeeded!");
   } catch (e) {
     isException(e, Cr.NS_ERROR_INVALID_ARG);
   }

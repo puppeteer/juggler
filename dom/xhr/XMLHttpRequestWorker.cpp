@@ -10,9 +10,13 @@
 #include "nsIRunnable.h"
 #include "nsIXPConnect.h"
 
+#include "jsapi.h"  // JS::AutoValueArray
 #include "jsfriendapi.h"
-#include "js/TracingAPI.h"
+#include "js/ArrayBuffer.h"  // JS::Is{,Detached}ArrayBufferObject
 #include "js/GCPolicyAPI.h"
+#include "js/RootingAPI.h"  // JS::{Handle,Heap},PersistentRooted
+#include "js/TracingAPI.h"
+#include "js/Value.h"  // JS::{Undefined,}Value
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/Event.h"
@@ -26,6 +30,7 @@
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerRef.h"
 #include "mozilla/dom/WorkerRunnable.h"
+#include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "mozilla/Telemetry.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
@@ -39,7 +44,8 @@
 namespace mozilla {
 namespace dom {
 
-/* static */ void XMLHttpRequestWorker::StateData::trace(JSTracer* aTrc) {
+/* static */
+void XMLHttpRequestWorker::StateData::trace(JSTracer* aTrc) {
   JS::TraceEdge(aTrc, &mResponse, "XMLHttpRequestWorker::StateData::mResponse");
 }
 
@@ -578,10 +584,8 @@ class SetResponseTypeRunnable final : public WorkerThreadProxySyncRunnable {
   ~SetResponseTypeRunnable() {}
 
   virtual void RunOnMainThread(ErrorResult& aRv) override {
-    mProxy->mXHR->SetResponseType(mResponseType, aRv);
-    if (!aRv.Failed()) {
-      mResponseType = mProxy->mXHR->ResponseType();
-    }
+    mProxy->mXHR->SetResponseTypeRaw(mResponseType);
+    mResponseType = mProxy->mXHR->ResponseType();
   }
 };
 
@@ -661,6 +665,11 @@ class OpenRunnable final : public WorkerThreadProxySyncRunnable {
   bool mWithCredentials;
   uint32_t mTimeout;
   XMLHttpRequestResponseType mResponseType;
+  const nsString mMimeTypeOverride;
+
+  // Remember the worker thread's stack when the XHR was opened, so that it can
+  // be passed on to the net monitor.
+  UniquePtr<SerializedStackHolder> mOriginStack;
 
  public:
   OpenRunnable(WorkerPrivate* aWorkerPrivate, Proxy* aProxy,
@@ -668,14 +677,18 @@ class OpenRunnable final : public WorkerThreadProxySyncRunnable {
                const Optional<nsAString>& aUser,
                const Optional<nsAString>& aPassword, bool aBackgroundRequest,
                bool aWithCredentials, uint32_t aTimeout,
-               XMLHttpRequestResponseType aResponseType)
+               XMLHttpRequestResponseType aResponseType,
+               const nsString& aMimeTypeOverride,
+               UniquePtr<SerializedStackHolder> aOriginStack)
       : WorkerThreadProxySyncRunnable(aWorkerPrivate, aProxy),
         mMethod(aMethod),
         mURL(aURL),
         mBackgroundRequest(aBackgroundRequest),
         mWithCredentials(aWithCredentials),
         mTimeout(aTimeout),
-        mResponseType(aResponseType) {
+        mResponseType(aResponseType),
+        mMimeTypeOverride(aMimeTypeOverride),
+        mOriginStack(std::move(aOriginStack)) {
     if (aUser.WasPassed()) {
       mUserStr = aUser.Value();
       mUser = &mUserStr;
@@ -774,6 +787,7 @@ bool Proxy::Init() {
   mXHR = new XMLHttpRequestMainThread();
   mXHR->Construct(mWorkerPrivate->GetPrincipal(),
                   ownerWindow ? ownerWindow->AsGlobal() : nullptr,
+                  mWorkerPrivate->CookieSettings(), true,
                   mWorkerPrivate->GetBaseURI(), mWorkerPrivate->GetLoadGroup(),
                   mWorkerPrivate->GetPerformanceStorage(),
                   mWorkerPrivate->CSPEventListener());
@@ -1033,14 +1047,14 @@ bool EventRunnable::PreDispatch(WorkerPrivate* /* unused */) {
         JS::Rooted<JS::Value> transferable(cx);
         JS::Rooted<JSObject*> obj(
             cx, response.isObject() ? &response.toObject() : nullptr);
-        if (obj && JS_IsArrayBufferObject(obj)) {
+        if (obj && JS::IsArrayBufferObject(obj)) {
           // Use cached response if the arraybuffer has been transfered.
           if (mProxy->mArrayBufferResponseWasTransferred) {
-            MOZ_ASSERT(JS_IsDetachedArrayBufferObject(obj));
+            MOZ_ASSERT(JS::IsDetachedArrayBufferObject(obj));
             mUseCachedArrayBufferResponse = true;
             doClone = false;
           } else {
-            MOZ_ASSERT(!JS_IsDetachedArrayBufferObject(obj));
+            MOZ_ASSERT(!JS::IsDetachedArrayBufferObject(obj));
             JS::AutoValueArray<1> argv(cx);
             argv[0].set(response);
             obj = JS_NewArrayObject(cx, argv);
@@ -1220,8 +1234,7 @@ bool EventRunnable::WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) {
 
   target->DispatchEvent(*event);
 
-  // After firing the event set mResponse to JSVAL_NULL for chunked response
-  // types.
+  // After firing the event set mResponse to null for chunked response types.
   if (StringBeginsWith(mResponseType, NS_LITERAL_STRING("moz-chunked-"))) {
     xhr->NullResponseText();
   }
@@ -1268,6 +1281,10 @@ nsresult OpenRunnable::MainThreadRunInternal() {
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  if (mOriginStack) {
+    mProxy->mXHR->SetOriginStack(std::move(mOriginStack));
+  }
+
   ErrorResult rv;
 
   if (mWithCredentials) {
@@ -1279,6 +1296,13 @@ nsresult OpenRunnable::MainThreadRunInternal() {
 
   if (mTimeout) {
     mProxy->mXHR->SetTimeout(mTimeout, rv);
+    if (NS_WARN_IF(rv.Failed())) {
+      return rv.StealNSResult();
+    }
+  }
+
+  if (!mMimeTypeOverride.IsVoid()) {
+    mProxy->mXHR->OverrideMimeType(mMimeTypeOverride, rv);
     if (NS_WARN_IF(rv.Failed())) {
       return rv.StealNSResult();
     }
@@ -1419,7 +1443,8 @@ XMLHttpRequestWorker::XMLHttpRequestWorker(WorkerPrivate* aWorkerPrivate)
       mWithCredentials(false),
       mCanceled(false),
       mMozAnon(false),
-      mMozSystem(false) {
+      mMozSystem(false),
+      mMimeTypeOverride(VoidString()) {
   mWorkerPrivate->AssertIsOnWorkerThread();
 
   mozilla::HoldJSObjects(this);
@@ -1460,14 +1485,22 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(XMLHttpRequestWorker,
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mStateData.mResponse)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
-/* static */ already_AddRefed<XMLHttpRequest> XMLHttpRequestWorker::Construct(
+/* static */
+already_AddRefed<XMLHttpRequest> XMLHttpRequestWorker::Construct(
     const GlobalObject& aGlobal, const MozXMLHttpRequestParameters& aParams,
     ErrorResult& aRv) {
   JSContext* cx = aGlobal.Context();
   WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(cx);
   MOZ_ASSERT(workerPrivate);
 
+  nsCOMPtr<nsIGlobalObject> global = do_QueryInterface(aGlobal.GetAsSupports());
+  if (NS_WARN_IF(!global)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return nullptr;
+  }
+
   RefPtr<XMLHttpRequestWorker> xhr = new XMLHttpRequestWorker(workerPrivate);
+  xhr->BindToOwner(global);
 
   if (workerPrivate->XHRParamsAllowed()) {
     if (aParams.mMozSystem)
@@ -1584,6 +1617,12 @@ void XMLHttpRequestWorker::MaybeDispatchPrematureAbortEvents(ErrorResult& aRv) {
 
     DispatchPrematureAbortEvent(this, NS_LITERAL_STRING("loadend"), false, aRv);
     if (aRv.Failed()) {
+      return;
+    }
+
+    // Similarly to null check in ::Open, mProxy may have been cleared here.
+    if (!mProxy) {
+      aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return;
     }
 
@@ -1728,6 +1767,7 @@ void XMLHttpRequestWorker::Open(const nsACString& aMethod,
     return;
   }
 
+  bool alsoOverrideMimeType = false;
   if (mProxy) {
     MaybeDispatchPrematureAbortEvents(aRv);
     if (aRv.Failed()) {
@@ -1741,13 +1781,23 @@ void XMLHttpRequestWorker::Open(const nsACString& aMethod,
     }
     mProxy = new Proxy(this, clientInfo.ref(), mWorkerPrivate->GetController(),
                        mMozAnon, mMozSystem);
+    alsoOverrideMimeType = true;
   }
 
   mProxy->mOuterEventStreamId++;
 
+  UniquePtr<SerializedStackHolder> stack;
+  if (mWorkerPrivate->IsWatchedByDevtools()) {
+    if (JSContext* cx = nsContentUtils::GetCurrentJSContext()) {
+      stack = GetCurrentStackForNetMonitor(cx);
+    }
+  }
+
   RefPtr<OpenRunnable> runnable = new OpenRunnable(
       mWorkerPrivate, mProxy, aMethod, aUrl, aUser, aPassword,
-      mBackgroundRequest, mWithCredentials, mTimeout, mResponseType);
+      mBackgroundRequest, mWithCredentials, mTimeout, mResponseType,
+      alsoOverrideMimeType ? mMimeTypeOverride : VoidString(),
+      std::move(stack));
 
   ++mProxy->mOpenCount;
   runnable->Dispatch(Canceling, aRv);
@@ -1864,7 +1914,7 @@ XMLHttpRequestUpload* XMLHttpRequestWorker::GetUpload(ErrorResult& aRv) {
   }
 
   if (!mUpload) {
-    mUpload = new XMLHttpRequestUpload();
+    mUpload = new XMLHttpRequestUpload(this);
 
     if (!mUpload) {
       aRv.Throw(NS_ERROR_FAILURE);
@@ -2106,30 +2156,25 @@ void XMLHttpRequestWorker::OverrideMimeType(const nsAString& aMimeType,
     return;
   }
 
-  // We're supposed to throw if the state is not OPENED or HEADERS_RECEIVED. We
-  // can detect OPENED really easily but we can't detect HEADERS_RECEIVED in a
-  // non-racy way until the XHR state machine actually runs on this thread
-  // (bug 671047). For now we're going to let this work only if the Send()
-  // method has not been called, unless the send has been aborted.
-  if (!mProxy || (SendInProgress() &&
-                  (mProxy->mSeenLoadStart || mStateData.mReadyState > 1))) {
+  // We're supposed to throw if the state is LOADING or DONE.
+  if (mStateData.mReadyState == XMLHttpRequest_Binding::LOADING ||
+      mStateData.mReadyState == XMLHttpRequest_Binding::DONE) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
 
-  RefPtr<OverrideMimeTypeRunnable> runnable =
-      new OverrideMimeTypeRunnable(mWorkerPrivate, mProxy, aMimeType);
-  runnable->Dispatch(Canceling, aRv);
+  mMimeTypeOverride = aMimeType;
+
+  if (mProxy) {
+    RefPtr<OverrideMimeTypeRunnable> runnable =
+        new OverrideMimeTypeRunnable(mWorkerPrivate, mProxy, aMimeType);
+    runnable->Dispatch(Canceling, aRv);
+  }
 }
 
 void XMLHttpRequestWorker::SetResponseType(
     XMLHttpRequestResponseType aResponseType, ErrorResult& aRv) {
   mWorkerPrivate->AssertIsOnWorkerThread();
-
-  if (mCanceled) {
-    aRv.ThrowUncatchableException();
-    return;
-  }
 
   // "document" is fine for the main thread but not for a worker. Short-circuit
   // that here.
@@ -2144,9 +2189,9 @@ void XMLHttpRequestWorker::SetResponseType(
     return;
   }
 
-  if (SendInProgress() &&
-      (mProxy->mSeenLoadStart || mStateData.mReadyState > 1)) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+  if (mStateData.mReadyState == XMLHttpRequest_Binding::LOADING ||
+      mStateData.mReadyState == XMLHttpRequest_Binding::DONE) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_LOADING_OR_DONE);
     return;
   }
 
@@ -2206,7 +2251,7 @@ void XMLHttpRequestWorker::UpdateState(const StateData& aStateData,
                                        bool aUseCachedArrayBufferResponse) {
   if (aUseCachedArrayBufferResponse) {
     MOZ_ASSERT(mStateData.mResponse.isObject() &&
-               JS_IsArrayBufferObject(&mStateData.mResponse.toObject()));
+               JS::IsArrayBufferObject(&mStateData.mResponse.toObject()));
 
     JS::Rooted<JS::Value> response(mWorkerPrivate->GetJSContext(),
                                    mStateData.mResponse);

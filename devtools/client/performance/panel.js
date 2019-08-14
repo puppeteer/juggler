@@ -29,15 +29,18 @@ PerformancePanel.prototype = {
       return this._opening;
     }
 
-    this.panelWin.gToolbox = this.toolbox;
-    this.panelWin.gTarget = this.target;
     this._checkRecordingStatus = this._checkRecordingStatus.bind(this);
 
     // Actor is already created in the toolbox; reuse
     // the same front, and the toolbox will also initialize the front,
     // but redo it here so we can hook into the same event to prevent race conditions
     // in the case of the front still being in the process of opening.
-    const front = await this.panelWin.gToolbox.initPerformance();
+    const front = await this.target.getFront("performance");
+
+    // Keep references on window for toolbox, target and front for tests.
+    this.panelWin.gToolbox = this.toolbox;
+    this.panelWin.gTarget = this.target;
+    this.panelWin.gFront = front;
 
     // This should only happen if this is completely unsupported (when profiler
     // does not exist), and in that case, the tool shouldn't be available,
@@ -46,11 +49,19 @@ PerformancePanel.prototype = {
       console.error("No PerformanceFront found in toolbox.");
     }
 
-    this.panelWin.gFront = front;
-    const { PerformanceController, EVENTS } = this.panelWin;
-    PerformanceController.on(EVENTS.RECORDING_ADDED, this._checkRecordingStatus);
-    PerformanceController.on(EVENTS.RECORDING_STATE_CHANGE, this._checkRecordingStatus);
-    await this.panelWin.startupPerformance();
+    const { PerformanceController, PerformanceView, EVENTS } = this.panelWin;
+    PerformanceController.on(
+      EVENTS.RECORDING_ADDED,
+      this._checkRecordingStatus
+    );
+    PerformanceController.on(
+      EVENTS.RECORDING_STATE_CHANGE,
+      this._checkRecordingStatus
+    );
+
+    await PerformanceController.initialize(this.toolbox, this.target, front);
+    await PerformanceView.initialize();
+    PerformanceController.enableFrontEventListeners();
 
     // Fire this once incase we have an in-progress recording (console profile)
     // that caused this start up, and no state change yet, so we can highlight the
@@ -78,10 +89,20 @@ PerformancePanel.prototype = {
       return;
     }
 
-    const { PerformanceController, EVENTS } = this.panelWin;
-    PerformanceController.off(EVENTS.RECORDING_ADDED, this._checkRecordingStatus);
-    PerformanceController.off(EVENTS.RECORDING_STATE_CHANGE, this._checkRecordingStatus);
-    await this.panelWin.shutdownPerformance();
+    const { PerformanceController, PerformanceView, EVENTS } = this.panelWin;
+    PerformanceController.off(
+      EVENTS.RECORDING_ADDED,
+      this._checkRecordingStatus
+    );
+    PerformanceController.off(
+      EVENTS.RECORDING_STATE_CHANGE,
+      this._checkRecordingStatus
+    );
+
+    await PerformanceController.destroy();
+    await PerformanceView.destroy();
+    PerformanceController.disableFrontEventListeners();
+
     this.emit("destroyed");
     this._destroyed = true;
   },

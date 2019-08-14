@@ -12,15 +12,10 @@ using namespace mozilla;
 
 namespace TestTArray {
 
-struct Copyable
-{
-  Copyable()
-    : mDestructionCounter(nullptr)
-  {
-  }
+struct Copyable {
+  Copyable() : mDestructionCounter(nullptr) {}
 
-  ~Copyable()
-  {
+  ~Copyable() {
     if (mDestructionCounter) {
       (*mDestructionCounter)++;
     }
@@ -32,47 +27,37 @@ struct Copyable
   uint32_t* mDestructionCounter;
 };
 
-struct Movable
-{
-  Movable()
-    : mDestructionCounter(nullptr)
-  {
-  }
+struct Movable {
+  Movable() : mDestructionCounter(nullptr) {}
 
-  ~Movable()
-  {
+  ~Movable() {
     if (mDestructionCounter) {
       (*mDestructionCounter)++;
     }
   }
 
-  Movable(Movable&& aOther)
-    : mDestructionCounter(aOther.mDestructionCounter)
-  {
+  Movable(Movable&& aOther) : mDestructionCounter(aOther.mDestructionCounter) {
     aOther.mDestructionCounter = nullptr;
   }
 
   uint32_t* mDestructionCounter;
 };
 
-} // namespace TestTArray
+}  // namespace TestTArray
 
-template<>
-struct nsTArray_CopyChooser<TestTArray::Copyable>
-{
+template <>
+struct nsTArray_CopyChooser<TestTArray::Copyable> {
   typedef nsTArray_CopyWithConstructors<TestTArray::Copyable> Type;
 };
 
-template<>
-struct nsTArray_CopyChooser<TestTArray::Movable>
-{
+template <>
+struct nsTArray_CopyChooser<TestTArray::Movable> {
   typedef nsTArray_CopyWithConstructors<TestTArray::Movable> Type;
 };
 
 namespace TestTArray {
 
-const nsTArray<int>& DummyArray()
-{
+static const nsTArray<int>& DummyArray() {
   static nsTArray<int> sArray;
   if (sArray.IsEmpty()) {
     const int data[] = {4, 1, 2, 8};
@@ -84,8 +69,7 @@ const nsTArray<int>& DummyArray()
 // This returns an invalid nsTArray with a huge length in order to test that
 // fallible operations actually fail.
 #ifdef DEBUG
-const nsTArray<int>& FakeHugeArray()
-{
+static const nsTArray<int>& FakeHugeArray() {
   static nsTArray<int> sArray;
   if (sArray.IsEmpty()) {
     sArray.AppendElement();
@@ -141,13 +125,13 @@ TEST(TArray, AssignmentOperatorSelfAssignment)
   ASSERT_EQ(DummyArray(), array);
 
 #if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wself-move"
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wself-move"
 #endif
-  array = std::move(array); // self-move
+  array = std::move(array);  // self-move
   ASSERT_EQ(DummyArray(), array);
 #if defined(__clang__)
-#pragma clang diagnostic pop
+#  pragma clang diagnostic pop
 #endif
 }
 
@@ -220,10 +204,10 @@ TEST(TArray, UnorderedRemoveElements)
   // [ 1, 2, 3 ] => [ 1, 2 ]
   //         ^
   {
-    nsTArray<int> array{ 1, 2, 3 };
+    nsTArray<int> array{1, 2, 3};
     array.UnorderedRemoveElementAt(2);
 
-    nsTArray<int> goal{ 1, 2 };
+    nsTArray<int> goal{1, 2};
     ASSERT_EQ(array, goal);
   }
 
@@ -335,7 +319,7 @@ TEST(TArray, UnorderedRemoveElements)
 TEST(TArray, RemoveFromEnd)
 {
   {
-    nsTArray<int> array{1,2,3,4};
+    nsTArray<int> array{1, 2, 3, 4};
     ASSERT_EQ(array.PopLastElement(), 4);
     array.RemoveLastElement();
     ASSERT_EQ(array.PopLastElement(), 2);
@@ -344,4 +328,4 @@ TEST(TArray, RemoveFromEnd)
   }
 }
 
-} // namespace TestTArray
+}  // namespace TestTArray

@@ -27,6 +27,7 @@
 
 #include "jit/ExecutableAllocator.h"
 
+#include "gc/Zone.h"
 #include "jit/JitRealm.h"
 #include "js/MemoryMetrics.h"
 
@@ -154,8 +155,9 @@ ExecutablePool* ExecutableAllocator::poolForSize(size_t n) {
   return pool;
 }
 
-/* static */ size_t ExecutableAllocator::roundUpAllocationSize(
-    size_t request, size_t granularity) {
+/* static */
+size_t ExecutableAllocator::roundUpAllocationSize(size_t request,
+                                                  size_t granularity) {
   if ((std::numeric_limits<size_t>::max() - granularity) <= request) {
     return OVERSIZE_ALLOCATION;
   }
@@ -257,16 +259,18 @@ void ExecutableAllocator::addSizeOfCode(JS::CodeSizes* sizes) const {
   }
 }
 
-/* static */ void ExecutableAllocator::reprotectPool(
-    JSRuntime* rt, ExecutablePool* pool, ProtectionSetting protection) {
+/* static */
+void ExecutableAllocator::reprotectPool(JSRuntime* rt, ExecutablePool* pool,
+                                        ProtectionSetting protection) {
   char* start = pool->m_allocation.pages;
   if (!ReprotectRegion(start, pool->m_freePtr - start, protection)) {
     MOZ_CRASH();
   }
 }
 
-/* static */ void ExecutableAllocator::poisonCode(
-    JSRuntime* rt, JitPoisonRangeVector& ranges) {
+/* static */
+void ExecutableAllocator::poisonCode(JSRuntime* rt,
+                                     JitPoisonRangeVector& ranges) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
 
 #ifdef DEBUG
@@ -293,9 +297,9 @@ void ExecutableAllocator::addSizeOfCode(JS::CodeSizes* sizes) const {
       pool->mark();
     }
 
-    // Note: we use memset instead of JS_POISON because we want to poison
+    // Note: we use memset instead of js::Poison because we want to poison
     // JIT code in release builds too. Furthermore, we don't want the
-    // invalid-ObjectValue poisoning JS_POISON does in debug builds.
+    // invalid-ObjectValue poisoning js::Poison does in debug builds.
     memset(ranges[i].start, JS_SWEPT_CODE_PATTERN, ranges[i].size);
     MOZ_MAKE_MEM_NOACCESS(ranges[i].start, ranges[i].size);
   }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Test for blobURL in location</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
@@ -17,9 +17,9 @@ onmessage = function(e) {
     is(e.data, expectedData, "Pathname should be not be changed");
     SimpleTest.finish();
   }
-}
+};
 
-var ifr = document.createElement('iframe');
+var ifr = document.createElement("iframe");
 document.body.appendChild(ifr);
 
 ifr.src = "data:text/html,<script>location=URL.createObjectURL(new%20Blob(['<script>parent.postMessage(location.pathname,\"*\");location.pathname=\"foo\";parent.postMessage(location.pathname,\"*\");<\/s' +'cript>'], {type:\"text/html\"}));<\/script>";

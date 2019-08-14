@@ -6,8 +6,12 @@
 
 var EXPORTED_SYMBOLS = ["GeckoViewAccessibility"];
 
-ChromeUtils.import("resource://gre/modules/GeckoViewModule.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { GeckoViewModule } = ChromeUtils.import(
+  "resource://gre/modules/GeckoViewModule.jsm"
+);
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   EventDispatcher: "resource://gre/modules/Messaging.jsm",
@@ -25,3 +29,8 @@ class GeckoViewAccessibility extends GeckoViewModule {
     }, "GeckoView:AccessibilitySettings");
   }
 }
+
+// eslint-disable-next-line no-unused-vars
+const { debug, warn } = GeckoViewAccessibility.initLogging(
+  "GeckoViewAccessibility"
+);

@@ -4,30 +4,25 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var EXPORTED_SYMBOLS = ["ForgetAboutSite"];
 
 var ForgetAboutSite = {
   async removeDataFromDomain(aDomain) {
-    let promises = [];
-    let errorCount = 0;
-
-    ["http://", "https://"].forEach(scheme => {
-      promises.push(new Promise(resolve => {
-        Services.clearData.deleteDataFromHost(aDomain, true /* user request */,
-                                              Ci.nsIClearDataService.CLEAR_FORGET_ABOUT_SITE,
-                                              value => {
-          errorCount += bitCounting(value);
-          resolve();
-        });
-      }));
+    let errorCount = await new Promise(resolve => {
+      Services.clearData.deleteDataFromHost(
+        aDomain,
+        true /* user request */,
+        Ci.nsIClearDataService.CLEAR_FORGET_ABOUT_SITE,
+        errorCode => resolve(bitCounting(errorCode))
+      );
     });
 
-    await Promise.all(promises);
-
     if (errorCount !== 0) {
-      throw new Error(`There were a total of ${errorCount} errors during removal`);
+      throw new Error(
+        `There were a total of ${errorCount} errors during removal`
+      );
     }
   },
 };
@@ -36,6 +31,7 @@ function bitCounting(value) {
   // To know more about how to count bits set to 1 in a numeric value, see this
   // interesting article:
   // https://blogs.msdn.microsoft.com/jeuge/2005/06/08/bit-fiddling-3/
-  const count = value - ((value >> 1) & 0o33333333333) - ((value >> 2) & 0o11111111111);
+  const count =
+    value - ((value >> 1) & 0o33333333333) - ((value >> 2) & 0o11111111111);
   return ((count + (count >> 3)) & 0o30707070707) % 63;
 }

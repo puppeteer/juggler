@@ -11,6 +11,8 @@
 #include "mozilla/Range.h"
 #include "mozilla/TextUtils.h"
 
+#include <type_traits>  // std::is_same
+
 #include "jsapi.h"
 #include "jsfriendapi.h"
 
@@ -396,6 +398,13 @@ class JSString : public js::gc::Cell {
   MOZ_ALWAYS_INLINE
   uint32_t flags() const { return uint32_t(d.flags_); }
 
+  template <typename CharT>
+  static MOZ_ALWAYS_INLINE void checkStringCharsArena(const CharT* chars) {
+#ifdef MOZ_DEBUG
+    js::AssertJSStringBufferInCorrectArena(chars);
+#endif
+  }
+
  public:
   MOZ_ALWAYS_INLINE
   size_t length() const {
@@ -594,7 +603,7 @@ class JSString : public js::gc::Cell {
   static constexpr size_t offsetOfLength() {
     return offsetof(JSString, d.length_);
   }
-#elif defined(MOZ_LITTLE_ENDIAN)
+#elif MOZ_LITTLE_ENDIAN
   static constexpr size_t offsetOfFlags() {
     return offsetof(JSString, d.flags_);
   }
@@ -712,12 +721,12 @@ class JSString : public js::gc::Cell {
 
   static void addCellAddressToStoreBuffer(js::gc::StoreBuffer* buffer,
                                           js::gc::Cell** cellp) {
-    buffer->putCell(cellp);
+    buffer->putCell(reinterpret_cast<JSString**>(cellp));
   }
 
   static void removeCellAddressFromStoreBuffer(js::gc::StoreBuffer* buffer,
                                                js::gc::Cell** cellp) {
-    buffer->unputCell(cellp);
+    buffer->unputCell(reinterpret_cast<JSString**>(cellp));
   }
 
   static void writeBarrierPost(void* cellp, JSString* prev, JSString* next) {
@@ -729,12 +738,12 @@ class JSString : public js::gc::Cell {
       if (prev && prev->storeBuffer()) {
         return;
       }
-      buffer->putCell(static_cast<js::gc::Cell**>(cellp));
+      buffer->putCell(static_cast<JSString**>(cellp));
       return;
     }
 
     if (prev && (buffer = prev->storeBuffer())) {
-      buffer->unputCell(static_cast<js::gc::Cell**>(cellp));
+      buffer->unputCell(static_cast<JSString**>(cellp));
     }
   }
 
@@ -747,7 +756,7 @@ class JSString : public js::gc::Cell {
 class JSRope : public JSString {
   template <typename CharT>
   js::UniquePtr<CharT[], JS::FreePolicy> copyCharsInternal(
-      JSContext* cx, bool nullTerminate) const;
+      JSContext* cx, bool nullTerminate, arena_id_t destArenaId) const;
 
   enum UsingBarrier { WithIncrementalBarrier, NoBarrier };
 
@@ -771,15 +780,18 @@ class JSRope : public JSString {
       size_t length, js::gc::InitialHeap = js::gc::DefaultHeap);
 
   js::UniquePtr<JS::Latin1Char[], JS::FreePolicy> copyLatin1Chars(
-      JSContext* maybecx) const;
-  JS::UniqueTwoByteChars copyTwoByteChars(JSContext* maybecx) const;
+      JSContext* maybecx, arena_id_t destArenaId) const;
+  JS::UniqueTwoByteChars copyTwoByteChars(JSContext* maybecx,
+                                          arena_id_t destArenaId) const;
 
   js::UniquePtr<JS::Latin1Char[], JS::FreePolicy> copyLatin1CharsZ(
-      JSContext* maybecx) const;
-  JS::UniqueTwoByteChars copyTwoByteCharsZ(JSContext* maybecx) const;
+      JSContext* maybecx, arena_id_t destArenaId) const;
+  JS::UniqueTwoByteChars copyTwoByteCharsZ(JSContext* maybecx,
+                                           arena_id_t destArenaId) const;
 
   template <typename CharT>
-  js::UniquePtr<CharT[], JS::FreePolicy> copyChars(JSContext* maybecx) const;
+  js::UniquePtr<CharT[], JS::FreePolicy> copyChars(
+      JSContext* maybecx, arena_id_t destArenaId) const;
 
   // Hash function specific for ropes that avoids allocating a temporary
   // string. There are still allocations internally so it's technically
@@ -968,7 +980,8 @@ class JSFlatString : public JSLinearString {
 
  public:
   template <js::AllowGC allowGC, typename CharT>
-  static inline JSFlatString* new_(JSContext* cx, const CharT* chars,
+  static inline JSFlatString* new_(JSContext* cx,
+                                   js::UniquePtr<CharT[], JS::FreePolicy> chars,
                                    size_t length);
 
   inline bool isIndexSlow(uint32_t* indexp) const {
@@ -1029,6 +1042,8 @@ class JSFlatString : public JSLinearString {
   MOZ_ALWAYS_INLINE JSAtom* morphAtomizedStringIntoAtom(js::HashNumber hash);
   MOZ_ALWAYS_INLINE JSAtom* morphAtomizedStringIntoPermanentAtom(
       js::HashNumber hash);
+
+  inline size_t allocSize() const;
 
   inline void finalize(js::FreeOp* fop);
 
@@ -1228,8 +1243,6 @@ class JSAtom : public JSFlatString {
   /* Returns the PropertyName for this.  isIndex() must be false. */
   inline js::PropertyName* asPropertyName();
 
-  inline void finalize(js::FreeOp* fop);
-
   MOZ_ALWAYS_INLINE
   bool isPermanent() const { return JSString::isPermanentAtom(); }
 
@@ -1331,6 +1344,24 @@ MOZ_ALWAYS_INLINE JSAtom* JSFlatString::morphAtomizedStringIntoPermanentAtom(
 
 namespace js {
 
+/**
+ * An indexable characters class exposing unaligned, little-endian encoded
+ * char16_t data.
+ */
+class LittleEndianChars {
+ public:
+  explicit constexpr LittleEndianChars(const uint8_t* leTwoByte)
+      : current(leTwoByte) {}
+
+  constexpr char16_t operator[](size_t index) const {
+    size_t offset = index * sizeof(char16_t);
+    return (current[offset + 1] << 8) | current[offset];
+  }
+
+ private:
+  const uint8_t* current;
+};
+
 class StaticStrings {
  private:
   /* Bigger chars cannot be in a length-2 string. */
@@ -1382,8 +1413,14 @@ class StaticStrings {
   static bool isStatic(JSAtom* atom);
 
   /* Return null if no static atom exists for the given (chars, length). */
-  template <typename CharT>
-  MOZ_ALWAYS_INLINE JSAtom* lookup(const CharT* chars, size_t length) {
+  template <typename Chars>
+  MOZ_ALWAYS_INLINE JSAtom* lookup(Chars chars, size_t length) {
+    static_assert(std::is_same<Chars, const Latin1Char*>::value ||
+                      std::is_same<Chars, const char16_t*>::value ||
+                      std::is_same<Chars, LittleEndianChars>::value,
+                  "for understandability, |chars| must be one of a few "
+                  "identified types");
+
     switch (length) {
       case 1: {
         char16_t c = chars[0];
@@ -1421,6 +1458,19 @@ class StaticStrings {
     }
 
     return nullptr;
+  }
+
+  template <typename CharT, typename = typename std::enable_if<
+                                std::is_same<CharT, char>::value ||
+                                std::is_same<CharT, const char>::value ||
+                                !std::is_const<CharT>::value>::type>
+  MOZ_ALWAYS_INLINE JSAtom* lookup(CharT* chars, size_t length) {
+    // Collapse calls for |char*| or |const char*| into |const unsigned char*|
+    // to avoid excess instantiations.  Collapse the remaining |CharT*| to
+    // |const CharT*| for the same reason.
+    using UnsignedCharT = typename std::make_unsigned<CharT>::type;
+    UnsignedCharT* unsignedChars = reinterpret_cast<UnsignedCharT*>(chars);
+    return lookup(const_cast<const UnsignedCharT*>(unsignedChars), length);
   }
 
  private:
@@ -1494,16 +1544,23 @@ static inline UniqueChars StringToNewUTF8CharsZ(JSContext* maybecx,
                 .c_str());
 }
 
-/* GC-allocate a string descriptor for the given malloc-allocated chars. */
+/**
+ * Allocate a string with the given contents, potentially GCing in the process.
+ */
 template <typename CharT>
-extern JSFlatString* NewString(JSContext* cx, CharT* chars, size_t length);
+extern JSFlatString* NewString(JSContext* cx,
+                               UniquePtr<CharT[], JS::FreePolicy> chars,
+                               size_t length);
 
-/* Like NewString, but doesn't try to deflate to Latin1. */
+/* Like NewString, but doesn't attempt to deflate to Latin1. */
 template <typename CharT>
-extern JSFlatString* NewStringDontDeflate(JSContext* cx, CharT* chars,
-                                          size_t length);
+extern JSFlatString* NewStringDontDeflate(
+    JSContext* cx, UniquePtr<CharT[], JS::FreePolicy> chars, size_t length);
 
-/* GC-allocate a string descriptor for the given malloc-allocated chars. */
+/**
+ * Allocate a string with the given contents.  If |allowGC == CanGC|, this may
+ * trigger a GC.
+ */
 template <js::AllowGC allowGC, typename CharT>
 extern JSFlatString* NewString(JSContext* cx,
                                UniquePtr<CharT[], JS::FreePolicy> chars,
@@ -1559,6 +1616,13 @@ inline JSFlatString* NewStringCopyUTF8Z(JSContext* cx,
 JSString* NewMaybeExternalString(JSContext* cx, const char16_t* s, size_t n,
                                  const JSStringFinalizer* fin,
                                  bool* allocatedExternal);
+
+/**
+ * Allocate a new string consisting of |chars[0..length]| characters.
+ */
+extern JSFlatString* NewStringFromLittleEndianNoGC(JSContext* cx,
+                                                   LittleEndianChars chars,
+                                                   size_t length);
 
 JS_STATIC_ASSERT(sizeof(HashNumber) == 4);
 
@@ -1778,14 +1842,15 @@ MOZ_ALWAYS_INLINE const JS::Latin1Char* JSLinearString::chars(
 
 template <>
 MOZ_ALWAYS_INLINE js::UniquePtr<JS::Latin1Char[], JS::FreePolicy>
-JSRope::copyChars<JS::Latin1Char>(JSContext* maybecx) const {
-  return copyLatin1Chars(maybecx);
+JSRope::copyChars<JS::Latin1Char>(JSContext* maybecx,
+                                  arena_id_t destArenaId) const {
+  return copyLatin1Chars(maybecx, destArenaId);
 }
 
 template <>
 MOZ_ALWAYS_INLINE JS::UniqueTwoByteChars JSRope::copyChars<char16_t>(
-    JSContext* maybecx) const {
-  return copyTwoByteChars(maybecx);
+    JSContext* maybecx, arena_id_t destArenaId) const {
+  return copyTwoByteChars(maybecx, destArenaId);
 }
 
 template <>
@@ -1849,12 +1914,16 @@ MOZ_ALWAYS_INLINE bool JSInlineString::lengthFits<char16_t>(size_t length) {
 
 template <>
 MOZ_ALWAYS_INLINE void JSString::setNonInlineChars(const char16_t* chars) {
+  // Check that the new buffer is located in the StringBufferArena
+  checkStringCharsArena(chars);
   d.s.u2.nonInlineCharsTwoByte = chars;
 }
 
 template <>
 MOZ_ALWAYS_INLINE void JSString::setNonInlineChars(
     const JS::Latin1Char* chars) {
+  // Check that the new buffer is located in the StringBufferArena
+  checkStringCharsArena(chars);
   d.s.u2.nonInlineCharsLatin1 = chars;
 }
 

@@ -11,6 +11,7 @@
 #include "RubyUtils.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/WritingModes.h"
 #include "nsLineLayout.h"
 #include "nsPresContext.h"
@@ -30,9 +31,9 @@ NS_QUERYFRAME_TAIL_INHERITING(nsInlineFrame)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsRubyFrame)
 
-nsContainerFrame* NS_NewRubyFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewRubyFrame(PresShell* aPresShell,
                                   ComputedStyle* aStyle) {
-  return new (aPresShell) nsRubyFrame(aStyle);
+  return new (aPresShell) nsRubyFrame(aStyle, aPresShell->GetPresContext());
 }
 
 //----------------------------------------------------------------------
@@ -40,7 +41,8 @@ nsContainerFrame* NS_NewRubyFrame(nsIPresShell* aPresShell,
 // nsRubyFrame Method Implementations
 // ==================================
 
-/* virtual */ bool nsRubyFrame::IsFrameOfType(uint32_t aFlags) const {
+/* virtual */
+bool nsRubyFrame::IsFrameOfType(uint32_t aFlags) const {
   if (aFlags & eBidiInlineContainer) {
     return false;
   }
@@ -53,8 +55,9 @@ nsresult nsRubyFrame::GetFrameName(nsAString& aResult) const {
 }
 #endif
 
-/* virtual */ void nsRubyFrame::AddInlineMinISize(
-    gfxContext* aRenderingContext, nsIFrame::InlineMinISizeData* aData) {
+/* virtual */
+void nsRubyFrame::AddInlineMinISize(gfxContext* aRenderingContext,
+                                    nsIFrame::InlineMinISizeData* aData) {
   for (nsIFrame* frame = this; frame; frame = frame->GetNextInFlow()) {
     for (RubySegmentEnumerator e(static_cast<nsRubyFrame*>(frame)); !e.AtEnd();
          e.Next()) {
@@ -63,8 +66,9 @@ nsresult nsRubyFrame::GetFrameName(nsAString& aResult) const {
   }
 }
 
-/* virtual */ void nsRubyFrame::AddInlinePrefISize(
-    gfxContext* aRenderingContext, nsIFrame::InlinePrefISizeData* aData) {
+/* virtual */
+void nsRubyFrame::AddInlinePrefISize(gfxContext* aRenderingContext,
+                                     nsIFrame::InlinePrefISizeData* aData) {
   for (nsIFrame* frame = this; frame; frame = frame->GetNextInFlow()) {
     for (RubySegmentEnumerator e(static_cast<nsRubyFrame*>(frame)); !e.AtEnd();
          e.Next()) {
@@ -86,10 +90,11 @@ static nsRubyBaseContainerFrame* FindRubyBaseContainerAncestor(
   return nullptr;
 }
 
-/* virtual */ void nsRubyFrame::Reflow(nsPresContext* aPresContext,
-                                       ReflowOutput& aDesiredSize,
-                                       const ReflowInput& aReflowInput,
-                                       nsReflowStatus& aStatus) {
+/* virtual */
+void nsRubyFrame::Reflow(nsPresContext* aPresContext,
+                         ReflowOutput& aDesiredSize,
+                         const ReflowInput& aReflowInput,
+                         nsReflowStatus& aStatus) {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsRubyFrame");
   DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
@@ -106,29 +111,6 @@ static nsRubyBaseContainerFrame* FindRubyBaseContainerAncestor(
 
   // Clear leadings
   mLeadings.Reset();
-
-  // Since the ruby base container is going to reflow not only the ruby
-  // base frames, but also the ruby text frames, and then *afterwards*
-  // we're going to reflow the ruby text containers (which do not reflow
-  // their children), we need to transfer NS_FRAME_IS_DIRTY status from
-  // the ruby text containers to their child ruby texts now, both so
-  // that the ruby texts are marked dirty if needed, and so that the
-  // ruby text container doesn't mark the ruby text frames dirty *after*
-  // they're reflowed and leave dirty bits in a clean tree (suppressing
-  // future reflows, due to lack of a queued reflow to clean them).
-  for (nsIFrame* child : PrincipalChildList()) {
-    if (child->HasAnyStateBits(NS_FRAME_IS_DIRTY) &&
-        child->IsRubyTextContainerFrame()) {
-      for (nsIFrame* grandchild : child->PrincipalChildList()) {
-        grandchild->AddStateBits(NS_FRAME_IS_DIRTY);
-      }
-      // Replace NS_FRAME_IS_DIRTY with NS_FRAME_HAS_DIRTY_CHILDREN so
-      // we still have a dirty marking, but one that we won't transfer
-      // to children again.
-      child->RemoveStateBits(NS_FRAME_IS_DIRTY);
-      child->AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
-    }
-  }
 
   // Begin the span for the ruby frame
   WritingMode frameWM = aReflowInput.GetWritingMode();
@@ -307,7 +289,7 @@ void nsRubyFrame::ReflowSegment(nsPresContext* aPresContext,
     // handled when reflowing the base containers.
     NS_ASSERTION(textReflowStatus.IsEmpty(),
                  "Ruby text container must not break itself inside");
-    // The metrics is initialized with reflow state of this ruby frame,
+    // The metrics is initialized with reflow input of this ruby frame,
     // hence the writing-mode is tied to rubyWM instead of rtcWM.
     LogicalSize size = textMetrics.Size(rubyWM).ConvertTo(lineWM, rubyWM);
     textContainer->SetSize(lineWM, size);
@@ -404,10 +386,9 @@ nsRubyBaseContainerFrame* nsRubyFrame::PullOneSegment(
   }
 
   if (nsBlockFrame* newFloatCB =
-          nsLayoutUtils::GetAsBlock(aLineLayout->LineContainerFrame())) {
+          do_QueryFrame(aLineLayout->LineContainerFrame())) {
     if (oldFloatCB && oldFloatCB != newFloatCB) {
-      newFloatCB->ReparentFloats(baseFrame, oldFloatCB, true,
-                                 ReparentingDirection::Backwards);
+      newFloatCB->ReparentFloats(baseFrame, oldFloatCB, true);
     }
   }
 

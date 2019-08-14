@@ -24,11 +24,11 @@
 #include "mozilla/Sprintf.h"
 #include "mozilla/TextUtils.h"
 
-#include <ctype.h>
 #include <math.h>
 #include <string.h>
 
 #include "jsapi.h"
+#include "jsfriendapi.h"
 #include "jsnum.h"
 #include "jstypes.h"
 #include "jsutil.h"
@@ -37,9 +37,11 @@
 #include "js/Conversions.h"
 #include "js/Date.h"
 #include "js/LocaleSensitive.h"
+#include "js/PropertySpec.h"
 #include "js/Wrapper.h"
 #include "util/StringBuffer.h"
 #include "util/Text.h"
+#include "vm/DateObject.h"
 #include "vm/DateTime.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
@@ -56,6 +58,7 @@ using mozilla::ArrayLength;
 using mozilla::Atomic;
 using mozilla::BitwiseCast;
 using mozilla::IsAsciiAlpha;
+using mozilla::IsAsciiDigit;
 using mozilla::IsFinite;
 using mozilla::IsNaN;
 using mozilla::NumbersAreIdentical;
@@ -902,6 +905,7 @@ template <typename CharT>
 static bool ParseISOStyleDate(const CharT* s, size_t length,
                               ClippedTime* result) {
   size_t i = 0;
+  size_t pre = 0;
   int tzMul = 1;
   int dateMul = 1;
   size_t year = 1970;
@@ -914,6 +918,8 @@ static bool ParseISOStyleDate(const CharT* s, size_t length,
   bool isLocalTime = false;
   size_t tzHour = 0;
   size_t tzMin = 0;
+  bool isPermissive = false;
+  bool isStrict = false;
 
 #define PEEK(ch) (i < length && s[i] == ch)
 
@@ -944,8 +950,16 @@ static bool ParseISOStyleDate(const CharT* s, size_t length,
   }
 
 #define NEED_NDIGITS_OR_LESS(n, field)                 \
+  pre = i;                                             \
   if (!ParseDigitsNOrLess(n, &field, s, &i, length)) { \
     return false;                                      \
+  }                                                    \
+  if (i < pre + (n)) {                                 \
+    if (isStrict) {                                    \
+      return false;                                    \
+    } else {                                           \
+      isPermissive = true;                             \
+    }                                                  \
   }
 
   if (PEEK('+') || PEEK('-')) {
@@ -954,7 +968,7 @@ static bool ParseISOStyleDate(const CharT* s, size_t length,
     }
     ++i;
     NEED_NDIGITS(6, year);
-  } else if (!PEEK('T')) {
+  } else {
     NEED_NDIGITS(4, year);
   }
   DONE_DATE_UNLESS('-');
@@ -963,7 +977,15 @@ static bool ParseISOStyleDate(const CharT* s, size_t length,
   NEED_NDIGITS_OR_LESS(2, day);
 
 done_date:
-  if (PEEK('T') || PEEK(' ')) {
+  if (PEEK('T')) {
+    if (isPermissive) {
+      // Require standard format "[+00]1970-01-01" if a time part marker "T"
+      // exists
+      return false;
+    }
+    isStrict = true;
+    i++;
+  } else if (PEEK(' ')) {
     i++;
   } else {
     goto done;
@@ -1035,6 +1057,7 @@ done:
 #undef NEED
 #undef DONE_UNLESS
 #undef NEED_NDIGITS
+#undef NEED_NDIGITS_OR_LESS
 }
 
 template <typename CharT>
@@ -2753,7 +2776,7 @@ JSString* DateTimeHelper::timeZoneComment(JSContext* cx, double utcTime,
     bool usetz = true;
     for (size_t i = 0; i < tzlen; i++) {
       char16_t c = tzbuf[i];
-      if (c > 127 || !isprint(c)) {
+      if (!IsAsciiPrintable(c)) {
         usetz = false;
         break;
       }
@@ -2889,11 +2912,12 @@ static bool ToLocaleFormatHelper(JSContext* cx, HandleObject obj,
     if (strcmp(format, "%x") == 0 && result_len >= 6 &&
         /* Format %x means use OS settings, which may have 2-digit yr, so
            hack end of 3/11/22 or 11.03.22 or 11Mar22 to use 4-digit yr...*/
-        !isdigit(buf[result_len - 3]) && isdigit(buf[result_len - 2]) &&
-        isdigit(buf[result_len - 1]) &&
+        !IsAsciiDigit(buf[result_len - 3]) &&
+        IsAsciiDigit(buf[result_len - 2]) &&
+        IsAsciiDigit(buf[result_len - 1]) &&
         /* ...but not if starts with 4-digit year, like 2022/3/11. */
-        !(isdigit(buf[0]) && isdigit(buf[1]) && isdigit(buf[2]) &&
-          isdigit(buf[3]))) {
+        !(IsAsciiDigit(buf[0]) && IsAsciiDigit(buf[1]) &&
+          IsAsciiDigit(buf[2]) && IsAsciiDigit(buf[3]))) {
       int year = int(YearFromTime(localTime));
       snprintf(buf + (result_len - 2), (sizeof buf) - (result_len - 2), "%d",
                year);
@@ -2921,11 +2945,11 @@ MOZ_ALWAYS_INLINE bool date_toLocaleString_impl(JSContext* cx,
    * with msvc; '%#c' requests that a full year be used in the result string.
    */
   static const char format[] =
-#if defined(_WIN32) && !defined(__MWERKS__)
+#  if defined(_WIN32) && !defined(__MWERKS__)
       "%#c"
-#else
+#  else
       "%c"
-#endif
+#  endif
       ;
 
   Rooted<DateObject*> dateObj(cx, &args.thisv().toObject().as<DateObject>());
@@ -2945,11 +2969,11 @@ MOZ_ALWAYS_INLINE bool date_toLocaleDateString_impl(JSContext* cx,
    * with msvc; '%#x' requests that a full year be used in the result string.
    */
   static const char format[] =
-#if defined(_WIN32) && !defined(__MWERKS__)
+#  if defined(_WIN32) && !defined(__MWERKS__)
       "%#x"
-#else
+#  else
       "%x"
-#endif
+#  endif
       ;
 
   Rooted<DateObject*> dateObj(cx, &args.thisv().toObject().as<DateObject>());
@@ -3001,7 +3025,7 @@ static bool date_toDateString(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 MOZ_ALWAYS_INLINE bool date_toSource_impl(JSContext* cx, const CallArgs& args) {
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (!sb.append("(new Date(") ||
       !NumberValueToStringBuffer(
           cx, args.thisv().toObject().as<DateObject>().UTCTime(), sb) ||
@@ -3134,7 +3158,7 @@ static bool NewDateObject(JSContext* cx, const CallArgs& args, ClippedTime t) {
   MOZ_ASSERT(args.isConstructing());
 
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Date, &proto)) {
     return false;
   }
 
@@ -3356,6 +3380,12 @@ JSObject* js::NewDateObjectMsec(JSContext* cx, ClippedTime t,
   return obj;
 }
 
+JS_PUBLIC_API JSObject* JS::NewDateObject(JSContext* cx, ClippedTime time) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+  return NewDateObjectMsec(cx, time);
+}
+
 JS_FRIEND_API JSObject* js::NewDateObject(JSContext* cx, int year, int mon,
                                           int mday, int hour, int min,
                                           int sec) {
@@ -3383,6 +3413,27 @@ JS_FRIEND_API bool js::DateIsValid(JSContext* cx, HandleObject obj,
   }
 
   *isValid = !IsNaN(unboxed.toNumber());
+  return true;
+}
+
+JS_PUBLIC_API JSObject* JS::NewDateObject(JSContext* cx, int year, int mon,
+                                          int mday, int hour, int min,
+                                          int sec) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+  return js::NewDateObject(cx, year, mon, mday, hour, min, sec);
+}
+
+JS_PUBLIC_API bool JS::ObjectIsDate(JSContext* cx, Handle<JSObject*> obj,
+                                    bool* isDate) {
+  cx->check(obj);
+
+  ESClass cls;
+  if (!GetBuiltinClass(cx, obj, &cls)) {
+    return false;
+  }
+
+  *isDate = cls == ESClass::Date;
   return true;
 }
 

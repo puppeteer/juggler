@@ -32,7 +32,7 @@ ChromiumCDMParent::ChromiumCDMParent(GMPContentParent* aContentParent,
                                      uint32_t aPluginId)
     : mPluginId(aPluginId),
       mContentParent(aContentParent),
-      mVideoShmemLimit(StaticPrefs::MediaEmeChromiumApiVideoShmems()) {
+      mVideoShmemLimit(StaticPrefs::media_eme_chromium_api_video_shmems()) {
   GMP_LOG(
       "ChromiumCDMParent::ChromiumCDMParent(this=%p, contentParent=%p, id=%u)",
       this, aContentParent, aPluginId);
@@ -61,8 +61,6 @@ RefPtr<ChromiumCDMParent::InitPromise> ChromiumCDMParent::Init(
                                     !aMainThread ? "true" : "false")),
         __func__);
   }
-  mCDMCallback = aCDMCallback;
-  mMainThread = aMainThread;
 
   RefPtr<ChromiumCDMParent::InitPromise> promise =
       mInitPromise.Ensure(__func__);
@@ -70,7 +68,7 @@ RefPtr<ChromiumCDMParent::InitPromise> ChromiumCDMParent::Init(
   SendInit(aAllowDistinctiveIdentifier, aAllowPersistentState)
       ->Then(
           AbstractThread::GetCurrent(), __func__,
-          [self](bool aSuccess) {
+          [self, aCDMCallback](bool aSuccess) {
             if (!aSuccess) {
               GMP_LOG(
                   "ChromiumCDMParent::Init() failed with callback from "
@@ -84,9 +82,10 @@ RefPtr<ChromiumCDMParent::InitPromise> ChromiumCDMParent::Init(
             }
             GMP_LOG(
                 "ChromiumCDMParent::Init() succeeded with callback from child");
+            self->mCDMCallback = aCDMCallback;
             self->mInitPromise.ResolveIfExists(true /* unused */, __func__);
           },
-          [self](ResponseRejectReason aReason) {
+          [self](ResponseRejectReason&& aReason) {
             RefPtr<gmp::GeckoMediaPluginService> service =
                 gmp::GeckoMediaPluginService::GetGeckoMediaPluginService();
             bool xpcomWillShutdown =
@@ -245,20 +244,43 @@ bool ChromiumCDMParent::InitCDMInputBuffer(gmp::CDMInputBuffer& aBuffer,
     return false;
   }
   memcpy(shmem.get<uint8_t>(), aSample->Data(), aSample->Size());
+  GMPEncryptionScheme encryptionScheme =
+      GMPEncryptionScheme::kGMPEncryptionNone;
+  switch (crypto.mCryptoScheme) {
+    case CryptoScheme::None:
+      break;  // Default to none
+    case CryptoScheme::Cenc:
+      encryptionScheme = GMPEncryptionScheme::kGMPEncryptionCenc;
+      break;
+    case CryptoScheme::Cbcs:
+      encryptionScheme = GMPEncryptionScheme::kGMPEncryptionCbcs;
+      break;
+    default:
+      GMP_LOG(
+          "InitCDMInputBuffer got unexpected encryption scheme with "
+          "value of %" PRIu8 ". Treating as no encryption.",
+          static_cast<uint8_t>(crypto.mCryptoScheme));
+      MOZ_ASSERT_UNREACHABLE("Should not have unrecognized encryption type");
+      break;
+  }
 
+  const nsTArray<uint8_t>& iv =
+      encryptionScheme != GMPEncryptionScheme::kGMPEncryptionCbcs
+          ? crypto.mIV
+          : crypto.mConstantIV;
   aBuffer = gmp::CDMInputBuffer(
-      shmem, crypto.mKeyId, crypto.mIV, aSample->mTime.ToMicroseconds(),
+      std::move(shmem), crypto.mKeyId, iv, aSample->mTime.ToMicroseconds(),
       aSample->mDuration.ToMicroseconds(), crypto.mPlainSizes,
-      crypto.mEncryptedSizes,
-      crypto.mValid ? GMPEncryptionScheme::kGMPEncryptionCenc
-                    : GMPEncryptionScheme::kGMPEncryptionNone);
+      crypto.mEncryptedSizes, crypto.mCryptByteBlock, crypto.mSkipByteBlock,
+      encryptionScheme);
   MOZ_ASSERT(
       aBuffer.mEncryptionScheme() == GMPEncryptionScheme::kGMPEncryptionNone ||
           aBuffer.mEncryptionScheme() ==
-              GMPEncryptionScheme::kGMPEncryptionCenc,
-      "aBuffer should use either no encryption or cenc, other kinds are not "
-      "yet "
-      "supported");
+              GMPEncryptionScheme::kGMPEncryptionCenc ||
+          aBuffer.mEncryptionScheme() ==
+              GMPEncryptionScheme::kGMPEncryptionCbcs,
+      "aBuffer should use no encryption, cenc, or cbcs, other kinds are not "
+      "yet supported");
   return true;
 }
 
@@ -268,7 +290,7 @@ bool ChromiumCDMParent::SendBufferToCDM(uint32_t aSizeInBytes) {
   if (!AllocShmem(aSizeInBytes, Shmem::SharedMemory::TYPE_BASIC, &shmem)) {
     return false;
   }
-  if (!SendGiveBuffer(shmem)) {
+  if (!SendGiveBuffer(std::move(shmem))) {
     DeallocShmem(shmem);
     return false;
   }
@@ -690,7 +712,7 @@ ipc::IPCResult ChromiumCDMParent::RecvDecodedShmem(const CDMVideoFrame& aFrame,
 
   // Return the shmem to the CDM so the shmem can be reused to send us
   // another frame.
-  if (!SendGiveBuffer(aShmem)) {
+  if (!SendGiveBuffer(std::move(aShmem))) {
     mDecodePromise.RejectIfExists(
         MediaResult(NS_ERROR_OUT_OF_MEMORY,
                     RESULT_DETAIL("Can't return shmem to CDM process")),

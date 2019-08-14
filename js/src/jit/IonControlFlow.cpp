@@ -992,10 +992,7 @@ ControlFlowGenerator::ControlStatus ControlFlowGenerator::processBrokenLoop(
     CFGState& state) {
   MOZ_ASSERT(!current);
 
-  {
-    state.loop.entry->setStopIns(CFGGoto::New(
-        alloc(), state.loop.entry->stopIns()->toLoopEntry()->successor()));
-  }
+  state.loop.entry->stopIns()->toLoopEntry()->setIsBrokenLoop();
 
   // If the loop started with a condition (while/for) then even if the
   // structure never actually loops, the condition itself can still fail and
@@ -1679,8 +1676,7 @@ ControlFlowGenerator::ControlStatus ControlFlowGenerator::processContinue(
   CFGState* found = nullptr;
   jsbytecode* target = pc + GetJumpOffset(pc);
   for (size_t i = loops_.length() - 1;; i--) {
-    // +1 to skip JSOP_JUMPTARGET.
-    if (loops_[i].continuepc == target + 1 ||
+    if (loops_[i].continuepc == target + JSOP_JUMPTARGET_LENGTH ||
         EffectiveContinue(loops_[i].continuepc) == target) {
       found = &cfgStack_[loops_[i].cfgEntry];
       break;
@@ -2161,7 +2157,7 @@ ControlFlowGenerator::ControlStatus ControlFlowGenerator::processAndOr(
 ControlFlowGenerator::ControlStatus ControlFlowGenerator::processLabel() {
   MOZ_ASSERT(JSOp(*pc) == JSOP_LABEL);
 
-  jsbytecode* endpc = pc + GET_JUMP_OFFSET(pc);
+  jsbytecode* endpc = pc + GET_CODE_OFFSET(pc);
   MOZ_ASSERT(endpc > pc);
 
   ControlFlowInfo label(cfgStack_.length(), endpc);

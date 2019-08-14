@@ -10,9 +10,9 @@
  * liability, trademark and document use rules apply.
  */
 
-[Func="nsDocument::IsWebAnimationsEnabled",
+[Func="Document::IsWebAnimationsEnabled",
  Constructor(DOMString type,
-             optional AnimationPlaybackEventInit eventInitDict)]
+             optional AnimationPlaybackEventInit eventInitDict = {})]
 interface AnimationPlaybackEvent : Event {
   readonly attribute double? currentTime;
   readonly attribute double? timelineTime;

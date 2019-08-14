@@ -1,5 +1,4 @@
-// |jit-test| skip-if: !wasmGcEnabled()
-// Ensure that if gc types aren't enabled, test cases properly fail.
+// |jit-test| skip-if: !wasmReftypesEnabled()
 
 // Dummy constructor.
 function Baguette(calories) {
@@ -11,14 +10,12 @@ function Baguette(calories) {
 const { validate, CompileError } = WebAssembly;
 
 assertErrorMessage(() => wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (func (result anyref)
         i32.const 42
     )
 )`), CompileError, mismatchError('i32', 'anyref'));
 
 assertErrorMessage(() => wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (func (result anyref)
         i32.const 0
         ref.null
@@ -28,7 +25,6 @@ assertErrorMessage(() => wasmEvalText(`(module
 )`), CompileError, /select operand types/);
 
 assertErrorMessage(() => wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (func (result i32)
         ref.null
         if
@@ -41,16 +37,16 @@ assertErrorMessage(() => wasmEvalText(`(module
 // Basic compilation tests.
 
 let simpleTests = [
-    "(module (gc_feature_opt_in 2) (func (drop (ref.null))))",
-    "(module (gc_feature_opt_in 2) (func $test (local anyref)))",
-    "(module (gc_feature_opt_in 2) (func $test (param anyref)))",
-    "(module (gc_feature_opt_in 2) (func $test (result anyref) (ref.null)))",
-    "(module (gc_feature_opt_in 2) (func $test (block anyref (unreachable)) unreachable))",
-    "(module (gc_feature_opt_in 2) (func $test (local anyref) (result i32) (ref.is_null (get_local 0))))",
-    `(module (gc_feature_opt_in 2) (import "a" "b" (param anyref)))`,
-    `(module (gc_feature_opt_in 2) (import "a" "b" (result anyref)))`,
-    `(module (gc_feature_opt_in 2) (global anyref (ref.null)))`,
-    `(module (gc_feature_opt_in 2) (global (mut anyref) (ref.null)))`,
+    "(module (func (drop (ref.null))))",
+    "(module (func $test (local anyref)))",
+    "(module (func $test (param anyref)))",
+    "(module (func $test (result anyref) (ref.null)))",
+    "(module (func $test (block anyref (unreachable)) unreachable))",
+    "(module (func $test (local anyref) (result i32) (ref.is_null (local.get 0))))",
+    `(module (import "a" "b" (param anyref)))`,
+    `(module (import "a" "b" (result anyref)))`,
+    `(module (global anyref (ref.null)))`,
+    `(module (global (mut anyref) (ref.null)))`,
 ];
 
 for (let src of simpleTests) {
@@ -61,14 +57,13 @@ for (let src of simpleTests) {
 // Basic behavioral tests.
 
 let { exports } = wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (func (export "is_null") (result i32)
         ref.null
         ref.is_null
     )
 
     (func $sum (result i32) (param i32)
-        get_local 0
+        local.get 0
         i32.const 42
         i32.add
     )
@@ -83,62 +78,47 @@ let { exports } = wasmEvalText(`(module
 
     (func (export "is_null_local") (result i32) (local anyref)
         ref.null
-        set_local 0
+        local.set 0
         i32.const 58
         call $sum
         drop
-        get_local 0
+        local.get 0
         ref.is_null
     )
-
-    (func (export "ref_eq") (param $a anyref) (param $b anyref) (result i32)
-	  (ref.eq (get_local $a) (get_local $b)))
-
-    (func (export "ref_eq_for_control") (param $a anyref) (param $b anyref) (result f64)
-	  (if f64 (ref.eq (get_local $a) (get_local $b))
-	      (f64.const 5.0)
-	      (f64.const 3.0)))
     )`);
 
 assertEq(exports.is_null(), 1);
 assertEq(exports.is_null_spill(), 1);
 assertEq(exports.is_null_local(), 1);
-assertEq(exports.ref_eq(null, null), 1);
-assertEq(exports.ref_eq(null, {}), 0);
-assertEq(exports.ref_eq(this, this), 1);
-assertEq(exports.ref_eq_for_control(null, null), 5);
-assertEq(exports.ref_eq_for_control(null, {}), 3);
-assertEq(exports.ref_eq_for_control(this, this), 5);
 
 // Anyref param and result in wasm functions.
 
 exports = wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (func (export "is_null") (result i32) (param $ref anyref)
-        get_local $ref
+        local.get $ref
         ref.is_null
     )
 
     (func (export "ref_or_null") (result anyref) (param $ref anyref) (param $selector i32)
-        get_local $ref
+        local.get $ref
         ref.null
-        get_local $selector
+        local.get $selector
         select
     )
 
     (func $recursive (export "nested") (result anyref) (param $ref anyref) (param $i i32)
         ;; i == 10 => ret $ref
-        get_local $i
+        local.get $i
         i32.const 10
         i32.eq
         if
-            get_local $ref
+            local.get $ref
             return
         end
 
-        get_local $ref
+        local.get $ref
 
-        get_local $i
+        local.get $i
         i32.const 1
         i32.add
 
@@ -146,7 +126,7 @@ exports = wasmEvalText(`(module
     )
 )`).exports;
 
-assertErrorMessage(() => exports.is_null(undefined), TypeError, "can't convert undefined to object");
+assertEq(exports.is_null(undefined), 0);
 assertEq(exports.is_null(null), 1);
 assertEq(exports.is_null({}), 0);
 assertEq(exports.is_null("hi"), 0);
@@ -171,13 +151,12 @@ assertEq(ref.calories, baguette.calories);
 // Make sure grow-memory isn't blocked by the lack of gc.
 (function() {
     assertEq(wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (memory 0 64)
     (func (export "f") (param anyref) (result i32)
         i32.const 10
-        grow_memory
+        memory.grow
         drop
-        current_memory
+        memory.size
     )
 )`).exports.f({}), 10);
 })();
@@ -187,7 +166,6 @@ assertEq(ref.calories, baguette.calories);
 function assertJoin(body) {
     let val = { i: -1 };
     assertEq(wasmEvalText(`(module
-        (gc_feature_opt_in 2)
         (func (export "test") (param $ref anyref) (param $i i32) (result anyref)
             ${body}
         )
@@ -195,26 +173,26 @@ function assertJoin(body) {
     assertEq(val.i, -1);
 }
 
-assertJoin("(block anyref get_local $ref)");
-assertJoin("(block $out anyref get_local $ref br $out)");
-assertJoin("(loop anyref get_local $ref)");
+assertJoin("(block anyref local.get $ref)");
+assertJoin("(block $out anyref local.get $ref br $out)");
+assertJoin("(loop anyref local.get $ref)");
 
 assertJoin(`(block $out anyref (loop $top anyref
-    get_local $i
+    local.get $i
     i32.const 1
     i32.add
     tee_local $i
     i32.const 10
     i32.eq
     if
-        get_local $ref
+        local.get $ref
         return
     end
     br $top))
 `);
 
 assertJoin(`(block $out (loop $top
-    get_local $i
+    local.get $i
     i32.const 1
     i32.add
     tee_local $i
@@ -223,15 +201,15 @@ assertJoin(`(block $out (loop $top
     if
         br $top
     else
-        get_local $ref
+        local.get $ref
         return
     end
     )) unreachable
 `);
 
 assertJoin(`(block $out anyref (loop $top
-    get_local $ref
-    get_local $i
+    local.get $ref
+    local.get $i
     i32.const 1
     i32.add
     tee_local $i
@@ -243,8 +221,8 @@ assertJoin(`(block $out anyref (loop $top
 `);
 
 assertJoin(`(block $out anyref (block $unreachable anyref (loop $top
-    get_local $ref
-    get_local $i
+    local.get $ref
+    local.get $i
     i32.const 1
     i32.add
     tee_local $i
@@ -254,11 +232,10 @@ assertJoin(`(block $out anyref (block $unreachable anyref (loop $top
 
 let x = { i: 42 }, y = { f: 53 };
 exports = wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (func (export "test") (param $lhs anyref) (param $rhs anyref) (param $i i32) (result anyref)
-        get_local $lhs
-        get_local $rhs
-        get_local $i
+        local.get $lhs
+        local.get $rhs
+        local.get $i
         select
     )
 )`).exports;
@@ -309,13 +286,12 @@ let imports = {
 };
 
 exports = wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (import $ret "funcs" "ret" (result anyref))
     (import $param "funcs" "param" (param anyref))
 
     (func (export "param") (param $x anyref) (param $y anyref)
-        get_local $y
-        get_local $x
+        local.get $y
+        local.get $x
         call $param
         call $param
     )
@@ -338,7 +314,6 @@ assertEq(exports.ret(), imports.myBaguette);
 // Check lazy stubs generation.
 
 exports = wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (import $mirror "funcs" "mirror" (param anyref) (result anyref))
     (import $augment "funcs" "augment" (param anyref) (result anyref))
 
@@ -347,36 +322,36 @@ exports = wasmEvalText(`(module
 
     (func $f (param $param anyref) (result anyref)
         i32.const 1
-        get_global $count_f
+        global.get $count_f
         i32.add
-        set_global $count_f
+        global.set $count_f
 
-        get_local $param
+        local.get $param
         call $augment
     )
 
     (func $g (param $param anyref) (result anyref)
         i32.const 1
-        get_global $count_g
+        global.get $count_g
         i32.add
-        set_global $count_g
+        global.set $count_g
 
-        get_local $param
+        local.get $param
         call $mirror
     )
 
-    (table (export "table") 10 anyfunc)
+    (table (export "table") 10 funcref)
     (elem (i32.const 0) $f $g $mirror $augment)
     (type $table_type (func (param anyref) (result anyref)))
 
     (func (export "call_indirect") (param $i i32) (param $ref anyref) (result anyref)
-        get_local $ref
-        get_local $i
+        local.get $ref
+        local.get $i
         call_indirect $table_type
     )
 
-    (func (export "count_f") (result i32) get_global $count_f)
-    (func (export "count_g") (result i32) get_global $count_g)
+    (func (export "count_f") (result i32) global.get $count_f)
+    (func (export "count_g") (result i32) global.get $count_g)
 )`, {
     funcs: {
         mirror(x) {
@@ -422,15 +397,11 @@ assertEq(exports.count_g(), 1);
 
 // Anyref globals in wasm modules.
 
-assertErrorMessage(() => wasmEvalText(`(module (gc_feature_opt_in 2) (global (import "glob" "anyref") anyref))`, { glob: { anyref: 42 } }),
-    WebAssembly.LinkError,
-    /import object field 'anyref' is not a Object-or-null/);
-
-assertErrorMessage(() => wasmEvalText(`(module (gc_feature_opt_in 2) (global (import "glob" "anyref") anyref))`, { glob: { anyref: new WebAssembly.Global({ value: 'i32' }, 42) } }),
+assertErrorMessage(() => wasmEvalText(`(module (global (import "glob" "anyref") anyref))`, { glob: { anyref: new WebAssembly.Global({ value: 'i32' }, 42) } }),
     WebAssembly.LinkError,
     /imported global type mismatch/);
 
-assertErrorMessage(() => wasmEvalText(`(module (gc_feature_opt_in 2) (global (import "glob" "i32") i32))`, { glob: { i32: {} } }),
+assertErrorMessage(() => wasmEvalText(`(module (global (import "glob" "i32") i32))`, { glob: { i32: {} } }),
     WebAssembly.LinkError,
     /import object field 'i32' is not a Number/);
 
@@ -444,7 +415,6 @@ imports = {
 };
 
 exports = wasmEvalText(`(module
-    (gc_feature_opt_in 2)
     (global $g_imp_imm_null  (import "constants" "imm_null") anyref)
     (global $g_imp_imm_bread (import "constants" "imm_bread") anyref)
 
@@ -452,22 +422,22 @@ exports = wasmEvalText(`(module
     (global $g_imp_mut_bread  (import "constants" "mut_bread") (mut anyref))
 
     (global $g_imm_null     anyref (ref.null))
-    (global $g_imm_getglob  anyref (get_global $g_imp_imm_bread))
+    (global $g_imm_getglob  anyref (global.get $g_imp_imm_bread))
     (global $g_mut         (mut anyref) (ref.null))
 
-    (func (export "imm_null")      (result anyref) get_global $g_imm_null)
-    (func (export "imm_getglob")   (result anyref) get_global $g_imm_getglob)
+    (func (export "imm_null")      (result anyref) global.get $g_imm_null)
+    (func (export "imm_getglob")   (result anyref) global.get $g_imm_getglob)
 
-    (func (export "imp_imm_null")  (result anyref) get_global $g_imp_imm_null)
-    (func (export "imp_imm_bread") (result anyref) get_global $g_imp_imm_bread)
-    (func (export "imp_mut_null")  (result anyref) get_global $g_imp_mut_null)
-    (func (export "imp_mut_bread") (result anyref) get_global $g_imp_mut_bread)
+    (func (export "imp_imm_null")  (result anyref) global.get $g_imp_imm_null)
+    (func (export "imp_imm_bread") (result anyref) global.get $g_imp_imm_bread)
+    (func (export "imp_mut_null")  (result anyref) global.get $g_imp_mut_null)
+    (func (export "imp_mut_bread") (result anyref) global.get $g_imp_mut_bread)
 
-    (func (export "set_imp_null")  (param anyref) get_local 0 set_global $g_imp_mut_null)
-    (func (export "set_imp_bread") (param anyref) get_local 0 set_global $g_imp_mut_bread)
+    (func (export "set_imp_null")  (param anyref) local.get 0 global.set $g_imp_mut_null)
+    (func (export "set_imp_bread") (param anyref) local.get 0 global.set $g_imp_mut_bread)
 
-    (func (export "set_mut") (param anyref) get_local 0 set_global $g_mut)
-    (func (export "get_mut") (result anyref) get_global $g_mut)
+    (func (export "set_mut") (param anyref) local.get 0 global.set $g_mut)
+    (func (export "get_mut") (result anyref) global.get $g_mut)
 )`, imports).exports;
 
 assertEq(exports.imp_imm_null(), imports.constants.imm_null);
@@ -493,3 +463,22 @@ let glutenFreeBaguette = new Baguette("calories-free bread");
 exports.set_mut(glutenFreeBaguette);
 assertEq(exports.get_mut(), glutenFreeBaguette);
 assertEq(exports.get_mut().calories, "calories-free bread");
+
+// Make sure that dead code doesn't prevent compilation.
+wasmEvalText(
+    `(module
+       (func
+         (return)
+         (ref.null)
+         (drop)
+        )
+    )`);
+
+wasmEvalText(
+    `(module
+       (func (param anyref)
+         (return)
+         (ref.is_null (get_local 0))
+         (drop)
+        )
+    )`);

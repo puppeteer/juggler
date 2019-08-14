@@ -2,24 +2,31 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {TargetFactory} = require("devtools/client/framework/target");
 const Services = require("Services");
-const {FileUtils} = require("resource://gre/modules/FileUtils.jsm");
+const { FileUtils } = require("resource://gre/modules/FileUtils.jsm");
 const EventEmitter = require("devtools/shared/event-emitter");
-const {OS} = require("resource://gre/modules/osfile.jsm");
-const {AppProjects} = require("devtools/client/webide/modules/app-projects");
+const { OS } = require("resource://gre/modules/osfile.jsm");
+const { AppProjects } = require("devtools/client/webide/modules/app-projects");
 const TabStore = require("devtools/client/webide/modules/tab-store");
-const {AppValidator} = require("devtools/client/webide/modules/app-validator");
-const {ConnectionManager, Connection} = require("devtools/shared/client/connection-manager");
-const {RuntimeScanners} = require("devtools/client/webide/modules/runtimes");
-const {RuntimeTypes} = require("devtools/client/webide/modules/runtime-types");
-const {NetUtil} = require("resource://gre/modules/NetUtil.jsm");
+const {
+  AppValidator,
+} = require("devtools/client/webide/modules/app-validator");
+const {
+  ConnectionManager,
+  Connection,
+} = require("devtools/shared/client/connection-manager");
+const { RuntimeScanners } = require("devtools/client/webide/modules/runtimes");
+const {
+  RuntimeTypes,
+} = require("devtools/client/webide/modules/runtime-types");
+const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 const Telemetry = require("devtools/client/shared/telemetry");
 
-const Strings = Services.strings.createBundle("chrome://devtools/locale/webide.properties");
+const Strings = Services.strings.createBundle(
+  "chrome://devtools/locale/webide.properties"
+);
 
-var AppManager = exports.AppManager = {
-
+var AppManager = (exports.AppManager = {
   DEFAULT_PROJECT_ICON: "chrome://webide/skin/default-app-icon.png",
   DEFAULT_PROJECT_NAME: "--",
 
@@ -34,7 +41,10 @@ var AppManager = exports.AppManager = {
     const port = Services.prefs.getIntPref("devtools.debugger.remote-port");
     this.connection = ConnectionManager.createConnection("localhost", port);
     this.onConnectionChanged = this.onConnectionChanged.bind(this);
-    this.connection.on(Connection.Events.STATUS_CHANGED, this.onConnectionChanged);
+    this.connection.on(
+      Connection.Events.STATUS_CHANGED,
+      this.onConnectionChanged
+    );
 
     this.tabStore = new TabStore(this.connection);
     this.onTabList = this.onTabList.bind(this);
@@ -69,8 +79,11 @@ var AppManager = exports.AppManager = {
     this.tabStore.off("closed", this.onTabClosed);
     this.tabStore.destroy();
     this.tabStore = null;
-    this.connection.off(Connection.Events.STATUS_CHANGED, this.onConnectionChanged);
-    this._listTabsResponse = null;
+    this.connection.off(
+      Connection.Events.STATUS_CHANGED,
+      this.onConnectionChanged
+    );
+    this._rootForm = null;
     this.connection.disconnect();
     this.connection = null;
   },
@@ -131,7 +144,7 @@ var AppManager = exports.AppManager = {
     } else {
       let text;
       if (l10nArgs.length > 0) {
-        text = Strings.formatStringFromName(l10nProperty, l10nArgs, l10nArgs.length);
+        text = Strings.formatStringFromName(l10nProperty, l10nArgs);
       } else {
         text = Strings.GetStringFromName(l10nProperty);
       }
@@ -147,16 +160,20 @@ var AppManager = exports.AppManager = {
     }
 
     if (!this.connected) {
-      this._listTabsResponse = null;
+      this._rootForm = null;
       this.deviceFront = null;
       this.preferenceFront = null;
       this.perfFront = null;
     } else {
-      const response = await this.connection.client.listTabs();
-      this._listTabsResponse = response;
+      const response = await this.connection.client.mainRoot.rootForm;
+      this._rootForm = response;
       try {
-        this.deviceFront = await this.connection.client.mainRoot.getFront("device");
-        this.preferenceFront = await this.connection.client.mainRoot.getFront("preference");
+        this.deviceFront = await this.connection.client.mainRoot.getFront(
+          "device"
+        );
+        this.preferenceFront = await this.connection.client.mainRoot.getFront(
+          "preference"
+        );
         this.perfFront = await this.connection.client.mainRoot.getFront("perf");
         this._recordRuntimeInfo();
       } catch (e) {
@@ -172,8 +189,9 @@ var AppManager = exports.AppManager = {
   },
 
   get connected() {
-    return this.connection &&
-           this.connection.status == Connection.Status.CONNECTED;
+    return (
+      this.connection && this.connection.status == Connection.Status.CONNECTED
+    );
   },
 
   get apps() {
@@ -184,8 +202,10 @@ var AppManager = exports.AppManager = {
   },
 
   isProjectRunning: function() {
-    if (this.selectedProject.type == "mainProcess" ||
-        this.selectedProject.type == "tab") {
+    if (
+      this.selectedProject.type == "mainProcess" ||
+      this.selectedProject.type == "tab"
+    ) {
       return true;
     }
 
@@ -217,7 +237,7 @@ var AppManager = exports.AppManager = {
     if (this.selectedProject.type !== "tab") {
       return;
     }
-    const tab = this.selectedProject.app = this.tabStore.selectedTab;
+    const tab = (this.selectedProject.app = this.tabStore.selectedTab);
     const uri = NetUtil.newURI(tab.url);
     // Wanted to use nsIFaviconService here, but it only works for visited
     // tabs, so that's no help for any remote tabs.  Maybe some favicon wizard
@@ -246,29 +266,13 @@ var AppManager = exports.AppManager = {
       return Promise.reject("tried to reload non-tab project");
     }
     return this.getTarget().then(target => {
-      target.activeTab.reload();
+      target.reload();
     }, console.error);
   },
 
   getTarget: function() {
     if (this.selectedProject.type == "mainProcess") {
-      // Fx >=39 exposes a ParentProcessTargetActor to debug the main process
-      if (this.connection.client.mainRoot.traits.allowChromeProcess) {
-        return this.connection.client.mainRoot.getMainProcess()
-                   .then(front => {
-                     return TargetFactory.forRemoteTab({
-                       activeTab: front,
-                       client: this.connection.client,
-                       chrome: true,
-                     });
-                   });
-      }
-      // Fx <39 exposes chrome target actors on the root actor
-      return TargetFactory.forRemoteTab({
-          form: this._listTabsResponse,
-          client: this.connection.client,
-          chrome: true,
-      });
+      return this.connection.client.mainRoot.getMainProcess();
     }
 
     if (this.selectedProject.type == "tab") {
@@ -294,7 +298,10 @@ var AppManager = exports.AppManager = {
         });
       }
 
-      AppManager.reportError("error_cantConnectToApp", app.manifest.manifestURL);
+      AppManager.reportError(
+        "error_cantConnectToApp",
+        app.manifest.manifestURL
+      );
       throw new Error("can't connect to app");
     })();
   },
@@ -352,9 +359,11 @@ var AppManager = exports.AppManager = {
     }
 
     let cancelled = false;
-    this.update("before-project", { cancel: () => {
-      cancelled = true;
-    } });
+    this.update("before-project", {
+      cancel: () => {
+        cancelled = true;
+      },
+    });
     if (cancelled) {
       return;
     }
@@ -365,8 +374,7 @@ var AppManager = exports.AppManager = {
     this.tabStore.selectedTab = null;
 
     if (project) {
-      if (project.type == "packaged" ||
-          project.type == "hosted") {
+      if (project.type == "packaged" || project.type == "hosted") {
         this.validateAndUpdateProject(project);
       }
       if (project.type == "tab") {
@@ -396,10 +404,13 @@ var AppManager = exports.AppManager = {
   _selectedRuntime: null,
   set selectedRuntime(value) {
     this._selectedRuntime = value;
-    if (!value && this.selectedProject &&
-        (this.selectedProject.type == "mainProcess" ||
-         this.selectedProject.type == "runtimeApp" ||
-         this.selectedProject.type == "tab")) {
+    if (
+      !value &&
+      this.selectedProject &&
+      (this.selectedProject.type == "mainProcess" ||
+        this.selectedProject.type == "runtimeApp" ||
+        this.selectedProject.type == "tab")
+    ) {
       this.selectedProject = null;
     }
     this.update("runtime");
@@ -420,23 +431,34 @@ var AppManager = exports.AppManager = {
         this.selectedRuntime = runtime;
 
         const onConnectedOrDisconnected = () => {
-          this.connection.off(Connection.Events.CONNECTED, onConnectedOrDisconnected);
-          this.connection.off(Connection.Events.DISCONNECTED, onConnectedOrDisconnected);
+          this.connection.off(
+            Connection.Events.CONNECTED,
+            onConnectedOrDisconnected
+          );
+          this.connection.off(
+            Connection.Events.DISCONNECTED,
+            onConnectedOrDisconnected
+          );
           if (this.connected) {
             resolve();
           } else {
             reject();
           }
         };
-        this.connection.on(Connection.Events.CONNECTED, onConnectedOrDisconnected);
-        this.connection.on(Connection.Events.DISCONNECTED, onConnectedOrDisconnected);
+        this.connection.on(
+          Connection.Events.CONNECTED,
+          onConnectedOrDisconnected
+        );
+        this.connection.on(
+          Connection.Events.DISCONNECTED,
+          onConnectedOrDisconnected
+        );
         try {
           // Reset the connection's state to defaults
           this.connection.resetOptions();
           // Only watch for errors here.  Final resolution occurs above, once
           // we've reached the CONNECTED state.
-          this.selectedRuntime.connect(this.connection)
-                              .catch(e => reject(e));
+          this.selectedRuntime.connect(this.connection).catch(e => reject(e));
         } catch (e) {
           reject(e);
         }
@@ -445,27 +467,31 @@ var AppManager = exports.AppManager = {
 
     // Record connection result in telemetry
     const logResult = result => {
-      this._telemetry.getHistogramById("DEVTOOLS_WEBIDE_CONNECTION_RESULT")
-                     .add(result);
+      this._telemetry
+        .getHistogramById("DEVTOOLS_WEBIDE_CONNECTION_RESULT")
+        .add(result);
       if (runtime.type) {
-        this._telemetry.getHistogramById(
-          `DEVTOOLS_WEBIDE_${runtime.type}_CONNECTION_RESULT`).add(result);
+        this._telemetry
+          .getHistogramById(`DEVTOOLS_WEBIDE_${runtime.type}_CONNECTION_RESULT`)
+          .add(result);
       }
     };
     deferred.then(() => logResult(true), () => logResult(false));
 
     // If successful, record connection time in telemetry
-    deferred.then(() => {
-      const timerId = "DEVTOOLS_WEBIDE_CONNECTION_TIME_SECONDS";
-      this._telemetry.start(timerId, this);
-      this.connection.once(Connection.Events.STATUS_CHANGED, () => {
-        this._telemetry.finish(timerId, this);
+    deferred
+      .then(() => {
+        const timerId = "DEVTOOLS_WEBIDE_CONNECTION_TIME_SECONDS";
+        this._telemetry.start(timerId, this);
+        this.connection.once(Connection.Events.STATUS_CHANGED, () => {
+          this._telemetry.finish(timerId, this);
+        });
+      })
+      .catch(() => {
+        // Empty rejection handler to silence uncaught rejection warnings
+        // |connectToRuntime| caller should listen for rejections.
+        // Bug 1121100 may find a better way to silence these.
       });
-    }).catch(() => {
-      // Empty rejection handler to silence uncaught rejection warnings
-      // |connectToRuntime| caller should listen for rejections.
-      // Bug 1121100 may find a better way to silence these.
-    });
 
     return deferred;
   },
@@ -476,11 +502,11 @@ var AppManager = exports.AppManager = {
     }
     const runtime = this.selectedRuntime;
     this._telemetry
-        .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_TYPE")
-        .add(runtime.type || "UNKNOWN", true);
+      .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_TYPE")
+      .add(runtime.type || "UNKNOWN", true);
     this._telemetry
-        .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_ID")
-        .add(runtime.id || "unknown", true);
+      .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_ID")
+      .add(runtime.id || "unknown", true);
     if (!this.deviceFront) {
       this.update("runtime-telemetry");
       return;
@@ -493,25 +519,28 @@ var AppManager = exports.AppManager = {
       .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_OS")
       .add(d.os, true);
     this._telemetry
-      .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PLATFORM_VERSION")
+      .getKeyedHistogramById(
+        "DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_PLATFORM_VERSION"
+      )
       .add(d.platformversion, true);
     this._telemetry
-        .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_APP_TYPE")
-        .add(d.apptype, true);
+      .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_APP_TYPE")
+      .add(d.apptype, true);
     this._telemetry
-        .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_VERSION")
-        .add(d.version, true);
+      .getKeyedHistogramById("DEVTOOLS_WEBIDE_CONNECTED_RUNTIME_VERSION")
+      .add(d.version, true);
     this.update("runtime-telemetry");
   },
 
   isMainProcessDebuggable: function() {
     // Fx <39 exposes chrome target actors on RootActor
     // Fx >=39 exposes a dedicated actor via getProcess request
-    return this.connection.client &&
-           this.connection.client.mainRoot &&
-           this.connection.client.mainRoot.traits.allowChromeProcess ||
-           (this._listTabsResponse &&
-            this._listTabsResponse.consoleActor);
+    return (
+      (this.connection.client &&
+        this.connection.client.mainRoot &&
+        this.connection.client.mainRoot.traits.allowChromeProcess) ||
+      (this._rootForm && this._rootForm.consoleActor)
+    );
   },
 
   disconnectRuntime: function() {
@@ -556,7 +585,7 @@ var AppManager = exports.AppManager = {
       return Promise.reject("Can't install");
     }
 
-    if (!this._listTabsResponse) {
+    if (!this._rootForm) {
       this.reportError("error_cantInstallNotFullyConnected");
       return Promise.reject("Can't install");
     }
@@ -586,8 +615,10 @@ var AppManager = exports.AppManager = {
         const packageDir = project.location;
         console.log("Installing app from " + packageDir);
 
-        response = await self._appsFront.installPackaged(packageDir,
-                                                         project.packagedAppOrigin);
+        response = await self._appsFront.installPackaged(
+          packageDir,
+          project.packagedAppOrigin
+        );
 
         // If the packaged app specified a custom origin override,
         // we need to update the local project origin
@@ -604,18 +635,23 @@ var AppManager = exports.AppManager = {
           origin: origin.spec,
           manifestURL: project.location,
         };
-        response = await self._appsFront.installHosted(appId,
-                                            metadata,
-                                            project.manifest);
+        response = await self._appsFront.installHosted(
+          appId,
+          metadata,
+          project.manifest
+        );
       }
 
       // Addons don't have any document to load (yet?)
       // So that there is no need to run them, installing is enough
-      if (project.manifest.manifest_version || project.manifest.role === "addon") {
+      if (
+        project.manifest.manifest_version ||
+        project.manifest.role === "addon"
+      ) {
         return;
       }
 
-      const {app} = response;
+      const { app } = response;
       if (!app.running) {
         const deferred = new Promise(resolve => {
           self.on("app-manager-update", function onUpdate(what) {
@@ -712,7 +748,10 @@ var AppManager = exports.AppManager = {
         project.validationStatus = "error warning";
       }
 
-      if (project.type === "hosted" && project.location !== validation.manifestURL) {
+      if (
+        project.type === "hosted" &&
+        project.location !== validation.manifestURL
+      ) {
         await AppProjects.updateLocation(project, validation.manifestURL);
       } else if (AppProjects.get(project.location)) {
         await AppProjects.update(project);
@@ -772,8 +811,10 @@ var AppManager = exports.AppManager = {
     const text = JSON.stringify(project.manifest, null, 2);
     const encoder = new TextEncoder();
     const array = encoder.encode(text);
-    return OS.File.writeAtomic(manifestPath, array, {tmpPath: manifestPath + ".tmp"});
+    return OS.File.writeAtomic(manifestPath, array, {
+      tmpPath: manifestPath + ".tmp",
+    });
   },
-};
+});
 
 EventEmitter.decorate(AppManager);

@@ -24,9 +24,11 @@ class gfxDrawable;
 struct gfxQuad;
 class nsIInputStream;
 class nsIGfxInfo;
-class nsIPresShell;
 
 namespace mozilla {
+namespace dom {
+class Element;
+}
 namespace layers {
 class WebRenderBridgeChild;
 class GlyphArray;
@@ -40,6 +42,13 @@ namespace wr {
 class DisplayListBuilder;
 }  // namespace wr
 }  // namespace mozilla
+
+enum class ImageType {
+  BMP,
+  ICO,
+  JPEG,
+  PNG,
+};
 
 class gfxUtils {
  public:
@@ -158,11 +167,11 @@ class gfxUtils {
   static void ClearThebesSurface(gfxASurface* aSurface);
 
   static const float* YuvToRgbMatrix4x3RowMajor(
-      mozilla::YUVColorSpace aYUVColorSpace);
+      mozilla::gfx::YUVColorSpace aYUVColorSpace);
   static const float* YuvToRgbMatrix3x3ColumnMajor(
-      mozilla::YUVColorSpace aYUVColorSpace);
+      mozilla::gfx::YUVColorSpace aYUVColorSpace);
   static const float* YuvToRgbMatrix4x4ColumnMajor(
-      mozilla::YUVColorSpace aYUVColorSpace);
+      mozilla::gfx::YUVColorSpace aYUVColorSpace);
 
   /**
    * Creates a copy of aSurface, but having the SurfaceFormat aFormat.
@@ -225,9 +234,8 @@ class gfxUtils {
    * If both aFile and aString are null, the encoded data is copied to the
    * clipboard.
    *
-   * @param aMimeType The MIME-type of the image type that the surface is to
-   *   be encoded to. Used to create an appropriate imgIEncoder instance to
-   *   do the encoding.
+   * @param aImageType The image type that the surface is to be encoded to.
+   *   Used to create an appropriate imgIEncoder instance to do the encoding.
    *
    * @param aOutputOptions Passed directly to imgIEncoder::InitFromData as
    *   the value of the |outputOptions| parameter. Callers are responsible
@@ -246,7 +254,7 @@ class gfxUtils {
    * supported.
    */
   static nsresult EncodeSourceSurface(SourceSurface* aSurface,
-                                      const nsACString& aMimeType,
+                                      const ImageType aImageType,
                                       const nsAString& aOutputOptions,
                                       BinaryOrData aBinaryOrData, FILE* aFile,
                                       nsACString* aString = nullptr);
@@ -258,7 +266,6 @@ class gfxUtils {
   static void WriteAsPNG(SourceSurface* aSurface, const char* aFile);
   static void WriteAsPNG(DrawTarget* aDT, const nsAString& aFile);
   static void WriteAsPNG(DrawTarget* aDT, const char* aFile);
-  static void WriteAsPNG(nsIPresShell* aShell, const char* aFile);
 
   /**
    * Dump as a PNG encoded Data URL to a FILE stream (using stdout by
@@ -286,7 +293,7 @@ class gfxUtils {
   static nsresult GetInputStream(DataSourceSurface* aSurface,
                                  bool aIsAlphaPremultiplied,
                                  const char* aMimeType,
-                                 const char16_t* aEncoderOptions,
+                                 const nsAString& aEncoderOptions,
                                  nsIInputStream** outStream);
 
   static nsresult ThreadSafeGetFeatureStatus(
@@ -304,9 +311,21 @@ class gfxUtils {
   static bool DumpDisplayList();
 
   static FILE* sDumpPaintFile;
+
+  static mozilla::wr::RenderRoot GetContentRenderRoot();
+
+  static mozilla::Maybe<mozilla::wr::RenderRoot> GetRenderRootForFrame(
+      const nsIFrame* aFrame);
+  static mozilla::Maybe<mozilla::wr::RenderRoot> GetRenderRootForElement(
+      const mozilla::dom::Element* aElement);
+  static mozilla::wr::RenderRoot RecursivelyGetRenderRootForFrame(
+      const nsIFrame* aFrame);
 };
 
 namespace mozilla {
+
+struct StyleRGBA;
+
 namespace gfx {
 
 /**
@@ -317,6 +336,7 @@ namespace gfx {
  * applicable).
  */
 Color ToDeviceColor(Color aColor);
+Color ToDeviceColor(const StyleRGBA& aColor);
 Color ToDeviceColor(nscolor aColor);
 
 /**

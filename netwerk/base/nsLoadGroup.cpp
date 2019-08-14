@@ -46,29 +46,29 @@ static LazyLogModule gLoadGroupLog("LoadGroup");
 
 class RequestMapEntry : public PLDHashEntryHdr {
  public:
-  explicit RequestMapEntry(nsIRequest *aRequest) : mKey(aRequest) {}
+  explicit RequestMapEntry(nsIRequest* aRequest) : mKey(aRequest) {}
 
   nsCOMPtr<nsIRequest> mKey;
 };
 
-static bool RequestHashMatchEntry(const PLDHashEntryHdr *entry,
-                                  const void *key) {
-  const RequestMapEntry *e = static_cast<const RequestMapEntry *>(entry);
-  const nsIRequest *request = static_cast<const nsIRequest *>(key);
+static bool RequestHashMatchEntry(const PLDHashEntryHdr* entry,
+                                  const void* key) {
+  const RequestMapEntry* e = static_cast<const RequestMapEntry*>(entry);
+  const nsIRequest* request = static_cast<const nsIRequest*>(key);
 
   return e->mKey == request;
 }
 
-static void RequestHashClearEntry(PLDHashTable *table, PLDHashEntryHdr *entry) {
-  RequestMapEntry *e = static_cast<RequestMapEntry *>(entry);
+static void RequestHashClearEntry(PLDHashTable* table, PLDHashEntryHdr* entry) {
+  RequestMapEntry* e = static_cast<RequestMapEntry*>(entry);
 
   // An entry is being cleared, let the entry do its own cleanup.
   e->~RequestMapEntry();
 }
 
-static void RequestHashInitEntry(PLDHashEntryHdr *entry, const void *key) {
-  const nsIRequest *const_request = static_cast<const nsIRequest *>(key);
-  nsIRequest *request = const_cast<nsIRequest *>(const_request);
+static void RequestHashInitEntry(PLDHashEntryHdr* entry, const void* key) {
+  const nsIRequest* const_request = static_cast<const nsIRequest*>(key);
+  nsIRequest* request = const_cast<nsIRequest*>(const_request);
 
   // Initialize the entry with placement new
   new (entry) RequestMapEntry(request);
@@ -78,24 +78,22 @@ static const PLDHashTableOps sRequestHashOps = {
     PLDHashTable::HashVoidPtrKeyStub, RequestHashMatchEntry,
     PLDHashTable::MoveEntryStub, RequestHashClearEntry, RequestHashInitEntry};
 
-static void RescheduleRequest(nsIRequest *aRequest, int32_t delta) {
+static void RescheduleRequest(nsIRequest* aRequest, int32_t delta) {
   nsCOMPtr<nsISupportsPriority> p = do_QueryInterface(aRequest);
   if (p) p->AdjustPriority(delta);
 }
 
-nsLoadGroup::nsLoadGroup(nsISupports *outer)
+nsLoadGroup::nsLoadGroup()
     : mForegroundCount(0),
       mLoadFlags(LOAD_NORMAL),
       mDefaultLoadFlags(0),
+      mPriority(PRIORITY_NORMAL),
       mRequests(&sRequestHashOps, sizeof(RequestMapEntry)),
       mStatus(NS_OK),
-      mPriority(PRIORITY_NORMAL),
       mIsCanceling(false),
       mDefaultLoadIsTimed(false),
       mTimedRequests(0),
-      mCachedRequests(0),
-      mTimedNonCachedRequestsUntilOnEndPageLoad(0) {
-  NS_INIT_AGGREGATED(outer);
+      mCachedRequests(0) {
   LOG(("LOADGROUP [%p]: Created.\n", this));
 }
 
@@ -115,21 +113,14 @@ nsLoadGroup::~nsLoadGroup() {
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports methods:
 
-NS_IMPL_AGGREGATED(nsLoadGroup)
-NS_INTERFACE_MAP_BEGIN_AGGREGATED(nsLoadGroup)
-  NS_INTERFACE_MAP_ENTRY(nsILoadGroup)
-  NS_INTERFACE_MAP_ENTRY(nsPILoadGroupInternal)
-  NS_INTERFACE_MAP_ENTRY(nsILoadGroupChild)
-  NS_INTERFACE_MAP_ENTRY(nsIRequest)
-  NS_INTERFACE_MAP_ENTRY(nsISupportsPriority)
-  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-NS_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS(nsLoadGroup, nsILoadGroup, nsILoadGroupChild, nsIRequest,
+                  nsISupportsPriority, nsISupportsWeakReference)
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIRequest methods:
 
 NS_IMETHODIMP
-nsLoadGroup::GetName(nsACString &result) {
+nsLoadGroup::GetName(nsACString& result) {
   // XXX is this the right "name" for a load group?
 
   if (!mDefaultLoadRequest) {
@@ -141,13 +132,13 @@ nsLoadGroup::GetName(nsACString &result) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::IsPending(bool *aResult) {
+nsLoadGroup::IsPending(bool* aResult) {
   *aResult = (mForegroundCount > 0) ? true : false;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetStatus(nsresult *status) {
+nsLoadGroup::GetStatus(nsresult* status) {
   if (NS_SUCCEEDED(mStatus) && mDefaultLoadRequest)
     return mDefaultLoadRequest->GetStatus(status);
 
@@ -155,11 +146,11 @@ nsLoadGroup::GetStatus(nsresult *status) {
   return NS_OK;
 }
 
-static bool AppendRequestsToArray(PLDHashTable *aTable,
-                                  nsTArray<nsIRequest *> *aArray) {
+static bool AppendRequestsToArray(PLDHashTable* aTable,
+                                  nsTArray<nsIRequest*>* aArray) {
   for (auto iter = aTable->Iter(); !iter.Done(); iter.Next()) {
-    auto e = static_cast<RequestMapEntry *>(iter.Get());
-    nsIRequest *request = e->mKey;
+    auto e = static_cast<RequestMapEntry*>(iter.Get());
+    nsIRequest* request = e->mKey;
     NS_ASSERTION(request, "What? Null key in PLDHashTable entry?");
 
     bool ok = !!aArray->AppendElement(request);
@@ -186,7 +177,7 @@ nsLoadGroup::Cancel(nsresult status) {
   nsresult rv;
   uint32_t count = mRequests.EntryCount();
 
-  AutoTArray<nsIRequest *, 8> requests;
+  AutoTArray<nsIRequest*, 8> requests;
 
   if (!AppendRequestsToArray(&mRequests, &requests)) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -205,20 +196,19 @@ nsLoadGroup::Cancel(nsresult status) {
   nsresult firstError = NS_OK;
 
   while (count > 0) {
-    nsIRequest *request = requests.ElementAt(--count);
+    nsCOMPtr<nsIRequest> request = dont_AddRef(requests.ElementAt(--count));
 
     NS_ASSERTION(request, "NULL request found in list.");
 
     if (!mRequests.Search(request)) {
       // |request| was removed already
-      NS_RELEASE(request);
       continue;
     }
 
     if (MOZ_LOG_TEST(gLoadGroupLog, LogLevel::Debug)) {
       nsAutoCString nameStr;
       request->GetName(nameStr);
-      LOG(("LOADGROUP [%p]: Canceling request %p %s.\n", this, request,
+      LOG(("LOADGROUP [%p]: Canceling request %p %s.\n", this, request.get(),
            nameStr.get()));
     }
 
@@ -235,8 +225,6 @@ nsLoadGroup::Cancel(nsresult status) {
 
     // Remember the first failure and return it...
     if (NS_FAILED(rv) && NS_SUCCEEDED(firstError)) firstError = rv;
-
-    NS_RELEASE(request);
   }
 
   if (mRequestContext) {
@@ -259,7 +247,7 @@ nsLoadGroup::Suspend() {
   nsresult rv, firstError;
   uint32_t count = mRequests.EntryCount();
 
-  AutoTArray<nsIRequest *, 8> requests;
+  AutoTArray<nsIRequest*, 8> requests;
 
   if (!AppendRequestsToArray(&mRequests, &requests)) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -271,7 +259,7 @@ nsLoadGroup::Suspend() {
   // get removed from the list it won't affect our iteration
   //
   while (count > 0) {
-    nsIRequest *request = requests.ElementAt(--count);
+    nsCOMPtr<nsIRequest> request = dont_AddRef(requests.ElementAt(--count));
 
     NS_ASSERTION(request, "NULL request found in list.");
     if (!request) continue;
@@ -279,7 +267,7 @@ nsLoadGroup::Suspend() {
     if (MOZ_LOG_TEST(gLoadGroupLog, LogLevel::Debug)) {
       nsAutoCString nameStr;
       request->GetName(nameStr);
-      LOG(("LOADGROUP [%p]: Suspending request %p %s.\n", this, request,
+      LOG(("LOADGROUP [%p]: Suspending request %p %s.\n", this, request.get(),
            nameStr.get()));
     }
 
@@ -288,8 +276,6 @@ nsLoadGroup::Suspend() {
 
     // Remember the first failure and return it...
     if (NS_FAILED(rv) && NS_SUCCEEDED(firstError)) firstError = rv;
-
-    NS_RELEASE(request);
   }
 
   return firstError;
@@ -300,7 +286,7 @@ nsLoadGroup::Resume() {
   nsresult rv, firstError;
   uint32_t count = mRequests.EntryCount();
 
-  AutoTArray<nsIRequest *, 8> requests;
+  AutoTArray<nsIRequest*, 8> requests;
 
   if (!AppendRequestsToArray(&mRequests, &requests)) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -312,7 +298,7 @@ nsLoadGroup::Resume() {
   // get removed from the list it won't affect our iteration
   //
   while (count > 0) {
-    nsIRequest *request = requests.ElementAt(--count);
+    nsCOMPtr<nsIRequest> request = dont_AddRef(requests.ElementAt(--count));
 
     NS_ASSERTION(request, "NULL request found in list.");
     if (!request) continue;
@@ -320,7 +306,7 @@ nsLoadGroup::Resume() {
     if (MOZ_LOG_TEST(gLoadGroupLog, LogLevel::Debug)) {
       nsAutoCString nameStr;
       request->GetName(nameStr);
-      LOG(("LOADGROUP [%p]: Resuming request %p %s.\n", this, request,
+      LOG(("LOADGROUP [%p]: Resuming request %p %s.\n", this, request.get(),
            nameStr.get()));
     }
 
@@ -329,15 +315,13 @@ nsLoadGroup::Resume() {
 
     // Remember the first failure and return it...
     if (NS_FAILED(rv) && NS_SUCCEEDED(firstError)) firstError = rv;
-
-    NS_RELEASE(request);
   }
 
   return firstError;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetLoadFlags(uint32_t *aLoadFlags) {
+nsLoadGroup::GetLoadFlags(uint32_t* aLoadFlags) {
   *aLoadFlags = mLoadFlags;
   return NS_OK;
 }
@@ -349,14 +333,14 @@ nsLoadGroup::SetLoadFlags(uint32_t aLoadFlags) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetLoadGroup(nsILoadGroup **loadGroup) {
-  *loadGroup = mLoadGroup;
-  NS_IF_ADDREF(*loadGroup);
+nsLoadGroup::GetLoadGroup(nsILoadGroup** loadGroup) {
+  nsCOMPtr<nsILoadGroup> result = mLoadGroup;
+  result.forget(loadGroup);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::SetLoadGroup(nsILoadGroup *loadGroup) {
+nsLoadGroup::SetLoadGroup(nsILoadGroup* loadGroup) {
   mLoadGroup = loadGroup;
   return NS_OK;
 }
@@ -365,14 +349,14 @@ nsLoadGroup::SetLoadGroup(nsILoadGroup *loadGroup) {
 // nsILoadGroup methods:
 
 NS_IMETHODIMP
-nsLoadGroup::GetDefaultLoadRequest(nsIRequest **aRequest) {
-  *aRequest = mDefaultLoadRequest;
-  NS_IF_ADDREF(*aRequest);
+nsLoadGroup::GetDefaultLoadRequest(nsIRequest** aRequest) {
+  nsCOMPtr<nsIRequest> result = mDefaultLoadRequest;
+  result.forget(aRequest);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::SetDefaultLoadRequest(nsIRequest *aRequest) {
+nsLoadGroup::SetDefaultLoadRequest(nsIRequest* aRequest) {
   LOG(("nsLoadGroup::SetDefaultLoadRequest this=%p default-request=%p", this,
        aRequest));
 
@@ -398,7 +382,7 @@ nsLoadGroup::SetDefaultLoadRequest(nsIRequest *aRequest) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::AddRequest(nsIRequest *request, nsISupports *ctxt) {
+nsLoadGroup::AddRequest(nsIRequest* request, nsISupports* ctxt) {
   nsresult rv;
 
   if (MOZ_LOG_TEST(gLoadGroupLog, LogLevel::Debug)) {
@@ -438,7 +422,7 @@ nsLoadGroup::AddRequest(nsIRequest *request, nsISupports *ctxt) {
   // Add the request to the list of active requests...
   //
 
-  auto entry = static_cast<RequestMapEntry *>(mRequests.Add(request, fallible));
+  auto entry = static_cast<RequestMapEntry*>(mRequests.Add(request, fallible));
   if (!entry) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -465,7 +449,7 @@ nsLoadGroup::AddRequest(nsIRequest *request, nsISupports *ctxt) {
            "(foreground count=%d).\n",
            this, request, mForegroundCount));
 
-      rv = observer->OnStartRequest(request, ctxt);
+      rv = observer->OnStartRequest(request);
       if (NS_FAILED(rv)) {
         LOG(("LOADGROUP [%p]: OnStartRequest for request %p FAILED.\n", this,
              request));
@@ -492,7 +476,7 @@ nsLoadGroup::AddRequest(nsIRequest *request, nsISupports *ctxt) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports *ctxt,
+nsLoadGroup::RemoveRequest(nsIRequest* request, nsISupports* ctxt,
                            nsresult aStatus) {
   NS_ENSURE_ARG_POINTER(request);
   nsresult rv;
@@ -516,7 +500,7 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports *ctxt,
   // the request was *not* in the group so do not update the foreground
   // count or it will get messed up...
   //
-  auto entry = static_cast<RequestMapEntry *>(mRequests.Search(request));
+  auto entry = static_cast<RequestMapEntry*>(mRequests.Search(request));
 
   if (!entry) {
     LOG(("LOADGROUP [%p]: Unable to remove request %p. Not in group!\n", this,
@@ -538,8 +522,6 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports *ctxt,
       rv = timedChannel->GetCacheReadStart(&timeStamp);
       if (NS_SUCCEEDED(rv) && !timeStamp.IsNull()) {
         ++mCachedRequests;
-      } else {
-        mTimedNonCachedRequestsUntilOnEndPageLoad++;
       }
 
       rv = timedChannel->GetAsyncOpen(&timeStamp);
@@ -583,7 +565,7 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports *ctxt,
            "(foreground count=%d).\n",
            this, request, mForegroundCount));
 
-      rv = observer->OnStopRequest(request, ctxt, aStatus);
+      rv = observer->OnStopRequest(request, aStatus);
 
       if (NS_FAILED(rv)) {
         LOG(("LOADGROUP [%p]: OnStopRequest for request %p FAILED.\n", this,
@@ -601,12 +583,12 @@ nsLoadGroup::RemoveRequest(nsIRequest *request, nsISupports *ctxt,
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetRequests(nsISimpleEnumerator **aRequests) {
+nsLoadGroup::GetRequests(nsISimpleEnumerator** aRequests) {
   nsCOMArray<nsIRequest> requests;
   requests.SetCapacity(mRequests.EntryCount());
 
   for (auto iter = mRequests.Iter(); !iter.Done(); iter.Next()) {
-    auto e = static_cast<RequestMapEntry *>(iter.Get());
+    auto e = static_cast<RequestMapEntry*>(iter.Get());
     requests.AppendObject(e->mKey);
   }
 
@@ -614,41 +596,40 @@ nsLoadGroup::GetRequests(nsISimpleEnumerator **aRequests) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::SetGroupObserver(nsIRequestObserver *aObserver) {
+nsLoadGroup::SetGroupObserver(nsIRequestObserver* aObserver) {
   mObserver = do_GetWeakReference(aObserver);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetGroupObserver(nsIRequestObserver **aResult) {
+nsLoadGroup::GetGroupObserver(nsIRequestObserver** aResult) {
   nsCOMPtr<nsIRequestObserver> observer = do_QueryReferent(mObserver);
-  *aResult = observer;
-  NS_IF_ADDREF(*aResult);
+  observer.forget(aResult);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetActiveCount(uint32_t *aResult) {
+nsLoadGroup::GetActiveCount(uint32_t* aResult) {
   *aResult = mForegroundCount;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetNotificationCallbacks(nsIInterfaceRequestor **aCallbacks) {
+nsLoadGroup::GetNotificationCallbacks(nsIInterfaceRequestor** aCallbacks) {
   NS_ENSURE_ARG_POINTER(aCallbacks);
-  *aCallbacks = mCallbacks;
-  NS_IF_ADDREF(*aCallbacks);
+  nsCOMPtr<nsIInterfaceRequestor> callbacks = mCallbacks;
+  callbacks.forget(aCallbacks);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks) {
+nsLoadGroup::SetNotificationCallbacks(nsIInterfaceRequestor* aCallbacks) {
   mCallbacks = aCallbacks;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetRequestContextID(uint64_t *aRCID) {
+nsLoadGroup::GetRequestContextID(uint64_t* aRCID) {
   if (!mRequestContext) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -660,7 +641,7 @@ nsLoadGroup::GetRequestContextID(uint64_t *aRCID) {
 // nsILoadGroupChild methods:
 
 NS_IMETHODIMP
-nsLoadGroup::GetParentLoadGroup(nsILoadGroup **aParentLoadGroup) {
+nsLoadGroup::GetParentLoadGroup(nsILoadGroup** aParentLoadGroup) {
   *aParentLoadGroup = nullptr;
   nsCOMPtr<nsILoadGroup> parent = do_QueryReferent(mParentLoadGroup);
   if (!parent) return NS_OK;
@@ -669,19 +650,19 @@ nsLoadGroup::GetParentLoadGroup(nsILoadGroup **aParentLoadGroup) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::SetParentLoadGroup(nsILoadGroup *aParentLoadGroup) {
+nsLoadGroup::SetParentLoadGroup(nsILoadGroup* aParentLoadGroup) {
   mParentLoadGroup = do_GetWeakReference(aParentLoadGroup);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetChildLoadGroup(nsILoadGroup **aChildLoadGroup) {
+nsLoadGroup::GetChildLoadGroup(nsILoadGroup** aChildLoadGroup) {
   NS_ADDREF(*aChildLoadGroup = this);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetRootLoadGroup(nsILoadGroup **aRootLoadGroup) {
+nsLoadGroup::GetRootLoadGroup(nsILoadGroup** aRootLoadGroup) {
   // first recursively try the root load group of our parent
   nsCOMPtr<nsILoadGroupChild> ancestor = do_QueryReferent(mParentLoadGroup);
   if (ancestor) return ancestor->GetRootLoadGroup(aRootLoadGroup);
@@ -696,22 +677,10 @@ nsLoadGroup::GetRootLoadGroup(nsILoadGroup **aRootLoadGroup) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// nsPILoadGroupInternal methods:
-
-NS_IMETHODIMP
-nsLoadGroup::OnEndPageLoad(nsIChannel *aDefaultChannel) {
-  LOG(("nsLoadGroup::OnEndPageLoad this=%p default-request=%p", this,
-       aDefaultChannel));
-
-  // for the moment, nothing to do here.
-  return NS_OK;
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // nsISupportsPriority methods:
 
 NS_IMETHODIMP
-nsLoadGroup::GetPriority(int32_t *aValue) {
+nsLoadGroup::GetPriority(int32_t* aValue) {
   *aValue = mPriority;
   return NS_OK;
 }
@@ -727,7 +696,7 @@ nsLoadGroup::AdjustPriority(int32_t aDelta) {
   if (aDelta != 0) {
     mPriority += aDelta;
     for (auto iter = mRequests.Iter(); !iter.Done(); iter.Next()) {
-      auto e = static_cast<RequestMapEntry *>(iter.Get());
+      auto e = static_cast<RequestMapEntry*>(iter.Get());
       RescheduleRequest(e->mKey, aDelta);
     }
   }
@@ -735,7 +704,7 @@ nsLoadGroup::AdjustPriority(int32_t aDelta) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetDefaultLoadFlags(uint32_t *aFlags) {
+nsLoadGroup::GetDefaultLoadFlags(uint32_t* aFlags) {
   *aFlags = mDefaultLoadFlags;
   return NS_OK;
 }
@@ -747,14 +716,14 @@ nsLoadGroup::SetDefaultLoadFlags(uint32_t aFlags) {
 }
 
 NS_IMETHODIMP
-nsLoadGroup::GetUserAgentOverrideCache(nsACString &aUserAgentOverrideCache) {
+nsLoadGroup::GetUserAgentOverrideCache(nsACString& aUserAgentOverrideCache) {
   aUserAgentOverrideCache = mUserAgentOverrideCache;
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsLoadGroup::SetUserAgentOverrideCache(
-    const nsACString &aUserAgentOverrideCache) {
+    const nsACString& aUserAgentOverrideCache) {
   mUserAgentOverrideCache = aUserAgentOverrideCache;
   return NS_OK;
 }
@@ -785,7 +754,7 @@ void nsLoadGroup::TelemetryReport() {
   mDefaultLoadIsTimed = false;
 }
 
-void nsLoadGroup::TelemetryReportChannel(nsITimedChannel *aTimedChannel,
+void nsLoadGroup::TelemetryReportChannel(nsITimedChannel* aTimedChannel,
                                          bool aDefaultRequest) {
   nsresult rv;
   bool timingEnabled;
@@ -912,8 +881,8 @@ void nsLoadGroup::TelemetryReportChannel(nsITimedChannel *aTimedChannel,
 #undef HTTP_REQUEST_HISTOGRAMS
 }
 
-nsresult nsLoadGroup::MergeLoadFlags(nsIRequest *aRequest,
-                                     nsLoadFlags &outFlags) {
+nsresult nsLoadGroup::MergeLoadFlags(nsIRequest* aRequest,
+                                     nsLoadFlags& outFlags) {
   nsresult rv;
   nsLoadFlags flags, oldFlags;
 
@@ -940,8 +909,8 @@ nsresult nsLoadGroup::MergeLoadFlags(nsIRequest *aRequest,
   return rv;
 }
 
-nsresult nsLoadGroup::MergeDefaultLoadFlags(nsIRequest *aRequest,
-                                            nsLoadFlags &outFlags) {
+nsresult nsLoadGroup::MergeDefaultLoadFlags(nsIRequest* aRequest,
+                                            nsLoadFlags& outFlags) {
   nsresult rv;
   nsLoadFlags flags, oldFlags;
 

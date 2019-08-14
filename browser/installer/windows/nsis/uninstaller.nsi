@@ -4,6 +4,7 @@
 
 # Required Plugins:
 # AppAssocReg http://nsis.sourceforge.net/Application_Association_Registration_plug-in
+# BitsUtils   http://dxr.mozilla.org/mozilla-central/source/other-licenses/nsis/Contrib/BitsUtils
 # CityHash    http://dxr.mozilla.org/mozilla-central/source/other-licenses/nsis/Contrib/CityHash
 # ShellLink   http://nsis.sourceforge.net/ShellLink_plug-in
 # UAC         http://nsis.sourceforge.net/UAC_plug-in
@@ -38,6 +39,10 @@ ManifestDPIAware true
 Var TmpVal
 Var MaintCertKey
 Var ShouldOpenSurvey
+; AddTaskbarSC is defined here in order to silence warnings from inside
+; MigrateTaskBarShortcut and is not intended to be used here.
+; See Bug 1329869 for more.
+Var AddTaskbarSC
 
 ; Other included files may depend upon these includes!
 ; The following includes are provided by NSIS.
@@ -137,6 +142,11 @@ ShowUnInstDetails nevershow
 !define MUI_HEADERIMAGE
 !define MUI_HEADERIMAGE_RIGHT
 !define MUI_UNWELCOMEFINISHPAGE_BITMAP wizWatermark.bmp
+; By default MUI_BGCOLOR is hardcoded to FFFFFF, which is only correct if the
+; the Windows theme or high-contrast mode hasn't changed it, so we need to
+; override that with GetSysColor(COLOR_WINDOW) (this string ends up getting
+; passed to SetCtlColors, which uses this custom syntax to mean that).
+!define MUI_BGCOLOR SYSCLR:WINDOW
 
 ; Use a right to left header image when the language is right to left
 !ifdef ${AB_CD}_rtl
@@ -150,6 +160,7 @@ ShowUnInstDetails nevershow
  */
 ; Welcome Page
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.preWelcome
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.showWelcome
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.leaveWelcome
 !insertmacro MUI_UNPAGE_WELCOME
 
@@ -165,6 +176,7 @@ UninstPage custom un.preConfirm
 !define MUI_FINISHPAGE_SHOWREADME_TEXT $(UN_SURVEY_CHECKBOX_LABEL)
 !define MUI_FINISHPAGE_SHOWREADME_FUNCTION un.Survey
 !define MUI_PAGE_CUSTOMFUNCTION_PRE un.preFinish
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.showFinish
 !insertmacro MUI_UNPAGE_FINISH
 
 ; Use the default dialog for IDD_VERIFY for a simple Banner
@@ -194,6 +206,7 @@ Function un.UninstallServiceIfNotUsed
 
   ; The maintenance service always uses the 64-bit registry on x64 systems
   ${If} ${RunningX64}
+  ${OrIf} ${IsNativeARM64}
     SetRegView 64
   ${EndIf}
 
@@ -209,6 +222,7 @@ Function un.UninstallServiceIfNotUsed
 
   ; Restore back the registry view
   ${If} ${RunningX64}
+  ${OrIf} ${IsNativeARM64}
     SetRegView lastUsed
   ${EndIf}
 
@@ -219,11 +233,13 @@ Function un.UninstallServiceIfNotUsed
     ReadRegStr $1 HKLM ${MaintUninstallKey} "UninstallString"
     SetRegView lastused
 
-    ${If} $1 == ""
-    ${AndIf} ${RunningX64}
-      SetRegView 64
-      ReadRegStr $1 HKLM ${MaintUninstallKey} "UninstallString"
-      SetRegView lastused
+    ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
+      ${If} $1 == ""
+        SetRegView 64
+        ReadRegStr $1 HKLM ${MaintUninstallKey} "UninstallString"
+        SetRegView lastused
+      ${EndIf}
     ${EndIf}
 
     ; If the uninstall string does not exist, skip executing it
@@ -407,17 +423,20 @@ Section "Uninstall"
     ${UnregisterDLL} "$INSTDIR\AccessibleHandler.dll"
   ${EndIf}
 
+!ifdef MOZ_LAUNCHER_PROCESS
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Launcher"
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Browser"
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Image"
+  DeleteRegValue HKCU ${MOZ_LAUNCHER_SUBKEY} "$INSTDIR\${FileMainEXE}|Telemetry"
+!endif
+
   ${un.RemovePrecompleteEntries} "false"
 
   ${If} ${FileExists} "$INSTDIR\defaults\pref\channel-prefs.js"
     Delete /REBOOTOK "$INSTDIR\defaults\pref\channel-prefs.js"
   ${EndIf}
-  ${If} ${FileExists} "$INSTDIR\defaults\pref"
-    RmDir /REBOOTOK "$INSTDIR\defaults\pref"
-  ${EndIf}
-  ${If} ${FileExists} "$INSTDIR\defaults"
-    RmDir /REBOOTOK "$INSTDIR\defaults"
-  ${EndIf}
+  RmDir "$INSTDIR\defaults\pref"
+  RmDir "$INSTDIR\defaults"
   ${If} ${FileExists} "$INSTDIR\uninstall"
     ; Remove the uninstall directory that we control
     RmDir /r /REBOOTOK "$INSTDIR\uninstall"
@@ -475,14 +494,21 @@ Section "Uninstall"
   ${If} $MaintCertKey != ""
     ; Always use the 64bit registry for certs on 64bit systems.
     ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
       SetRegView 64
     ${EndIf}
     DeleteRegKey HKLM "$MaintCertKey"
     ${If} ${RunningX64}
+    ${OrIf} ${IsNativeARM64}
       SetRegView lastused
     ${EndIf}
   ${EndIf}
   Call un.UninstallServiceIfNotUsed
+!endif
+
+!ifdef MOZ_BITS_DOWNLOAD
+  BitsUtils::CancelBitsJobsByName "MozillaUpdate $AppUserModelID"
+  Pop $0
 !endif
 
   ${un.IsFirewallSvcRunning}
@@ -514,6 +540,25 @@ Function un.preWelcome
     Delete "$PLUGINSDIR\modern-wizard.bmp"
     CopyFiles /SILENT "$INSTDIR\distribution\modern-wizard.bmp" "$PLUGINSDIR\modern-wizard.bmp"
   ${EndIf}
+!ifdef MOZ_BITS_DOWNLOAD
+  BitsUtils::StartBitsServiceBackground
+!endif
+
+  ; We don't want the header bitmap showing on the welcome page.
+  GetDlgItem $0 $HWNDPARENT 1046
+  ShowWindow $0 ${SW_HIDE}
+FunctionEnd
+
+Function un.ShowWelcome
+  ; The welcome and finish pages don't get the correct colors for their labels
+  ; like the other pages do, presumably because they're built by filling in an
+  ; InstallOptions .ini file instead of from a dialog resource like the others.
+  ; Field 2 is the header and Field 3 is the body text.
+  ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 2" "HWND"
+  SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+
+  ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 3" "HWND"
+  SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
 FunctionEnd
 
 Function un.leaveWelcome
@@ -543,9 +588,20 @@ Function un.leaveWelcome
       StrCpy $TmpVal "true"
     ${EndIf}
   ${EndIf}
+
+  ; Bring back the header bitmap for the next pages.
+  GetDlgItem $0 $HWNDPARENT 1046
+  ShowWindow $0 ${SW_SHOW}
 FunctionEnd
 
 Function un.preConfirm
+  ; The header and subheader on the wizard pages don't get the correct text
+  ; color by default for some reason, even though the other controls do.
+  GetDlgItem $0 $HWNDPARENT 1037
+  SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+  GetDlgItem $0 $HWNDPARENT 1038
+  SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+
   ${If} ${FileExists} "$INSTDIR\distribution\modern-header.bmp"
   ${AndIf} $hHeaderBitmap == ""
     Delete "$PLUGINSDIR\modern-header.bmp"
@@ -613,6 +669,32 @@ Function un.preFinish
   ; 4 overlaps 5.
   ${IfNot} ${RebootFlag}
     WriteINIStr "$PLUGINSDIR\ioSpecial.ini" "Field 4" Bottom "120"
+  ${EndIf}
+
+  ; We don't want the header bitmap showing on the finish page.
+  GetDlgItem $0 $HWNDPARENT 1046
+  ShowWindow $0 ${SW_HIDE}
+FunctionEnd
+
+Function un.ShowFinish
+  ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 2" "HWND"
+  SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+
+  ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 3" "HWND"
+  SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+
+  ; Either Fields 4 and 5 are the reboot option radio buttons, or Field 4 is
+  ; the survey checkbox and Field 5 doesn't exist. Either way, we need to
+  ; clear the theme from them before we can set their background colors.
+  ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 4" "HWND"
+  System::Call 'uxtheme::SetWindowTheme(i $0, w " ", w " ")'
+  SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
+
+  ClearErrors
+  ReadINIStr $0 "$PLUGINSDIR\ioSpecial.ini" "Field 5" "HWND"
+  ${IfNot} ${Errors}
+    System::Call 'uxtheme::SetWindowTheme(i $0, w " ", w " ")'
+    SetCtlColors $0 SYSCLR:WINDOWTEXT SYSCLR:WINDOW
   ${EndIf}
 FunctionEnd
 

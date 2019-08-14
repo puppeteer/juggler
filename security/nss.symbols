@@ -13,7 +13,7 @@
 PR_*
 PL_*
 #endif
-#include ../db/sqlite3/src/sqlite.symbols
+#include ../third_party/sqlite3/src/sqlite.symbols
 ATOB_AsciiToData
 ATOB_AsciiToData_Util
 ATOB_ConvertAsciiToItem_Util
@@ -175,6 +175,7 @@ HASH_Create
 HASH_Destroy
 HASH_End
 HASH_GetHashObject
+HASH_GetHashOidTagByHashType
 HASH_GetType
 HASH_HashBuf
 HASH_ResultLenByOidTag
@@ -182,51 +183,21 @@ HASH_Update
 NSSBase64_EncodeItem_Util
 NSS_CMSContentInfo_GetContent
 NSS_CMSContentInfo_GetContentTypeTag
-NSS_CMSContentInfo_SetContent_Data
-NSS_CMSContentInfo_SetContent_EnvelopedData
 NSS_CMSContentInfo_SetContent_SignedData
-NSS_CMSDecoder_Cancel
-NSS_CMSDecoder_Finish
-NSS_CMSDecoder_Start
-NSS_CMSDecoder_Update
-NSS_CMSEncoder_Cancel
 NSS_CMSEncoder_Finish
 NSS_CMSEncoder_Start
-NSS_CMSEncoder_Update
-NSS_CMSEnvelopedData_AddRecipient
-NSS_CMSEnvelopedData_Create
-NSS_CMSEnvelopedData_GetContentInfo
 NSS_CMSMessage_ContentLevel
-NSS_CMSMessage_ContentLevelCount
 NSS_CMSMessage_Create
 NSS_CMSMessage_CreateFromDER
 NSS_CMSMessage_Destroy
-NSS_CMSMessage_GetContent
 NSS_CMSMessage_GetContentInfo
-NSS_CMSMessage_IsEncrypted
 NSS_CMSMessage_IsSigned
-NSS_CMSRecipientInfo_Create
 NSS_CMSSignedData_AddCertificate
-NSS_CMSSignedData_AddCertList
-NSS_CMSSignedData_AddSignerInfo
-NSS_CMSSignedData_Create
 NSS_CMSSignedData_CreateCertsOnly
 NSS_CMSSignedData_Destroy
-NSS_CMSSignedData_GetContentInfo
 NSS_CMSSignedData_GetSignerInfo
-NSS_CMSSignedData_ImportCerts
-NSS_CMSSignedData_SetDigestValue
 NSS_CMSSignedData_SignerInfoCount
-NSS_CMSSignedData_VerifySignerInfo
-NSS_CMSSignerInfo_AddMSSMIMEEncKeyPrefs
-NSS_CMSSignerInfo_AddSigningTime
-NSS_CMSSignerInfo_AddSMIMECaps
-NSS_CMSSignerInfo_AddSMIMEEncKeyPrefs
-NSS_CMSSignerInfo_Create
-NSS_CMSSignerInfo_GetSignerCommonName
-NSS_CMSSignerInfo_GetSignerEmailAddress
 NSS_CMSSignerInfo_GetSigningCertificate
-NSS_CMSSignerInfo_IncludeCerts
 NSS_CMSSignerInfo_Verify
 NSS_FindCertKEAType
 NSS_GetAlgorithmPolicy
@@ -250,6 +221,7 @@ NSS_Get_SEC_IA5StringTemplate_Util
 NSS_Get_SEC_IntegerTemplate
 NSS_Get_SEC_IntegerTemplate_Util
 NSS_Get_SECKEY_RSAPSSParamsTemplate
+NSS_Get_SECKEY_EncryptedPrivateKeyInfoTemplate
 NSS_Get_SEC_NullTemplate_Util
 NSS_Get_SEC_ObjectIDTemplate_Util
 NSS_Get_SEC_OctetStringTemplate
@@ -263,6 +235,7 @@ NSS_GetVersion
 NSS_Init
 NSS_InitContext
 NSS_Initialize
+NSS_InitReadWrite
 NSS_InitWithMerge
 NSS_IsInitialized
 NSS_OptionGet
@@ -345,6 +318,7 @@ PK11_FindCertsFromNickname
 PK11_FindKeyByAnyCert
 PK11_FindKeyByDERCert
 PK11_FindKeyByKeyID
+PK11_FindRawCertsWithSubject
 PK11_FindSlotByName
 PK11_FindSlotsByNames
 PK11_FreeSlot
@@ -691,6 +665,7 @@ SSL_ImplementedCiphers @DATA@
 SSL_ImportFD
 SSL_NamedGroupConfig
 SSL_NumImplementedCiphers @DATA@
+SSL_OptionGet
 SSL_OptionSet
 SSL_OptionSetDefault
 SSL_PeerCertificate

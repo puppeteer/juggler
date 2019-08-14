@@ -15,6 +15,7 @@
 #include "mozilla/ServoElementSnapshotTable.h"
 #include "nsChangeHint.h"
 #include "nsPresContext.h"
+#include "nsPresContextInlines.h"  // XXX Shouldn't be included by header though
 #include "nsStringFwd.h"
 
 class nsAttrValue;
@@ -42,10 +43,12 @@ class Element;
 class ServoRestyleState {
  public:
   ServoRestyleState(ServoStyleSet& aStyleSet, nsStyleChangeList& aChangeList,
-                    nsTArray<nsIFrame*>& aPendingWrapperRestyles)
+                    nsTArray<nsIFrame*>& aPendingWrapperRestyles,
+                    nsTArray<nsIFrame*>& aPendingScrollAnchorSuppressions)
       : mStyleSet(aStyleSet),
         mChangeList(aChangeList),
         mPendingWrapperRestyles(aPendingWrapperRestyles),
+        mPendingScrollAnchorSuppressions(aPendingScrollAnchorSuppressions),
         mPendingWrapperRestyleOffset(aPendingWrapperRestyles.Length()),
         mChangesHandled(nsChangeHint(0))
 #ifdef DEBUG
@@ -76,6 +79,8 @@ class ServoRestyleState {
       : mStyleSet(aParentState.mStyleSet),
         mChangeList(aParentState.mChangeList),
         mPendingWrapperRestyles(aParentState.mPendingWrapperRestyles),
+        mPendingScrollAnchorSuppressions(
+            aParentState.mPendingScrollAnchorSuppressions),
         mPendingWrapperRestyleOffset(
             aParentState.mPendingWrapperRestyles.Length()),
         mChangesHandled(aType == Type::InFlow
@@ -125,6 +130,20 @@ class ServoRestyleState {
   // outer table and cellcontent frames.
   static nsIFrame* TableAwareParentFor(const nsIFrame* aChild);
 
+  // When the value of the position property changes such as we stop or start
+  // being absolutely or fixed positioned, we need to suppress scroll anchoring
+  // adjustments to avoid breaking websites.
+  //
+  // We do need to process all this once we're done with all our reframes,
+  // to handle correctly the cases where we reconstruct an ancestor, like when
+  // you reframe an ib-split (see bug 1559627 for example).
+  //
+  // This doesn't handle nested reframes. We'd need to rework quite some code to
+  // do that, and so far it doesn't seem to be a problem in practice.
+  void AddPendingScrollAnchorSuppression(nsIFrame* aFrame) {
+    mPendingScrollAnchorSuppressions.AppendElement(aFrame);
+  }
+
  private:
   // Process a wrapper restyle at the given index, and restyles for any
   // wrappers nested in it.  Returns the number of entries from
@@ -153,6 +172,8 @@ class ServoRestyleState {
   // occurs, the relevant frames will be placed in the array with ancestors
   // before descendants.
   nsTArray<nsIFrame*>& mPendingWrapperRestyles;
+
+  nsTArray<nsIFrame*>& mPendingScrollAnchorSuppressions;
 
   // Since we're given a possibly-nonempty mPendingWrapperRestyles to start
   // with, we need to keep track of where the part of it we're responsible for
@@ -205,8 +226,6 @@ class RestyleManager {
     MOZ_ASSERT(!mReentrantChanges);
   }
 
-  static nsCString RestyleHintToString(nsRestyleHint aHint);
-
 #ifdef DEBUG
   static nsCString ChangeHintToString(nsChangeHint aHint);
 
@@ -254,17 +273,21 @@ class RestyleManager {
     // content node for the real element.
     void Put(nsIContent* aContent, ComputedStyle* aComputedStyle) {
       MOZ_ASSERT(aContent);
-      CSSPseudoElementType pseudoType = aComputedStyle->GetPseudoType();
-      if (pseudoType == CSSPseudoElementType::NotPseudo) {
+      PseudoStyleType pseudoType = aComputedStyle->GetPseudoType();
+      if (pseudoType == PseudoStyleType::NotPseudo) {
         mContents.AppendElement(aContent);
-      } else if (pseudoType == CSSPseudoElementType::before) {
+      } else if (pseudoType == PseudoStyleType::before) {
         MOZ_ASSERT(aContent->NodeInfo()->NameAtom() ==
                    nsGkAtoms::mozgeneratedcontentbefore);
         mBeforeContents.AppendElement(aContent->GetParent());
-      } else if (pseudoType == CSSPseudoElementType::after) {
+      } else if (pseudoType == PseudoStyleType::after) {
         MOZ_ASSERT(aContent->NodeInfo()->NameAtom() ==
                    nsGkAtoms::mozgeneratedcontentafter);
         mAfterContents.AppendElement(aContent->GetParent());
+      } else if (pseudoType == PseudoStyleType::marker) {
+        MOZ_ASSERT(aContent->NodeInfo()->NameAtom() ==
+                   nsGkAtoms::mozgeneratedcontentmarker);
+        mMarkerContents.AppendElement(aContent->GetParent());
       }
     }
 
@@ -272,7 +295,7 @@ class RestyleManager {
 
    private:
     void StopAnimationsWithoutFrame(nsTArray<RefPtr<nsIContent>>& aArray,
-                                    CSSPseudoElementType aPseudoType);
+                                    PseudoStyleType aPseudoType);
 
     RestyleManager* mRestyleManager;
     AutoRestore<AnimationsWithDestroyedFrame*> mRestorePointer;
@@ -280,12 +303,13 @@ class RestyleManager {
     // Below three arrays might include elements that have already had their
     // animations or transitions stopped.
     //
-    // mBeforeContents and mAfterContents hold the real element rather than
-    // the content node for the generated content (which might change during
-    // a reframe)
+    // mBeforeContents, mAfterContents and mMarkerContents hold the real element
+    // rather than the content node for the generated content (which might
+    // change during a reframe)
     nsTArray<RefPtr<nsIContent>> mContents;
     nsTArray<RefPtr<nsIContent>> mBeforeContents;
     nsTArray<RefPtr<nsIContent>> mAfterContents;
+    nsTArray<RefPtr<nsIContent>> mMarkerContents;
   };
 
   /**
@@ -315,7 +339,7 @@ class RestyleManager {
   // affect :empty / :-moz-only-whitespace / :-moz-first-node / :-moz-last-node.
   void CharacterDataChanged(nsIContent*, const CharacterDataChangeInfo&);
 
-  void PostRestyleEvent(dom::Element*, nsRestyleHint,
+  void PostRestyleEvent(dom::Element*, RestyleHint,
                         nsChangeHint aMinChangeHint);
 
   /**
@@ -327,22 +351,20 @@ class RestyleManager {
    * restyling process and this restyle event will be processed in the second
    * traversal of the same restyling process.
    */
-  void PostRestyleEventForAnimations(dom::Element*, CSSPseudoElementType,
-                                     nsRestyleHint);
+  void PostRestyleEventForAnimations(dom::Element*, PseudoStyleType,
+                                     RestyleHint);
 
   void NextRestyleIsForCSSRuleChanges() { mRestyleForCSSRuleChanges = true; }
 
-  void RebuildAllStyleData(nsChangeHint aExtraHint, nsRestyleHint aRestyleHint);
-  void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint,
-                                    nsRestyleHint aRestyleHint);
+  void RebuildAllStyleData(nsChangeHint aExtraHint, RestyleHint);
+  void PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint, RestyleHint);
 
   void ProcessPendingRestyles();
   void ProcessAllPendingAttributeAndStateInvalidations();
 
   void ContentStateChanged(nsIContent* aContent, EventStates aStateMask);
   void AttributeWillChange(Element* aElement, int32_t aNameSpaceID,
-                           nsAtom* aAttribute, int32_t aModType,
-                           const nsAttrValue* aNewValue);
+                           nsAtom* aAttribute, int32_t aModType);
   void ClassAttributeWillBeChangedBySMIL(dom::Element* aElement);
   void AttributeChanged(dom::Element* aElement, int32_t aNameSpaceID,
                         nsAtom* aAttribute, int32_t aModType,
@@ -373,7 +395,9 @@ class RestyleManager {
   // track whether off-main-thread animations are up-to-date.
   uint64_t GetAnimationGeneration() const { return mAnimationGeneration; }
 
-  static uint64_t GetAnimationGenerationForFrame(nsIFrame* aFrame);
+  // Typically only style frames have animations associated with them so this
+  // will likely return zero for anything that is not a style frame.
+  static uint64_t GetAnimationGenerationForFrame(nsIFrame* aStyleFrame);
 
   // Update the animation generation count to mark that animation state
   // has changed.
@@ -456,11 +480,6 @@ class RestyleManager {
   void RestyleForEmptyChange(Element* aContainer);
   void MaybeRestyleForEdgeChildChange(Element* aContainer,
                                       nsIContent* aChangedChild);
-
-  // TODO(emilio): there's no good reason this isn't part of ContentStateChanged
-  // now, or the change hint isn't returned instead of via an out-param, really.
-  void ContentStateChangedInternal(const Element&, EventStates aStateMask,
-                                   nsChangeHint* aOutChangeHint);
 
   bool IsDisconnected() const { return !mPresContext; }
 

@@ -14,10 +14,10 @@ const mem3Page = new Memory({initial:3});
 const mem3PageMax3 = new Memory({initial:3, maximum: 3});
 const mem4Page = new Memory({initial:4});
 const mem4PageMax4 = new Memory({initial:4, maximum: 4});
-const tab1Elem = new Table({initial:1, element:"anyfunc"});
-const tab2Elem = new Table({initial:2, element:"anyfunc"});
-const tab3Elem = new Table({initial:3, element:"anyfunc"});
-const tab4Elem = new Table({initial:4, element:"anyfunc"});
+const tab1Elem = new Table({initial:1, element:"funcref"});
+const tab2Elem = new Table({initial:2, element:"funcref"});
+const tab3Elem = new Table({initial:3, element:"funcref"});
+const tab4Elem = new Table({initial:4, element:"funcref"});
 
 // Memory size consistency and internal limits.
 assertErrorMessage(() => new Memory({initial:2, maximum:1}), RangeError, /bad Memory maximum size/);
@@ -34,11 +34,11 @@ new Memory({initial: 0, maximum: 65536});
 assertErrorMessage(() => new Memory({initial: 0, maximum: 65537}), RangeError, /bad Memory maximum size/);
 
 // Table size consistency and internal limits.
-assertErrorMessage(() => new Table({initial:2, maximum:1, element:"anyfunc"}), RangeError, /bad Table maximum size/);
-new Table({ initial: 10000000, element:"anyfunc" });
-assertErrorMessage(() => new Table({initial:10000001, element:"anyfunc"}), RangeError, /bad Table initial size/);
-new Table({ initial: 0, maximum: 10000000, element:"anyfunc" });
-assertErrorMessage(() => new Table({initial:0, maximum: 10000001, element:"anyfunc"}), RangeError, /bad Table maximum size/);
+assertErrorMessage(() => new Table({initial:2, maximum:1, element:"funcref"}), RangeError, /bad Table maximum size/);
+new Table({ initial: 10000000, element:"funcref" });
+assertErrorMessage(() => new Table({initial:10000001, element:"funcref"}), RangeError, /bad Table initial size/);
+new Table({ initial: 0, maximum: 10000000, element:"funcref" });
+assertErrorMessage(() => new Table({initial:0, maximum: 10000001, element:"funcref"}), RangeError, /bad Table maximum size/);
 
 const m1 = new Module(wasmTextToBinary('(module (import "foo" "bar") (import "baz" "quux"))'));
 assertErrorMessage(() => new Instance(m1), TypeError, /second argument must be an object/);
@@ -87,13 +87,13 @@ assertEq(new Instance(m5, {a:{b:mem2Page}}) instanceof Instance, true);
 assertEq(new Instance(m5, {a:{b:mem3Page}}) instanceof Instance, true);
 assertEq(new Instance(m5, {a:{b:mem4Page}}) instanceof Instance, true);
 
-const m6 = new Module(wasmTextToBinary('(module (import "a" "b" (table 2 anyfunc)))'));
+const m6 = new Module(wasmTextToBinary('(module (import "a" "b" (table 2 funcref)))'));
 assertErrorMessage(() => new Instance(m6, {a:{b:tab1Elem}}), LinkError, /imported Table with incompatible size/);
 assertEq(new Instance(m6, {a:{b:tab2Elem}}) instanceof Instance, true);
 assertEq(new Instance(m6, {a:{b:tab3Elem}}) instanceof Instance, true);
 assertEq(new Instance(m6, {a:{b:tab4Elem}}) instanceof Instance, true);
 
-const m7 = new Module(wasmTextToBinary('(module (import "a" "b" (table 2 3 anyfunc)))'));
+const m7 = new Module(wasmTextToBinary('(module (import "a" "b" (table 2 3 funcref)))'));
 assertErrorMessage(() => new Instance(m7, {a:{b:tab1Elem}}), LinkError, /imported Table with incompatible size/);
 assertErrorMessage(() => new Instance(m7, {a:{b:tab2Elem}}), LinkError, /imported Table with incompatible maximum size/);
 assertErrorMessage(() => new Instance(m7, {a:{b:tab3Elem}}), LinkError, /imported Table with incompatible maximum size/);
@@ -101,8 +101,8 @@ assertErrorMessage(() => new Instance(m7, {a:{b:tab4Elem}}), LinkError, /importe
 
 wasmFailValidateText('(module (memory 2 1))', /maximum length 1 is less than initial length 2/);
 wasmFailValidateText('(module (import "a" "b" (memory 2 1)))', /maximum length 1 is less than initial length 2/);
-wasmFailValidateText('(module (table 2 1 anyfunc))', /maximum length 1 is less than initial length 2/);
-wasmFailValidateText('(module (import "a" "b" (table 2 1 anyfunc)))', /maximum length 1 is less than initial length 2/);
+wasmFailValidateText('(module (table 2 1 funcref))', /maximum length 1 is less than initial length 2/);
+wasmFailValidateText('(module (import "a" "b" (table 2 1 funcref)))', /maximum length 1 is less than initial length 2/);
 
 // Import wasm-wasm type mismatch
 
@@ -217,13 +217,13 @@ assertEq(Object.keys(e).length, 1);
 assertEq(String(Object.keys(e)), "");
 assertEq(e[""] instanceof Memory, true);
 
-var code = wasmTextToBinary('(module (table 0 anyfunc) (export "tbl" table))');
+var code = wasmTextToBinary('(module (table 0 funcref) (export "tbl" table))');
 var e = new Instance(new Module(code)).exports;
 assertEq(Object.keys(e).join(), "tbl");
 assertEq(e.tbl instanceof Table, true);
 assertEq(e.tbl.length, 0);
 
-var code = wasmTextToBinary('(module (table 2 anyfunc) (export "t1" table) (export "t2" table))');
+var code = wasmTextToBinary('(module (table 2 funcref) (export "t1" table) (export "t2" table))');
 var e = new Instance(new Module(code)).exports;
 assertEq(Object.keys(e).join(), "t1,t2");
 assertEq(e.t1 instanceof Table, true);
@@ -231,7 +231,7 @@ assertEq(e.t2 instanceof Table, true);
 assertEq(e.t1, e.t2);
 assertEq(e.t1.length, 2);
 
-var code = wasmTextToBinary('(module (table 2 anyfunc) (memory 1 1) (func) (export "t" table) (export "m" memory) (export "f" 0))');
+var code = wasmTextToBinary('(module (table 2 funcref) (memory 1 1) (func) (export "t" table) (export "m" memory) (export "f" 0))');
 var e = new Instance(new Module(code)).exports;
 assertEq(Object.keys(e).join(), "t,m,f");
 assertEq(e.f(), undefined);
@@ -239,7 +239,7 @@ assertEq(e.t instanceof Table, true);
 assertEq(e.m instanceof Memory, true);
 assertEq(e.t.length, 2);
 
-var code = wasmTextToBinary('(module (table 1 anyfunc) (memory 1 1) (func) (export "m" memory) (export "f" 0) (export "t" table))');
+var code = wasmTextToBinary('(module (table 1 funcref) (memory 1 1) (func) (export "m" memory) (export "f" 0) (export "t" table))');
 var e = new Instance(new Module(code)).exports;
 assertEq(Object.keys(e).join(), "m,f,t");
 assertEq(e.f(), undefined);
@@ -247,7 +247,7 @@ assertEq(e.t instanceof Table, true);
 assertEq(e.m instanceof Memory, true);
 +assertEq(e.t.length, 1);
 
-var code = wasmTextToBinary('(module (table 0 anyfunc) (export "" table))');
+var code = wasmTextToBinary('(module (table 0 funcref) (export "" table))');
 var e = new Instance(new Module(code)).exports;
 assertEq(Object.keys(e).length, 1);
 assertEq(String(Object.keys(e)), "");
@@ -260,7 +260,7 @@ var text = `(module
     (func $f (result i32) (i32.const 1))
     (func $g (result i32) (i32.const 2))
     (func $h (result i32) (i32.const 3))
-    (table 4 anyfunc)
+    (table 4 funcref)
     (elem (i32.const 0) $f)
     (elem (i32.const 2) $g)
     (export "f1" $f)
@@ -337,14 +337,14 @@ var e = new Instance(new Module(code), {a:{b:mem}}).exports;
 assertEq(mem, e.foo);
 assertEq(mem, e.bar);
 
-var code = wasmTextToBinary('(module (import "a" "b" (table 1 1 anyfunc)) (export "foo" table) (export "bar" table))');
-var tbl = new Table({initial:1, maximum:1, element:"anyfunc"});
+var code = wasmTextToBinary('(module (import "a" "b" (table 1 1 funcref)) (export "foo" table) (export "bar" table))');
+var tbl = new Table({initial:1, maximum:1, element:"funcref"});
 var e = new Instance(new Module(code), {a:{b:tbl}}).exports;
 assertEq(tbl, e.foo);
 assertEq(tbl, e.bar);
 
-var code = wasmTextToBinary('(module (import "a" "b" (table 2 2 anyfunc)) (func $foo) (elem (i32.const 0) $foo) (export "foo" $foo))');
-var tbl = new Table({initial:2, maximum:2, element:"anyfunc"});
+var code = wasmTextToBinary('(module (import "a" "b" (table 2 2 funcref)) (func $foo) (elem (i32.const 0) $foo) (export "foo" $foo))');
+var tbl = new Table({initial:2, maximum:2, element:"funcref"});
 var e1 = new Instance(new Module(code), {a:{b:tbl}}).exports;
 assertEq(e1.foo, tbl.get(0));
 tbl.set(1, e1.foo);
@@ -356,7 +356,7 @@ assertEq(tbl.get(0) === e1.foo, false);
 assertEq(e1.foo === e2.foo, false);
 
 var m = new Module(wasmTextToBinary(`(module
-    (table 3 anyfunc)
+    (table 3 funcref)
     (import $foo "" "foo" (result i32))
     (import $bar "" "bar" (result i32))
     (func $baz (result i32) (i32.const 13))
@@ -408,7 +408,7 @@ assertEq(e4.baz, e4.tbl.get(2));
 
 // i64 is fully allowed for imported wasm functions
 
-var code1 = wasmTextToBinary('(module (func $exp (param i64) (result i64) (i64.add (get_local 0) (i64.const 10))) (export "exp" $exp))');
+var code1 = wasmTextToBinary('(module (func $exp (param i64) (result i64) (i64.add (local.get 0) (i64.const 10))) (export "exp" $exp))');
 var e1 = new Instance(new Module(code1)).exports;
 var code2 = wasmTextToBinary('(module (import $i "a" "b" (param i64) (result i64)) (func $f (result i32) (i32.wrap/i64 (call $i (i64.const 42)))) (export "f" $f))');
 var e2 = new Instance(new Module(code2), {a:{b:e1.exp}}).exports;
@@ -462,7 +462,7 @@ var m = new Module(wasmTextToBinary(`
         (data (i32.const 0) "\\0a\\0b")
         (data (i32.const 100) "\\0c\\0d")
         (func $get (param $p i32) (result i32)
-            (i32.load8_u (get_local $p)))
+            (i32.load8_u (local.get $p)))
         (export "get" $get))
 `));
 var mem = new Memory({initial:1, maximum:1});
@@ -487,7 +487,7 @@ var m = new Module(wasmTextToBinary(`
     (module
         (import "glob" "a" (global i32))
         (memory 1)
-        (data (get_global 0) "\\0a\\0b"))
+        (data (global.get 0) "\\0a\\0b"))
 `));
 assertEq(new Instance(m, {glob:{a:0}}) instanceof Instance, true);
 assertEq(new Instance(m, {glob:{a:(64*1024 - 2)}}) instanceof Instance, true);
@@ -515,33 +515,73 @@ assertErrorMessage(() => new Instance(m), LinkError, /data segment does not fit/
 var m = new Module(wasmTextToBinary(`
     (module
         (import "a" "mem" (memory 1))
-        (import "a" "tbl" (table 1 anyfunc))
+        (import "a" "tbl" (table 1 funcref))
         (import $memOff "a" "memOff" (global i32))
         (import $tblOff "a" "tblOff" (global i32))
         (func $f)
         (func $g)
         (data (i32.const 0) "\\01")
         (elem (i32.const 0) $f)
-        (data (get_global $memOff) "\\02")
-        (elem (get_global $tblOff) $g)
+        (data (global.get $memOff) "\\02")
+        (elem (global.get $tblOff) $g)
         (export "f" $f)
         (export "g" $g))
 `));
 
+// Active segments are applied in order (this is observable if they overlap).
+//
+// Without bulk memory, all range checking for tables and memory happens before
+// any writes happen, and any OOB will force no writing to happen at all.
+//
+// With bulk memory, active segments are applied first for tables and then for
+// memories.  Bounds checking happens for each byte or table element written.
+// The first OOB aborts the initialization process, leaving written data in
+// place.  Notably, any OOB in table initialization will prevent any memory
+// initialization from happening at all.
+
 var npages = 2;
 var mem = new Memory({initial:npages});
 var mem8 = new Uint8Array(mem.buffer);
-var tbl = new Table({initial:2, element:"anyfunc"});
+var tbl = new Table({initial:2, element:"funcref"});
 
-assertErrorMessage(() => new Instance(m, {a:{mem, tbl, memOff:1, tblOff:2}}), LinkError, /elem segment does not fit/);
+assertErrorMessage(() => new Instance(m, {a:{mem, tbl, memOff:1, tblOff:2}}),
+                   LinkError,
+                   /elem segment does not fit/);
+if (wasmBulkMemSupported()) {
+    // The first active element segment is applied, but the second active
+    // element segment is completely OOB.
+    assertEq(typeof tbl.get(0), "function");
+    assertEq(tbl.get(1), null);
+} else if (!wasmUsesCranelift()) {
+    assertEq(tbl.get(0), null);
+    assertEq(tbl.get(1), null);
+}
 assertEq(mem8[0], 0);
 assertEq(mem8[1], 0);
-assertEq(tbl.get(0), null);
 
-assertErrorMessage(() => new Instance(m, {a:{mem, tbl, memOff:npages*64*1024, tblOff:1}}), LinkError, /data segment does not fit/);
-assertEq(mem8[0], 0);
-assertEq(tbl.get(0), null);
-assertEq(tbl.get(1), null);
+tbl.set(0, null);
+tbl.set(1, null);
+
+assertErrorMessage(() => new Instance(m, {a:{mem, tbl, memOff:npages*64*1024, tblOff:1}}),
+                   LinkError,
+                   /data segment does not fit/);
+if (wasmBulkMemSupported()) {
+    // The first and second active element segments are applied fully.  The
+    // first active data segment applies, but the second one is completely OOB.
+    assertEq(typeof tbl.get(0), "function");
+    assertEq(typeof tbl.get(1), "function");
+    assertEq(mem8[0], 1);
+} else if (!wasmUsesCranelift()) {
+    assertEq(tbl.get(0), null);
+    assertEq(tbl.get(1), null);
+    assertEq(mem8[0], 0);
+}
+
+tbl.set(0, null);
+tbl.set(1, null);
+mem8[0] = 0;
+
+// Both element and data segments apply successfully without OOB
 
 var i = new Instance(m, {a:{mem, tbl, memOff:npages*64*1024-1, tblOff:1}});
 assertEq(mem8[0], 1);
@@ -549,11 +589,57 @@ assertEq(mem8[npages*64*1024-1], 2);
 assertEq(tbl.get(0), i.exports.f);
 assertEq(tbl.get(1), i.exports.g);
 
+// Element segment applies partially and prevents subsequent elem segment and
+// data segment from being applied.
+
+if (wasmBulkMemSupported()) {
+    let m = new Module(wasmTextToBinary(
+        `(module
+           (import "" "mem" (memory 1))
+           (import "" "tbl" (table 3 funcref))
+           (elem (i32.const 1) $f $g $h) ;; fails after $f and $g
+           (elem (i32.const 0) $f)       ;; is not applied
+           (data (i32.const 0) "\\01")   ;; is not applied
+           (func $f)
+           (func $g)
+           (func $h))`));
+    let mem = new Memory({initial:1});
+    let tbl = new Table({initial:3, element:"funcref"});
+    assertErrorMessage(() => new Instance(m, {"":{mem, tbl}}),
+                       LinkError,
+                       /elem segment does not fit/);
+    assertEq(tbl.get(0), null);
+    assertEq(typeof tbl.get(1), "function");
+    assertEq(typeof tbl.get(2), "function");
+    let v = new Uint8Array(mem.buffer);
+    assertEq(v[0], 0);
+}
+
+// Data segment applies partially and prevents subsequent data segment from
+// being applied.
+
+if (wasmBulkMemSupported()) {
+    let m = new Module(wasmTextToBinary(
+        `(module
+           (import "" "mem" (memory 1))
+           (data (i32.const 65534) "\\01\\02\\03") ;; fails after 1 and 2
+           (data (i32.const 0) "\\04")             ;; is not applied
+         )`));
+    let mem = new Memory({initial:1});
+    assertErrorMessage(() => new Instance(m, {"":{mem}}),
+                       LinkError,
+                       /data segment does not fit/);
+    let v = new Uint8Array(mem.buffer);
+    assertEq(v[65534], 1);
+    assertEq(v[65535], 2);
+    assertEq(v[0], 0);
+}
+
 // Elem segments on imported tables
 
 var m = new Module(wasmTextToBinary(`
     (module
-        (import "a" "b" (table 10 anyfunc))
+        (import "a" "b" (table 10 funcref))
         (elem (i32.const 0) $one $two)
         (elem (i32.const 3) $three $four)
         (func $one (result i32) (i32.const 1))
@@ -561,7 +647,7 @@ var m = new Module(wasmTextToBinary(`
         (func $three (result i32) (i32.const 3))
         (func $four (result i32) (i32.const 4)))
 `));
-var tbl = new Table({initial:10, element:"anyfunc"});
+var tbl = new Table({initial:10, element:"funcref"});
 new Instance(m, {a:{b:tbl}});
 assertEq(tbl.get(0)(), 1);
 assertEq(tbl.get(1)(), 2);
@@ -575,14 +661,14 @@ var m = new Module(wasmTextToBinary(`
     (module
         (func $their1 (import "" "func") (result i32))
         (func $their2 (import "" "func"))
-        (table (import "" "table") 4 anyfunc)
+        (table (import "" "table") 4 funcref)
         (func $my (result i32) i32.const 13)
         (elem (i32.const 1) $my)
         (elem (i32.const 2) $their1)
         (elem (i32.const 3) $their2)
     )
 `));
-var tbl = new Table({initial:4, element:"anyfunc"});
+var tbl = new Table({initial:4, element:"funcref"});
 var f = () => 42;
 new Instance(m, { "": { table: tbl, func: f} });
 assertEq(tbl.get(0), null);
@@ -592,7 +678,7 @@ assertEq(tbl.get(3)(), undefined);
 
 // Cross-instance calls
 
-var i1 = new Instance(new Module(wasmTextToBinary(`(module (func) (func (param i32) (result i32) (i32.add (get_local 0) (i32.const 1))) (func) (export "f" 1))`)));
+var i1 = new Instance(new Module(wasmTextToBinary(`(module (func) (func (param i32) (result i32) (i32.add (local.get 0) (i32.const 1))) (func) (export "f" 1))`)));
 var i2 = new Instance(new Module(wasmTextToBinary(`(module (import $imp "a" "b" (param i32) (result i32)) (func $g (result i32) (call $imp (i32.const 13))) (export "g" $g))`)), {a:{b:i1.exports.f}});
 assertEq(i2.exports.g(), 14);
 
@@ -606,11 +692,11 @@ var i2 = new Instance(new Module(wasmTextToBinary(`(module
     (import $imp "a" "b" (result i32))
     (memory 1 1)
     (data (i32.const 0) "\\13")
-    (table 2 2 anyfunc)
+    (table 2 2 funcref)
     (elem (i32.const 0) $imp $def)
     (func $def (result i32) (i32.load (i32.const 0)))
     (type $v2i (func (result i32)))
-    (func $call (param i32) (result i32) (call_indirect $v2i (get_local 0)))
+    (func $call (param i32) (result i32) (call_indirect $v2i (local.get 0)))
     (export "call" $call)
 )`)), {a:{b:i1.exports.f}});
 assertEq(i2.exports.call(0), 0x42);
@@ -620,11 +706,11 @@ var m = new Module(wasmTextToBinary(`(module
     (import $val "a" "val" (global i32))
     (import $next "a" "next" (result i32))
     (memory 1)
-    (func $start (i32.store (i32.const 0) (get_global $val)))
+    (func $start (i32.store (i32.const 0) (global.get $val)))
     (start $start)
     (func $call (result i32)
         (i32.add
-            (get_global $val)
+            (global.get $val)
             (i32.add
                 (i32.load (i32.const 0))
                 (call $next))))
@@ -674,7 +760,7 @@ assertEq(e.call(), 1090);
         (import $missingThreeArgs "a" "sum" (result i32))
 
         (func (export "foo") (param i32) (result i32)
-         get_local 0
+         local.get 0
          call $ffi
         )
 
@@ -683,13 +769,13 @@ assertEq(e.call(), 1090);
         )
 
         (func (export "missTwo") (param i32) (result i32)
-         get_local 0
+         local.get 0
          call $missingTwoArgs
         )
 
         (func (export "missOne") (param i32) (param i32) (result i32)
-         get_local 0
-         get_local 1
+         local.get 0
+         local.get 1
          call $missingOneArg
         )
     )`, imports).exports;
@@ -730,7 +816,7 @@ assertEq(e.call(), 1090);
     g.evaluate("function f1() { assertCorrectRealm(); return 123; }");
     g.mem = new Memory({initial:8});
 
-    // The current_memory builtin asserts cx->realm matches instance->realm so
+    // The memory.size builtin asserts cx->realm matches instance->realm so
     // we call it here.
     var i1 = new Instance(new Module(wasmTextToBinary(`
         (module
@@ -740,8 +826,8 @@ assertEq(e.call(), 1090);
             (func $test (result i32)
                 (i32.add
                     (i32.add
-                        (i32.add (current_memory) (call $imp1))
-                        (current_memory))
+                        (i32.add (memory.size) (call $imp1))
+                        (memory.size))
                     (call $imp2)))
             (export "impstub" $imp1)
             (export "test" $test))
@@ -757,7 +843,7 @@ assertEq(e.call(), 1090);
         (module
             (import $imp "a" "othertest" (result i32))
             (import "a" "m" (memory 1))
-            (func (result i32) (i32.add (call $imp) (current_memory)))
+            (func (result i32) (i32.add (call $imp) (memory.size)))
             (export "test" 1))
     `;
     g.i1 = i1;

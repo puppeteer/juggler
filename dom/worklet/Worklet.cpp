@@ -16,6 +16,7 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/WorkletImpl.h"
+#include "mozilla/StaticPrefs.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/SourceText.h"
 #include "nsIInputStreamPump.h"
@@ -35,8 +36,11 @@ class ExecutionRunnable final : public Runnable {
         mWorkletImpl(aWorkletImpl),
         mScriptBuffer(std::move(aScriptBuffer)),
         mScriptLength(aScriptLength),
+        mParentRuntime(
+            JS_GetParentRuntime(CycleCollectedJSContext::Get()->Context())),
         mResult(NS_ERROR_FAILURE) {
     MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(mParentRuntime);
   }
 
   NS_IMETHOD
@@ -51,6 +55,7 @@ class ExecutionRunnable final : public Runnable {
   RefPtr<WorkletImpl> mWorkletImpl;
   JS::UniqueTwoByteChars mScriptBuffer;
   size_t mScriptLength;
+  JSRuntime* mParentRuntime;
   nsresult mResult;
 };
 
@@ -82,7 +87,7 @@ class WorkletFetchHandler final : public PromiseNativeHandler,
     nsCOMPtr<nsPIDOMWindowInner> window = aWorklet->GetParentObject();
     MOZ_ASSERT(window);
 
-    nsCOMPtr<nsIDocument> doc;
+    nsCOMPtr<Document> doc;
     doc = window->GetExtantDoc();
     if (!doc) {
       promise->MaybeReject(NS_ERROR_FAILURE);
@@ -320,24 +325,23 @@ NS_IMPL_ISUPPORTS(WorkletFetchHandler, nsIStreamLoaderObserver)
 
 NS_IMETHODIMP
 ExecutionRunnable::Run() {
-  if (WorkletThread::IsOnWorkletThread()) {
+  // WorkletThread::IsOnWorkletThread() cannot be used here because it depends
+  // on a WorkletJSContext having been created for this thread.  That does not
+  // happen until the global scope is created the first time
+  // RunOnWorkletThread() is called.
+  if (!NS_IsMainThread()) {
     RunOnWorkletThread();
     return NS_DispatchToMainThread(this);
   }
 
-  MOZ_ASSERT(NS_IsMainThread());
   RunOnMainThread();
   return NS_OK;
 }
 
 void ExecutionRunnable::RunOnWorkletThread() {
-  WorkletThread::AssertIsOnWorkletThread();
+  WorkletThread::EnsureCycleCollectedJSContext(mParentRuntime);
 
-  AutoJSAPI jsapi;
-  jsapi.Init();
-
-  RefPtr<WorkletGlobalScope> globalScope =
-      mWorkletImpl->CreateGlobalScope(jsapi.cx());
+  WorkletGlobalScope* globalScope = mWorkletImpl->GetGlobalScope();
   MOZ_ASSERT(globalScope);
 
   AutoEntryScript aes(globalScope, "Worklet");
@@ -388,12 +392,14 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(Worklet)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Worklet)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mOwnedObject)
   tmp->mImpl->NotifyWorkletFinished();
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Worklet)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwnedObject)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(Worklet)
@@ -406,8 +412,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Worklet)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
-Worklet::Worklet(nsPIDOMWindowInner* aWindow, RefPtr<WorkletImpl> aImpl)
-    : mWindow(aWindow), mImpl(std::move(aImpl)) {
+Worklet::Worklet(nsPIDOMWindowInner* aWindow, RefPtr<WorkletImpl> aImpl,
+                 nsISupports* aOwnedObject)
+    : mWindow(aWindow), mOwnedObject(aOwnedObject), mImpl(std::move(aImpl)) {
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(mImpl);
   MOZ_ASSERT(NS_IsMainThread());

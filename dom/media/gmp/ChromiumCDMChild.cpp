@@ -392,15 +392,16 @@ mozilla::ipc::IPCResult ChromiumCDMChild::RecvInit(
   mPersistentStateAllowed = aAllowPersistentState;
 
   RefPtr<ChromiumCDMChild::InitPromise> promise = mInitPromise.Ensure(__func__);
-  promise->Then(mPlugin->GMPMessageLoop()->SerialEventTarget(), __func__,
-                [aResolver](bool /* unused */) { aResolver(true); },
-                [aResolver](nsresult rv) {
-                  GMP_LOG(
-                      "ChromiumCDMChild::RecvInit() init promise rejected with "
-                      "rv=%" PRIu32,
-                      static_cast<uint32_t>(rv));
-                  aResolver(false);
-                });
+  promise->Then(
+      mPlugin->GMPMessageLoop()->SerialEventTarget(), __func__,
+      [aResolver](bool /* unused */) { aResolver(true); },
+      [aResolver](nsresult rv) {
+        GMP_LOG(
+            "ChromiumCDMChild::RecvInit() init promise rejected with "
+            "rv=%" PRIu32,
+            static_cast<uint32_t>(rv));
+        aResolver(false);
+      });
 
   if (mCDM) {
     // Once the CDM is initialized we expect it to resolve mInitPromise via
@@ -575,10 +576,10 @@ static void InitInputBuffer(const CDMInputBuffer& aBuffer,
   aInputBuffer.data_size = aBuffer.mData().Size<uint8_t>();
 
   if (aBuffer.mEncryptionScheme() > GMPEncryptionScheme::kGMPEncryptionNone) {
-    // Cbcs is not yet supported, so we expect only cenc if the buffer us
-    // encrypted
     MOZ_ASSERT(aBuffer.mEncryptionScheme() ==
-               GMPEncryptionScheme::kGMPEncryptionCenc);
+                   GMPEncryptionScheme::kGMPEncryptionCenc ||
+               aBuffer.mEncryptionScheme() ==
+                   GMPEncryptionScheme::kGMPEncryptionCbcs);
     aInputBuffer.key_id = aBuffer.mKeyId().Elements();
     aInputBuffer.key_id_size = aBuffer.mKeyId().Length();
 
@@ -595,6 +596,8 @@ static void InitInputBuffer(const CDMInputBuffer& aBuffer,
     aInputBuffer.encryption_scheme =
         ConvertToCdmEncryptionScheme(aBuffer.mEncryptionScheme());
   }
+  aInputBuffer.pattern.crypt_byte_block = aBuffer.mCryptByteBlock();
+  aInputBuffer.pattern.skip_byte_block = aBuffer.mSkipByteBlock();
   aInputBuffer.timestamp = aBuffer.mTimestamp();
 }
 
@@ -669,7 +672,7 @@ mozilla::ipc::IPCResult ChromiumCDMChild::RecvDecrypt(
   // Success! Return the decrypted sample to parent.
   MOZ_ASSERT(!HasShmemOfSize(outputShmemSize));
   ipc::Shmem shmem = buffer->ExtractShmem();
-  if (SendDecrypted(aId, cdm::kSuccess, shmem)) {
+  if (SendDecrypted(aId, cdm::kSuccess, std::move(shmem))) {
     // No need to deallocate the output shmem; it should have been returned
     // to the content process.
     autoDeallocateOutputShmem.release();
@@ -818,7 +821,7 @@ void ChromiumCDMChild::ReturnOutput(WidevineVideoFrame& aFrame) {
   CDMBuffer* base = reinterpret_cast<CDMBuffer*>(aFrame.FrameBuffer());
   if (base->AsShmemBuffer()) {
     ipc::Shmem shmem = base->AsShmemBuffer()->ExtractShmem();
-    Unused << SendDecodedShmem(output, shmem);
+    Unused << SendDecodedShmem(output, std::move(shmem));
   } else {
     MOZ_ASSERT(base->AsArrayBuffer());
     Unused << SendDecodedData(output, base->AsArrayBuffer()->ExtractBuffer());

@@ -45,9 +45,19 @@ Structure:
           submissionURL: <string> // set for default engines or well known search domains
         },
         searchCohort: <string>, // optional, contains an identifier for any active search A/B experiments
+        launcherProcessState: <integer>, // optional, values correspond to values of mozilla::LauncherRegistryInfo::EnabledState enum
         e10sEnabled: <bool>, // whether e10s is on, i.e. browser tabs open by default in a different process
+        e10sMultiProcesses: <integer>, // Maximum number of processes that will be launched for regular web content
         telemetryEnabled: <bool>, // false on failure
         locale: <string>, // e.g. "it", null on failure
+        intl: {
+          requestedLocales: [ <string>, ... ], // The locales that are being requested.
+          availableLocales: [ <string>, ... ], // The locales that are available for use.
+          appLocales: [ <string>, ... ], // The negotiated locales that are being used.
+          systemLocales: [ <string>, ... ], // The locales for the OS.
+          regionalPrefsLocales: [ <string>, ... ], // The regional preferences for the OS.
+          acceptLanguages: [ <string>, ... ], // The languages for the Accept-Languages header.
+        },
         update: {
           channel: <string>, // e.g. "release", null on failure
           enabled: <bool>, // true on failure
@@ -90,6 +100,7 @@ Structure:
         memoryMB: <number>,
         virtualMaxMB: <number>, // windows-only
         isWow64: <bool>, // windows-only
+	isWowARM64: <bool>, // windows-only
         cpu: {
             count: <number>,  // desktop only, e.g. 8, or null on failure - logical cpus
             cores: <number>, // desktop only, e.g., 4, or null on failure - physical cores
@@ -130,19 +141,23 @@ Structure:
           profile: { // hdd where the profile folder is located
               model: <string>, // windows only or null on failure
               revision: <string>, // windows only or null on failure
+              type: <string>, // "SSD" or "HDD" windows only or null on failure
           },
           binary:  { // hdd where the application binary is located
               model: <string>, // windows only or null on failure
               revision: <string>, // windows only or null on failure
+              type: <string>, // "SSD" or "HDD" windows only or null on failure
           },
           system:  { // hdd where the system files are located
               model: <string>, // windows only or null on failure
               revision: <string>, // windows only or null on failure
+              type: <string>, // "SSD" or "HDD" windows only or null on failure
           },
         },
         gfx: {
             D2DEnabled: <bool>, // null on failure
             DWriteEnabled: <bool>, // null on failure
+            Headless: <bool>, // null on failure
             //DWriteVersion: <string>, // temporarily removed, pending bug 1154500
             adapters: [
               {
@@ -152,6 +167,7 @@ Structure:
                 subsysID: <string>, // null on failure
                 RAM: <number>, // in MB, null on failure
                 driver: <string>, // null on failure
+                driverVendor: <string>, // null on failure
                 driverVersion: <string>, // null on failure
                 driverDate: <string>, // null on failure
                 GPUActive: <bool>, // currently always true for the first adapter
@@ -159,7 +175,7 @@ Structure:
               ...
             ],
             // Note: currently only added on Desktop. On Linux, only a single
-            // monitor is returned representing the entire virtual screen.
+            // monitor is returned for the primary screen.
             monitors: [
               {
                 screenWidth: <number>,  // screen width in pixels
@@ -266,7 +282,6 @@ Structure:
             },
             ...
         },
-        persona: <string>, // id of the current persona
       },
       experiments: {
         "<experiment id>": { branch: "<branch>" },
@@ -456,6 +471,11 @@ For each experiment we collect the ``id`` and the ``branch`` the client is enrol
 Version History
 ---------------
 
+- Firefox 67:
+
+  - Removed ``persona``. The ``addons.activeAddons`` list should be used instead. (`bug 1525511 https://bugzilla.mozilla.org/show_bug.cgi?id=1525511>`_)
+
 - Firefox 61:
 
   - Removed empty ``addons.activeExperiment`` (`bug 1452935 <https://bugzilla.mozilla.org/show_bug.cgi?id=1452935>`_).
+

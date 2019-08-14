@@ -9,7 +9,7 @@
 #include "jit/CompileInfo.h"
 #include "jit/JitSpewer.h"
 #ifdef TRACK_SNAPSHOTS
-#include "jit/LIR.h"
+#  include "jit/LIR.h"
 #endif
 #include "jit/MIR.h"
 #include "jit/Recover.h"
@@ -343,6 +343,8 @@ static const char* ValTypeToString(JSValueType type) {
       return "string";
     case JSVAL_TYPE_SYMBOL:
       return "symbol";
+    case JSVAL_TYPE_BIGINT:
+      return "BigInt";
     case JSVAL_TYPE_BOOLEAN:
       return "boolean";
     case JSVAL_TYPE_OBJECT:

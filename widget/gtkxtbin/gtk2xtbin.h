@@ -13,14 +13,14 @@
 #include <X11/Xutil.h>
 #include <X11/Xlib.h>
 #ifdef MOZILLA_CLIENT
-#include "mozilla/Types.h"
-#ifdef _IMPL_GTKXTBIN_API
-#define GTKXTBIN_API(type) MOZ_EXPORT type
+#  include "mozilla/Types.h"
+#  ifdef _IMPL_GTKXTBIN_API
+#    define GTKXTBIN_API(type) MOZ_EXPORT type
+#  else
+#    define GTKXTBIN_API(type) MOZ_IMPORT_API type
+#  endif
 #else
-#define GTKXTBIN_API(type) MOZ_IMPORT_API type
-#endif
-#else
-#define GTKXTBIN_API(type) type
+#  define GTKXTBIN_API(type) type
 #endif
 
 #ifdef __cplusplus
@@ -30,10 +30,10 @@ extern "C" {
 typedef struct _XtClient XtClient;
 
 struct _XtClient {
-  Display *xtdisplay;
+  Display* xtdisplay;
   Widget top_widget;   /* The toplevel widget */
   Widget child_widget; /* The embedded widget */
-  Visual *xtvisual;
+  Visual* xtvisual;
   int xtdepth;
   Colormap xtcolormap;
   Window oldwindow;
@@ -43,19 +43,19 @@ struct _XtClient {
 typedef struct _GtkXtBin GtkXtBin;
 typedef struct _GtkXtBinClass GtkXtBinClass;
 
-#define GTK_TYPE_XTBIN (gtk_xtbin_get_type())
-#define GTK_XTBIN(obj) \
-  (G_TYPE_CHECK_INSTANCE_CAST((obj), GTK_TYPE_XTBIN, GtkXtBin))
-#define GTK_XTBIN_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_CAST((klass), GTK_TYPE_XTBIN, GtkXtBinClass))
-#define GTK_IS_XTBIN(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj), GTK_TYPE_XTBIN))
-#define GTK_IS_XTBIN_CLASS(klass) \
-  (G_TYPE_CHECK_CLASS_TYPE((klass), GTK_TYPE_XTBIN))
+#  define GTK_TYPE_XTBIN (gtk_xtbin_get_type())
+#  define GTK_XTBIN(obj) \
+    (G_TYPE_CHECK_INSTANCE_CAST((obj), GTK_TYPE_XTBIN, GtkXtBin))
+#  define GTK_XTBIN_CLASS(klass) \
+    (G_TYPE_CHECK_CLASS_CAST((klass), GTK_TYPE_XTBIN, GtkXtBinClass))
+#  define GTK_IS_XTBIN(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj), GTK_TYPE_XTBIN))
+#  define GTK_IS_XTBIN_CLASS(klass) \
+    (G_TYPE_CHECK_CLASS_TYPE((klass), GTK_TYPE_XTBIN))
 
 struct _GtkXtBin {
   GtkSocket gsocket;
-  GdkWindow *parent_window;
-  Display *xtdisplay; /* Xt Toolkit Display */
+  GdkWindow* parent_window;
+  Display* xtdisplay; /* Xt Toolkit Display */
 
   Window xtwindow;   /* Xt Toolkit XWindow */
   XtClient xtclient; /* Xt Client for XEmbed */
@@ -66,13 +66,13 @@ struct _GtkXtBinClass {
 };
 
 GTKXTBIN_API(GType) gtk_xtbin_get_type(void);
-GTKXTBIN_API(GtkWidget *) gtk_xtbin_new(GdkWindow *parent_window, String *f);
+GTKXTBIN_API(GtkWidget*) gtk_xtbin_new(GdkWindow* parent_window, String* f);
 #endif
 
 typedef struct _XtTMRec {
   XtTranslations translations;       /* private to Translation Manager    */
   XtBoundActions proc_table;         /* procedure bindings for actions    */
-  struct _XtStateRec *current_state; /* Translation Manager state ptr     */
+  struct _XtStateRec* current_state; /* Translation Manager state ptr     */
   unsigned long lastEventTime;
 } XtTMRec, *XtTM;
 
@@ -98,7 +98,7 @@ typedef struct _CorePart {
   WidgetList popup_list;            /* list of popups                    */
   Cardinal num_popups;              /* how many popups                   */
   String name;                      /* widget resource name              */
-  Screen *screen;                   /* window's screen                   */
+  Screen* screen;                   /* window's screen                   */
   Colormap colormap;                /* colormap                          */
   Window window;                    /* window ID                         */
   Cardinal depth;                   /* number of planes in window        */
@@ -113,15 +113,15 @@ typedef struct _WidgetRec {
 } WidgetRec, CoreRec;
 
 /* Exported functions, used by Xt plugins */
-void xt_client_create(XtClient *xtclient, Window embeder, int height,
+void xt_client_create(XtClient* xtclient, Window embeder, int height,
                       int width);
-void xt_client_unrealize(XtClient *xtclient);
-void xt_client_destroy(XtClient *xtclient);
-void xt_client_init(XtClient *xtclient, Visual *xtvisual, Colormap xtcolormap,
+void xt_client_unrealize(XtClient* xtclient);
+void xt_client_destroy(XtClient* xtclient);
+void xt_client_init(XtClient* xtclient, Visual* xtvisual, Colormap xtcolormap,
                     int xtdepth);
 void xt_client_xloop_create(void);
 void xt_client_xloop_destroy(void);
-Display *xt_client_get_display(void);
+Display* xt_client_get_display(void);
 
 #ifdef __cplusplus
 }

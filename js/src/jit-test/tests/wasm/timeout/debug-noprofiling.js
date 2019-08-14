@@ -3,23 +3,23 @@
 // Don't include wasm.js in timeout tests: when wasm isn't supported, it will
 // quit(0) which will cause the test to fail.
 
-newGlobal().Debugger().addDebuggee(this);
+newGlobal({newCompartment: true}).Debugger().addDebuggee(this);
 
 var t = new WebAssembly.Table({
     initial: 1,
-    element: "anyfunc"
+    element: "funcref"
 });
 
 new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`
 (module
     (func $iloop loop $top br $top end)
-    (import "imports" "t" (table1 anyfunc))
+    (import "imports" "t" (table1 funcref))
     (elem (i32.const0) $iloop))
 `)), { imports: { t } });
 
 outer = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`
 (module
-    (import "imports" "t" (table1 anyfunc))
+    (import "imports" "t" (table1 funcref))
     (type $v2v (func))
     (func (export "run")
         i32.const0

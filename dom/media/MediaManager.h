@@ -36,7 +36,7 @@
 #include "DOMMediaStream.h"
 
 #ifdef MOZ_WEBRTC
-#include "mtransport/runnable_utils.h"
+#  include "mtransport/runnable_utils.h"
 #endif
 
 // Note, these suck in Windows headers, unfortunately.
@@ -56,29 +56,26 @@ namespace ipc {
 class PrincipalInfo;
 }
 
-class AllocationHandle;
 class GetUserMediaTask;
 class GetUserMediaWindowListener;
 class MediaManager;
 class SourceListener;
-
-LogModule* GetMediaManagerLog();
 
 class MediaDevice : public nsIMediaDevice {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIMEDIADEVICE
 
-  explicit MediaDevice(const RefPtr<MediaEngineSource>& aSource,
-                       const nsString& aName, const nsString& aID,
-                       const nsString& aRawID);
+  MediaDevice(const RefPtr<MediaEngineSource>& aSource, const nsString& aName,
+              const nsString& aID, const nsString& aGroupID,
+              const nsString& aRawID);
 
-  explicit MediaDevice(const RefPtr<AudioDeviceInfo>& aAudioDeviceInfo,
-                       const nsString& aID,
-                       const nsString& aRawID = NS_LITERAL_STRING(""));
+  MediaDevice(const RefPtr<AudioDeviceInfo>& aAudioDeviceInfo,
+              const nsString& aID, const nsString& aGroupID,
+              const nsString& aRawID = NS_LITERAL_STRING(""));
 
-  explicit MediaDevice(const RefPtr<MediaDevice>& aOther, const nsString& aID,
-                       const nsString& aRawID);
+  MediaDevice(const RefPtr<MediaDevice>& aOther, const nsString& aID,
+              const nsString& aGroupID, const nsString& aRawID);
 
   uint32_t GetBestFitnessDistance(
       const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
@@ -120,10 +117,6 @@ class MediaDevice : public nsIMediaDevice {
   static uint32_t FitnessDistance(
       nsString aN, const dom::ConstrainDOMStringParameters& aParams);
 
-  // Assigned on allocation on media thread, then read on the media thread and
-  // graph thread
-  RefPtr<AllocationHandle> mAllocationHandle;
-
  public:
   const RefPtr<MediaEngineSource> mSource;
   const RefPtr<AudioDeviceInfo> mSinkInfo;
@@ -132,6 +125,7 @@ class MediaDevice : public nsIMediaDevice {
   const nsString mType;
   const nsString mName;
   const nsString mID;
+  const nsString mGroupID;
   const nsString mRawID;
 };
 
@@ -189,27 +183,24 @@ class MediaManager final : public nsIMediaManagerService,
     MOZ_ASSERT(NS_IsMainThread());
     return mActiveWindows.GetWeak(aWindowId);
   }
-  void AddWindowID(uint64_t aWindowId, GetUserMediaWindowListener* aListener);
+  void AddWindowID(uint64_t aWindowId,
+                   RefPtr<GetUserMediaWindowListener> aListener);
   void RemoveWindowID(uint64_t aWindowId);
   void SendPendingGUMRequest();
   bool IsWindowStillActive(uint64_t aWindowId) {
     return !!GetWindowListener(aWindowId);
   }
-  bool IsWindowListenerStillActive(GetUserMediaWindowListener* aListener);
-  // Note: also calls aListener->Remove(), even if inactive
-  void RemoveFromWindowList(uint64_t aWindowID,
-                            GetUserMediaWindowListener* aListener);
+  bool IsWindowListenerStillActive(
+      const RefPtr<GetUserMediaWindowListener>& aListener);
 
-  typedef dom::CallbackObjectHolder<dom::NavigatorUserMediaSuccessCallback,
-                                    nsIDOMGetUserMediaSuccessCallback>
-      GetUserMediaSuccessCallback;
-  typedef dom::CallbackObjectHolder<dom::NavigatorUserMediaErrorCallback,
-                                    nsIDOMGetUserMediaErrorCallback>
-      GetUserMediaErrorCallback;
+  typedef dom::NavigatorUserMediaSuccessCallback GetUserMediaSuccessCallback;
+  typedef dom::NavigatorUserMediaErrorCallback GetUserMediaErrorCallback;
 
-  static void CallOnError(const GetUserMediaErrorCallback* aCallback,
+  MOZ_CAN_RUN_SCRIPT
+  static void CallOnError(GetUserMediaErrorCallback& aCallback,
                           dom::MediaStreamError& aError);
-  static void CallOnSuccess(const GetUserMediaSuccessCallback* aCallback,
+  MOZ_CAN_RUN_SCRIPT
+  static void CallOnSuccess(GetUserMediaSuccessCallback& aCallback,
                             DOMMediaStream& aStream);
 
   typedef nsTArray<RefPtr<MediaDevice>> MediaDeviceSet;
@@ -218,24 +209,32 @@ class MediaManager final : public nsIMediaManagerService,
   typedef MozPromise<RefPtr<DOMMediaStream>, RefPtr<MediaMgrError>, true>
       StreamPromise;
   typedef MozPromise<RefPtr<MediaDeviceSetRefCnt>, RefPtr<MediaMgrError>, true>
-      MediaDeviceSetPromise;
-  typedef MozPromise<const char*, nsresult, false> BadConstraintsPromise;
+      DevicesPromise;
+  typedef MozPromise<bool, RefPtr<MediaMgrError>, true> MgrPromise;
+  typedef MozPromise<const char*, RefPtr<MediaMgrError>, true>
+      BadConstraintsPromise;
 
   RefPtr<StreamPromise> GetUserMedia(
       nsPIDOMWindowInner* aWindow,
       const dom::MediaStreamConstraints& aConstraints,
       dom::CallerType aCallerType);
 
+  MOZ_CAN_RUN_SCRIPT
   nsresult GetUserMediaDevices(
       nsPIDOMWindowInner* aWindow,
       const dom::MediaStreamConstraints& aConstraints,
       dom::MozGetUserMediaDevicesSuccessCallback& aOnSuccess,
       uint64_t aInnerWindowID = 0, const nsAString& aCallID = nsString());
-  RefPtr<MediaDeviceSetPromise> EnumerateDevices(nsPIDOMWindowInner* aWindow,
-                                                 dom::CallerType aCallerType);
+  RefPtr<DevicesPromise> EnumerateDevices(nsPIDOMWindowInner* aWindow,
+                                          dom::CallerType aCallerType);
 
   nsresult EnumerateDevices(nsPIDOMWindowInner* aWindow,
                             dom::Promise& aPromise);
+
+  RefPtr<StreamPromise> GetDisplayMedia(
+      nsPIDOMWindowInner* aWindow,
+      const dom::DisplayMediaStreamConstraints& aConstraintsPassedIn,
+      dom::CallerType aCallerType);
 
   // Get the sink that corresponds to the given device id.
   // It is resposible to check if an application is
@@ -270,9 +269,11 @@ class MediaManager final : public nsIMediaManagerService,
 
  public:  // TODO: make private once we upgrade to GCC 4.8+ on linux.
   static void AnonymizeDevices(MediaDeviceSet& aDevices,
-                               const nsACString& aOriginKey);
+                               const nsACString& aOriginKey,
+                               const uint64_t aWindowId);
   static already_AddRefed<nsIWritableVariant> ToJSArray(
       MediaDeviceSet& aDevices);
+  static void GuessVideoDeviceGroupIDs(MediaManager::MediaDeviceSet& aDevices);
 
  private:
   enum class DeviceEnumerationType : uint8_t {
@@ -282,18 +283,19 @@ class MediaManager final : public nsIMediaManagerService,
              addition to normal devices) */
   };
 
-  RefPtr<MediaDeviceSetPromise> EnumerateRawDevices(
-      uint64_t aWindowId, dom::MediaSourceEnum aVideoInputType,
-      dom::MediaSourceEnum aAudioInputType, MediaSinkEnum aAudioOutputType,
-      DeviceEnumerationType aVideoInputEnumType = DeviceEnumerationType::Normal,
-      DeviceEnumerationType aAudioInputEnumType =
-          DeviceEnumerationType::Normal);
-
-  RefPtr<MediaDeviceSetPromise> EnumerateDevicesImpl(
+  RefPtr<MgrPromise> EnumerateRawDevices(
       uint64_t aWindowId, dom::MediaSourceEnum aVideoInputType,
       dom::MediaSourceEnum aAudioInputType, MediaSinkEnum aAudioOutputType,
       DeviceEnumerationType aVideoInputEnumType,
-      DeviceEnumerationType aAudioInputEnumType);
+      DeviceEnumerationType aAudioInputEnumType, bool aForceNoPermRequest,
+      const RefPtr<MediaDeviceSetRefCnt>& aOutDevices);
+
+  RefPtr<MgrPromise> EnumerateDevicesImpl(
+      uint64_t aWindowId, dom::MediaSourceEnum aVideoInputType,
+      dom::MediaSourceEnum aAudioInputType, MediaSinkEnum aAudioOutputType,
+      DeviceEnumerationType aVideoInputEnumType,
+      DeviceEnumerationType aAudioInputEnumType, bool aForceNoPermRequest,
+      const RefPtr<MediaDeviceSetRefCnt>& aOutDevices);
 
   RefPtr<BadConstraintsPromise> SelectSettings(
       const dom::MediaStreamConstraints& aConstraints, bool aIsChrome,

@@ -11,14 +11,14 @@ const TEST_URL_2 =
   "data:text/html;charset=utf-8,<h1 style='color:red'>HTML test page</h1>";
 
 add_task(async function() {
-  const {inspector} = await openInspectorForURL(TEST_URL);
+  const { inspector } = await openInspectorForURL(TEST_URL);
 
   info("Check the inspector toolbar");
   let button = inspector.panelDoc.querySelector("#inspector-eyedropper-toggle");
   ok(isDisabled(button), "The button is hidden in the toolbar");
 
   info("Check the color picker");
-  await selectNode("#tree", inspector);
+  await selectNode("#xbl-host", inspector);
 
   // Find the color swatch in the rule-view.
   let ruleView = inspector.getPanel("ruleview").view;

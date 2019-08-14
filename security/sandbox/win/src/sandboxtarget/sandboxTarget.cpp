@@ -12,7 +12,8 @@ namespace mozilla {
 
 // We need to define this function out of line so that clang-cl doesn't inline
 // it.
-/* static */ SandboxTarget* SandboxTarget::Instance() {
+/* static */
+SandboxTarget* SandboxTarget::Instance() {
   static SandboxTarget sb;
   return &sb;
 }
@@ -20,7 +21,20 @@ namespace mozilla {
 void SandboxTarget::StartSandbox() {
   if (mTargetServices) {
     mTargetServices->LowerToken();
+    NotifyStartObservers();
   }
+}
+
+void SandboxTarget::NotifyStartObservers() {
+  for (auto&& obs : mStartObservers) {
+    if (!obs) {
+      continue;
+    }
+
+    obs();
+  }
+
+  mStartObservers.clear();
 }
 
 bool SandboxTarget::BrokerDuplicateHandle(HANDLE aSourceHandle,

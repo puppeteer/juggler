@@ -30,6 +30,7 @@ class nsOverflowChecker;
 class nsTreeImageListener;
 
 namespace mozilla {
+class PresShell;
 namespace layout {
 class ScrollbarActivity;
 }  // namespace layout
@@ -54,7 +55,7 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
   typedef mozilla::image::ImgDrawResult ImgDrawResult;
 
  public:
-  explicit nsTreeBodyFrame(ComputedStyle* aStyle);
+  explicit nsTreeBodyFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
   ~nsTreeBodyFrame();
 
   NS_DECL_QUERYFRAME
@@ -156,8 +157,7 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
   virtual void DestroyFrom(nsIFrame* aDestructRoot,
                            PostDestroyData& aPostDestroyData) override;
 
-  virtual nsresult GetCursor(const nsPoint& aPoint,
-                             nsIFrame::Cursor& aCursor) override;
+  mozilla::Maybe<Cursor> GetCursor(const nsPoint&) override;
 
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
@@ -168,7 +168,7 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
 
   virtual void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
 
-  friend nsIFrame* NS_NewTreeBodyFrame(nsIPresShell* aPresShell);
+  friend nsIFrame* NS_NewTreeBodyFrame(mozilla::PresShell* aPresShell);
   friend class nsTreeColumn;
 
   struct ScrollParts {
@@ -184,10 +184,8 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
                               const nsRect& aDirtyRect, nsPoint aPt,
                               nsDisplayListBuilder* aBuilder);
 
-  nsITreeBoxObject* GetTreeBoxObject() const { return mTreeBoxObject; }
-
   // Get the base element, <tree>
-  mozilla::dom::Element* GetBaseElement();
+  mozilla::dom::XULTreeElement* GetBaseElement();
 
   bool GetVerticalOverflow() const { return mVerticalOverflow; }
   bool GetHorizontalOverflow() const { return mHorizontalOverflow; }
@@ -351,7 +349,7 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
                             AutoWeakFrame& aWeakColumnsFrame);
 
   // Check overflow and generate events.
-  void CheckOverflow(const ScrollParts& aParts);
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void CheckOverflow(const ScrollParts& aParts);
 
   // Calls UpdateScrollbars, Invalidate aNeedsFullInvalidation if true,
   // InvalidateScrollbars and finally CheckOverflow.
@@ -370,9 +368,6 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
 
   // Convert client pixels into appunits in our coordinate space.
   nsPoint AdjustClientCoordsToBoxCoordSpace(int32_t aX, int32_t aY);
-
-  // Cache the box object
-  void EnsureBoxObject();
 
   void EnsureView();
 
@@ -530,8 +525,8 @@ class nsTreeBodyFrame final : public nsLeafBoxFrame,
 
   RefPtr<ScrollbarActivity> mScrollbarActivity;
 
-  // The cached box object parent.
-  nsCOMPtr<nsITreeBoxObject> mTreeBoxObject;
+  // The <tree> element containing this treebody.
+  RefPtr<mozilla::dom::XULTreeElement> mTree;
 
   // Cached column information.
   RefPtr<nsTreeColumns> mColumns;

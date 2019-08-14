@@ -16,7 +16,6 @@
 #include "nsISupports.h"
 #include "nsWrapperCache.h"
 
-class nsIDocument;
 struct nsRuleData;
 template <class T>
 struct already_AddRefed;
@@ -72,7 +71,7 @@ class Rule : public nsISupports, public nsWrapperCache {
   // Return the document the rule applies to, if any.
   //
   // Suitable for style updates, and that's about it.
-  nsIDocument* GetComposedDoc() const {
+  dom::Document* GetComposedDoc() const {
     return mSheet ? mSheet->GetComposedDoc() : nullptr;
   }
 
@@ -89,6 +88,9 @@ class Rule : public nsISupports, public nsWrapperCache {
 
   uint32_t GetLineNumber() const { return mLineNumber; }
   uint32_t GetColumnNumber() const { return mColumnNumber; }
+
+  // Whether this a rule in a read only style sheet.
+  bool IsReadOnly() const;
 
   // This is pure virtual because all of Rule's data members are non-owning and
   // thus measured elsewhere.

@@ -10,6 +10,7 @@
 
 #include "builtin/WeakSetObject.h"
 #include "gc/FreeOp.h"
+#include "js/PropertySpec.h"
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
 
@@ -43,7 +44,8 @@ using namespace js;
   return true;
 }
 
-/* static */ bool WeakMapObject::has(JSContext* cx, unsigned argc, Value* vp) {
+/* static */
+bool WeakMapObject::has(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   return CallNonGenericMethod<WeakMapObject::is, WeakMapObject::has_impl>(cx,
                                                                           args);
@@ -71,7 +73,8 @@ using namespace js;
   return true;
 }
 
-/* static */ bool WeakMapObject::get(JSContext* cx, unsigned argc, Value* vp) {
+/* static */
+bool WeakMapObject::get(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   return CallNonGenericMethod<WeakMapObject::is, WeakMapObject::get_impl>(cx,
                                                                           args);
@@ -100,8 +103,8 @@ using namespace js;
   return true;
 }
 
-/* static */ bool WeakMapObject::delete_(JSContext* cx, unsigned argc,
-                                         Value* vp) {
+/* static */
+bool WeakMapObject::delete_(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   return CallNonGenericMethod<WeakMapObject::is, WeakMapObject::delete_impl>(
       cx, args);
@@ -112,7 +115,7 @@ using namespace js;
   MOZ_ASSERT(WeakMapObject::is(args.thisv()));
 
   if (!args.get(0).isObject()) {
-    ReportNotObjectWithName(cx, "WeakMap key", args.get(0));
+    ReportNotObject(cx, JSMSG_OBJECT_REQUIRED_WEAKMAP_KEY, args.get(0));
     return false;
   }
 
@@ -126,7 +129,8 @@ using namespace js;
   return true;
 }
 
-/* static */ bool WeakMapObject::set(JSContext* cx, unsigned argc, Value* vp) {
+/* static */
+bool WeakMapObject::set(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   return CallNonGenericMethod<WeakMapObject::is, WeakMapObject::set_impl>(cx,
                                                                           args);
@@ -177,7 +181,7 @@ static void WeakCollection_trace(JSTracer* trc, JSObject* obj) {
 static void WeakCollection_finalize(FreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->maybeOnHelperThread());
   if (ObjectValueMap* map = obj->as<WeakCollectionObject>().getMap()) {
-    fop->delete_(map);
+    fop->delete_(obj, map, MemoryUse::WeakMapObject);
   }
 }
 
@@ -216,8 +220,8 @@ JS_PUBLIC_API bool JS::SetWeakMapEntry(JSContext* cx, HandleObject mapObj,
   return WeakCollectionPutEntryInternal(cx, rootedMap, key, val);
 }
 
-/* static */ bool WeakMapObject::construct(JSContext* cx, unsigned argc,
-                                           Value* vp) {
+/* static */
+bool WeakMapObject::construct(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
   // ES6 draft rev 31 (15 Jan 2015) 23.3.1.1 step 1.
@@ -226,7 +230,7 @@ JS_PUBLIC_API bool JS::SetWeakMapEntry(JSContext* cx, HandleObject mapObj,
   }
 
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_WeakMap, &proto)) {
     return false;
   }
 

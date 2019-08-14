@@ -370,10 +370,8 @@ class TestClickNavigation(MarionetteTestCase):
     def close_notification(self):
         try:
             with self.marionette.using_context("chrome"):
-                popup = self.marionette.find_element(
-                    By.CSS_SELECTOR, "#notification-popup popupnotification")
-                popup.find_element(By.ANON_ATTRIBUTE,
-                                   {"anonid": "closebutton"}).click()
+                self.marionette.find_element(By.CSS_SELECTOR,
+                    "#notification-popup popupnotification .popup-notification-closebutton").click()
         except errors.NoSuchElementException:
             pass
 
@@ -449,20 +447,16 @@ class TestClickCloseContext(WindowManagerMixin, MarionetteTestCase):
         super(TestClickCloseContext, self).tearDown()
 
     def test_click_close_tab(self):
-        self.marionette.navigate(self.marionette.absolute_url("windowHandles.html"))
-        tab = self.open_tab(
-            lambda: self.marionette.find_element(By.ID, "new-tab").click())
-        self.marionette.switch_to_window(tab)
+        new_tab = self.open_tab()
+        self.marionette.switch_to_window(new_tab)
 
         self.marionette.navigate(self.test_page)
         self.marionette.find_element(By.ID, "close-window").click()
 
     @skip_if_mobile("Fennec doesn't support other chrome windows")
     def test_click_close_window(self):
-        self.marionette.navigate(self.marionette.absolute_url("windowHandles.html"))
-        win = self.open_window(
-            lambda: self.marionette.find_element(By.ID, "new-window").click())
-        self.marionette.switch_to_window(win)
+        new_tab = self.open_window()
+        self.marionette.switch_to_window(new_tab)
 
         self.marionette.navigate(self.test_page)
         self.marionette.find_element(By.ID, "close-window").click()

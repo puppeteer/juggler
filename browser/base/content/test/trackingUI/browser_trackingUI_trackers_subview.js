@@ -4,16 +4,23 @@
 
 "use strict";
 
-const TRACKING_PAGE = "http://tracking.example.org/browser/browser/base/content/test/trackingUI/trackingPage.html";
+const TRACKING_PAGE =
+  "http://tracking.example.org/browser/browser/base/content/test/trackingUI/trackingPage.html";
 
 const TP_PREF = "privacy.trackingprotection.enabled";
 
 add_task(async function setup() {
+  let oldCanRecord = Services.telemetry.canRecordExtended;
+  Services.telemetry.canRecordExtended = true;
+
   // Avoid the content blocking tour interfering with our tests by popping up.
-  await SpecialPowers.pushPrefEnv({set: [[ContentBlocking.prefIntroCount, ContentBlocking.MAX_INTROS]]});
+  await SpecialPowers.pushPrefEnv({
+    set: [[ContentBlocking.prefIntroCount, ContentBlocking.MAX_INTROS]],
+  });
   await UrlClassifierTestUtils.addTestTrackers();
 
   registerCleanupFunction(() => {
+    Services.telemetry.canRecordExtended = oldCanRecord;
     UrlClassifierTestUtils.cleanupTestTrackers();
   });
 });
@@ -22,9 +29,15 @@ async function assertSitesListed(blocked) {
   await BrowserTestUtils.withNewTab(TRACKING_PAGE, async function(browser) {
     await openIdentityPopup();
 
-    let categoryItem =
-      document.getElementById("identity-popup-content-blocking-category-tracking-protection");
-    ok(BrowserTestUtils.is_visible(categoryItem), "TP category item is visible");
+    Services.telemetry.clearEvents();
+
+    let categoryItem = document.getElementById(
+      "identity-popup-content-blocking-category-tracking-protection"
+    );
+    ok(
+      BrowserTestUtils.is_visible(categoryItem),
+      "TP category item is visible"
+    );
     let trackersView = document.getElementById("identity-popup-trackersView");
     let viewShown = BrowserTestUtils.waitForEvent(trackersView, "ViewShown");
     categoryItem.click();
@@ -32,12 +45,30 @@ async function assertSitesListed(blocked) {
 
     ok(true, "Trackers view was shown");
 
-    let listItems = trackersView.querySelectorAll(".identity-popup-content-blocking-list-item");
+    let events = Services.telemetry.snapshotEvents(
+      Ci.nsITelemetry.DATASET_PRERELEASE_CHANNELS
+    ).parent;
+    let buttonEvents = events.filter(
+      e =>
+        e[1] == "security.ui.identitypopup" &&
+        e[2] == "click" &&
+        e[3] == "trackers_subview_btn"
+    );
+    is(buttonEvents.length, 1, "recorded telemetry for the button click");
+
+    let listItems = trackersView.querySelectorAll(
+      ".identity-popup-content-blocking-list-item"
+    );
     is(listItems.length, 1, "We have 1 tracker in the list");
 
-    let strictInfo = document.getElementById("identity-popup-trackersView-strict-info");
-    is(BrowserTestUtils.is_hidden(strictInfo), Services.prefs.getBoolPref(TP_PREF),
-      "Strict info is hidden if TP is enabled.");
+    let strictInfo = document.getElementById(
+      "identity-popup-trackersView-strict-info"
+    );
+    is(
+      BrowserTestUtils.is_hidden(strictInfo),
+      Services.prefs.getBoolPref(TP_PREF),
+      "Strict info is hidden if TP is enabled."
+    );
 
     let mainView = document.getElementById("identity-popup-mainView");
     viewShown = BrowserTestUtils.waitForEvent(mainView, "ViewShown");
@@ -63,20 +94,34 @@ async function assertSitesListed(blocked) {
 
     ok(true, "Trackers view was shown");
 
-    listItems = Array.from(trackersView.querySelectorAll(".identity-popup-content-blocking-list-item"));
+    listItems = Array.from(
+      trackersView.querySelectorAll(
+        ".identity-popup-content-blocking-list-item"
+      )
+    );
     is(listItems.length, 2, "We have 2 trackers in the list");
 
-    let listItem = listItems.find(item => item.querySelector("label").value == "trackertest.org");
+    let listItem = listItems.find(
+      item => item.querySelector("label").value == "trackertest.org"
+    );
     ok(listItem, "Has an item for trackertest.org");
     ok(BrowserTestUtils.is_visible(listItem), "List item is visible");
-    is(listItem.classList.contains("allowed"), !blocked,
-      "Indicates whether the tracker was blocked or allowed");
+    is(
+      listItem.classList.contains("allowed"),
+      !blocked,
+      "Indicates whether the tracker was blocked or allowed"
+    );
 
-    listItem = listItems.find(item => item.querySelector("label").value == "itisatracker.org");
+    listItem = listItems.find(
+      item => item.querySelector("label").value == "itisatracker.org"
+    );
     ok(listItem, "Has an item for itisatracker.org");
     ok(BrowserTestUtils.is_visible(listItem), "List item is visible");
-    is(listItem.classList.contains("allowed"), !blocked,
-      "Indicates whether the tracker was blocked or allowed");
+    is(
+      listItem.classList.contains("allowed"),
+      !blocked,
+      "Indicates whether the tracker was blocked or allowed"
+    );
   });
 }
 

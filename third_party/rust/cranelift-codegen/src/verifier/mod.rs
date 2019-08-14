@@ -57,26 +57,27 @@
 //!   of arguments must match the destination type, and the lane indexes must be in range.
 
 use self::flags::verify_flags;
-use dbg::DisplayList;
-use dominator_tree::DominatorTree;
-use entity::SparseSet;
-use flowgraph::{BasicBlock, ControlFlowGraph};
-use ir;
-use ir::entities::AnyEntity;
-use ir::instructions::{BranchInfo, CallInfo, InstructionFormat, ResolvedConstraint};
-use ir::{
-    types, ArgumentLoc, Ebb, FuncRef, Function, GlobalValue, Inst, JumpTable, Opcode, SigRef,
-    StackSlot, StackSlotKind, Type, Value, ValueDef, ValueList, ValueLoc,
+use crate::dbg::DisplayList;
+use crate::dominator_tree::DominatorTree;
+use crate::entity::SparseSet;
+use crate::flowgraph::{BasicBlock, ControlFlowGraph};
+use crate::ir;
+use crate::ir::entities::AnyEntity;
+use crate::ir::instructions::{BranchInfo, CallInfo, InstructionFormat, ResolvedConstraint};
+use crate::ir::{
+    types, ArgumentLoc, Ebb, FuncRef, Function, GlobalValue, Inst, InstructionData, JumpTable,
+    Opcode, SigRef, StackSlot, StackSlotKind, Type, Value, ValueDef, ValueList, ValueLoc,
 };
-use isa::TargetIsa;
-use iterators::IteratorExtras;
-use settings::FlagsOrIsa;
-use std::cmp::Ordering;
+use crate::isa::TargetIsa;
+use crate::iterators::IteratorExtras;
+use crate::settings::FlagsOrIsa;
+use crate::timing;
+use core::cmp::Ordering;
+use core::fmt::{self, Display, Formatter, Write};
+use failure_derive::Fail;
 use std::collections::BTreeSet;
-use std::fmt::{self, Display, Formatter, Write};
 use std::string::String;
 use std::vec::Vec;
-use timing;
 
 pub use self::cssa::verify_cssa;
 pub use self::liveness::verify_liveness;
@@ -90,14 +91,14 @@ pub use self::locations::verify_locations;
 /// as the error message.
 macro_rules! report {
     ( $errors: expr, $loc: expr, $msg: tt ) => {
-        $errors.0.push(::verifier::VerifierError {
+        $errors.0.push(crate::verifier::VerifierError {
             location: $loc.into(),
             message: String::from($msg),
         })
     };
 
     ( $errors: expr, $loc: expr, $fmt: tt, $( $arg: expr ),+ ) => {
-        $errors.0.push(::verifier::VerifierError {
+        $errors.0.push(crate::verifier::VerifierError {
             location: $loc.into(),
             message: format!( $fmt, $( $arg ),+ ),
         })
@@ -265,7 +266,9 @@ struct Verifier<'a> {
     func: &'a Function,
     expected_cfg: ControlFlowGraph,
     expected_domtree: DominatorTree,
-    isa: Option<&'a TargetIsa>,
+    isa: Option<&'a dyn TargetIsa>,
+    // To be removed when #796 is completed.
+    verify_encodable_as_bb: bool,
 }
 
 impl<'a> Verifier<'a> {
@@ -277,6 +280,7 @@ impl<'a> Verifier<'a> {
             expected_cfg,
             expected_domtree,
             isa: fisa.isa,
+            verify_encodable_as_bb: std::env::var("CRANELIFT_BB").is_ok(),
         }
     }
 
@@ -458,6 +462,62 @@ impl<'a> Verifier<'a> {
         Ok(())
     }
 
+    fn verify_jump_tables(&self, errors: &mut VerifierErrors) -> VerifierStepResult<()> {
+        for (jt, jt_data) in &self.func.jump_tables {
+            for &ebb in jt_data.iter() {
+                self.verify_ebb(jt, ebb, errors)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Check that the given EBB can be encoded as a BB, by checking that only
+    /// branching instructions are ending the EBB.
+    fn encodable_as_bb(&self, ebb: Ebb, errors: &mut VerifierErrors) -> VerifierStepResult<()> {
+        // Skip this verification if the environment variable is not set.
+        if !self.verify_encodable_as_bb {
+            return Ok(());
+        };
+
+        let dfg = &self.func.dfg;
+        let inst_iter = self.func.layout.ebb_insts(ebb);
+        // Skip non-branching instructions.
+        let mut inst_iter = inst_iter.skip_while(|&inst| !dfg[inst].opcode().is_branch());
+
+        let branch = match inst_iter.next() {
+            // There is no branch in the current EBB.
+            None => return Ok(()),
+            Some(br) => br,
+        };
+
+        let after_branch = match inst_iter.next() {
+            // The branch is also the terminator.
+            None => return Ok(()),
+            Some(inst) => inst,
+        };
+
+        let after_branch_opcode = dfg[after_branch].opcode();
+        if !after_branch_opcode.is_terminator() {
+            return fatal!(
+                errors,
+                branch,
+                "branch followed by a non-terminator instruction."
+            );
+        };
+
+        // Allow only one conditional branch and a fallthrough implemented with
+        // a jump or fallthrough instruction. Any other, which returns or check
+        // a different condition would have to be moved to a different EBB.
+        match after_branch_opcode {
+            Opcode::Fallthrough | Opcode::Jump => Ok(()),
+            _ => fatal!(
+                errors,
+                after_branch,
+                "terminator instruction not fallthrough or jump"
+            ),
+        }
+    }
+
     fn ebb_integrity(
         &self,
         ebb: Ebb,
@@ -551,7 +611,7 @@ impl<'a> Verifier<'a> {
         inst: Inst,
         errors: &mut VerifierErrors,
     ) -> VerifierStepResult<()> {
-        use ir::instructions::InstructionData::*;
+        use crate::ir::instructions::InstructionData::*;
 
         for &arg in self.func.dfg.inst_args(inst) {
             self.verify_inst_arg(inst, arg, errors)?;
@@ -570,7 +630,7 @@ impl<'a> Verifier<'a> {
         }
 
         for &res in self.func.dfg.inst_results(inst) {
-            self.verify_inst_result(inst, res, errors).is_ok();
+            self.verify_inst_result(inst, res, errors)?;
         }
 
         match self.func.dfg[inst] {
@@ -605,8 +665,13 @@ impl<'a> Verifier<'a> {
                 self.verify_ebb(inst, destination, errors)?;
                 self.verify_value_list(inst, args, errors)?;
             }
-            BranchTable { table, .. }
-            | BranchTableBase { table, .. }
+            BranchTable {
+                table, destination, ..
+            } => {
+                self.verify_ebb(inst, destination, errors)?;
+                self.verify_jump_table(inst, table, errors)?;
+            }
+            BranchTableBase { table, .. }
             | BranchTableEntry { table, .. }
             | IndirectJump { table, .. } => {
                 self.verify_jump_table(inst, table, errors)?;
@@ -684,16 +749,16 @@ impl<'a> Verifier<'a> {
 
     fn verify_ebb(
         &self,
-        inst: Inst,
+        loc: impl Into<AnyEntity>,
         e: Ebb,
         errors: &mut VerifierErrors,
     ) -> VerifierStepResult<()> {
         if !self.func.dfg.ebb_is_valid(e) || !self.func.layout.is_ebb_inserted(e) {
-            return fatal!(errors, inst, "invalid ebb reference {}", e);
+            return fatal!(errors, loc, "invalid ebb reference {}", e);
         }
         if let Some(entry_block) = self.func.layout.entry_block() {
             if e == entry_block {
-                return fatal!(errors, inst, "invalid reference to entry ebb {}", e);
+                return fatal!(errors, loc, "invalid reference to entry ebb {}", e);
             }
         }
         Ok(())
@@ -887,11 +952,11 @@ impl<'a> Verifier<'a> {
                     );
                 }
                 // The defining EBB dominates the instruction using this value.
-                if is_reachable && !self.expected_domtree.dominates(
-                    ebb,
-                    loc_inst,
-                    &self.func.layout,
-                ) {
+                if is_reachable
+                    && !self
+                        .expected_domtree
+                        .dominates(ebb, loc_inst, &self.func.layout)
+                {
                     return fatal!(
                         errors,
                         loc_inst,
@@ -1058,11 +1123,14 @@ impl<'a> Verifier<'a> {
         };
 
         // Typechecking instructions is never fatal
-        self.typecheck_results(inst, ctrl_type, errors).is_ok();
-        self.typecheck_fixed_args(inst, ctrl_type, errors).is_ok();
-        self.typecheck_variable_args(inst, errors).is_ok();
-        self.typecheck_return(inst, errors).is_ok();
-        self.typecheck_special(inst, ctrl_type, errors).is_ok();
+        let _ = self.typecheck_results(inst, ctrl_type, errors);
+        let _ = self.typecheck_fixed_args(inst, ctrl_type, errors);
+        let _ = self.typecheck_variable_args(inst, errors);
+        let _ = self.typecheck_return(inst, errors);
+        let _ = self.typecheck_special(inst, ctrl_type, errors);
+
+        // Misuses of copy_nop instructions are fatal
+        self.typecheck_copy_nop(inst, errors)?;
 
         Ok(())
     }
@@ -1454,6 +1522,43 @@ impl<'a> Verifier<'a> {
         Ok(())
     }
 
+    fn typecheck_copy_nop(
+        &self,
+        inst: Inst,
+        errors: &mut VerifierErrors,
+    ) -> VerifierStepResult<()> {
+        if let InstructionData::Unary {
+            opcode: Opcode::CopyNop,
+            arg,
+        } = self.func.dfg[inst]
+        {
+            let dst_vals = self.func.dfg.inst_results(inst);
+            if dst_vals.len() != 1 {
+                return fatal!(errors, inst, "copy_nop must produce exactly one result");
+            }
+            let dst_val = dst_vals[0];
+            if self.func.dfg.value_type(dst_val) != self.func.dfg.value_type(arg) {
+                return fatal!(errors, inst, "copy_nop src and dst types must be the same");
+            }
+            let src_loc = self.func.locations[arg];
+            let dst_loc = self.func.locations[dst_val];
+            let locs_ok = match (src_loc, dst_loc) {
+                (ValueLoc::Stack(src_slot), ValueLoc::Stack(dst_slot)) => src_slot == dst_slot,
+                _ => false,
+            };
+            if !locs_ok {
+                return fatal!(
+                    errors,
+                    inst,
+                    "copy_nop must refer to identical stack slots, but found {:?} vs {:?}",
+                    src_loc,
+                    dst_loc
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn cfg_integrity(
         &self,
         cfg: &ControlFlowGraph,
@@ -1559,7 +1664,8 @@ impl<'a> Verifier<'a> {
                     &self.func,
                     &self.func.dfg[inst],
                     self.func.dfg.ctrl_typevar(inst),
-                ).peekable();
+                )
+                .peekable();
 
             if encodings.peek().is_none() {
                 return nonfatal!(
@@ -1639,7 +1745,7 @@ impl<'a> Verifier<'a> {
                         "{} must have an encoding (e.g., {})",
                         text,
                         isa.encoding_info().display(enc)
-                    )
+                    );
                 }
                 Err(_) => return nonfatal!(errors, inst, "{} must have an encoding", text),
             }
@@ -1677,6 +1783,7 @@ impl<'a> Verifier<'a> {
         self.verify_global_values(errors)?;
         self.verify_heaps(errors)?;
         self.verify_tables(errors)?;
+        self.verify_jump_tables(errors)?;
         self.typecheck_entry_block_params(errors)?;
 
         for ebb in self.func.layout.ebbs() {
@@ -1687,6 +1794,7 @@ impl<'a> Verifier<'a> {
                 self.verify_encoding(inst, errors)?;
                 self.immediate_constraints(inst, errors)?;
             }
+            self.encodable_as_bb(ebb, errors)?;
         }
 
         verify_flags(self.func, &self.expected_cfg, self.isa, errors)?;
@@ -1698,10 +1806,10 @@ impl<'a> Verifier<'a> {
 #[cfg(test)]
 mod tests {
     use super::{Verifier, VerifierError, VerifierErrors};
-    use entity::EntityList;
-    use ir::instructions::{InstructionData, Opcode};
-    use ir::Function;
-    use settings;
+    use crate::entity::EntityList;
+    use crate::ir::instructions::{InstructionData, Opcode};
+    use crate::ir::Function;
+    use crate::settings;
 
     macro_rules! assert_err_with_msg {
         ($e:expr, $msg:expr) => {

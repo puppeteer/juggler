@@ -18,7 +18,11 @@
 class nsITimer;
 class nsSliderFrame;
 
-nsIFrame* NS_NewSliderFrame(nsIPresShell* aPresShell,
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
+nsIFrame* NS_NewSliderFrame(mozilla::PresShell* aPresShell,
                             mozilla::ComputedStyle* aStyle);
 
 class nsSliderMediator final : public nsIDOMEventListener {
@@ -44,7 +48,7 @@ class nsSliderFrame final : public nsBoxFrame {
 
   friend class nsSliderMediator;
 
-  explicit nsSliderFrame(ComputedStyle* aStyle);
+  explicit nsSliderFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
   virtual ~nsSliderFrame();
 
 #ifdef DEBUG_FRAME_DUMP
@@ -112,6 +116,7 @@ class nsSliderFrame final : public nsBoxFrame {
     return NS_OK;
   }
 
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD HandleDrag(nsPresContext* aPresContext,
                         mozilla::WidgetGUIEvent* aEvent,
                         nsEventStatus* aEventStatus) override {

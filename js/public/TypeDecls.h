@@ -33,6 +33,10 @@ class JSScript;
 class JSString;
 struct JSFreeOp;
 
+namespace js {
+class TempAllocPolicy;
+};  // namespace js
+
 namespace JS {
 
 struct PropertyKey;
@@ -40,9 +44,7 @@ struct PropertyKey;
 typedef unsigned char Latin1Char;
 
 class Symbol;
-#ifdef ENABLE_BIGINT
 class BigInt;
-#endif
 union Value;
 
 class Compartment;
@@ -58,6 +60,12 @@ template <typename T>
 class Rooted;
 template <typename T>
 class PersistentRooted;
+template <typename T>
+class RootedVector;
+template <typename T>
+class PersistentRootedVector;
+template <typename T, typename AllocPolicy = js::TempAllocPolicy>
+class StackGCVector;
 
 typedef Handle<JSFunction*> HandleFunction;
 typedef Handle<PropertyKey> HandleId;
@@ -65,10 +73,11 @@ typedef Handle<JSObject*> HandleObject;
 typedef Handle<JSScript*> HandleScript;
 typedef Handle<JSString*> HandleString;
 typedef Handle<JS::Symbol*> HandleSymbol;
-#ifdef ENABLE_BIGINT
 typedef Handle<JS::BigInt*> HandleBigInt;
-#endif
 typedef Handle<Value> HandleValue;
+typedef Handle<StackGCVector<Value>> HandleValueVector;
+typedef Handle<StackGCVector<JSObject*>> HandleObjectVector;
+typedef Handle<StackGCVector<JS::PropertyKey>> HandleIdVector;
 
 typedef MutableHandle<JSFunction*> MutableHandleFunction;
 typedef MutableHandle<PropertyKey> MutableHandleId;
@@ -76,21 +85,24 @@ typedef MutableHandle<JSObject*> MutableHandleObject;
 typedef MutableHandle<JSScript*> MutableHandleScript;
 typedef MutableHandle<JSString*> MutableHandleString;
 typedef MutableHandle<JS::Symbol*> MutableHandleSymbol;
-#ifdef ENABLE_BIGINT
 typedef MutableHandle<JS::BigInt*> MutableHandleBigInt;
-#endif
 typedef MutableHandle<Value> MutableHandleValue;
+typedef MutableHandle<StackGCVector<Value>> MutableHandleValueVector;
+typedef MutableHandle<StackGCVector<JSObject*>> MutableHandleObjectVector;
+typedef MutableHandle<StackGCVector<JS::PropertyKey>> MutableHandleIdVector;
 
 typedef Rooted<JSObject*> RootedObject;
 typedef Rooted<JSFunction*> RootedFunction;
 typedef Rooted<JSScript*> RootedScript;
 typedef Rooted<JSString*> RootedString;
 typedef Rooted<JS::Symbol*> RootedSymbol;
-#ifdef ENABLE_BIGINT
 typedef Rooted<JS::BigInt*> RootedBigInt;
-#endif
 typedef Rooted<PropertyKey> RootedId;
 typedef Rooted<JS::Value> RootedValue;
+
+typedef RootedVector<JS::Value> RootedValueVector;
+typedef RootedVector<JSObject*> RootedObjectVector;
+typedef RootedVector<JS::PropertyKey> RootedIdVector;
 
 typedef PersistentRooted<JSFunction*> PersistentRootedFunction;
 typedef PersistentRooted<PropertyKey> PersistentRootedId;
@@ -98,19 +110,18 @@ typedef PersistentRooted<JSObject*> PersistentRootedObject;
 typedef PersistentRooted<JSScript*> PersistentRootedScript;
 typedef PersistentRooted<JSString*> PersistentRootedString;
 typedef PersistentRooted<JS::Symbol*> PersistentRootedSymbol;
-#ifdef ENABLE_BIGINT
 typedef PersistentRooted<JS::BigInt*> PersistentRootedBigInt;
-#endif
 typedef PersistentRooted<Value> PersistentRootedValue;
 
+typedef PersistentRootedVector<PropertyKey> PersistentRootedIdVector;
+typedef PersistentRootedVector<JSObject*> PersistentRootedObjectVector;
+
+template <typename T>
+using HandleVector = Handle<StackGCVector<T>>;
+template <typename T>
+using MutableHandleVector = MutableHandle<StackGCVector<T>>;
 }  // namespace JS
 
 using jsid = JS::PropertyKey;
-
-#ifdef ENABLE_BIGINT
-#define IF_BIGINT(x, y) x
-#else
-#define IF_BIGINT(x, y) y
-#endif
 
 #endif /* js_TypeDecls_h */

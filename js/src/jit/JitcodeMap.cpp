@@ -198,6 +198,26 @@ void JitcodeGlobalEntry::BaselineEntry::destroy() {
   str_ = nullptr;
 }
 
+void* JitcodeGlobalEntry::BaselineInterpreterEntry::canonicalNativeAddrFor(
+    void* ptr) const {
+  return ptr;
+}
+
+bool JitcodeGlobalEntry::BaselineInterpreterEntry::callStackAtAddr(
+    void* ptr, BytecodeLocationVector& results, uint32_t* depth) const {
+  MOZ_CRASH("shouldn't be called for BaselineInterpreter entries");
+}
+
+uint32_t JitcodeGlobalEntry::BaselineInterpreterEntry::callStackAtAddr(
+    void* ptr, const char** results, uint32_t maxResults) const {
+  MOZ_CRASH("shouldn't be called for BaselineInterpreter entries");
+}
+
+void JitcodeGlobalEntry::BaselineInterpreterEntry::youngestFrameLocationAtAddr(
+    void* ptr, JSScript** script, jsbytecode** pc) const {
+  MOZ_CRASH("shouldn't be called for BaselineInterpreter entries");
+}
+
 static inline JitcodeGlobalEntry& RejoinEntry(
     JSRuntime* rt, const JitcodeGlobalEntry::IonCacheEntry& cache, void* ptr) {
   MOZ_ASSERT(cache.containsPointer(ptr));
@@ -245,8 +265,9 @@ static int ComparePointers(const void* a, const void* b) {
   return 0;
 }
 
-/* static */ int JitcodeGlobalEntry::compare(const JitcodeGlobalEntry& ent1,
-                                             const JitcodeGlobalEntry& ent2) {
+/* static */
+int JitcodeGlobalEntry::compare(const JitcodeGlobalEntry& ent1,
+                                const JitcodeGlobalEntry& ent2) {
   // Both parts of compare cannot be a query.
   MOZ_ASSERT(!(ent1.isQuery() && ent2.isQuery()));
 
@@ -273,98 +294,6 @@ static int ComparePointers(const void* a, const void* b) {
 
   // query ptr < entry
   return flip * -1;
-}
-
-/* static */ char* JitcodeGlobalEntry::createScriptString(JSContext* cx,
-                                                          JSScript* script,
-                                                          size_t* length) {
-  // If the script has a function, try calculating its name.
-  bool hasName = false;
-  size_t nameLength = 0;
-  UniqueChars nameStr;
-  JSFunction* func = script->functionDelazifying();
-  if (func && func->displayAtom()) {
-    nameStr = StringToNewUTF8CharsZ(cx, *func->displayAtom());
-    if (!nameStr) {
-      return nullptr;
-    }
-
-    nameLength = strlen(nameStr.get());
-    hasName = true;
-  }
-
-  // Calculate filename length
-  const char* filenameStr = script->filename() ? script->filename() : "(null)";
-  size_t filenameLength = strlen(filenameStr);
-
-  // Calculate line + column length
-  bool hasLineAndColumn = false;
-  size_t lineAndColumnLength = 0;
-  char lineAndColumnStr[30];
-  if (hasName || (script->functionNonDelazifying() || script->isForEval())) {
-    lineAndColumnLength = SprintfLiteral(lineAndColumnStr, "%u:%u",
-                                         script->lineno(), script->column());
-    hasLineAndColumn = true;
-  }
-
-  // Full profile string for scripts with functions is:
-  //      FuncName (FileName:Lineno:Column)
-  // Full profile string for scripts without functions is:
-  //      FileName:Lineno:Column
-  // Full profile string for scripts without functions and without lines is:
-  //      FileName
-
-  // Calculate full string length.
-  size_t fullLength = 0;
-  if (hasName) {
-    MOZ_ASSERT(hasLineAndColumn);
-    fullLength = nameLength + 2 + filenameLength + 1 + lineAndColumnLength + 1;
-  } else if (hasLineAndColumn) {
-    fullLength = filenameLength + 1 + lineAndColumnLength;
-  } else {
-    fullLength = filenameLength;
-  }
-
-  // Allocate string.
-  char* str = cx->pod_malloc<char>(fullLength + 1);
-  if (!str) {
-    return nullptr;
-  }
-
-  size_t cur = 0;
-
-  // Fill string with func name if needed.
-  if (hasName) {
-    memcpy(str + cur, nameStr.get(), nameLength);
-    cur += nameLength;
-    str[cur++] = ' ';
-    str[cur++] = '(';
-  }
-
-  // Fill string with filename chars.
-  memcpy(str + cur, filenameStr, filenameLength);
-  cur += filenameLength;
-
-  // Fill line + column chars.
-  if (hasLineAndColumn) {
-    str[cur++] = ':';
-    memcpy(str + cur, lineAndColumnStr, lineAndColumnLength);
-    cur += lineAndColumnLength;
-  }
-
-  // Terminal ')' if necessary.
-  if (hasName) {
-    str[cur++] = ')';
-  }
-
-  MOZ_ASSERT(cur == fullLength);
-  str[cur] = 0;
-
-  if (length) {
-    *length = fullLength;
-  }
-
-  return str;
 }
 
 JitcodeGlobalTable::Enum::Enum(JitcodeGlobalTable& table, JSRuntime* rt)
@@ -458,7 +387,7 @@ JitcodeGlobalEntry* JitcodeGlobalTable::lookupInternal(void* ptr) {
 
 bool JitcodeGlobalTable::addEntry(const JitcodeGlobalEntry& entry) {
   MOZ_ASSERT(entry.isIon() || entry.isBaseline() || entry.isIonCache() ||
-             entry.isDummy());
+             entry.isBaselineInterpreter() || entry.isDummy());
 
   JitcodeGlobalEntry* searchTower[JitcodeSkiplistTower::MAX_HEIGHT];
   searchInternal(entry, searchTower);
@@ -1007,37 +936,38 @@ void JitcodeGlobalEntry::IonCacheEntry::forEachOptimizationTypeInfo(
   entry.forEachOptimizationTypeInfo(rt, index, op);
 }
 
-/* static */ void JitcodeRegionEntry::WriteHead(CompactBufferWriter& writer,
-                                                uint32_t nativeOffset,
-                                                uint8_t scriptDepth) {
+/* static */
+void JitcodeRegionEntry::WriteHead(CompactBufferWriter& writer,
+                                   uint32_t nativeOffset, uint8_t scriptDepth) {
   writer.writeUnsigned(nativeOffset);
   writer.writeByte(scriptDepth);
 }
 
-/* static */ void JitcodeRegionEntry::ReadHead(CompactBufferReader& reader,
-                                               uint32_t* nativeOffset,
-                                               uint8_t* scriptDepth) {
+/* static */
+void JitcodeRegionEntry::ReadHead(CompactBufferReader& reader,
+                                  uint32_t* nativeOffset,
+                                  uint8_t* scriptDepth) {
   *nativeOffset = reader.readUnsigned();
   *scriptDepth = reader.readByte();
 }
 
-/* static */ void JitcodeRegionEntry::WriteScriptPc(CompactBufferWriter& writer,
-                                                    uint32_t scriptIdx,
-                                                    uint32_t pcOffset) {
+/* static */
+void JitcodeRegionEntry::WriteScriptPc(CompactBufferWriter& writer,
+                                       uint32_t scriptIdx, uint32_t pcOffset) {
   writer.writeUnsigned(scriptIdx);
   writer.writeUnsigned(pcOffset);
 }
 
-/* static */ void JitcodeRegionEntry::ReadScriptPc(CompactBufferReader& reader,
-                                                   uint32_t* scriptIdx,
-                                                   uint32_t* pcOffset) {
+/* static */
+void JitcodeRegionEntry::ReadScriptPc(CompactBufferReader& reader,
+                                      uint32_t* scriptIdx, uint32_t* pcOffset) {
   *scriptIdx = reader.readUnsigned();
   *pcOffset = reader.readUnsigned();
 }
 
-/* static */ void JitcodeRegionEntry::WriteDelta(CompactBufferWriter& writer,
-                                                 uint32_t nativeDelta,
-                                                 int32_t pcDelta) {
+/* static */
+void JitcodeRegionEntry::WriteDelta(CompactBufferWriter& writer,
+                                    uint32_t nativeDelta, int32_t pcDelta) {
   if (pcDelta >= 0) {
     // 1 and 2-byte formats possible.
 
@@ -1090,9 +1020,9 @@ void JitcodeGlobalEntry::IonCacheEntry::forEachOptimizationTypeInfo(
   MOZ_CRASH("pcDelta/nativeDelta values are too large to encode.");
 }
 
-/* static */ void JitcodeRegionEntry::ReadDelta(CompactBufferReader& reader,
-                                                uint32_t* nativeDelta,
-                                                int32_t* pcDelta) {
+/* static */
+void JitcodeRegionEntry::ReadDelta(CompactBufferReader& reader,
+                                   uint32_t* nativeDelta, int32_t* pcDelta) {
   // NB:
   // It's possible to get nativeDeltas with value 0 in two cases:
   //
@@ -1160,8 +1090,9 @@ void JitcodeGlobalEntry::IonCacheEntry::forEachOptimizationTypeInfo(
   MOZ_ASSERT_IF(*nativeDelta == 0, *pcDelta <= 0);
 }
 
-/* static */ uint32_t JitcodeRegionEntry::ExpectedRunLength(
-    const NativeToBytecode* entry, const NativeToBytecode* end) {
+/* static */
+uint32_t JitcodeRegionEntry::ExpectedRunLength(const NativeToBytecode* entry,
+                                               const NativeToBytecode* end) {
   MOZ_ASSERT(entry < end);
 
   // We always use the first entry, so runLength starts at 1
@@ -1251,11 +1182,11 @@ struct JitcodeMapBufferWriteSpewer {
 
 // Write a run, starting at the given NativeToBytecode entry, into the given
 // buffer writer.
-/* static */ bool JitcodeRegionEntry::WriteRun(CompactBufferWriter& writer,
-                                               JSScript** scriptList,
-                                               uint32_t scriptListSize,
-                                               uint32_t runLength,
-                                               const NativeToBytecode* entry) {
+/* static */
+bool JitcodeRegionEntry::WriteRun(CompactBufferWriter& writer,
+                                  JSScript** scriptList,
+                                  uint32_t scriptListSize, uint32_t runLength,
+                                  const NativeToBytecode* entry) {
   MOZ_ASSERT(runLength > 0);
   MOZ_ASSERT(runLength <= MAX_RUN_LENGTH);
 
@@ -1417,11 +1348,11 @@ bool JitcodeIonTable::makeIonEntry(JSContext* cx, JitCode* code,
   });
 
   for (uint32_t i = 0; i < numScripts; i++) {
-    char* str = JitcodeGlobalEntry::createScriptString(cx, scripts[i]);
+    UniqueChars str = GeckoProfilerRuntime::allocProfileString(cx, scripts[i]);
     if (!str) {
       return false;
     }
-    if (!profilingStrings.append(str)) {
+    if (!profilingStrings.append(str.release())) {
       return false;
     }
   }
@@ -1495,7 +1426,8 @@ uint32_t JitcodeIonTable::findRegionEntry(uint32_t nativeOffset) const {
   return idx;
 }
 
-/* static */ bool JitcodeIonTable::WriteIonTable(
+/* static */
+bool JitcodeIonTable::WriteIonTable(
     CompactBufferWriter& writer, JSScript** scriptList, uint32_t scriptListSize,
     const NativeToBytecode* start, const NativeToBytecode* end,
     uint32_t* tableOffsetOut, uint32_t* numRegionsOut) {
@@ -1611,6 +1543,9 @@ JS::ProfiledFrameHandle::ProfiledFrameHandle(JSRuntime* rt,
 
 JS_PUBLIC_API JS::ProfilingFrameIterator::FrameKind
 JS::ProfiledFrameHandle::frameKind() const {
+  if (entry_.isBaselineInterpreter()) {
+    return JS::ProfilingFrameIterator::Frame_BaselineInterpreter;
+  }
   if (entry_.isBaseline()) {
     return JS::ProfilingFrameIterator::Frame_Baseline;
   }

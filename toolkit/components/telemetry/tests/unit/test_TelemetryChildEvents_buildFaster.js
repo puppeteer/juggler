@@ -2,7 +2,6 @@
    http://creativecommons.org/publicdomain/zero/1.0/
 */
 
-ChromeUtils.import("resource://services-common/utils.js");
 ChromeUtils.import("resource://testing-common/ContentTaskUtils.jsm", this);
 
 const MESSAGE_CHILD_TEST_DONE = "ChildTest:Done";
@@ -27,8 +26,10 @@ function run_child_test() {
  */
 async function waitForContentEvents() {
   await ContentTaskUtils.waitForCondition(() => {
-    const snapshot =
-      Telemetry.snapshotEvents(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, false);
+    const snapshot = Telemetry.snapshotEvents(
+      Ci.nsITelemetry.DATASET_PRERELEASE_CHANNELS,
+      false
+    );
     return Object.keys(snapshot).includes("content");
   });
 }
@@ -45,6 +46,7 @@ add_task(async function test_setup() {
   do_get_profile(true);
   loadAddonManager(APP_ID, APP_NAME, APP_VERSION, PLATFORM_VERSION);
   finishAddonManagerStartup();
+  fakeIntlReady();
   await TelemetryController.testSetup();
   // Make sure we don't generate unexpected pings due to pref changes.
   await setEmptyPrefWatchlist();
@@ -52,9 +54,14 @@ add_task(async function test_setup() {
 
   // Register some dynamic builtin test events.
   Telemetry.registerBuiltinEvents(TEST_EVENT_NAME, {
-    "dynamic": {
+    dynamic: {
       methods: ["dynamic", "child"],
       objects: ["builtin", "anotherone"],
+    },
+    dynamic_expired: {
+      methods: ["check"],
+      objects: ["expiry"],
+      expired: true,
     },
   });
   Telemetry.setEventRecordingEnabled(TEST_STATIC_EVENT_NAME, true);
@@ -63,6 +70,7 @@ add_task(async function test_setup() {
   Telemetry.recordEvent(TEST_EVENT_NAME, "dynamic", "builtin");
   Telemetry.recordEvent(TEST_STATIC_EVENT_NAME, "main_and_content", "object1");
   Telemetry.recordEvent(TEST_EVENT_NAME, "dynamic", "anotherone");
+  Telemetry.recordEvent(TEST_EVENT_NAME, "check", "expiry");
 
   // Run test in child, don't wait for it to finish: just wait for the
   // MESSAGE_CHILD_TEST_DONE.
@@ -74,10 +82,15 @@ add_task(async function test_setup() {
   // and batch send the data back to the parent process.
   await waitForContentEvents();
 
-  let snapshot =
-    Telemetry.snapshotEvents(Ci.nsITelemetry.DATASET_RELEASE_CHANNEL_OPTIN, false);
-  Assert.ok(("parent" in snapshot), "Should have parent events in the snapshot.");
-  Assert.ok(("content" in snapshot), "Should have content events in the snapshot.");
+  let snapshot = Telemetry.snapshotEvents(
+    Ci.nsITelemetry.DATASET_PRERELEASE_CHANNELS,
+    false
+  );
+  Assert.ok("parent" in snapshot, "Should have parent events in the snapshot.");
+  Assert.ok(
+    "content" in snapshot,
+    "Should have content events in the snapshot."
+  );
 
   // All events should now be recorded in the right order
   let expectedParent = [
@@ -91,15 +104,29 @@ add_task(async function test_setup() {
     [TEST_EVENT_NAME, "child", "anotherone"],
   ];
 
-  Assert.equal(snapshot.parent.length, expectedParent.length, "Should have recorded the right amount of events in parent.");
+  Assert.equal(
+    snapshot.parent.length,
+    expectedParent.length,
+    "Should have recorded the right amount of events in parent."
+  );
   for (let i = 0; i < expectedParent.length; ++i) {
-    Assert.deepEqual(snapshot.parent[i].slice(1), expectedParent[i],
-                     "Should have recorded the expected event data in parent.");
+    Assert.deepEqual(
+      snapshot.parent[i].slice(1),
+      expectedParent[i],
+      "Should have recorded the expected event data in parent."
+    );
   }
 
-  Assert.equal(snapshot.content.length, expectedContent.length, "Should have recorded the right amount of events in content.");
+  Assert.equal(
+    snapshot.content.length,
+    expectedContent.length,
+    "Should have recorded the right amount of events in content."
+  );
   for (let i = 0; i < expectedContent.length; ++i) {
-    Assert.deepEqual(snapshot.content[i].slice(1), expectedContent[i],
-                     "Should have recorded the expected event data in content.");
+    Assert.deepEqual(
+      snapshot.content[i].slice(1),
+      expectedContent[i],
+      "Should have recorded the expected event data in content."
+    );
   }
 });

@@ -8,16 +8,21 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.support.test.InstrumentationRegistry
 
 import android.support.test.filters.MediumTest
 import android.support.test.filters.SdkSuppress
 import android.support.test.runner.AndroidJUnit4
+
+import java.math.BigInteger
 
 import java.net.URI
 
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.Charset
+
+import java.security.MessageDigest
 
 import java.util.concurrent.CountDownLatch
 
@@ -38,6 +43,8 @@ import org.mozilla.geckoview.WebResponse
 import org.mozilla.geckoview.test.util.Environment
 import org.mozilla.geckoview.test.util.HttpBin
 import org.mozilla.geckoview.test.util.RuntimeCreator
+import java.net.UnknownHostException
+import java.util.*
 
 @MediumTest
 @RunWith(AndroidJUnit4::class)
@@ -61,7 +68,7 @@ class WebExecutorTest {
         val latch = CountDownLatch(1)
         Handler(Looper.getMainLooper()).post {
             executor = GeckoWebExecutor(RuntimeCreator.getRuntime())
-            server = HttpBin(URI.create(TEST_ENDPOINT))
+            server = HttpBin(InstrumentationRegistry.getTargetContext(), URI.create(TEST_ENDPOINT))
             server.start()
             latch.countDown()
         }
@@ -78,8 +85,8 @@ class WebExecutorTest {
         return fetch(request, GeckoWebExecutor.FETCH_FLAGS_NONE)
     }
 
-    private fun fetch(request: WebRequest, @GeckoWebExecutor.FetchFlags flags: Int): WebResponse {
-        return executor.fetch(request, flags).poll(env.defaultTimeoutMillis)
+    private fun fetch(request: WebRequest, flags: Int): WebResponse {
+        return executor.fetch(request, flags).poll(env.defaultTimeoutMillis)!!
     }
 
     fun String.toDirectByteBuffer(): ByteBuffer {
@@ -90,14 +97,32 @@ class WebExecutorTest {
         return buffer
     }
 
+    fun WebResponse.getBodyBytes(): ByteBuffer {
+        return ByteBuffer.wrap(body!!.readBytes())
+    }
+
     fun WebResponse.getJSONBody(): JSONObject {
-        return JSONObject(Charset.forName("UTF-8").decode(body).toString())
+        val bytes = this.getBodyBytes()
+        val bodyString = Charset.forName("UTF-8").decode(bytes).toString()
+        return JSONObject(bodyString)
+    }
+
+    private fun randomString(count: Int): String {
+        val chars = "01234567890abcdefghijklmnopqrstuvwxyz[],./?;'"
+        val builder = StringBuilder(count)
+        val rand = Random(System.currentTimeMillis())
+
+        for (i in 0 until count) {
+            builder.append(chars[rand.nextInt(chars.length)])
+        }
+
+        return builder.toString()
     }
 
     @Test
     fun smoke() {
         val uri = "$TEST_ENDPOINT/anything"
-        val bodyString = "This is the POST data"
+        val bodyString = randomString(8192)
         val referrer = "http://foo/bar"
 
         val request = WebRequest.Builder(uri)
@@ -107,6 +132,7 @@ class WebExecutorTest {
                 .addHeader("Header2", "Value1")
                 .addHeader("Header2", "Value2")
                 .referrer(referrer)
+                .header("Content-Type", "text/plain")
                 .body(bodyString.toDirectByteBuffer())
                 .build()
 
@@ -121,8 +147,16 @@ class WebExecutorTest {
         assertThat("Method should match", body.getString("method"), equalTo("POST"))
         assertThat("Headers should match", body.getJSONObject("headers").getString("Header1"), equalTo("Value"))
         assertThat("Headers should match", body.getJSONObject("headers").getString("Header2"), equalTo("Value1, Value2"))
+        assertThat("Headers should match", body.getJSONObject("headers").getString("Content-Type"), equalTo("text/plain"))
         assertThat("Referrer should match", body.getJSONObject("headers").getString("Referer"), equalTo(referrer))
         assertThat("Data should match", body.getString("data"), equalTo(bodyString));
+    }
+
+    @Test
+    fun testFetchAsset() {
+        val response = fetch(WebRequest("$TEST_ENDPOINT/assets/www/hello.html"))
+        assertThat("Status should match", response.statusCode, equalTo(200))
+        assertThat("Body should have bytes", response.getBodyBytes().remaining(), greaterThan(0))
     }
 
     @Test
@@ -138,6 +172,15 @@ class WebExecutorTest {
         assertThat("URI should match", response.uri, equalTo(TEST_ENDPOINT +"/status/200"))
         assertThat("Redirected should match", response.redirected, equalTo(true))
         assertThat("Status code should match", response.statusCode, equalTo(200))
+    }
+
+    @Test
+    fun testDisallowRedirect() {
+        val response = fetch(WebRequest("$TEST_ENDPOINT/redirect-to?url=/status/200"), GeckoWebExecutor.FETCH_FLAGS_NO_REDIRECTS)
+
+        assertThat("URI should match", response.uri, equalTo("$TEST_ENDPOINT/redirect-to?url=/status/200"))
+        assertThat("Redirected should match", response.redirected, equalTo(false))
+        assertThat("Status code should match", response.statusCode, equalTo(302))
     }
 
     @Test
@@ -211,7 +254,7 @@ class WebExecutorTest {
 
     @Test
     fun testResolveV4() {
-        val addresses = executor.resolve("localhost").poll()
+        val addresses = executor.resolve("localhost").poll()!!
         assertThat("Addresses should not be null",
                 addresses, notNullValue())
         assertThat("First address should be loopback",
@@ -223,7 +266,7 @@ class WebExecutorTest {
     @Test
     @SdkSuppress(minSdkVersion = Build.VERSION_CODES.LOLLIPOP)
     fun testResolveV6() {
-        val addresses = executor.resolve("ip6-localhost").poll()
+        val addresses = executor.resolve("ip6-localhost").poll()!!
         assertThat("Addresses should not be null",
                 addresses, notNullValue())
         assertThat("First address should be loopback",
@@ -233,8 +276,53 @@ class WebExecutorTest {
     }
 
     @Test
+    fun testFetchUnknownHost() {
+        thrown.expect(equalTo(WebRequestError(WebRequestError.ERROR_UNKNOWN_HOST, WebRequestError.ERROR_CATEGORY_URI)))
+        fetch(WebRequest("https://this.should.not.resolve"))
+    }
+
+    @Test(expected = UnknownHostException::class)
     fun testResolveError() {
-        thrown.expect(equalTo(WebRequestError(WebRequestError.ERROR_UNKNOWN_HOST, WebRequestError.ERROR_CATEGORY_URI)));
-        executor.resolve("this should not resolve").poll()
+        executor.resolve("this.should.not.resolve").poll()
+    }
+
+    @Test
+    fun testFetchStream() {
+        val expectedCount = 1 * 1024 * 1024 // 1MB
+        val response = executor.fetch(WebRequest("$TEST_ENDPOINT/bytes/$expectedCount")).poll(env.defaultTimeoutMillis)!!
+
+        assertThat("Status code should match", response.statusCode, equalTo(200))
+        assertThat("Content-Length should match", response.headers["Content-Length"]!!.toInt(), equalTo(expectedCount))
+
+        val stream = response.body!!
+        val bytes = stream.readBytes(expectedCount)
+        stream.close()
+
+        assertThat("Byte counts should match", bytes.size, equalTo(expectedCount))
+
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        assertThat("Hashes should match", response.headers["X-SHA-256"],
+                equalTo(String.format("%064x", BigInteger(1, digest))))
+    }
+
+    @Test
+    fun testFetchStreamCancel() {
+        val expectedCount = 1 * 1024 * 1024 // 1MB
+        val response = executor.fetch(WebRequest("$TEST_ENDPOINT/bytes/$expectedCount")).poll(env.defaultTimeoutMillis)!!
+
+        assertThat("Status code should match", response.statusCode, equalTo(200))
+        assertThat("Content-Length should match", response.headers["Content-Length"]!!.toInt(), equalTo(expectedCount))
+
+        val stream = response.body!!;
+
+        assertThat("Stream should have 0 bytes available", stream.available(), equalTo(0))
+
+        // Wait a second. Not perfect, but should be enough time for at least one buffer
+        // to be appended if things are not going as they should.
+        SystemClock.sleep(1000);
+
+        assertThat("Stream should still have 0 bytes available", stream.available(), equalTo(0));
+
+        stream.close()
     }
 }

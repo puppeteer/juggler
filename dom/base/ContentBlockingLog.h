@@ -7,13 +7,13 @@
 #ifndef mozilla_dom_ContentBlockingLog_h
 #define mozilla_dom_ContentBlockingLog_h
 
+#include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/JSONWriter.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/UniquePtr.h"
-#include "nsClassHashtable.h"
-#include "nsHashKeys.h"
+#include "nsIWebProgressListener.h"
 #include "nsReadableUtils.h"
 #include "nsTArray.h"
 #include "nsWindowSizes.h"
@@ -22,105 +22,160 @@ namespace mozilla {
 namespace dom {
 
 class ContentBlockingLog final {
+  typedef AntiTrackingCommon::StorageAccessGrantedReason
+      StorageAccessGrantedReason;
+
   struct LogEntry {
     uint32_t mType;
     uint32_t mRepeatCount;
     bool mBlocked;
+    Maybe<AntiTrackingCommon::StorageAccessGrantedReason> mReason;
+    nsTArray<nsCString> mTrackingFullHashes;
   };
 
-  // Each element is a tuple of (type, blocked, repeatCount). The type values
-  // come from the blocking types defined in nsIWebProgressListener.
-  typedef nsTArray<LogEntry> OriginLog;
-  typedef Tuple<bool, Maybe<bool>, OriginLog> OriginData;
-  typedef nsClassHashtable<nsStringHashKey, OriginData> OriginDataHashTable;
+  struct OriginDataEntry {
+    OriginDataEntry() : mHasTrackingContentLoaded(false) {}
+
+    bool mHasTrackingContentLoaded;
+    Maybe<bool> mHasCookiesLoaded;
+    nsTArray<LogEntry> mLogs;
+  };
+
+  struct OriginEntry {
+    OriginEntry() { mData = MakeUnique<OriginDataEntry>(); }
+
+    nsCString mOrigin;
+    UniquePtr<OriginDataEntry> mData;
+  };
+
+  typedef nsTArray<OriginEntry> OriginDataTable;
 
   struct StringWriteFunc : public JSONWriteFunc {
-    nsAString&
+    nsACString&
         mBuffer;  // The lifetime of the struct must be bound to the buffer
-    explicit StringWriteFunc(nsAString& aBuffer) : mBuffer(aBuffer) {}
+    explicit StringWriteFunc(nsACString& aBuffer) : mBuffer(aBuffer) {}
 
-    void Write(const char* aStr) override {
-      mBuffer.Append(NS_ConvertUTF8toUTF16(aStr));
+    void Write(const char* aStr) override { mBuffer.Append(aStr); }
+  };
+
+  struct Comparator {
+   public:
+    bool Equals(const OriginDataTable::elem_type& aLeft,
+                const OriginDataTable::elem_type& aRight) const {
+      return aLeft.mOrigin.Equals(aRight.mOrigin);
+    }
+
+    bool Equals(const OriginDataTable::elem_type& aLeft,
+                const nsACString& aRight) const {
+      return aLeft.mOrigin.Equals(aRight);
     }
   };
 
  public:
+  static const nsLiteralCString kDummyOriginHash;
+
   ContentBlockingLog() = default;
   ~ContentBlockingLog() = default;
 
-  void RecordLog(const nsAString& aOrigin, uint32_t aType, bool aBlocked) {
+  void RecordLog(
+      const nsACString& aOrigin, uint32_t aType, bool aBlocked,
+      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason,
+      const nsTArray<nsCString>& aTrackingFullHashes) {
+    DebugOnly<bool> isCookiesBlockedTracker =
+        aType == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER;
+    MOZ_ASSERT_IF(aBlocked, aReason.isNothing());
+    MOZ_ASSERT_IF(!isCookiesBlockedTracker, aReason.isNothing());
+    MOZ_ASSERT_IF(isCookiesBlockedTracker && !aBlocked, aReason.isSome());
+
     if (aOrigin.IsVoid()) {
       return;
     }
-    auto entry = mLog.LookupForAdd(aOrigin);
-    if (entry) {
-      auto& data = entry.Data();
+    auto index = mLog.IndexOf(aOrigin, 0, Comparator());
+    if (index != OriginDataTable::NoIndex) {
+      OriginEntry& entry = mLog[index];
+      if (!entry.mData) {
+        return;
+      }
+
       if (aType == nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT) {
-        Get<0>(*data) = aBlocked;
+        entry.mData->mHasTrackingContentLoaded = aBlocked;
         return;
       }
       if (aType == nsIWebProgressListener::STATE_COOKIES_LOADED) {
-        if (Get<1>(*data).isSome()) {
-          Get<1>(*data).ref() = aBlocked;
+        if (entry.mData->mHasCookiesLoaded.isSome()) {
+          entry.mData->mHasCookiesLoaded.ref() = aBlocked;
         } else {
-          Get<1>(*data).emplace(aBlocked);
+          entry.mData->mHasCookiesLoaded.emplace(aBlocked);
         }
         return;
       }
-      auto& log = Get<2>(*data);
-      if (!log.IsEmpty()) {
-        auto& last = log.LastElement();
+      if (!entry.mData->mLogs.IsEmpty()) {
+        auto& last = entry.mData->mLogs.LastElement();
         if (last.mType == aType && last.mBlocked == aBlocked) {
           ++last.mRepeatCount;
           // Don't record recorded events.  This helps compress our log.
+          // We don't care about if the the reason is the same, just keep the
+          // first one.
+          // Note: {aReason, aTrackingFullHashes} are not compared here and we
+          // simply keep the first ones.
+#ifdef DEBUG
+          for (const auto& hash : aTrackingFullHashes) {
+            MOZ_ASSERT(last.mTrackingFullHashes.Contains(hash));
+          }
+#endif
           return;
         }
       }
-      if (log.Length() ==
+      if (entry.mData->mLogs.Length() ==
           std::max(1u,
                    StaticPrefs::browser_contentblocking_originlog_length())) {
         // Cap the size at the maximum length adjustable by the pref
-        log.RemoveElementAt(0);
+        entry.mData->mLogs.RemoveElementAt(0);
       }
-      log.AppendElement(LogEntry{aType, 1u, aBlocked});
+      entry.mData->mLogs.AppendElement(
+          LogEntry{aType, 1u, aBlocked, aReason,
+                   nsTArray<nsCString>(aTrackingFullHashes)});
+      return;
+    }
+
+    // The entry has not been found.
+
+    OriginEntry* entry = mLog.AppendElement();
+    if (NS_WARN_IF(!entry || !entry->mData)) {
+      return;
+    }
+
+    entry->mOrigin = aOrigin;
+
+    if (aType == nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT) {
+      entry->mData->mHasTrackingContentLoaded = aBlocked;
+    } else if (aType == nsIWebProgressListener::STATE_COOKIES_LOADED) {
+      MOZ_ASSERT(entry->mData->mHasCookiesLoaded.isNothing());
+      entry->mData->mHasCookiesLoaded.emplace(aBlocked);
     } else {
-      entry.OrInsert([=] {
-        nsAutoPtr<OriginData> data(
-            new OriginData(false, Maybe<bool>(), OriginLog()));
-        if (aType == nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT) {
-          Get<0>(*data) = aBlocked;
-        } else if (aType == nsIWebProgressListener::STATE_COOKIES_LOADED) {
-          if (Get<1>(*data).isSome()) {
-            Get<1>(*data).ref() = aBlocked;
-          } else {
-            Get<1>(*data).emplace(aBlocked);
-          }
-        } else {
-          Get<2>(*data).AppendElement(LogEntry{aType, 1u, aBlocked});
-        }
-        return data.forget();
-      });
+      entry->mData->mLogs.AppendElement(
+          LogEntry{aType, 1u, aBlocked, aReason,
+                   nsTArray<nsCString>(aTrackingFullHashes)});
     }
   }
 
-  nsAutoString Stringify() {
-    nsAutoString buffer;
+  void ReportOrigins();
+  void ReportLog(nsIPrincipal* aFirstPartyPrincipal);
+
+  nsAutoCString Stringify() {
+    nsAutoCString buffer;
 
     JSONWriter w(MakeUnique<StringWriteFunc>(buffer));
     w.Start();
 
-    for (auto iter = mLog.Iter(); !iter.Done(); iter.Next()) {
-      if (!iter.UserData()) {
-        w.StartArrayProperty(NS_ConvertUTF16toUTF8(iter.Key()).get(),
-                             w.SingleLineStyle);
-        w.EndArray();
+    for (const OriginEntry& entry : mLog) {
+      if (!entry.mData) {
         continue;
       }
 
-      w.StartArrayProperty(NS_ConvertUTF16toUTF8(iter.Key()).get(),
-                           w.SingleLineStyle);
-      auto& data = *iter.UserData();
-      if (Get<0>(data)) {
+      w.StartArrayProperty(entry.mOrigin.get(), w.SingleLineStyle);
+
+      if (entry.mData->mHasTrackingContentLoaded) {
         w.StartArrayElement(w.SingleLineStyle);
         {
           w.IntElement(nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT);
@@ -129,21 +184,24 @@ class ContentBlockingLog final {
         }
         w.EndArray();
       }
-      if (Get<1>(data).isSome()) {
+      if (entry.mData->mHasCookiesLoaded.isSome()) {
         w.StartArrayElement(w.SingleLineStyle);
         {
           w.IntElement(nsIWebProgressListener::STATE_COOKIES_LOADED);
-          w.BoolElement(Get<1>(data).value());  // blocked
-          w.IntElement(1);                      // repeat count
+          w.BoolElement(entry.mData->mHasCookiesLoaded.value());  // blocked
+          w.IntElement(1);  // repeat count
         }
         w.EndArray();
       }
-      for (auto& item : Get<2>(data)) {
+      for (const LogEntry& item : entry.mData->mLogs) {
         w.StartArrayElement(w.SingleLineStyle);
         {
           w.IntElement(item.mType);
           w.BoolElement(item.mBlocked);
           w.IntElement(item.mRepeatCount);
+          if (item.mReason.isSome()) {
+            w.IntElement(item.mReason.value());
+          }
         }
         w.EndArray();
       }
@@ -155,28 +213,28 @@ class ContentBlockingLog final {
     return buffer;
   }
 
-  bool HasBlockedAnyOfType(uint32_t aType) {
+  bool HasBlockedAnyOfType(uint32_t aType) const {
     // Note: nothing inside this loop should return false, the goal for the
     // loop is to scan the log to see if we find a matching entry, and if so
     // we would return true, otherwise in the end of the function outside of
     // the loop we take the common `return false;` statement.
-    for (auto iter = mLog.Iter(); !iter.Done(); iter.Next()) {
-      if (!iter.UserData()) {
+    for (const OriginEntry& entry : mLog) {
+      if (!entry.mData) {
         continue;
       }
 
       if (aType == nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT) {
-        if (Get<0>(*iter.UserData())) {
+        if (entry.mData->mHasTrackingContentLoaded) {
           return true;
         }
       } else if (aType == nsIWebProgressListener::STATE_COOKIES_LOADED) {
-        if (Get<1>(*iter.UserData()).isSome() &&
-            Get<1>(*iter.UserData()).value()) {
+        if (entry.mData->mHasCookiesLoaded.isSome() &&
+            entry.mData->mHasCookiesLoaded.value()) {
           return true;
         }
       } else {
-        for (auto& item : Get<2>(*iter.UserData())) {
-          if ((item.mType & aType) != 0) {
+        for (const auto& item : entry.mData->mLogs) {
+          if (((item.mType & aType) != 0) && item.mBlocked) {
             return true;
           }
         }
@@ -190,21 +248,17 @@ class ContentBlockingLog final {
         mLog.ShallowSizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
 
     // Now add the sizes of each origin log queue.
-    // The const_cast is needed because the nsTHashtable::Iterator interface is
-    // not const-safe.  :-(
-    for (auto iter = const_cast<OriginDataHashTable&>(mLog).Iter();
-         !iter.Done(); iter.Next()) {
-      if (iter.UserData()) {
-        aSizes.mDOMOtherSize +=
-            aSizes.mState.mMallocSizeOf(iter.UserData()) +
-            Get<2>(*iter.UserData())
-                .ShallowSizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
+    for (const OriginEntry& entry : mLog) {
+      if (entry.mData) {
+        aSizes.mDOMOtherSize += aSizes.mState.mMallocSizeOf(entry.mData.get()) +
+                                entry.mData->mLogs.ShallowSizeOfExcludingThis(
+                                    aSizes.mState.mMallocSizeOf);
       }
     }
   }
 
  private:
-  OriginDataHashTable mLog;
+  OriginDataTable mLog;
 };
 
 }  // namespace dom

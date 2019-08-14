@@ -45,6 +45,7 @@ BROWSER_CHROME_MANIFESTS += ['tests/browser/browser.ini']
 
 XPIDL_SOURCES += [
     'core/nsITelemetry.idl',
+    'other/GCTelemetry.idl',
 ]
 
 XPIDL_MODULE = 'telemetry'
@@ -59,6 +60,7 @@ EXPORTS.mozilla += [
     'core/Telemetry.h',
     'other/CombinedStacks.h',
     'other/ProcessedStack.h',
+    'TelemetryOriginEnums.h',
 ]
 
 EXPORTS.mozilla.telemetry += [
@@ -73,6 +75,7 @@ SOURCES += [
     'core/TelemetryCommon.cpp',
     'core/TelemetryEvent.cpp',
     'core/TelemetryHistogram.cpp',
+    'core/TelemetryOrigin.cpp',
     'core/TelemetryScalar.cpp',
     'geckoview/TelemetryGeckoViewPersistence.cpp',
     'other/CombinedStacks.cpp',
@@ -92,30 +95,38 @@ if CONFIG['MOZ_GECKO_PROFILER']:
       'other/KeyedStackCapturer.cpp'
     ]
 
+XPCOM_MANIFESTS += [
+    'components.conf',
+    'core/components.conf',
+]
+
 EXTRA_COMPONENTS += [
-    'TelemetryStartup.js',
     'TelemetryStartup.manifest'
 ]
 
 EXTRA_JS_MODULES += [
+    'app/ClientID.jsm',
     'app/TelemetryArchive.jsm',
     'app/TelemetryController.jsm',
     'app/TelemetryEnvironment.jsm',
     'app/TelemetryReportingPolicy.jsm',
+    'app/TelemetryScheduler.jsm',
     'app/TelemetrySend.jsm',
     'app/TelemetryStorage.jsm',
     'app/TelemetryTimestamps.jsm',
     'app/TelemetryUtils.jsm',
     'other/GCTelemetry.jsm',
-    'other/MemoryTelemetry.jsm',
     'other/UITelemetry.jsm',
     'pings/CoveragePing.jsm',
+    'pings/EcosystemTelemetry.jsm',
     'pings/EventPing.jsm',
     'pings/HealthPing.jsm',
     'pings/ModulesPing.jsm',
+    'pings/PrioPing.jsm',
     'pings/TelemetrySession.jsm',
     'pings/UntrustedModulesPing.jsm',
     'pings/UpdatePing.jsm',
+    'TelemetryStartup.jsm',
 ]
 
 TESTING_JS_MODULES += [

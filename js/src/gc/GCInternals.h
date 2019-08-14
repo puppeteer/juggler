@@ -85,7 +85,9 @@ class MOZ_RAII AutoTraceSession : public AutoLockAllAtoms,
 };
 
 struct MOZ_RAII AutoFinishGC {
-  explicit AutoFinishGC(JSContext* cx) { FinishGC(cx); }
+  explicit AutoFinishGC(JSContext* cx, JS::GCReason reason) {
+    FinishGC(cx, reason);
+  }
 };
 
 // This class should be used by any code that needs exclusive access to the heap
@@ -94,7 +96,8 @@ class MOZ_RAII AutoPrepareForTracing : private AutoFinishGC,
                                        public AutoTraceSession {
  public:
   explicit AutoPrepareForTracing(JSContext* cx)
-      : AutoFinishGC(cx), AutoTraceSession(cx->runtime()) {}
+      : AutoFinishGC(cx, JS::GCReason::PREPARE_FOR_TRACING),
+        AutoTraceSession(cx->runtime()) {}
 };
 
 AbortReason IsIncrementalGCUnsafe(JSRuntime* rt);
@@ -146,7 +149,7 @@ void CheckHashTablesAfterMovingGC(JSRuntime* rt);
 void CheckHeapAfterGC(JSRuntime* rt);
 #endif
 
-struct MovingTracer : JS::CallbackTracer {
+struct MovingTracer final : public JS::CallbackTracer {
   explicit MovingTracer(JSRuntime* rt)
       : CallbackTracer(rt, TraceWeakMapKeysValues) {}
 
@@ -158,6 +161,7 @@ struct MovingTracer : JS::CallbackTracer {
   void onBaseShapeEdge(BaseShape** basep) override;
   void onScopeEdge(Scope** basep) override;
   void onRegExpSharedEdge(RegExpShared** sharedp) override;
+  void onBigIntEdge(BigInt** bip) override;
   void onChild(const JS::GCCellPtr& thing) override {
     MOZ_ASSERT(!thing.asCell()->isForwarded());
   }
@@ -175,7 +179,7 @@ struct MovingTracer : JS::CallbackTracer {
 // been tenured during a minor collection.
 struct TenureCount {
   ObjectGroup* group;
-  int count;
+  unsigned count;
 
   // ObjectGroups are never nursery-allocated, and TenureCounts are only used
   // in minor GC (not compacting GC), so prevent the analysis from
@@ -282,9 +286,9 @@ class MOZ_RAII AutoEmptyNursery : public AutoAssertEmptyNursery {
 
 extern void DelayCrossCompartmentGrayMarking(JSObject* src);
 
-inline bool IsOOMReason(JS::gcreason::Reason reason) {
-  return reason == JS::gcreason::LAST_DITCH ||
-         reason == JS::gcreason::MEM_PRESSURE;
+inline bool IsOOMReason(JS::GCReason reason) {
+  return reason == JS::GCReason::LAST_DITCH ||
+         reason == JS::GCReason::MEM_PRESSURE;
 }
 
 TenuredCell* AllocateCellInGC(JS::Zone* zone, AllocKind thingKind);

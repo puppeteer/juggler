@@ -10,11 +10,20 @@
 #include "ParentInternal.h"
 
 #include "chrome/common/mach_ipc_mac.h"
-#include "mozilla/dom/TabChild.h"
+#include "jsapi.h"  // JSAutoRealm
+#include "js/ArrayBuffer.h"  // JS::{DetachArrayBuffer,NewArrayBufferWithUserOwnedContents}
+#include "js/RootingAPI.h"  // JS::Rooted
+#include "js/Value.h"       // JS::{,Object}Value
+#include "mozilla/Assertions.h"
+#include "mozilla/ClearOnShutdown.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PTextureChild.h"
+#include "nsImportModule.h"
+#include "rrIGraphics.h"
 
 #include <mach/mach_vm.h>
 
@@ -66,39 +75,17 @@ void SendGraphicsMemoryToChild() {
 }
 
 // Global object for the sandbox used to paint graphics data in this process.
-static JS::PersistentRootedObject* gGraphicsSandbox;
+static StaticRefPtr<rrIGraphics> gGraphics;
 
 static void InitGraphicsSandbox() {
-  MOZ_RELEASE_ASSERT(!gGraphicsSandbox);
+  MOZ_RELEASE_ASSERT(!gGraphics);
 
-  dom::AutoJSAPI jsapi;
-  if (!jsapi.Init(xpc::PrivilegedJunkScope())) {
-    MOZ_CRASH("InitGraphicsSandbox");
-  }
+  nsCOMPtr<rrIGraphics> graphics =
+      do_ImportModule("resource://devtools/server/actors/replay/graphics.js");
+  gGraphics = graphics.forget();
+  ClearOnShutdown(&gGraphics);
 
-  JSContext* cx = jsapi.cx();
-
-  xpc::SandboxOptions options;
-  options.sandboxName.AssignLiteral("Record/Replay Graphics Sandbox");
-  options.invisibleToDebugger = true;
-  RootedValue v(cx);
-  nsresult rv =
-      CreateSandboxObject(cx, &v, nsXPConnect::SystemPrincipal(), options);
-  MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-
-  gGraphicsSandbox = new JS::PersistentRootedObject(cx);
-  *gGraphicsSandbox = ::js::UncheckedUnwrap(&v.toObject());
-
-  JSAutoRealm ar(cx, *gGraphicsSandbox);
-
-  ErrorResult er;
-  dom::GlobalObject global(cx, *gGraphicsSandbox);
-  RootedObject obj(cx);
-  dom::ChromeUtils::Import(
-      global,
-      NS_LITERAL_STRING("resource://devtools/server/actors/replay/graphics.js"),
-      dom::Optional<HandleObject>(), &obj, er);
-  MOZ_RELEASE_ASSERT(!er.Failed());
+  MOZ_RELEASE_ASSERT(gGraphics);
 }
 
 // Buffer used to transform graphics memory, if necessary.
@@ -117,14 +104,6 @@ static size_t gLastPaintWidth, gLastPaintHeight;
 // its graphics, we wait until both the Paint and the checkpoint itself have
 // been hit, with no intervening repaint.
 
-// The last explicit paint message received from the child, if there has not
-// been an intervening repaint.
-static UniquePtr<PaintMessage> gLastExplicitPaint;
-
-// The last checkpoint the child reached, if there has not been an intervening
-// repaint.
-static size_t gLastCheckpoint;
-
 void UpdateGraphicsInUIProcess(const PaintMessage* aMsg) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -139,12 +118,8 @@ void UpdateGraphicsInUIProcess(const PaintMessage* aMsg) {
 
   bool hadFailure = !aMsg;
 
-  // Clear out the last explicit paint information. This may delete aMsg.
-  gLastExplicitPaint = nullptr;
-  gLastCheckpoint = CheckpointId::Invalid;
-
   // Make sure there is a sandbox which is running the graphics JS module.
-  if (!gGraphicsSandbox) {
+  if (!gGraphics) {
     InitGraphicsSandbox();
   }
 
@@ -179,41 +154,25 @@ void UpdateGraphicsInUIProcess(const PaintMessage* aMsg) {
   }
 
   AutoSafeJSContext cx;
-  JSAutoRealm ar(cx, *gGraphicsSandbox);
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
 
-  JSObject* bufferObject =
-      JS_NewArrayBufferWithExternalContents(cx, width * height * 4, memory);
+  // Create an ArrayBuffer whose contents are the externally-provided |memory|.
+  JS::Rooted<JSObject*> bufferObject(cx);
+  bufferObject =
+      JS::NewArrayBufferWithUserOwnedContents(cx, width * height * 4, memory);
   MOZ_RELEASE_ASSERT(bufferObject);
 
-  JS::AutoValueArray<4> args(cx);
-  args[0].setObject(*bufferObject);
-  args[1].setInt32(width);
-  args[2].setInt32(height);
-  args[3].setBoolean(hadFailure);
+  JS::Rooted<JS::Value> buffer(cx, JS::ObjectValue(*bufferObject));
 
   // Call into the graphics module to update the canvas it manages.
-  RootedValue rval(cx);
-  if (!JS_CallFunctionName(cx, *gGraphicsSandbox, "UpdateCanvas", args,
-                           &rval)) {
+  if (NS_FAILED(gGraphics->UpdateCanvas(buffer, width, height, hadFailure))) {
     MOZ_CRASH("UpdateGraphicsInUIProcess");
   }
-}
 
-static void MaybeTriggerExplicitPaint() {
-  if (gLastExplicitPaint &&
-      gLastExplicitPaint->mCheckpointId == gLastCheckpoint) {
-    UpdateGraphicsInUIProcess(gLastExplicitPaint.get());
-  }
-}
-
-void MaybeUpdateGraphicsAtPaint(const PaintMessage& aMsg) {
-  gLastExplicitPaint.reset(new PaintMessage(aMsg));
-  MaybeTriggerExplicitPaint();
-}
-
-void MaybeUpdateGraphicsAtCheckpoint(size_t aCheckpointId) {
-  gLastCheckpoint = aCheckpointId;
-  MaybeTriggerExplicitPaint();
+  // Manually detach this ArrayBuffer once this update completes, as the
+  // JS::NewArrayBufferWithUserOwnedContents API mandates.  (The API also
+  // guarantees that this call always succeeds.)
+  MOZ_ALWAYS_TRUE(JS::DetachArrayBuffer(cx, bufferObject));
 }
 
 bool InRepaintStressMode() {

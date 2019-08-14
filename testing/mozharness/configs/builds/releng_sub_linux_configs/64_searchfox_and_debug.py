@@ -7,7 +7,6 @@ config = {
         'build',
     ],
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
-    # decides whether we want to use moz_sign_cmd in env
     'vcs_share_base': '/builds/hg-shared',
     #########################################################################
 
@@ -37,6 +36,4 @@ config = {
     # This doesn't actually inherit from anything.
     'mozconfig_platform': 'linux64',
     'mozconfig_variant': 'debug-searchfox-clang',
-    #######################
-    'artifact_flag_build_variant_in_try': None,
 }

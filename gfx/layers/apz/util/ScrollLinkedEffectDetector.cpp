@@ -6,7 +6,7 @@
 
 #include "ScrollLinkedEffectDetector.h"
 
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
@@ -15,7 +15,8 @@ namespace layers {
 uint32_t ScrollLinkedEffectDetector::sDepth = 0;
 bool ScrollLinkedEffectDetector::sFoundScrollLinkedEffect = false;
 
-/* static */ void ScrollLinkedEffectDetector::PositioningPropertyMutated() {
+/* static */
+void ScrollLinkedEffectDetector::PositioningPropertyMutated() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (sDepth > 0) {
@@ -24,7 +25,7 @@ bool ScrollLinkedEffectDetector::sFoundScrollLinkedEffect = false;
   }
 }
 
-ScrollLinkedEffectDetector::ScrollLinkedEffectDetector(nsIDocument* aDoc)
+ScrollLinkedEffectDetector::ScrollLinkedEffectDetector(dom::Document* aDoc)
     : mDocument(aDoc) {
   MOZ_ASSERT(NS_IsMainThread());
   sDepth++;

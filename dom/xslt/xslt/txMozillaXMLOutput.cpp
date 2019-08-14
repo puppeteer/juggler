@@ -5,7 +5,7 @@
 
 #include "txMozillaXMLOutput.h"
 
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDocShell.h"
 #include "nsIScriptElement.h"
 #include "nsCharsetSource.h"
@@ -20,7 +20,6 @@
 #include "nsNameSpaceManager.h"
 #include "txStringUtils.h"
 #include "txURIUtils.h"
-#include "nsIHTMLDocument.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIDocumentTransformer.h"
 #include "mozilla/StyleSheetInlines.h"
@@ -206,11 +205,10 @@ nsresult txMozillaXMLOutput::endDocument(nsresult aResult) {
   }
 
   if (mCreatingNewDocument) {
-    // This should really be handled by nsIDocument::EndLoad
-    MOZ_ASSERT(
-        mDocument->GetReadyStateEnum() == nsIDocument::READYSTATE_LOADING,
-        "Bad readyState");
-    mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_INTERACTIVE);
+    // This should really be handled by Document::EndLoad
+    MOZ_ASSERT(mDocument->GetReadyStateEnum() == Document::READYSTATE_LOADING,
+               "Bad readyState");
+    mDocument->SetReadyStateInternal(Document::READYSTATE_INTERACTIVE);
     ScriptLoader* loader = mDocument->ScriptLoader();
     if (loader) {
       loader->ParsingComplete(false);
@@ -337,7 +335,7 @@ nsresult txMozillaXMLOutput::endElement() {
   return NS_OK;
 }
 
-void txMozillaXMLOutput::getOutputDocument(nsIDocument** aDocument) {
+void txMozillaXMLOutput::getOutputDocument(Document** aDocument) {
   NS_IF_ADDREF(*aDocument = mDocument);
 }
 
@@ -724,7 +722,7 @@ void txMozillaXMLOutput::processHTTPEquiv(nsAtom* aHeader,
 
 nsresult txMozillaXMLOutput::createResultDocument(const nsAString& aName,
                                                   int32_t aNsID,
-                                                  nsIDocument* aSourceDocument,
+                                                  Document* aSourceDocument,
                                                   bool aLoadedAsData) {
   nsresult rv;
 
@@ -738,11 +736,11 @@ nsresult txMozillaXMLOutput::createResultDocument(const nsAString& aName,
     rv = NS_NewXMLDocument(getter_AddRefs(mDocument), aLoadedAsData);
     NS_ENSURE_SUCCESS(rv, rv);
   }
-  // This should really be handled by nsIDocument::BeginLoad
+  // This should really be handled by Document::BeginLoad
   MOZ_ASSERT(
-      mDocument->GetReadyStateEnum() == nsIDocument::READYSTATE_UNINITIALIZED,
+      mDocument->GetReadyStateEnum() == Document::READYSTATE_UNINITIALIZED,
       "Bad readyState");
-  mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_LOADING);
+  mDocument->SetReadyStateInternal(Document::READYSTATE_LOADING);
   mDocument->SetMayStartLayout(false);
   bool hasHadScriptObject = false;
   nsIScriptGlobalObject* sgo =
@@ -758,6 +756,8 @@ nsresult txMozillaXMLOutput::createResultDocument(const nsAString& aName,
   // Make sure we set the script handling object after resetting with the
   // source, so that we have the right principal.
   mDocument->SetScriptHandlingObject(sgo);
+
+  mDocument->SetStateObjectFrom(aSourceDocument);
 
   // Set the charset
   if (!mOutputFormat.mEncoding.IsEmpty()) {
@@ -811,9 +811,8 @@ nsresult txMozillaXMLOutput::createResultDocument(const nsAString& aName,
 
   // Do this after calling OnDocumentCreated to ensure that the
   // PresShell/PresContext has been hooked up and get notified.
-  nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(mDocument);
-  if (htmlDoc) {
-    htmlDoc->SetCompatibilityMode(eCompatibility_FullStandards);
+  if (mDocument) {
+    mDocument->SetCompatibilityMode(eCompatibility_FullStandards);
   }
 
   // Add a doc-type if requested
@@ -932,7 +931,7 @@ void txTransformNotifier::OnTransformEnd(nsresult aResult) {
 
 void txTransformNotifier::OnTransformStart() { mInTransform = true; }
 
-nsresult txTransformNotifier::SetOutputDocument(nsIDocument* aDocument) {
+nsresult txTransformNotifier::SetOutputDocument(Document* aDocument) {
   mDocument = aDocument;
 
   // Notify the contentsink that the document is created

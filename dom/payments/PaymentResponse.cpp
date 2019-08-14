@@ -97,21 +97,17 @@ void PaymentResponse::GetDetails(JSContext* aCx,
       const BasicCardData& rawData = mDetails.basicCardData();
       BasicCardResponse basicCardResponse;
       if (!rawData.cardholderName.IsEmpty()) {
-        basicCardResponse.mCardholderName.Construct();
-        basicCardResponse.mCardholderName.Value() = rawData.cardholderName;
+        basicCardResponse.mCardholderName = rawData.cardholderName;
       }
       basicCardResponse.mCardNumber = rawData.cardNumber;
       if (!rawData.expiryMonth.IsEmpty()) {
-        basicCardResponse.mExpiryMonth.Construct();
-        basicCardResponse.mExpiryMonth.Value() = rawData.expiryMonth;
+        basicCardResponse.mExpiryMonth = rawData.expiryMonth;
       }
       if (!rawData.expiryYear.IsEmpty()) {
-        basicCardResponse.mExpiryYear.Construct();
-        basicCardResponse.mExpiryYear.Value() = rawData.expiryYear;
+        basicCardResponse.mExpiryYear = rawData.expiryYear;
       }
       if (!rawData.cardSecurityCode.IsEmpty()) {
-        basicCardResponse.mCardSecurityCode.Construct();
-        basicCardResponse.mCardSecurityCode.Value() = rawData.cardSecurityCode;
+        basicCardResponse.mCardSecurityCode = rawData.cardSecurityCode;
       }
       if (!rawData.billingAddress.country.IsEmpty() ||
           !rawData.billingAddress.addressLine.IsEmpty() ||
@@ -124,8 +120,7 @@ void PaymentResponse::GetDetails(JSContext* aCx,
           !rawData.billingAddress.organization.IsEmpty() ||
           !rawData.billingAddress.recipient.IsEmpty() ||
           !rawData.billingAddress.phone.IsEmpty()) {
-        basicCardResponse.mBillingAddress.Construct();
-        basicCardResponse.mBillingAddress.Value() = new PaymentAddress(
+        basicCardResponse.mBillingAddress = new PaymentAddress(
             GetOwner(), rawData.billingAddress.country,
             rawData.billingAddress.addressLine, rawData.billingAddress.region,
             rawData.billingAddress.regionCode, rawData.billingAddress.city,
@@ -176,6 +171,12 @@ already_AddRefed<PaymentAddress> PaymentResponse::GetShippingAddress() const {
 
 already_AddRefed<Promise> PaymentResponse::Complete(PaymentComplete result,
                                                     ErrorResult& aRv) {
+  MOZ_ASSERT(mRequest);
+  if (!mRequest->InFullyActiveDocument()) {
+    aRv.Throw(NS_ERROR_DOM_ABORT_ERR);
+    return nullptr;
+  }
+
   if (mCompleteCalled) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
@@ -226,6 +227,12 @@ void PaymentResponse::RespondComplete() {
 
 already_AddRefed<Promise> PaymentResponse::Retry(
     JSContext* aCx, const PaymentValidationErrors& aErrors, ErrorResult& aRv) {
+  MOZ_ASSERT(mRequest);
+  if (!mRequest->InFullyActiveDocument()) {
+    aRv.Throw(NS_ERROR_DOM_ABORT_ERR);
+    return nullptr;
+  }
+
   nsIGlobalObject* global = GetOwner()->AsGlobal();
   ErrorResult errResult;
   RefPtr<Promise> promise = Promise::Create(global, errResult);
@@ -237,17 +244,6 @@ already_AddRefed<Promise> PaymentResponse::Retry(
   if (mTimer) {
     mTimer->Cancel();
     mTimer = nullptr;
-  }
-
-  if (NS_WARN_IF(!GetOwner())) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
-  nsIDocument* doc = GetOwner()->GetExtantDoc();
-  if (!doc || !doc->IsCurrentActiveDocument()) {
-    promise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
-    return promise.forget();
   }
 
   if (mCompleteCalled || mRetryPromise) {
@@ -413,6 +409,11 @@ nsresult PaymentResponse::ValidatePaymentValidationErrors(
 NS_IMETHODIMP
 PaymentResponse::Notify(nsITimer* timer) {
   mTimer = nullptr;
+
+  if (!mRequest->InFullyActiveDocument()) {
+    return NS_OK;
+  }
+
   if (mCompleteCalled) {
     return NS_OK;
   }

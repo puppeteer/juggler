@@ -14,7 +14,6 @@
 #include "js/Conversions.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/JSObject.h"
-#include "vm/ShapedObject.h"
 
 /*
  * -------------
@@ -185,15 +184,18 @@ class TypeDescr : public NativeObject {
   // InlineTypedObject, and (b) the descriptor contains at least one
   // reference. Otherwise its value is undefined.
   //
-  // The list is three consecutive arrays of int32_t offsets, with each array
-  // terminated by -1. The arrays store offsets of string, object, and value
-  // references in the descriptor, in that order.
+  // The list is three consecutive arrays of uint32_t offsets, preceded by a
+  // header consisting of the length of each array. The arrays store offsets of
+  // string, object/anyref, and value references in the descriptor, in that
+  // order.
+  // TODO/AnyRef-boxing: once anyref has a more complicated structure, we must
+  // revisit this.
   MOZ_MUST_USE bool hasTraceList() const {
     return !getFixedSlot(JS_DESCR_SLOT_TRACE_LIST).isUndefined();
   }
-  const int32_t* traceList() const {
+  const uint32_t* traceList() const {
     MOZ_ASSERT(hasTraceList());
-    return reinterpret_cast<int32_t*>(
+    return reinterpret_cast<uint32_t*>(
         getFixedSlot(JS_DESCR_SLOT_TRACE_LIST).toPrivate());
   }
 
@@ -248,6 +250,12 @@ class ScalarTypeDescr : public SimpleTypeDescr {
         Scalar::Uint32 == JS_SCALARTYPEREPR_UINT32,
         "TypedObjectConstants.h must be consistent with Scalar::Type");
     static_assert(
+        Scalar::BigInt64 == JS_SCALARTYPEREPR_BIGINT64,
+        "TypedObjectConstants.h must be consistent with Scalar::Type");
+    static_assert(
+        Scalar::BigUint64 == JS_SCALARTYPEREPR_BIGUINT64,
+        "TypedObjectConstants.h must be consistent with Scalar::Type");
+    static_assert(
         Scalar::Float32 == JS_SCALARTYPEREPR_FLOAT32,
         "TypedObjectConstants.h must be consistent with Scalar::Type");
     static_assert(
@@ -274,7 +282,9 @@ class ScalarTypeDescr : public SimpleTypeDescr {
   MACRO_(Scalar::Int32, int32_t, int32)                   \
   MACRO_(Scalar::Uint32, uint32_t, uint32)                \
   MACRO_(Scalar::Float32, float, float32)                 \
-  MACRO_(Scalar::Float64, double, float64)
+  MACRO_(Scalar::Float64, double, float64)                \
+  MACRO_(Scalar::BigInt64, int64_t, bigint64)             \
+  MACRO_(Scalar::BigUint64, uint64_t, biguint64)
 
 // Must be in same order as the enum ScalarTypeDescr::Type:
 #define JS_FOR_EACH_SCALAR_TYPE_REPR(MACRO_)        \
@@ -284,6 +294,7 @@ class ScalarTypeDescr : public SimpleTypeDescr {
 enum class ReferenceType {
   TYPE_ANY = JS_REFERENCETYPEREPR_ANY,
   TYPE_OBJECT = JS_REFERENCETYPEREPR_OBJECT,
+  TYPE_WASM_ANYREF = JS_REFERENCETYPEREPR_WASM_ANYREF,
   TYPE_STRING = JS_REFERENCETYPEREPR_STRING
 };
 
@@ -313,9 +324,12 @@ class ReferenceTypeDescr : public SimpleTypeDescr {
   static MOZ_MUST_USE bool call(JSContext* cx, unsigned argc, Value* vp);
 };
 
-#define JS_FOR_EACH_REFERENCE_TYPE_REPR(MACRO_)           \
-  MACRO_(ReferenceType::TYPE_ANY, GCPtrValue, Any)        \
-  MACRO_(ReferenceType::TYPE_OBJECT, GCPtrObject, Object) \
+// TODO/AnyRef-boxing: With boxed immediates and strings, GCPtrObject may not be
+// appropriate.
+#define JS_FOR_EACH_REFERENCE_TYPE_REPR(MACRO_)                    \
+  MACRO_(ReferenceType::TYPE_ANY, GCPtrValue, Any)                 \
+  MACRO_(ReferenceType::TYPE_WASM_ANYREF, GCPtrObject, WasmAnyRef) \
+  MACRO_(ReferenceType::TYPE_OBJECT, GCPtrObject, Object)          \
   MACRO_(ReferenceType::TYPE_STRING, GCPtrString, string)
 
 // Type descriptors whose instances are objects and hence which have
@@ -423,7 +437,7 @@ class StructMetaTypeDescr : public NativeObject {
   // The type objects in `fieldTypeObjs` must all be TypeDescr objects.
   static StructTypeDescr* createFromArrays(
       JSContext* cx, HandleObject structTypePrototype, bool opaque,
-      bool allowConstruct, AutoIdVector& ids, AutoValueVector& fieldTypeObjs,
+      bool allowConstruct, HandleIdVector ids, HandleValueVector fieldTypeObjs,
       Vector<StructFieldProps>& fieldProps);
 
   // Properties and methods to be installed on StructType.prototype,
@@ -509,6 +523,7 @@ class TypedObjectModuleObject : public NativeObject {
     Float32Desc,
     Float64Desc,
     ObjectDesc,
+    WasmAnyRefDesc,
     SlotCount
   };
 
@@ -516,7 +531,7 @@ class TypedObjectModuleObject : public NativeObject {
 };
 
 /* Base type for transparent and opaque typed objects. */
-class TypedObject : public ShapedObject {
+class TypedObject : public JSObject {
   static const bool IsTypedObjectClass = true;
 
   static MOZ_MUST_USE bool obj_getArrayElement(JSContext* cx,
@@ -566,7 +581,7 @@ class TypedObject : public ShapedObject {
 
  public:
   static MOZ_MUST_USE bool obj_newEnumerate(JSContext* cx, HandleObject obj,
-                                            AutoIdVector& properties,
+                                            MutableHandleIdVector properties,
                                             bool enumerableOnly);
 
   TypedProto& typedProto() const {
@@ -612,12 +627,11 @@ class TypedObject : public ShapedObject {
   static MOZ_MUST_USE bool construct(JSContext* cx, unsigned argc, Value* vp);
 
   /* Accessors for self hosted code. */
-  static MOZ_MUST_USE bool GetBuffer(JSContext* cx, unsigned argc, Value* vp);
   static MOZ_MUST_USE bool GetByteOffset(JSContext* cx, unsigned argc,
                                          Value* vp);
 
   Shape** addressOfShapeFromGC() {
-    return shapeRef().unsafeUnbarrieredForTracing();
+    return shape_.unsafeUnbarrieredForTracing();
   }
 };
 
@@ -694,8 +708,6 @@ class OutlineTypedObject : public TypedObject {
 class OutlineTransparentTypedObject : public OutlineTypedObject {
  public:
   static const Class class_;
-
-  ArrayBufferObject* getOrCreateBuffer(JSContext* cx);
 };
 
 // Class for an opaque typed object whose owner may be either an array buffer
@@ -752,8 +764,6 @@ class InlineTypedObject : public TypedObject {
 class InlineTransparentTypedObject : public InlineTypedObject {
  public:
   static const Class class_;
-
-  ArrayBufferObject* getOrCreateBuffer(JSContext* cx);
 
   uint8_t* inlineTypedMem() const {
     return InlineTypedObject::inlineTypedMem();
@@ -867,6 +877,39 @@ MOZ_MUST_USE bool ClampToUint8(JSContext* cx, unsigned argc, Value* vp);
  * system.
  */
 MOZ_MUST_USE bool GetTypedObjectModule(JSContext* cx, unsigned argc, Value* vp);
+
+/*
+ * Usage: IsBoxedWasmAnyRef(Object) -> bool
+ *
+ * Return true iff object is an instance of the Wasm-internal type WasmValueBox.
+ */
+MOZ_MUST_USE bool IsBoxedWasmAnyRef(JSContext* cx, unsigned argc, Value* vp);
+
+/*
+ * Usage: IsBoxableWasmAnyRef(Value) -> bool
+ *
+ * Return true iff the value must be boxed into a WasmValueBox in order to be
+ * stored into an anyref field.  Values for which false is returned may be
+ * passed as they are to Store_WasmAnyRef and may therefore appear as results
+ * from Load_WasmAnyRef.
+ */
+MOZ_MUST_USE bool IsBoxableWasmAnyRef(JSContext* cx, unsigned argc, Value* vp);
+
+/*
+ * Usage: BoxWasmAnyRef(Value) -> Object
+ *
+ * Return a new WasmValueBox that holds `value`.  The value can be any value at
+ * all.
+ */
+MOZ_MUST_USE bool BoxWasmAnyRef(JSContext* cx, unsigned argc, Value* vp);
+
+/*
+ * Usage: UnboxBoxedWasmAnyRef(Object) -> Value
+ *
+ * The object must be a value for which IsBoxedWasmAnyRef returns true.
+ * Return the value stored in the box.
+ */
+MOZ_MUST_USE bool UnboxBoxedWasmAnyRef(JSContext* cx, unsigned argc, Value* vp);
 
 /*
  * Usage: Store_int8(targetDatum, targetOffset, value)

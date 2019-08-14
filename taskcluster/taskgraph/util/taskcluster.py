@@ -6,44 +6,86 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import os
 import datetime
 import functools
-import yaml
 import requests
 import logging
+import taskcluster_urls as liburls
 from mozbuild.util import memoize
 from requests.packages.urllib3.util.retry import Retry
-from requests.adapters import HTTPAdapter
 from taskgraph.task import Task
-
-_PUBLIC_TC_ARTIFACT_LOCATION = \
-    'https://queue.taskcluster.net/v1/task/{task_id}/artifacts/{artifact_prefix}/{postfix}'
-
-_PRIVATE_TC_ARTIFACT_LOCATION = \
-    'http://taskcluster/queue/v1/task/{task_id}/artifacts/{artifact_prefix}/{postfix}'
+from taskgraph.util import yaml
 
 logger = logging.getLogger(__name__)
 
 # this is set to true for `mach taskgraph action-callback --test`
 testing = False
 
+# Default rootUrl to use if none is given in the environment; this should point
+# to the production Taskcluster deployment used for CI.
+PRODUCTION_TASKCLUSTER_ROOT_URL = 'https://taskcluster.net'
+
+# the maximum number of parallel Taskcluster API calls to make
+CONCURRENCY = 50
+
+
+@memoize
+def get_root_url(use_proxy):
+    """Get the current TASKCLUSTER_ROOT_URL.  When running in a task, this must
+    come from $TASKCLUSTER_ROOT_URL; when run on the command line, we apply a
+    defualt that points to the production deployment of Taskcluster.  If use_proxy
+    is set, this attempts to get TASKCLUSTER_PROXY_URL instead, failing if it
+    is not set."""
+    if use_proxy:
+        try:
+            return os.environ['TASKCLUSTER_PROXY_URL']
+        except KeyError:
+            if 'TASK_ID' not in os.environ:
+                raise RuntimeError(
+                    'taskcluster-proxy is not available when not executing in a task')
+            else:
+                raise RuntimeError(
+                    'taskcluster-proxy is not enabled for this task')
+
+    if 'TASKCLUSTER_ROOT_URL' not in os.environ:
+        if 'TASK_ID' in os.environ:
+            raise RuntimeError('$TASKCLUSTER_ROOT_URL must be set when running in a task')
+        else:
+            logger.debug('Using default TASKCLUSTER_ROOT_URL (Firefox CI production)')
+            return PRODUCTION_TASKCLUSTER_ROOT_URL
+    logger.debug('Running in Taskcluster instance {}{}'.format(
+        os.environ['TASKCLUSTER_ROOT_URL'],
+        ' with taskcluster-proxy' if 'TASKCLUSTER_PROXY_URL' in os.environ else ''))
+    return os.environ['TASKCLUSTER_ROOT_URL']
+
 
 @memoize
 def get_session():
     session = requests.Session()
+
     retry = Retry(total=5, backoff_factor=0.1,
                   status_forcelist=[500, 502, 503, 504])
-    session.mount('http://', HTTPAdapter(max_retries=retry))
-    session.mount('https://', HTTPAdapter(max_retries=retry))
+
+    # Default HTTPAdapter uses 10 connections. Mount custom adapter to increase
+    # that limit. Connections are established as needed, so using a large value
+    # should not negatively impact performance.
+    http_adapter = requests.adapters.HTTPAdapter(
+        pool_connections=CONCURRENCY,
+        pool_maxsize=CONCURRENCY,
+        max_retries=retry)
+    session.mount('https://', http_adapter)
+    session.mount('http://', http_adapter)
+
     return session
 
 
-def _do_request(url, **kwargs):
+def _do_request(url, force_get=False, **kwargs):
     session = get_session()
-    if kwargs:
+    if kwargs and not force_get:
         response = session.post(url, **kwargs)
     else:
-        response = session.get(url, stream=True)
+        response = session.get(url, stream=True, **kwargs)
     if response.status_code >= 400:
         # Consume content before raise_for_status, so that the connection can be
         # reused.
@@ -56,24 +98,28 @@ def _handle_artifact(path, response):
     if path.endswith('.json'):
         return response.json()
     if path.endswith('.yml'):
-        return yaml.safe_load(response.text)
+        return yaml.load_stream(response.text)
     response.raw.read = functools.partial(response.raw.read,
                                           decode_content=True)
     return response.raw
 
 
 def get_artifact_url(task_id, path, use_proxy=False):
-    ARTIFACT_URL = 'https://queue.taskcluster.net/v1/task/{}/artifacts/{}'
+    artifact_tmpl = liburls.api(get_root_url(False), 'queue', 'v1',
+                                'task/{}/artifacts/{}')
+    data = artifact_tmpl.format(task_id, path)
     if use_proxy:
         # Until Bug 1405889 is deployed, we can't download directly
         # from the taskcluster-proxy.  Work around by using the /bewit
         # endpoint instead.
-        data = ARTIFACT_URL.format(task_id, path)
         # The bewit URL is the body of a 303 redirect, which we don't
         # want to follow (which fetches a potentially large resource).
-        response = _do_request('http://taskcluster/bewit', data=data, allow_redirects=False)
+        response = _do_request(
+            os.environ['TASKCLUSTER_PROXY_URL'] + '/bewit',
+            data=data,
+            allow_redirects=False)
         return response.text
-    return ARTIFACT_URL.format(task_id, path)
+    return data
 
 
 def get_artifact(task_id, path, use_proxy=False):
@@ -108,11 +154,8 @@ def get_artifact_path(task, path):
 
 
 def get_index_url(index_path, use_proxy=False, multiple=False):
-    if use_proxy:
-        INDEX_URL = 'http://taskcluster/index/v1/task{}/{}'
-    else:
-        INDEX_URL = 'https://index.taskcluster.net/v1/task{}/{}'
-    return INDEX_URL.format('s' if multiple else '', index_path)
+    index_tmpl = liburls.api(get_root_url(use_proxy), 'index', 'v1', 'task{}/{}')
+    return index_tmpl.format('s' if multiple else '', index_path)
 
 
 def find_task_id(index_path, use_proxy=False):
@@ -161,11 +204,8 @@ def parse_time(timestamp):
 
 
 def get_task_url(task_id, use_proxy=False):
-    if use_proxy:
-        TASK_URL = 'http://taskcluster/queue/v1/task/{}'
-    else:
-        TASK_URL = 'https://queue.taskcluster.net/v1/task/{}'
-    return TASK_URL.format(task_id)
+    task_tmpl = liburls.api(get_root_url(use_proxy), 'queue', 'v1', 'task/{}')
+    return task_tmpl.format(task_id)
 
 
 def get_task_definition(task_id, use_proxy=False):
@@ -205,16 +245,14 @@ def rerun_task(task_id):
 def get_current_scopes():
     """Get the current scopes.  This only makes sense in a task with the Taskcluster
     proxy enabled, where it returns the actual scopes accorded to the task."""
-    resp = _do_request('http://taskcluster/auth/v1/scopes/current')
+    auth_url = liburls.api(get_root_url(True), 'auth', 'v1', 'scopes/current')
+    resp = _do_request(auth_url)
     return resp.json().get("scopes", [])
 
 
 def get_purge_cache_url(provisioner_id, worker_type, use_proxy=False):
-    if use_proxy:
-        TASK_URL = 'http://taskcluster/purge-cache/v1/purge-cache/{}/{}'
-    else:
-        TASK_URL = 'https://purge-cache.taskcluster.net/v1/purge-cache/{}/{}'
-    return TASK_URL.format(provisioner_id, worker_type)
+    url_tmpl = liburls.api(get_root_url(use_proxy), 'purge-cache', 'v1', 'purge-cache/{}/{}')
+    return url_tmpl.format(provisioner_id, worker_type)
 
 
 def purge_cache(provisioner_id, worker_type, cache_name, use_proxy=False):
@@ -227,31 +265,29 @@ def purge_cache(provisioner_id, worker_type, cache_name, use_proxy=False):
         _do_request(purge_cache_url, json={'cacheName': cache_name})
 
 
-def get_taskcluster_artifact_prefix(task, task_id, postfix='', locale=None, force_private=False):
-    if locale:
-        postfix = '{}/{}'.format(locale, postfix)
-
-    artifact_prefix = get_artifact_prefix(task)
-    if artifact_prefix == 'public/build' and not force_private:
-        tmpl = _PUBLIC_TC_ARTIFACT_LOCATION
-    else:
-        tmpl = _PRIVATE_TC_ARTIFACT_LOCATION
-
-    return tmpl.format(
-        task_id=task_id, postfix=postfix, artifact_prefix=artifact_prefix
-    )
-
-
 def send_email(address, subject, content, link, use_proxy=False):
     """Sends an email using the notify service"""
     logger.info('Sending email to {}.'.format(address))
-    if use_proxy:
-        url = 'http://taskcluster/notify/v1/email'
-    else:
-        url = 'https://notify.taskcluster.net/v1/email'
+    url = liburls.api(get_root_url(use_proxy), 'notify', 'v1', 'email')
     _do_request(url, json={
         'address': address,
         'subject': subject,
         'content': content,
         'link': link,
     })
+
+
+def list_task_group_incomplete_tasks(task_group_id):
+    """Generate the incomplete tasks in a task group"""
+    params = {}
+    while True:
+        url = liburls.api(get_root_url(False), 'queue', 'v1',
+                          'task-group/{}/list'.format(task_group_id))
+        resp = _do_request(url, force_get=True, params=params).json()
+        for task in [t['status'] for t in resp['tasks']]:
+            if task['state'] in ['running', 'pending', 'unscheduled']:
+                yield task['taskId']
+        if resp.get('continuationToken'):
+            params = {'continuationToken': resp.get('continuationToken')}
+        else:
+            break

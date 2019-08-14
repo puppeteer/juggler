@@ -88,7 +88,7 @@ advantages:
   (sub)manifests as appropriate to your needs.
 
 Manifest Format
-````````
+```````````````
 
 Manifests are .ini file with the section names denoting the path
 relative to the manifest:
@@ -474,7 +474,7 @@ Please file any bugs or feature requests at
 
 https://bugzilla.mozilla.org/enter_bug.cgi?product=Testing&component=ManifestParser
 
-Or contact jhammel @mozilla.org or in #ateam on irc.mozilla.org
+Or contact in #cia on irc.mozilla.org
 
 CLI
 ```

@@ -26,8 +26,8 @@
 
 /* Silence dire "bugs in previous versions of MSVC have been fixed" warnings */
 #ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4345)
+#  pragma warning(push)
+#  pragma warning(disable : 4345)
 #endif
 
 namespace mozilla {
@@ -378,8 +378,8 @@ class MOZ_NON_PARAM Vector final : private AllocPolicy {
 // Silence warnings about this struct possibly being padded dued to the
 // alignas() in it -- there's nothing we can do to avoid it.
 #ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4324)
+#  pragma warning(push)
+#  pragma warning(disable : 4324)
 #endif  // _MSC_VER
 
   template <size_t Capacity, size_t Dummy>
@@ -403,13 +403,20 @@ class MOZ_NON_PARAM Vector final : private AllocPolicy {
         : CapacityAndReserved(aCapacity, aReserved) {}
     CRAndStorage() = default;
 
-    T* storage() { return nullptr; }
+    T* storage() {
+      // If this returns |nullptr|, functions like |Vector::begin()| would too,
+      // breaking callers that pass a vector's elements as pointer/length to
+      // code that bounds its operation by length but (even just as a sanity
+      // check) always wants a non-null pointer.  Fake up an aligned, non-null
+      // pointer to support these callers.
+      return reinterpret_cast<T*>(sizeof(T));
+    }
   };
 
   CRAndStorage<kInlineCapacity, 0> mTail;
 
 #ifdef _MSC_VER
-#pragma warning(pop)
+#  pragma warning(pop)
 #endif  // _MSC_VER
 
 #ifdef DEBUG
@@ -794,6 +801,20 @@ class MOZ_NON_PARAM Vector final : private AllocPolicy {
   void erase(T* aBegin, T* aEnd);
 
   /**
+   * Removes all elements that satisfy the predicate, shifting existing elements
+   * lower to fill erased gaps.
+   */
+  template <typename Pred>
+  void eraseIf(Pred aPred);
+
+  /**
+   * Removes all elements that compare equal to |aU|, shifting existing elements
+   * lower to fill erased gaps.
+   */
+  template <typename U>
+  void eraseIfEqual(const U& aU);
+
+  /**
    * Measure the size of the vector's heap-allocated storage.
    */
   size_t sizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
@@ -823,7 +844,7 @@ class MOZ_NON_PARAM Vector final : private AllocPolicy {
 
 template <typename T, size_t N, class AP>
 MOZ_ALWAYS_INLINE Vector<T, N, AP>::Vector(AP aAP)
-    : AP(aAP),
+    : AP(std::move(aAP)),
       mLength(0),
       mTail(kInlineCapacity, 0)
 #ifdef DEBUG
@@ -1279,6 +1300,26 @@ inline void Vector<T, N, AP>::erase(T* aBegin, T* aEnd) {
 }
 
 template <typename T, size_t N, class AP>
+template <typename Pred>
+void Vector<T, N, AP>::eraseIf(Pred aPred) {
+  // remove_if finds the first element to be erased, and then efficiently move-
+  // assigns elements to effectively overwrite elements that satisfy the
+  // predicate. It returns the new end pointer, after which there are only
+  // moved-from elements ready to be destroyed, so we just need to shrink the
+  // vector accordingly.
+  T* newEnd = std::remove_if(begin(), end(),
+                             [&aPred](const T& aT) { return aPred(aT); });
+  MOZ_ASSERT(newEnd <= end());
+  shrinkBy(end() - newEnd);
+}
+
+template <typename T, size_t N, class AP>
+template <typename U>
+void Vector<T, N, AP>::eraseIfEqual(const U& aU) {
+  return eraseIf([&aU](const T& aT) { return aT == aU; });
+}
+
+template <typename T, size_t N, class AP>
 template <typename U>
 MOZ_ALWAYS_INLINE bool Vector<T, N, AP>::append(const U* aInsBegin,
                                                 const U* aInsEnd) {
@@ -1479,7 +1520,7 @@ inline void Vector<T, N, AP>::swap(Vector& aOther) {
 }  // namespace mozilla
 
 #ifdef _MSC_VER
-#pragma warning(pop)
+#  pragma warning(pop)
 #endif
 
 #endif /* mozilla_Vector_h */

@@ -3,6 +3,12 @@
 
 "use strict";
 
+/* import-globals-from helper-collapsibilities.js */
+Services.scriptloader.loadSubScript(
+  CHROME_URL_ROOT + "helper-collapsibilities.js",
+  this
+);
+
 /**
  * Check that DevTools are not closed when leaving This Firefox runtime page.
  */
@@ -12,9 +18,10 @@ add_task(async function() {
   prepareCollapsibilitiesTest();
 
   const { document, tab, window } = await openAboutDebugging();
+  await selectThisFirefoxPage(document, window.AboutDebugging.store);
 
-  const connectSidebarItem = findSidebarItemByText("Connect", document);
-  const connectLink = connectSidebarItem.querySelector(".js-sidebar-link");
+  const connectSidebarItem = findSidebarItemByText("Setup", document);
+  const connectLink = connectSidebarItem.querySelector(".qa-sidebar-link");
   ok(connectSidebarItem, "Found the Connect sidebar item");
 
   info("Open devtools on the current about:debugging tab");
@@ -23,7 +30,6 @@ add_task(async function() {
 
   info("DevTools starts workers, wait for requests to settle");
   const store = window.AboutDebugging.store;
-  await waitForDispatch(store, "REQUEST_WORKERS_SUCCESS");
   await waitForRequestsToSettle(store);
 
   info("Click on the Connect item in the sidebar");
@@ -31,7 +37,7 @@ add_task(async function() {
   await waitForDispatch(store, "UNWATCH_RUNTIME_SUCCESS");
 
   info("Wait until Connect page is displayed");
-  await waitUntil(() => document.querySelector(".js-connect-page"));
+  await waitUntil(() => document.querySelector(".qa-connect-page"));
 
   const markupViewElement = inspector.panelDoc.getElementById("markup-box");
   ok(markupViewElement, "Inspector is still rendered");

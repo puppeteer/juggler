@@ -24,7 +24,7 @@ class HTMLEditorEventListener final : public EditorEventListener {
   virtual ~HTMLEditorEventListener() {}
 
   // nsIDOMEventListener
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD HandleEvent(dom::Event* aEvent) override;
 
   /**
@@ -74,6 +74,7 @@ class HTMLEditorEventListener final : public EditorEventListener {
  protected:
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult MouseDown(dom::MouseEvent* aMouseEvent) override;
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult MouseUp(dom::MouseEvent* aMouseEvent) override;
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult MouseClick(WidgetMouseEvent* aMouseClickEvent) override;

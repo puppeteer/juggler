@@ -12,11 +12,14 @@
 #include "nsString.h"
 
 struct nsCSSToken;
-class nsIDocument;
 class nsIURI;
 
 namespace mozilla {
 class StyleSheet;
+
+namespace dom {
+class Document;
+}
 
 namespace css {
 
@@ -36,12 +39,12 @@ class MOZ_STACK_CLASS ErrorReporter final {
     }
   }
 
-  static bool ShouldReportErrors(const nsIDocument&);
+  static bool ShouldReportErrors(const dom::Document&);
   static bool ShouldReportErrors(const StyleSheet* aSheet,
                                  const Loader* aLoader);
 
   void OutputError(uint32_t aLineNumber, uint32_t aLineOffset,
-                   const nsACString& aSource);
+                   const nsACString& aSource, const nsACString& aSelectors);
   void ClearError();
 
   // In all overloads of ReportUnexpected, aMessage is a stringbundle
@@ -52,7 +55,7 @@ class MOZ_STACK_CLASS ErrorReporter final {
   void ReportUnexpected(const char* aMessage);
   // one parameter which has already been escaped appropriately
   void ReportUnexpectedUnescaped(const char* aMessage,
-                                 const nsAutoString& aParam);
+                                 const nsTArray<nsString>& aParam);
 
  private:
   void OutputError();
@@ -65,6 +68,7 @@ class MOZ_STACK_CLASS ErrorReporter final {
   nsString mError;
   nsString mErrorLine;
   nsString mFileName;
+  nsString mSelectors;
   const StyleSheet* mSheet;
   const Loader* mLoader;
   nsIURI* mURI;

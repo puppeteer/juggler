@@ -238,7 +238,8 @@ JS::Value WebGLContext::GetParameter(JSContext* cx, GLenum pname,
     case LOCAL_GL_IMPLEMENTATION_COLOR_READ_TYPE: {
       const webgl::FormatUsageInfo* usage;
       uint32_t width, height;
-      if (!BindCurFBForColorRead(&usage, &width, &height))
+      if (!BindCurFBForColorRead(&usage, &width, &height,
+                                 LOCAL_GL_INVALID_OPERATION))
         return JS::NullValue();
 
       const auto implPI = ValidImplementationColorReadPI(usage);
@@ -407,7 +408,13 @@ JS::Value WebGLContext::GetParameter(JSContext* cx, GLenum pname,
       return JS::Int32Value(mGLMaxFragmentUniformVectors);
 
     case LOCAL_GL_MAX_VARYING_VECTORS:
-      return JS::Int32Value(mGLMaxVaryingVectors);
+      return JS::Int32Value(mGLMaxFragmentInputVectors);
+
+    case LOCAL_GL_MAX_VIEWS_OVR:
+      if (IsExtensionEnabled(WebGLExtensionID::OVR_multiview2)) {
+        return JS::NumberValue(mGLMaxMultiviewViews);
+      }
+      break;
 
     case LOCAL_GL_COMPRESSED_TEXTURE_FORMATS: {
       uint32_t length = mCompressedTextureFormats.Length();
@@ -639,6 +646,8 @@ realGLboolean* WebGLContext::GetStateTrackingSlot(GLenum cap) {
       return &mScissorTestEnabled;
     case LOCAL_GL_STENCIL_TEST:
       return &mStencilTestEnabled;
+    case LOCAL_GL_BLEND:
+      return &mBlendEnabled;
   }
 
   return nullptr;

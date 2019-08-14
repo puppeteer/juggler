@@ -6,21 +6,21 @@
 
 #include "mozilla/dom/MessageManagerGlobal.h"
 #include "mozilla/IntentionalCrash.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "nsContentUtils.h"
+#include "nsJSUtils.h"
 
 #ifdef ANDROID
-#include <android/log.h>
+#  include <android/log.h>
 #endif
 #ifdef XP_WIN
-#include <windows.h>
+#  include <windows.h>
 #endif
 
 namespace mozilla {
 namespace dom {
 
 void MessageManagerGlobal::Dump(const nsAString& aStr) {
-  if (!DOMPrefs::DumpEnabled()) {
+  if (!nsJSUtils::DumpEnabled()) {
     return;
   }
 

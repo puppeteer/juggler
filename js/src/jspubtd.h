@@ -19,16 +19,10 @@
 #include "js/TypeDecls.h"
 
 #if defined(JS_GC_ZEAL) || defined(DEBUG)
-#define JSGC_HASH_TABLE_CHECKS
+#  define JSGC_HASH_TABLE_CHECKS
 #endif
 
 namespace JS {
-
-template <typename T>
-class AutoVector;
-using AutoIdVector = AutoVector<jsid>;
-using AutoValueVector = AutoVector<Value>;
-using AutoObjectVector = AutoVector<JSObject*>;
 
 class CallArgs;
 
@@ -46,9 +40,7 @@ enum JSType {
   JSTYPE_BOOLEAN,   /* boolean */
   JSTYPE_NULL,      /* null */
   JSTYPE_SYMBOL,    /* symbol */
-#ifdef ENABLE_BIGINT
-  JSTYPE_BIGINT, /* BigInt */
-#endif
+  JSTYPE_BIGINT,    /* BigInt */
   JSTYPE_LIMIT
 };
 

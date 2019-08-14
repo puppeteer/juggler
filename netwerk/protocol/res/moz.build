@@ -14,7 +14,13 @@ XPIDL_MODULE = 'necko_res'
 
 EXPORTS.mozilla.net += [
     'ExtensionProtocolHandler.h',
+    'SubstitutingJARURI.h',
     'SubstitutingProtocolHandler.h',
+    'SubstitutingURL.h',
+]
+
+EXPORTS += [
+    'nsResProtocolHandler.h',
 ]
 
 UNIFIED_SOURCES += [
@@ -29,4 +35,5 @@ FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
     '/netwerk/base',
+    '/xpcom/base',
 ]

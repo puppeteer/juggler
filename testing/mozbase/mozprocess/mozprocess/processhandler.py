@@ -10,19 +10,22 @@ import signal
 import subprocess
 import sys
 import threading
-import time
 import traceback
-
-from Queue import Queue, Empty
 from datetime import datetime
 
+import six
+import time
+
+if six.PY2:
+    from Queue import Queue, Empty  # Python 2
+else:
+    from queue import Queue, Empty  # Python 3
 
 __all__ = ['ProcessHandlerMixin', 'ProcessHandler', 'LogOutput',
            'StoreOutput', 'StreamOutput']
 
 # Set the MOZPROCESS_DEBUG environment variable to 1 to see some debugging output
 MOZPROCESS_DEBUG = os.getenv("MOZPROCESS_DEBUG")
-
 
 INTERVAL_PROCESS_ALIVE_CHECK = 0.02
 
@@ -33,8 +36,8 @@ isPosix = os.name == "posix"  # includes MacOS X
 if isWin:
     from ctypes import sizeof, addressof, c_ulong, byref, WinError, c_longlong
     from . import winprocess
-    from .qijo import JobObjectAssociateCompletionPortInformation,\
-        JOBOBJECT_ASSOCIATE_COMPLETION_PORT, JobObjectExtendedLimitInformation,\
+    from .qijo import JobObjectAssociateCompletionPortInformation, \
+        JOBOBJECT_ASSOCIATE_COMPLETION_PORT, JobObjectExtendedLimitInformation, \
         JOBOBJECT_BASIC_LIMIT_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, IO_COUNTERS
 
 
@@ -109,6 +112,7 @@ class ProcessHandlerMixin(object):
                 #       child processes, TODO: Ideally, find a way around this
                 def setpgidfn():
                     os.setpgid(0, 0)
+
                 preexec_fn = setpgidfn
 
             try:
@@ -127,14 +131,15 @@ class ProcessHandlerMixin(object):
             thread = threading.current_thread().name
             print("DBG::MOZPROC PID:{} ({}) | {}".format(self.pid, thread, msg))
 
-        def __del__(self, _maxint=sys.maxint):
+        def __del__(self):
             if isWin:
+                if six.PY2:
+                    _maxint = sys.maxint
+                else:
+                    _maxint = sys.maxsize
                 handle = getattr(self, '_handle', None)
                 if handle:
-                    if hasattr(self, '_internal_poll'):
-                        self._internal_poll(_deadstate=_maxint)
-                    else:
-                        self.poll(_deadstate=sys.maxint)
+                    self._internal_poll(_deadstate=_maxint)
                 if handle or self._job or self._io_port:
                     self._cleanup()
             else:
@@ -214,14 +219,14 @@ class ProcessHandlerMixin(object):
 
             return subprocess.Popen.poll(self)
 
-        def wait(self):
+        def wait(self, timeout=None):
             """ Popen.wait
                 Called to wait for a running process to shut down and return
                 its exit code
                 Returns the main process's exit code
             """
             # This call will be different for each OS
-            self.returncode = self._wait()
+            self.returncode = self._custom_wait(timeout=timeout)
             self._cleanup()
             return self.returncode
 
@@ -230,8 +235,16 @@ class ProcessHandlerMixin(object):
         if isWin:
             # Redefine the execute child so that we can track process groups
             def _execute_child(self, *args_tuple):
+                if six.PY3:
+                    (args, executable, preexec_fn, close_fds,
+                     pass_fds, cwd, env,
+                     startupinfo, creationflags, shell,
+                     p2cread, p2cwrite,
+                     c2pread, c2pwrite,
+                     errread, errwrite,
+                     restore_signals, start_new_session) = args_tuple
                 # workaround for bug 950894
-                if sys.hexversion < 0x02070600:  # prior to 2.7.6
+                elif sys.hexversion < 0x02070600:  # prior to 2.7.6
                     (args, executable, preexec_fn, close_fds,
                      cwd, env, universal_newlines, startupinfo,
                      creationflags, shell,
@@ -246,7 +259,7 @@ class ProcessHandlerMixin(object):
                      p2cread, p2cwrite,
                      c2pread, c2pwrite,
                      errread, errwrite) = args_tuple
-                if not isinstance(args, basestring):
+                if not isinstance(args, six.string_types):
                     args = subprocess.list2cmdline(args)
 
                 # Always or in the create new process group
@@ -343,11 +356,11 @@ class ProcessHandlerMixin(object):
                         iocntr = IO_COUNTERS()
                         jeli = JOBOBJECT_EXTENDED_LIMIT_INFORMATION(
                             jbli,  # basic limit info struct
-                            iocntr,    # io_counters (ignored)
-                            0,    # process mem limit (ignored)
-                            0,    # job mem limit (ignored)
-                            0,    # peak process limit (ignored)
-                            0)    # peak job limit (ignored)
+                            iocntr,  # io_counters (ignored)
+                            0,  # process mem limit (ignored)
+                            0,  # job mem limit (ignored)
+                            0,  # peak process limit (ignored)
+                            0)  # peak job limit (ignored)
 
                         winprocess.SetInformationJobObject(self._job,
                                                            JobObjectExtendedLimitInformation,
@@ -489,7 +502,7 @@ falling back to not using job objects for managing child processes""", file=sys.
                                 countdowntokill = datetime.now()
                             elif pid.value in self._spawned_procs:
                                 # Child Process died remove from list
-                                del(self._spawned_procs[pid.value])
+                                del (self._spawned_procs[pid.value])
                         elif msgid.value == winprocess.JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS:
                             # One process existed abnormally
                             self.debug("process id %s exited abnormally" % pid.value)
@@ -504,7 +517,12 @@ falling back to not using job objects for managing child processes""", file=sys.
                             self.debug("We got a message %s" % msgid.value)
                             pass
 
-            def _wait(self):
+            def _custom_wait(self, timeout=None):
+                """ Custom implementation of wait.
+
+                - timeout: number of seconds before timing out. If None,
+                  will wait indefinitely.
+                """
                 # First, check to see if the process is still running
                 if self._handle:
                     self.returncode = winprocess.GetExitCodeProcess(self._handle)
@@ -517,6 +535,9 @@ falling back to not using job objects for managing child processes""", file=sys.
                     threadalive = self._procmgrthread.is_alive()
                 if self._job and threadalive and threading.current_thread() != self._procmgrthread:
                     self.debug("waiting with IO completion port")
+                    if timeout is None:
+                        timeout = (self.MAX_IOCOMPLETION_PORT_NOTIFICATION_DELAY +
+                                   self.MAX_PROCESS_KILL_DELAY)
                     # Then we are managing with IO Completion Ports
                     # wait on a signal so we know when we have seen the last
                     # process come through.
@@ -526,9 +547,7 @@ falling back to not using job objects for managing child processes""", file=sys.
                     try:
                         # timeout is the max amount of time the procmgr thread will wait for
                         # child processes to shutdown before killing them with extreme prejudice.
-                        item = self._process_events.get(
-                            timeout=self.MAX_IOCOMPLETION_PORT_NOTIFICATION_DELAY +
-                            self.MAX_PROCESS_KILL_DELAY)
+                        item = self._process_events.get(timeout=timeout)
                         if item[self.pid] == 'FINISHED':
                             self.debug("received 'FINISHED' from _procmgrthread")
                             self._process_events.task_done()
@@ -554,7 +573,13 @@ falling back to not using job objects for managing child processes""", file=sys.
 
                     rc = None
                     if self._handle:
-                        rc = winprocess.WaitForSingleObject(self._handle, -1)
+                        if timeout is None:
+                            timeout = -1
+                        else:
+                            # timeout for WaitForSingleObject is in ms
+                            timeout = timeout * 1000
+
+                        rc = winprocess.WaitForSingleObject(self._handle, timeout)
 
                     if rc == winprocess.WAIT_TIMEOUT:
                         # The process isn't dead, so kill it
@@ -589,7 +614,7 @@ falling back to not using job objects for managing child processes""", file=sys.
                     self._job = None
 
                 if getattr(self, '_io_port', None) and \
-                   self._io_port != winprocess.INVALID_HANDLE_VALUE:
+                        self._io_port != winprocess.INVALID_HANDLE_VALUE:
                     self._io_port.Close()
                     self._io_port = None
                 else:
@@ -614,10 +639,10 @@ falling back to not using job objects for managing child processes""", file=sys.
 
         elif isPosix:
 
-            def _wait(self):
+            def _custom_wait(self, timeout=None):
                 """ Haven't found any reason to differentiate between these platforms
                     so they all use the same wait callback.  If it is necessary to
-                    craft different styles of wait, then a new _wait method
+                    craft different styles of wait, then a new _custom_wait method
                     could be easily implemented.
                 """
 
@@ -649,7 +674,11 @@ falling back to not using job objects for managing child processes""", file=sys.
 
                 else:
                     # For non-group wait, call base class
-                    subprocess.Popen.wait(self)
+                    if six.PY2:
+                        subprocess.Popen.wait(self)
+                    else:
+                        # timeout was introduced in Python 3.3
+                        subprocess.Popen.wait(self, timeout=timeout)
                     return self.returncode
 
             def _cleanup(self):
@@ -660,8 +689,12 @@ falling back to not using job objects for managing child processes""", file=sys.
             print("Unrecognized platform, process groups may not "
                   "be managed properly", file=sys.stderr)
 
-            def _wait(self):
-                self.returncode = subprocess.Popen.wait(self)
+            def _custom_wait(self, timeout=None):
+                if six.PY2:
+                    self.returncode = subprocess.Popen.wait(self)
+                else:
+                    # timeout was introduced in Python 3.3
+                    self.returncode = subprocess.Popen.wait(self, timeout=timeout)
                 return self.returncode
 
             def _cleanup(self):
@@ -708,6 +741,7 @@ falling back to not using job objects for managing child processes""", file=sys.
             self.didOutputTimeout = self.reader.didOutputTimeout
             if kill_on_timeout:
                 self.kill()
+
         onTimeout.insert(0, on_timeout)
 
         self._stderr = subprocess.STDOUT
@@ -726,6 +760,12 @@ falling back to not using job objects for managing child processes""", file=sys.
             (self.cmd, self.args) = (self.cmd[0], self.cmd[1:])
         elif self.args is None:
             self.args = []
+
+    def debug(self, msg):
+        if not MOZPROCESS_DEBUG:
+            return
+        cmd = self.cmd.split(os.sep)[-1:]
+        print("DBG::MOZPROC ProcessHandlerMixin {} | {}".format(cmd, msg))
 
     @property
     def timedOut(self):
@@ -800,7 +840,10 @@ falling back to not using job objects for managing child processes""", file=sys.
         # When we kill the the managed process we also have to wait for the
         # reader thread to be finished. Otherwise consumers would have to assume
         # that it still has not completely shutdown.
-        return self.wait()
+        rc = self.wait()
+        if rc is None:
+            self.debug("kill: wait failed -- process is still alive")
+        return rc
 
     def poll(self):
         """Check if child process has terminated
@@ -868,6 +911,7 @@ falling back to not using job objects for managing child processes""", file=sys.
                 self.reader.join(timeout=1)
                 count += 1
                 if timeout is not None and count > timeout:
+                    self.debug("wait timeout for reader thread")
                     return None
 
         self.returncode = self.proc.wait()
@@ -968,6 +1012,11 @@ class ProcessReader(object):
         self.thread = None
         self.didOutputTimeout = False
 
+    def debug(self, msg):
+        if not MOZPROCESS_DEBUG:
+            return
+        print("DBG::MOZPROC ProcessReader | {}".format(msg))
+
     def _create_stream_reader(self, name, stream, queue, callback):
         thread = threading.Thread(name=name,
                                   target=self._read_stream,
@@ -1005,6 +1054,7 @@ class ProcessReader(object):
                                              queue))
         self.thread.daemon = True
         self.thread.start()
+        self.debug("ProcessReader started")
 
     def _read(self, stdout_reader, stderr_reader, queue):
         start_time = time.time()
@@ -1036,6 +1086,7 @@ class ProcessReader(object):
             if timeout is not None and now > timeout:
                 timed_out = True
                 break
+        self.debug("_read loop exited")
         # process remaining lines to read
         while not queue.empty():
             line, callback = queue.get(False)
@@ -1048,6 +1099,7 @@ class ProcessReader(object):
             stderr_reader.join()
         if not timed_out:
             self.finished_callback()
+        self.debug("_read exited")
 
     def is_alive(self):
         if self.thread:
@@ -1081,7 +1133,7 @@ class StreamOutput(object):
 
     def __call__(self, line):
         try:
-            self.stream.write(line + '\n')
+            self.stream.write(line + '\n'.encode('utf8'))
         except UnicodeDecodeError:
             # TODO: Workaround for bug #991866 to make sure we can display when
             # when normal UTF-8 display is failing

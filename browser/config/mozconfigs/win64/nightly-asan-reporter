@@ -1,13 +1,9 @@
 MOZ_AUTOMATION_L10N_CHECK=0
 
 ac_add_options --enable-update-channel=${MOZ_UPDATE_CHANNEL}
-if [ -f /c/builds/gapi.data ]; then
-  _gapi_keyfile=c:/builds/gapi.data
-else
-  _gapi_keyfile=e:/builds/gapi.data
-fi
-ac_add_options --with-google-api-keyfile=${_gapi_keyfile}
-ac_add_options --with-mozilla-api-keyfile=c:/builds/mozilla-desktop-geoloc-api.key
+ac_add_options --with-google-location-service-api-keyfile=${WORKSPACE}/gls-gapi.data
+ac_add_options --with-google-safebrowsing-api-keyfile=${WORKSPACE}/sb-gapi.data
+ac_add_options --with-mozilla-api-keyfile=${WORKSPACE}/mozilla-desktop-geoloc-api.key
 
 . "$topsrcdir/build/mozconfig.win-common"
 . "$topsrcdir/browser/config/mozconfigs/common"
@@ -27,11 +23,5 @@ export MOZILLA_OFFICIAL=1
 
 # Sandboxing is currently not compatible with the way the ASan reporter works
 ac_add_options --disable-sandbox
-
-# Enable Telemetry
-# The channel reported by Telemetry here will be "nightly-asan" as specified
-# in the respective override pref (toolkit.telemetry.overrideUpdateChannel),
-# while the build otherwise identifies as "nightly" to receive its updates.
-export MOZ_TELEMETRY_REPORTING=1
 
 . "$topsrcdir/build/mozconfig.common.override"

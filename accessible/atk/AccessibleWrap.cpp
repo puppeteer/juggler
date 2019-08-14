@@ -645,6 +645,11 @@ static AtkAttributeSet* ConvertToAtkAttributeSet(
     rv = propElem->GetValue(value);
     NS_ENSURE_SUCCESS(rv, objAttributeSet);
 
+    // On ATK, the placeholder attribute is called placeholder-text.
+    if (name.Equals("placeholder")) {
+      name.AssignLiteral("placeholder-text");
+    }
+
     AtkAttribute* objAttr = (AtkAttribute*)g_malloc(sizeof(AtkAttribute));
     objAttr->name = g_strdup(name.get());
     objAttr->value = g_strdup(NS_ConvertUTF16toUTF8(value).get());
@@ -676,6 +681,10 @@ AtkAttributeSet* getAttributesCB(AtkObject* aAtkObj) {
   AtkAttributeSet* objAttributeSet = nullptr;
   for (uint32_t i = 0; i < attrs.Length(); i++) {
     AtkAttribute* objAttr = (AtkAttribute*)g_malloc(sizeof(AtkAttribute));
+    // On ATK, the placeholder attribute is called placeholder-text.
+    if (attrs[i].Name().Equals("placeholder")) {
+      attrs[i].Name().AssignLiteral("placeholder-text");
+    }
     objAttr->name = g_strdup(attrs[i].Name().get());
     objAttr->value = g_strdup(NS_ConvertUTF16toUTF8(attrs[i].Value()).get());
     objAttributeSet = g_slist_prepend(objAttributeSet, objAttr);
@@ -726,7 +735,7 @@ gint getChildCountCB(AtkObject* aAtkObj) {
   }
 
   ProxyAccessible* proxy = GetProxy(aAtkObj);
-  if (proxy && !proxy->MustPruneChildren()) {
+  if (proxy && !nsAccUtils::MustPrune(proxy)) {
     return proxy->EmbeddedChildCount();
   }
 
@@ -757,7 +766,9 @@ AtkObject* refChildCB(AtkObject* aAtkObj, gint aChildIndex) {
       }
     }
   } else if (ProxyAccessible* proxy = GetProxy(aAtkObj)) {
-    if (proxy->MustPruneChildren()) return nullptr;
+    if (nsAccUtils::MustPrune(proxy)) {
+      return nullptr;
+    }
 
     ProxyAccessible* child = proxy->EmbeddedChildAt(aChildIndex);
     if (child) childAtkObj = GetWrapperFor(child);
@@ -1329,6 +1340,8 @@ void a11y::ProxyEvent(ProxyAccessible* aTarget, uint32_t aEventType) {
       g_object_notify((GObject*)wrapper, "accessible-value");
       break;
     case nsIAccessibleEvent::EVENT_TEXT_SELECTION_CHANGED:
+      g_signal_emit_by_name(wrapper, "text_selection_changed");
+      break;
     case nsIAccessibleEvent::EVENT_SELECTION_WITHIN:
       g_signal_emit_by_name(wrapper, "selection_changed");
       break;

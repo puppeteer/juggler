@@ -22,11 +22,15 @@ template <class AnimationType>
   MOZ_ASSERT(!collection->mCalledPropertyDtor, "can't call dtor twice");
   collection->mCalledPropertyDtor = true;
 #endif
+
+  PostRestyleMode postRestyle = collection->mCalledDestroy
+                                    ? PostRestyleMode::IfNeeded
+                                    : PostRestyleMode::Never;
   {
     nsAutoAnimationMutationBatch mb(collection->mElement->OwnerDoc());
 
     for (size_t animIdx = collection->mAnimations.Length(); animIdx-- != 0;) {
-      collection->mAnimations[animIdx]->CancelFromStyle();
+      collection->mAnimations[animIdx]->CancelFromStyle(postRestyle);
     }
   }
   delete collection;
@@ -35,7 +39,7 @@ template <class AnimationType>
 template <class AnimationType>
 /* static */ AnimationCollection<AnimationType>*
 AnimationCollection<AnimationType>::GetAnimationCollection(
-    const dom::Element* aElement, CSSPseudoElementType aPseudoType) {
+    const dom::Element* aElement, PseudoStyleType aPseudoType) {
   if (!aElement->MayHaveAnimations()) {
     // Early return for the most common case.
     return nullptr;
@@ -71,7 +75,7 @@ AnimationCollection<AnimationType>::GetAnimationCollection(
 template <class AnimationType>
 /* static */ AnimationCollection<AnimationType>*
 AnimationCollection<AnimationType>::GetOrCreateAnimationCollection(
-    dom::Element* aElement, CSSPseudoElementType aPseudoType,
+    dom::Element* aElement, PseudoStyleType aPseudoType,
     bool* aCreatedCollection) {
   MOZ_ASSERT(aCreatedCollection);
   *aCreatedCollection = false;
@@ -108,15 +112,17 @@ AnimationCollection<AnimationType>::GetOrCreateAnimationCollection(
 template <class AnimationType>
 /*static*/ nsAtom*
 AnimationCollection<AnimationType>::GetPropertyAtomForPseudoType(
-    CSSPseudoElementType aPseudoType) {
+    PseudoStyleType aPseudoType) {
   nsAtom* propName = nullptr;
 
-  if (aPseudoType == CSSPseudoElementType::NotPseudo) {
+  if (aPseudoType == PseudoStyleType::NotPseudo) {
     propName = TraitsType::ElementPropertyAtom();
-  } else if (aPseudoType == CSSPseudoElementType::before) {
+  } else if (aPseudoType == PseudoStyleType::before) {
     propName = TraitsType::BeforePropertyAtom();
-  } else if (aPseudoType == CSSPseudoElementType::after) {
+  } else if (aPseudoType == PseudoStyleType::after) {
     propName = TraitsType::AfterPropertyAtom();
+  } else if (aPseudoType == PseudoStyleType::marker) {
+    propName = TraitsType::MarkerPropertyAtom();
   }
 
   return propName;

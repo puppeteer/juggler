@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "WebAuthnCoseIdentifiers.h"
 #include "mozilla/dom/U2FHIDTokenManager.h"
 #include "mozilla/dom/WebAuthnUtil.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -108,19 +109,59 @@ RefPtr<U2FRegisterPromise> U2FHIDTokenManager::Register(
 
   uint64_t registerFlags = 0;
 
-  if (aInfo.Extra().type() != WebAuthnMaybeMakeCredentialExtraInfo::Tnull_t) {
-    const auto& extra = aInfo.Extra().get_WebAuthnMakeCredentialExtraInfo();
+  if (aInfo.Extra().isSome()) {
+    const auto& extra = aInfo.Extra().ref();
     const WebAuthnAuthenticatorSelection& sel = extra.AuthenticatorSelection();
+
+    UserVerificationRequirement userVerificaitonRequirement =
+        sel.userVerificationRequirement();
+
+    bool requireUserVerification =
+        userVerificaitonRequirement == UserVerificationRequirement::Required;
+
+    bool requirePlatformAttachment = false;
+    if (sel.authenticatorAttachment().isSome()) {
+      const AuthenticatorAttachment authenticatorAttachment =
+          sel.authenticatorAttachment().value();
+      if (authenticatorAttachment == AuthenticatorAttachment::Platform) {
+        requirePlatformAttachment = true;
+      }
+    }
 
     // Set flags for credential creation.
     if (sel.requireResidentKey()) {
       registerFlags |= U2F_FLAG_REQUIRE_RESIDENT_KEY;
     }
-    if (sel.requireUserVerification()) {
+    if (requireUserVerification) {
       registerFlags |= U2F_FLAG_REQUIRE_USER_VERIFICATION;
     }
-    if (sel.requirePlatformAttachment()) {
+    if (requirePlatformAttachment) {
       registerFlags |= U2F_FLAG_REQUIRE_PLATFORM_ATTACHMENT;
+    }
+
+    nsTArray<CoseAlg> coseAlgos;
+    for (const auto& coseAlg : extra.coseAlgs()) {
+      switch (static_cast<CoseAlgorithmIdentifier>(coseAlg.alg())) {
+        case CoseAlgorithmIdentifier::ES256:
+          coseAlgos.AppendElement(coseAlg);
+          break;
+        default:
+          continue;
+      }
+    }
+
+    // Only if no algorithms were specified, default to the only CTAP 1 / U2F
+    // protocol-supported algorithm. Ultimately this logic must move into
+    // u2f-hid-rs in a fashion that doesn't break the tests.
+    if (extra.coseAlgs().IsEmpty()) {
+      coseAlgos.AppendElement(
+          static_cast<int32_t>(CoseAlgorithmIdentifier::ES256));
+    }
+
+    // If there are no acceptable/supported algorithms, reject the promise.
+    if (coseAlgos.IsEmpty()) {
+      return U2FRegisterPromise::CreateAndReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+                                                 __func__);
     }
   }
 
@@ -184,11 +225,14 @@ RefPtr<U2FSignPromise> U2FHIDTokenManager::Sign(
   nsTArray<nsTArray<uint8_t>> appIds;
   appIds.AppendElement(rpIdHash);
 
-  if (aInfo.Extra().type() != WebAuthnMaybeGetAssertionExtraInfo::Tnull_t) {
-    const auto& extra = aInfo.Extra().get_WebAuthnGetAssertionExtraInfo();
+  if (aInfo.Extra().isSome()) {
+    const auto& extra = aInfo.Extra().ref();
+
+    UserVerificationRequirement userVerificaitonReq =
+        extra.userVerificationRequirement();
 
     // Set flags for credential requests.
-    if (extra.RequireUserVerification()) {
+    if (userVerificaitonReq == UserVerificationRequirement::Required) {
       signFlags |= U2F_FLAG_REQUIRE_USER_VERIFICATION;
     }
 
@@ -276,8 +320,9 @@ void U2FHIDTokenManager::HandleRegisterResult(UniquePtr<U2FResult>&& aResult) {
     return;
   }
 
+  nsTArray<WebAuthnExtensionResult> extensions;
   WebAuthnMakeCredentialResult result(mTransaction.ref().mClientDataJSON,
-                                      attObj, keyHandle, regData);
+                                      attObj, keyHandle, regData, extensions);
   mRegisterPromise.Resolve(std::move(result), __func__);
 }
 
@@ -356,9 +401,11 @@ void U2FHIDTokenManager::HandleSignResult(UniquePtr<U2FResult>&& aResult) {
     return;
   }
 
+  nsTArray<uint8_t> userHandle;
+
   WebAuthnGetAssertionResult result(mTransaction.ref().mClientDataJSON,
                                     keyHandle, signatureBuf, authenticatorData,
-                                    extensions, rawSignatureBuf);
+                                    extensions, rawSignatureBuf, userHandle);
   mSignPromise.Resolve(std::move(result), __func__);
 }
 

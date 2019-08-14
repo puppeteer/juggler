@@ -12,11 +12,11 @@
 #include "nsIProtocolHandler.h"
 
 #if defined(MOZ_WIDGET_ANDROID) && defined(RELEASE_OR_BETA)
-#define ABOUT_CONFIG_BLOCKED_GV
+#  define ABOUT_CONFIG_BLOCKED_GV
 #endif
 
 #ifdef ABOUT_CONFIG_BLOCKED_GV
-#include "mozilla/jni/Utils.h"  // for mozilla::jni::IsFennec()
+#  include "mozilla/jni/Utils.h"  // for mozilla::jni::IsFennec()
 #endif
 
 NS_IMPL_ISUPPORTS(nsAboutRedirector, nsIAboutModule)
@@ -79,14 +79,18 @@ static const RedirEntry kRedirMap[] = {
     {"credits", "https://www.mozilla.org/credits/",
      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT},
     {"license", "chrome://global/content/license.html",
-     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
-         nsIAboutModule::MAKE_LINKABLE},
+     nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT},
     {"logo", "chrome://branding/content/about.png",
      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
          // Linkable for testing reasons.
          nsIAboutModule::MAKE_LINKABLE},
     {"memory", "chrome://global/content/aboutMemory.xhtml",
      nsIAboutModule::ALLOW_SCRIPT},
+    {"certificate", "chrome://global/content/certviewer/certviewer.html",
+     nsIAboutModule::ALLOW_SCRIPT |
+         nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT |
+         nsIAboutModule::URI_MUST_LOAD_IN_CHILD |
+         nsIAboutModule::URI_CAN_LOAD_IN_PRIVILEGEDABOUT_PROCESS},
     {"mozilla", "chrome://global/content/mozilla.xhtml",
      nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT},
     {"neterror", "chrome://global/content/netError.xhtml",
@@ -147,7 +151,14 @@ nsAboutRedirector::NewChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (path.EqualsASCII("crashparent") || path.EqualsASCII("crashcontent")) {
+    bool isExternal;
+    aLoadInfo->GetLoadTriggeredFromExternal(&isExternal);
+    if (isExternal) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
     nsCOMPtr<nsIChannel> channel = new CrashChannel(aURI);
+    channel->SetLoadInfo(aLoadInfo);
     channel.forget(aResult);
     return NS_OK;
   }

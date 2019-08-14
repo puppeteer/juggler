@@ -170,12 +170,8 @@ void WebGLRenderbuffer::RenderbufferStorage(uint32_t samples,
     return;
   }
 
-  if (!usage->maxSamplesKnown) {
-    const_cast<webgl::FormatUsageInfo*>(usage)->ResolveMaxSamples(mContext->gl);
-  }
-  MOZ_ASSERT(usage->maxSamplesKnown);
-
-  if (samples > usage->maxSamples) {
+  const auto maxSamples = usage->MaxSamples(*mContext->gl);
+  if (samples > maxSamples) {
     mContext->ErrorInvalidOperation("`samples` is out of the valid range.");
     return;
   }
@@ -185,6 +181,11 @@ void WebGLRenderbuffer::RenderbufferStorage(uint32_t samples,
   const GLenum error = DoRenderbufferStorage(samples, usage, width, height);
   if (error) {
     mContext->GenerateWarning("Unexpected error %s", EnumString(error).c_str());
+    if (error == LOCAL_GL_OUT_OF_MEMORY) {
+      // Truncate.
+      mImageInfo = {};
+      InvalidateCaches();
+    }
     return;
   }
 

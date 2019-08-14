@@ -7,11 +7,11 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1323700
   <meta charset="utf-8">
   <title>Test for Bug 1323700</title>
 
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
   <script type="application/javascript">
 
-let { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+let { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 const CssLogic = require("devtools/shared/inspector/css-logic");
 
 var _tests = [];

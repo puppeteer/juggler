@@ -1,10 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://services-crypto/utils.js");
-ChromeUtils.import("resource://services-common/async.js");
-ChromeUtils.import("resource://services-common/rest.js");
-ChromeUtils.import("resource://services-common/utils.js");
+const { CryptoUtils } = ChromeUtils.import(
+  "resource://services-crypto/utils.js"
+);
+const { TokenAuthenticatedRESTRequest } = ChromeUtils.import(
+  "resource://services-common/rest.js"
+);
 
 function run_test() {
   initTestLogging("Trace");
@@ -22,13 +24,14 @@ add_task(async function test_authenticated_request() {
   let key = "qTZf4ZFpAMpMoeSsX3zVRjiqmNs=";
   let method = "GET";
 
-  let nonce = btoa(CryptoUtils.generateRandomBytes(16));
+  let nonce = btoa(CryptoUtils.generateRandomBytesLegacy(16));
   let ts = Math.floor(Date.now() / 1000);
-  let extra = {ts, nonce};
+  let extra = { ts, nonce };
 
   let auth;
 
-  let server = httpd_setup({"/foo": function(request, response) {
+  let server = httpd_setup({
+    "/foo": function(request, response) {
       Assert.ok(request.hasHeader("Authorization"));
       Assert.equal(auth, request.getHeader("Authorization"));
 
@@ -37,10 +40,10 @@ add_task(async function test_authenticated_request() {
     },
   });
   let uri = CommonUtils.makeURI(server.baseURI + "/foo");
-  let sig = CryptoUtils.computeHTTPMACSHA1(id, key, method, uri, extra);
+  let sig = await CryptoUtils.computeHTTPMACSHA1(id, key, method, uri, extra);
   auth = sig.getHeader();
 
-  let req = new TokenAuthenticatedRESTRequest(uri, {id, key}, extra);
+  let req = new TokenAuthenticatedRESTRequest(uri, { id, key }, extra);
   await req.get();
 
   Assert.equal(message, req.response.body);

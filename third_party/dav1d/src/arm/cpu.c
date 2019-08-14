@@ -27,15 +27,24 @@
 
 #include "config.h"
 
+#include "common/attributes.h"
+
 #include "src/arm/cpu.h"
 
-#if defined(HAVE_GETAUXVAL) && ARCH_ARM
+#if defined(__ARM_NEON) || defined(__APPLE__) || defined(_WIN32) || ARCH_AARCH64
+// NEON is always available; runtime tests are not needed.
+#elif defined(HAVE_GETAUXVAL) && ARCH_ARM
 #include <sys/auxv.h>
 
 #ifndef HWCAP_ARM_NEON
 #define HWCAP_ARM_NEON (1 << 12)
 #endif
 #define NEON_HWCAP HWCAP_ARM_NEON
+
+#elif defined(HAVE_ELF_AUX_INFO) && ARCH_ARM
+#include <sys/auxv.h>
+
+#define NEON_HWCAP HWCAP_NEON
 
 #elif defined(__ANDROID__)
 #include <stdio.h>
@@ -57,7 +66,7 @@ static unsigned parse_proc_cpuinfo(const char *flag) {
         // if line is incomplete seek back to avoid splitting the search
         // string into two buffers
         if (!strchr(line, '\n') && strlen(line) > strlen(flag)) {
-            if (fseek(file, -strlen(flag), SEEK_CUR))
+            if (fseeko(file, -strlen(flag), SEEK_CUR))
                 break;
         }
     }
@@ -68,19 +77,19 @@ static unsigned parse_proc_cpuinfo(const char *flag) {
 }
 #endif
 
-unsigned dav1d_get_cpu_flags_arm(void) {
+COLD unsigned dav1d_get_cpu_flags_arm(void) {
     unsigned flags = 0;
-#if ARCH_AARCH64
+#if defined(__ARM_NEON) || defined(__APPLE__) || defined(_WIN32) || ARCH_AARCH64
     flags |= DAV1D_ARM_CPU_FLAG_NEON;
 #elif defined(HAVE_GETAUXVAL) && ARCH_ARM
     unsigned long hw_cap = getauxval(AT_HWCAP);
     flags |= (hw_cap & NEON_HWCAP) ? DAV1D_ARM_CPU_FLAG_NEON : 0;
+#elif defined(HAVE_ELF_AUX_INFO) && ARCH_ARM
+    unsigned long hw_cap = 0;
+    elf_aux_info(AT_HWCAP, &hw_cap, sizeof(hw_cap));
+    flags |= (hw_cap & NEON_HWCAP) ? DAV1D_ARM_CPU_FLAG_NEON : 0;
 #elif defined(__ANDROID__)
     flags |= parse_proc_cpuinfo("neon") ? DAV1D_ARM_CPU_FLAG_NEON : 0;
-#elif defined(__APPLE__)
-    flags |= DAV1D_ARM_CPU_FLAG_NEON;
-#elif defined(_WIN32)
-    flags |= DAV1D_ARM_CPU_FLAG_NEON;
 #endif
 
     return flags;

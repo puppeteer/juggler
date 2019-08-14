@@ -22,7 +22,7 @@
 #include "mozilla/dom/SRILogHelper.h"
 #include "mozilla/Preferences.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsUnicharUtils.h"
 #include "nsCRT.h"
 #include "nsXPCOMCIDInternal.h"
@@ -35,12 +35,13 @@ using namespace mozilla;
 using namespace mozilla::dom;
 
 nsStyleLinkElement::SheetInfo::SheetInfo(
-    const nsIDocument& aDocument, nsIContent* aContent,
+    const Document& aDocument, nsIContent* aContent,
     already_AddRefed<nsIURI> aURI,
     already_AddRefed<nsIPrincipal> aTriggeringPrincipal,
     mozilla::net::ReferrerPolicy aReferrerPolicy, mozilla::CORSMode aCORSMode,
     const nsAString& aTitle, const nsAString& aMedia,
-    HasAlternateRel aHasAlternateRel, IsInline aIsInline)
+    HasAlternateRel aHasAlternateRel, IsInline aIsInline,
+    IsExplicitlyEnabled aIsExplicitlyEnabled)
     : mContent(aContent),
       mURI(aURI),
       mTriggeringPrincipal(aTriggeringPrincipal),
@@ -49,7 +50,8 @@ nsStyleLinkElement::SheetInfo::SheetInfo(
       mTitle(aTitle),
       mMedia(aMedia),
       mHasAlternateRel(aHasAlternateRel == HasAlternateRel::Yes),
-      mIsInline(aIsInline == IsInline::Yes) {
+      mIsInline(aIsInline == IsInline::Yes),
+      mIsExplicitlyEnabled(aIsExplicitlyEnabled) {
   MOZ_ASSERT(!mIsInline || aContent);
   MOZ_ASSERT_IF(aContent, aContent->OwnerDoc() == &aDocument);
 
@@ -144,27 +146,28 @@ void nsStyleLinkElement::GetCharset(nsAString& aCharset) {
   aCharset.Truncate();
 }
 
-/* virtual */ void nsStyleLinkElement::OverrideBaseURI(nsIURI* aNewBaseURI) {
+/* virtual */
+void nsStyleLinkElement::OverrideBaseURI(nsIURI* aNewBaseURI) {
   MOZ_ASSERT_UNREACHABLE(
       "Base URI can't be overriden in this implementation "
       "of nsIStyleSheetLinkingElement.");
 }
 
-/* virtual */ void nsStyleLinkElement::SetLineNumber(uint32_t aLineNumber) {
+/* virtual */
+void nsStyleLinkElement::SetLineNumber(uint32_t aLineNumber) {
   mLineNumber = aLineNumber;
 }
 
-/* virtual */ uint32_t nsStyleLinkElement::GetLineNumber() {
-  return mLineNumber;
-}
+/* virtual */
+uint32_t nsStyleLinkElement::GetLineNumber() { return mLineNumber; }
 
-/* virtual */ void nsStyleLinkElement::SetColumnNumber(uint32_t aColumnNumber) {
+/* virtual */
+void nsStyleLinkElement::SetColumnNumber(uint32_t aColumnNumber) {
   mColumnNumber = aColumnNumber;
 }
 
-/* virtual */ uint32_t nsStyleLinkElement::GetColumnNumber() {
-  return mColumnNumber;
-}
+/* virtual */
+uint32_t nsStyleLinkElement::GetColumnNumber() { return mColumnNumber; }
 
 static uint32_t ToLinkMask(const nsAString& aLink) {
   // Keep this in sync with sRelValues in HTMLLinkElement.cpp
@@ -225,7 +228,7 @@ nsStyleLinkElement::UpdateStyleSheet(nsICSSLoaderObserver* aObserver) {
 }
 
 Result<nsStyleLinkElement::Update, nsresult>
-nsStyleLinkElement::UpdateStyleSheetInternal(nsIDocument* aOldDocument,
+nsStyleLinkElement::UpdateStyleSheetInternal(Document* aOldDocument,
                                              ShadowRoot* aOldShadowRoot,
                                              ForceUpdate aForceUpdate) {
   return DoUpdateStyleSheet(aOldDocument, aOldShadowRoot, nullptr,
@@ -233,7 +236,7 @@ nsStyleLinkElement::UpdateStyleSheetInternal(nsIDocument* aOldDocument,
 }
 
 Result<nsStyleLinkElement::Update, nsresult>
-nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
+nsStyleLinkElement::DoUpdateStyleSheet(Document* aOldDocument,
                                        ShadowRoot* aOldShadowRoot,
                                        nsICSSLoaderObserver* aObserver,
                                        ForceUpdate aForceUpdate) {
@@ -266,7 +269,7 @@ nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
     SetStyleSheet(nullptr);
   }
 
-  nsIDocument* doc = thisContent->GetComposedDoc();
+  Document* doc = thisContent->GetComposedDoc();
 
   // Loader could be null during unlink, see bug 1425866.
   if (!doc || !doc->CSSLoader() || !doc->CSSLoader()->GetEnabled()) {
@@ -327,9 +330,8 @@ nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
     MOZ_ASSERT(thisContent->IsElement());
     nsresult rv = NS_OK;
     if (!nsStyleUtil::CSPAllowsInlineStyle(
-            thisContent->AsElement(), thisContent->NodePrincipal(),
-            info->mTriggeringPrincipal, doc->GetDocumentURI(), mLineNumber,
-            mColumnNumber, text, &rv)) {
+            thisContent->AsElement(), doc, info->mTriggeringPrincipal,
+            mLineNumber, mColumnNumber, text, &rv)) {
       if (NS_FAILED(rv)) {
         return Err(rv);
       }

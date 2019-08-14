@@ -10,20 +10,20 @@
 const TEST_URL = URL_ROOT + "doc_markup_links.html";
 
 add_task(async function() {
-  const {toolbox, inspector} = await openInspectorForURL(TEST_URL);
+  const { toolbox, inspector } = await openInspectorForURL(TEST_URL);
 
   info("Select a node with a cssresource attribute");
   await selectNode("link", inspector);
 
   info("Set the popupNode to the node that contains the uri");
-  let {editor} = await getContainerForSelector("link", inspector);
+  let { editor } = await getContainerForSelector("link", inspector);
   openContextMenuAndGetAllItems(inspector, {
     target: editor.attrElements.get("href").querySelector(".link"),
   });
 
   info("Follow the link and wait for the style-editor to open");
   const onStyleEditorReady = toolbox.once("styleeditor-ready");
-  inspector.onFollowLink();
+  inspector.markup.contextMenu._onFollowLink();
   await onStyleEditorReady;
 
   // No real need to test that the editor opened on the right file here as this
@@ -37,14 +37,14 @@ add_task(async function() {
   await selectNode("script", inspector);
 
   info("Set the popupNode to the node that contains the uri");
-  ({editor} = await getContainerForSelector("script", inspector));
+  ({ editor } = await getContainerForSelector("script", inspector));
   openContextMenuAndGetAllItems(inspector, {
     target: editor.attrElements.get("src").querySelector(".link"),
   });
 
   info("Follow the link and wait for the debugger to open");
   const onDebuggerReady = toolbox.once("jsdebugger-ready");
-  inspector.onFollowLink();
+  inspector.markup.contextMenu._onFollowLink();
   await onDebuggerReady;
 
   // No real need to test that the debugger opened on the right file here as

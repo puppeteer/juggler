@@ -21,11 +21,14 @@ add_task(async function() {
     constructor: "PreInitGlobalActor",
     type: { global: true },
   });
-  ActorRegistry.registerModule("resource://test/pre_init_target_scoped_actors.js", {
-    prefix: "preInitTargetScoped",
-    constructor: "PreInitTargetScopedActor",
-    type: { target: true },
-  });
+  ActorRegistry.registerModule(
+    "resource://test/pre_init_target_scoped_actors.js",
+    {
+      prefix: "preInitTargetScoped",
+      constructor: "PreInitTargetScopedActor",
+      type: { target: true },
+    }
+  );
 
   const client = await startTestDebuggerServer("example tab");
 
@@ -34,14 +37,18 @@ add_task(async function() {
     constructor: "PostInitGlobalActor",
     type: { global: true },
   });
-  ActorRegistry.registerModule("resource://test/post_init_target_scoped_actors.js", {
-    prefix: "postInitTargetScoped",
-    constructor: "PostInitTargetScopedActor",
-    type: { target: true },
-  });
+  ActorRegistry.registerModule(
+    "resource://test/post_init_target_scoped_actors.js",
+    {
+      prefix: "postInitTargetScoped",
+      constructor: "PostInitTargetScopedActor",
+      type: { target: true },
+    }
+  );
 
-  let actors = await client.listTabs();
-  Assert.equal(actors.tabs.length, 1);
+  let actors = await client.mainRoot.rootForm;
+  const tabs = await client.mainRoot.listTabs();
+  Assert.equal(tabs.length, 1);
 
   let reply = await client.request({
     to: actors.preInitGlobalActor,
@@ -50,7 +57,7 @@ add_task(async function() {
   Assert.equal(reply.message, "pong");
 
   reply = await client.request({
-    to: actors.tabs[0].preInitTargetScopedActor,
+    to: tabs[0].targetForm.preInitTargetScopedActor,
     type: "ping",
   });
   Assert.equal(reply.message, "pong");
@@ -62,20 +69,30 @@ add_task(async function() {
   Assert.equal(reply.message, "pong");
 
   reply = await client.request({
-    to: actors.tabs[0].postInitTargetScopedActor,
+    to: tabs[0].targetForm.postInitTargetScopedActor,
     type: "ping",
   });
   Assert.equal(reply.message, "pong");
 
   // Consider that there is only one connection, and the first one is ours
   const connID = Object.keys(DebuggerServer._connections)[0];
-  const postInitGlobalActor = getActorInstance(connID, actors.postInitGlobalActor);
-  const preInitGlobalActor = getActorInstance(connID, actors.preInitGlobalActor);
-  actors = await client.listTabs();
-  Assert.equal(postInitGlobalActor,
-    getActorInstance(connID, actors.postInitGlobalActor));
-  Assert.equal(preInitGlobalActor,
-    getActorInstance(connID, actors.preInitGlobalActor));
+  const postInitGlobalActor = getActorInstance(
+    connID,
+    actors.postInitGlobalActor
+  );
+  const preInitGlobalActor = getActorInstance(
+    connID,
+    actors.preInitGlobalActor
+  );
+  actors = await client.mainRoot.getRoot();
+  Assert.equal(
+    postInitGlobalActor,
+    getActorInstance(connID, actors.postInitGlobalActor)
+  );
+  Assert.equal(
+    preInitGlobalActor,
+    getActorInstance(connID, actors.preInitGlobalActor)
+  );
 
   await client.close();
 });

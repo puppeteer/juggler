@@ -7,8 +7,9 @@
 
 "use strict";
 
-const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/mochitest/test-console-filters.html";
+const TEST_URI =
+  "http://example.com/browser/devtools/client/webconsole/" +
+  "test/mochitest/test-console-filters.html";
 
 add_task(async function() {
   let hud = await openNewTabAndConsole(TEST_URI);
@@ -47,14 +48,6 @@ add_task(async function() {
 
 async function getFilterButtons(hud) {
   const outputNode = hud.ui.outputNode;
-  info("Wait for console toolbar to appear");
-  const toolbar = await waitFor(() => {
-    return outputNode.querySelector(".webconsole-filterbar-primary");
-  });
-  // Show the filter bar if it is hidden
-  if (!outputNode.querySelector(".webconsole-filterbar-secondary")) {
-    toolbar.querySelector(".devtools-filter-icon").click();
-  }
 
   info("Wait for console filterbar to appear");
   const filterBar = await waitFor(() => {
@@ -62,9 +55,9 @@ async function getFilterButtons(hud) {
   });
   ok(filterBar, "Filter bar is shown when filter icon is clicked.");
 
-  return filterBar.querySelectorAll(".devtools-button");
+  return filterBar.querySelectorAll(".devtools-togglebutton");
 }
 
 function filterIsEnabled(button) {
-  return button.classList.contains("checked");
+  return button.getAttribute("aria-pressed") === "true";
 }

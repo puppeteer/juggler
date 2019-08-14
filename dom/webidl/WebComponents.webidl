@@ -10,17 +10,20 @@
  * liability, trademark and document use rules apply.
  */
 
-interface IID;
-
+[MOZ_CAN_RUN_SCRIPT_BOUNDARY]
 callback LifecycleConnectedCallback = void();
+[MOZ_CAN_RUN_SCRIPT_BOUNDARY]
 callback LifecycleDisconnectedCallback = void();
+[MOZ_CAN_RUN_SCRIPT_BOUNDARY]
 callback LifecycleAdoptedCallback = void(Document? oldDocument,
                                          Document? newDocment);
+[MOZ_CAN_RUN_SCRIPT_BOUNDARY]
 callback LifecycleAttributeChangedCallback = void(DOMString attrName,
                                                   DOMString? oldValue,
                                                   DOMString? newValue,
                                                   DOMString? namespaceURI);
-callback LifecycleGetCustomInterfaceCallback = object?(IID iid);
+[MOZ_CAN_RUN_SCRIPT_BOUNDARY]
+callback LifecycleGetCustomInterfaceCallback = object?(any iid);
 
 dictionary LifecycleCallbacks {
   LifecycleConnectedCallback connectedCallback;

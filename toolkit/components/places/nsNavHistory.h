@@ -28,8 +28,8 @@
 #include "mozilla/Atomics.h"
 
 #ifdef XP_WIN
-#include "WinUtils.h"
-#include <wincrypt.h>
+#  include "WinUtils.h"
+#  include <wincrypt.h>
 #endif
 
 #define QUERYUPDATE_TIME 0
@@ -51,8 +51,8 @@
 
 #ifdef MOZ_XUL
 // Fired after autocomplete feedback has been updated.
-#define TOPIC_AUTOCOMPLETE_FEEDBACK_UPDATED \
-  "places-autocomplete-feedback-updated"
+#  define TOPIC_AUTOCOMPLETE_FEEDBACK_UPDATED \
+    "places-autocomplete-feedback-updated"
 #endif
 
 // The preference we watch to know when the mobile bookmarks folder is filled by
@@ -60,7 +60,7 @@
 #define MOBILE_BOOKMARKS_PREF "browser.bookmarks.showMobileBookmarks"
 
 // The guid of the mobile bookmarks virtual query.
-#define MOBILE_BOOKMARKS_VIRTUAL_GUID "mobile____v"
+#define MOBILE_BOOKMARKS_VIRTUAL_GUID "mobile_____v"
 
 #define ROOT_GUID "root________"
 #define MENU_ROOT_GUID "menu________"
@@ -437,16 +437,6 @@ class nsNavHistory final : public nsSupportsWeakReference,
  protected:
   // Database handle.
   RefPtr<mozilla::places::Database> mDB;
-
-  /**
-   * Recalculates frecency for all pages where frecency < 0, then decays
-   * frecency and inputhistory values. Pages can invalidate frecencies:
-   *  * After a "clear private data"
-   *  * After removing visits
-   *  * After migrating from older versions
-   * This method runs on idle-daily.
-   */
-  nsresult FixAndDecayFrecency();
 
   /**
    * Loads all of the preferences that we use into member variables.

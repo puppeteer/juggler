@@ -22,8 +22,10 @@ class TimeoutExecutor final : public nsIRunnable,
                               public nsITimerCallback,
                               public nsINamed {
   TimeoutManager* mOwner;
+  bool mIsIdleQueue;
   nsCOMPtr<nsITimer> mTimer;
   TimeStamp mDeadline;
+  uint32_t mMaxIdleDeferMS;
 
   // Limits how far we allow timers to fire into the future from their
   // deadline.  Starts off at zero, but is then adjusted when we start
@@ -64,10 +66,11 @@ class TimeoutExecutor final : public nsIRunnable,
   nsresult MaybeReschedule(const TimeStamp& aDeadline,
                            const TimeDuration& aMinDelay);
 
-  void MaybeExecute();
+  MOZ_CAN_RUN_SCRIPT void MaybeExecute();
 
  public:
-  explicit TimeoutExecutor(TimeoutManager* aOwner);
+  TimeoutExecutor(TimeoutManager* aOwner, bool aIsIdleQueue,
+                  uint32_t aMaxIdleDeferMS);
 
   void Shutdown();
 

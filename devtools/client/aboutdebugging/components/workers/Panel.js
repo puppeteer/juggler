@@ -4,13 +4,24 @@
 /* globals window */
 "use strict";
 
-loader.lazyImporter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+loader.lazyImporter(
+  this,
+  "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm"
+);
 
-const { Component, createFactory } = require("devtools/client/shared/vendor/react");
+const {
+  Component,
+  createFactory,
+} = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const Services = require("Services");
+const {
+  addMultiE10sListener,
+  isMultiE10s,
+  removeMultiE10sListener,
+} = require("devtools/shared/multi-e10s-helper");
 
 const PanelHeader = createFactory(require("../PanelHeader"));
 const TargetList = createFactory(require("../TargetList"));
@@ -18,20 +29,27 @@ const WorkerTarget = createFactory(require("./Target"));
 const MultiE10SWarning = createFactory(require("./MultiE10sWarning"));
 const ServiceWorkerTarget = createFactory(require("./ServiceWorkerTarget"));
 
-loader.lazyImporter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+loader.lazyImporter(
+  this,
+  "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm"
+);
 
-loader.lazyRequireGetter(this, "DebuggerClient",
-  "devtools/shared/client/debugger-client", true);
+loader.lazyRequireGetter(
+  this,
+  "DebuggerClient",
+  "devtools/shared/client/debugger-client",
+  true
+);
 
 const Strings = Services.strings.createBundle(
-  "chrome://devtools/locale/aboutdebugging.properties");
+  "chrome://devtools/locale/aboutdebugging.properties"
+);
 
 const WorkerIcon = "chrome://devtools/skin/images/debugging-workers.svg";
-const MORE_INFO_URL = "https://developer.mozilla.org/en-US/docs/Tools/about%3Adebugging" +
-                      "#Service_workers_not_compatible";
-const PROCESS_COUNT_PREF = "dom.ipc.processCount";
-const MULTI_OPTOUT_PREF = "dom.ipc.multiOptOut";
+const MORE_INFO_URL =
+  "https://developer.mozilla.org/en-US/docs/Tools/about%3Adebugging" +
+  "#Service_workers_not_compatible";
 
 class WorkersPanel extends Component {
   static get propTypes() {
@@ -60,26 +78,20 @@ class WorkersPanel extends Component {
       front.on("workerListChanged", this.updateWorkers);
       this.state.contentProcessFronts.push(front);
     });
+    client.mainRoot.onFront("serviceWorkerRegistration", front => {
+      this.state.serviceWorkerRegistrationFronts.push(front);
+      front.on("push-subscription-modified", this.updateWorkers);
+      front.on("registration-changed", this.updateWorkers);
+    });
     client.mainRoot.on("workerListChanged", this.updateWorkers);
 
-    client.mainRoot.on("serviceWorkerRegistrationListChanged", this.updateWorkers);
+    client.mainRoot.on(
+      "serviceWorkerRegistrationListChanged",
+      this.updateWorkers
+    );
     client.mainRoot.on("processListChanged", this.updateWorkers);
-    client.addListener("registration-changed", this.updateWorkers);
 
-    // Some notes about these observers:
-    // - nsIPrefBranch.addObserver observes prefixes. In reality, watching
-    //   PROCESS_COUNT_PREF watches two separate prefs:
-    //   dom.ipc.processCount *and* dom.ipc.processCount.web. Because these
-    //   are the two ways that we control the number of content processes,
-    //   that works perfectly fine.
-    // - The user might opt in or out of multi by setting the multi opt out
-    //   pref. That affects whether we need to show our warning, so we need to
-    //   update our state when that pref changes.
-    // - In all cases, we don't have to manually check which pref changed to
-    //   what. The platform code in nsIXULRuntime.maxWebProcessCount does all
-    //   of that for us.
-    Services.prefs.addObserver(PROCESS_COUNT_PREF, this.updateMultiE10S);
-    Services.prefs.addObserver(MULTI_OPTOUT_PREF, this.updateMultiE10S);
+    addMultiE10sListener(this.updateMultiE10S);
 
     this.updateMultiE10S();
     this.updateWorkers();
@@ -88,15 +100,20 @@ class WorkersPanel extends Component {
   componentWillUnmount() {
     const client = this.props.client;
     client.mainRoot.off("processListChanged", this.updateWorkers);
-    client.mainRoot.off("serviceWorkerRegistrationListChanged", this.updateWorkers);
+    client.mainRoot.off(
+      "serviceWorkerRegistrationListChanged",
+      this.updateWorkers
+    );
     client.mainRoot.off("workerListChanged", this.updateWorkers);
     for (const front of this.state.contentProcessFronts) {
       front.off("workerListChanged", this.updateWorkers);
     }
-    client.removeListener("registration-changed", this.updateWorkers);
+    for (const front of this.state.serviceWorkerRegistrationFronts) {
+      front.off("push-subscription-modified", this.updateWorkers);
+      front.off("registration-changed", this.updateWorkers);
+    }
 
-    Services.prefs.removeObserver(PROCESS_COUNT_PREF, this.updateMultiE10S);
-    Services.prefs.removeObserver(MULTI_OPTOUT_PREF, this.updateMultiE10S);
+    removeMultiE10sListener(this.updateMultiE10S);
   }
 
   get initialState() {
@@ -106,35 +123,39 @@ class WorkersPanel extends Component {
         shared: [],
         other: [],
       },
-      processCount: 1,
+      isMultiE10S: isMultiE10s(),
 
       // List of ContentProcessTargetFront registered from componentWillMount
       // from which we listen for worker list changes
       contentProcessFronts: [],
+      serviceWorkerRegistrationFronts: [],
     };
   }
 
   updateMultiE10S() {
-    // We watch the pref but set the state based on
-    // nsIXULRuntime.maxWebProcessCount.
-    const processCount = Services.appinfo.maxWebProcessCount;
-    this.setState({ processCount });
+    this.setState({ isMultiE10S: isMultiE10s() });
   }
 
   updateWorkers() {
     const workers = this.initialState.workers;
 
-    this.props.client.mainRoot.listAllWorkers().then(({service, other, shared}) => {
-      workers.service = service.map(f => Object.assign({ icon: WorkerIcon }, f));
-      workers.other = other.map(f => Object.assign({ icon: WorkerIcon }, f));
-      workers.shared = shared.map(f => Object.assign({ icon: WorkerIcon }, f));
+    this.props.client.mainRoot
+      .listAllWorkers()
+      .then(({ service, other, shared }) => {
+        workers.service = service.map(f =>
+          Object.assign({ icon: WorkerIcon }, f)
+        );
+        workers.other = other.map(f => Object.assign({ icon: WorkerIcon }, f));
+        workers.shared = shared.map(f =>
+          Object.assign({ icon: WorkerIcon }, f)
+        );
 
-      // XXX: Filter out the service worker registrations for which we couldn't
-      // find the scriptSpec.
-      workers.service = workers.service.filter(reg => !!reg.url);
+        // XXX: Filter out the service worker registrations for which we couldn't
+        // find the scriptSpec.
+        workers.service = workers.service.filter(reg => !!reg.url);
 
-      this.setState({ workers });
-    });
+        this.setState({ workers });
+      });
   }
 
   isE10S() {
@@ -144,8 +165,9 @@ class WorkersPanel extends Component {
   renderServiceWorkersError() {
     const isWindowPrivate = PrivateBrowsingUtils.isContentWindowPrivate(window);
     const isPrivateBrowsingMode = PrivateBrowsingUtils.permanentPrivateBrowsing;
-    const isServiceWorkerDisabled = !Services.prefs
-                                    .getBoolPref("dom.serviceWorkers.enabled");
+    const isServiceWorkerDisabled = !Services.prefs.getBoolPref(
+      "dom.serviceWorkers.enabled"
+    );
 
     const isDisabled =
       isWindowPrivate || isPrivateBrowsingMode || isServiceWorkerDisabled;
@@ -169,16 +191,13 @@ class WorkersPanel extends Component {
           target: "_blank",
         },
         Strings.GetStringFromName("configurationIsNotCompatible.learnMore")
-      ),
+      )
     );
   }
 
   render() {
     const { client, id } = this.props;
-    const { workers, processCount } = this.state;
-
-    const isE10S = Services.appinfo.browserTabsRemoteAutostart;
-    const isMultiE10S = isE10S && processCount > 1;
+    const { workers, isMultiE10S } = this.state;
 
     return dom.div(
       {

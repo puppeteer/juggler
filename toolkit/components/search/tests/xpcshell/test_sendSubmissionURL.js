@@ -27,32 +27,39 @@ const SUBMISSION_NO = new Map([
   ["Other2 Test", "https://googlebutnotgoogle.com?q={searchTerms}"],
 ]);
 
-function addAndMakeDefault(name, searchURL) {
-   Services.search.addEngineWithDetails(name, null, null, null, "GET", searchURL);
-   let engine = Services.search.getEngineByName(name);
-   Services.search.defaultEngine = engine;
-   return engine;
+add_task(async function setup() {
+  await AddonTestUtils.promiseStartupManager();
+});
+
+async function addAndMakeDefault(name, searchURL) {
+  await Services.search.addEngineWithDetails(name, {
+    method: "GET",
+    template: searchURL,
+  });
+  let engine = Services.search.getEngineByName(name);
+  await Services.search.setDefault(engine);
+  return engine;
 }
 
 add_task(async function test() {
   Assert.ok(!Services.search.isInitialized);
-
-  await asyncInit();
-
   let engineInfo;
   let engine;
 
   for (let [name, searchURL] of SUBMISSION_YES) {
-    engine = addAndMakeDefault(name, searchURL);
-    engineInfo = Services.search.getDefaultEngineInfo();
-    Assert.equal(engineInfo.submissionURL, searchURL.replace("{searchTerms}", ""));
-    Services.search.removeEngine(engine);
+    engine = await addAndMakeDefault(name, searchURL);
+    engineInfo = await Services.search.getDefaultEngineInfo();
+    Assert.equal(
+      engineInfo.submissionURL,
+      searchURL.replace("{searchTerms}", "")
+    );
+    await Services.search.removeEngine(engine);
   }
 
- for (let [name, searchURL] of SUBMISSION_NO) {
-   engine = addAndMakeDefault(name, searchURL);
-   engineInfo = Services.search.getDefaultEngineInfo();
-   Assert.equal(engineInfo.submissionURL, null);
-   Services.search.removeEngine(engine);
- }
+  for (let [name, searchURL] of SUBMISSION_NO) {
+    engine = await addAndMakeDefault(name, searchURL);
+    engineInfo = await Services.search.getDefaultEngineInfo();
+    Assert.equal(engineInfo.submissionURL, null);
+    await Services.search.removeEngine(engine);
+  }
 });

@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/TextUtils.h"
 
 #include <ole2.h>
 #include <shlobj.h>
@@ -24,6 +25,7 @@
 #include "nsIURL.h"
 #include "nsNetUtil.h"
 #include "mozilla/Services.h"
+#include "mozilla/Unused.h"
 #include "nsIOutputStream.h"
 #include "nscore.h"
 #include "nsDirectoryServiceDefs.h"
@@ -69,13 +71,14 @@ nsresult nsDataObj::CStream::Init(nsIURI* pSourceURI,
   rv = NS_NewChannel(getter_AddRefs(mChannel), pSourceURI, aRequestingPrincipal,
                      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
                      aContentPolicyType,
+                     nullptr,  // nsICookieSettings
                      nullptr,  // PerformanceStorage
                      nullptr,  // loadGroup
                      nullptr,  // aCallbacks
                      nsIRequest::LOAD_FROM_CACHE);
 
   NS_ENSURE_SUCCESS(rv, rv);
-  rv = mChannel->AsyncOpen2(this);
+  rv = mChannel->AsyncOpen(this);
   NS_ENSURE_SUCCESS(rv, rv);
   return NS_OK;
 }
@@ -103,7 +106,7 @@ STDMETHODIMP nsDataObj::CStream::QueryInterface(REFIID refiid,
 // nsIStreamListener implementation
 NS_IMETHODIMP
 nsDataObj::CStream::OnDataAvailable(
-    nsIRequest* aRequest, nsISupports* aContext, nsIInputStream* aInputStream,
+    nsIRequest* aRequest, nsIInputStream* aInputStream,
     uint64_t aOffset,  // offset within the stream
     uint32_t aCount)   // bytes available on this call
 {
@@ -128,14 +131,12 @@ nsDataObj::CStream::OnDataAvailable(
   return rv;
 }
 
-NS_IMETHODIMP nsDataObj::CStream::OnStartRequest(nsIRequest* aRequest,
-                                                 nsISupports* aContext) {
+NS_IMETHODIMP nsDataObj::CStream::OnStartRequest(nsIRequest* aRequest) {
   mChannelResult = NS_OK;
   return NS_OK;
 }
 
 NS_IMETHODIMP nsDataObj::CStream::OnStopRequest(nsIRequest* aRequest,
-                                                nsISupports* aContext,
                                                 nsresult aStatusCode) {
   mChannelRead = true;
   mChannelResult = aStatusCode;
@@ -312,9 +313,6 @@ HRESULT nsDataObj::CreateStream(IStream** outStream) {
   return S_OK;
 }
 
-static GUID CLSID_nsDataObj = {
-    0x1bba7640, 0xdf52, 0x11cf, {0x82, 0x7b, 0, 0xa0, 0x24, 0x3a, 0xe5, 0x05}};
-
 /*
  * deliberately not using MAX_PATH. This is because on platforms < XP
  * a file created with a long filename may be mishandled by the shell
@@ -375,8 +373,8 @@ STDMETHODIMP nsDataObj::QueryInterface(REFIID riid, void** ppv) {
     *ppv = this;
     AddRef();
     return S_OK;
-  } else if (IID_IAsyncOperation == riid) {
-    *ppv = static_cast<IAsyncOperation*>(this);
+  } else if (IID_IDataObjectAsyncCapability == riid) {
+    *ppv = static_cast<IDataObjectAsyncCapability*>(this);
     AddRef();
     return S_OK;
   }
@@ -763,7 +761,7 @@ STDMETHODIMP nsDataObj::EnumDAdvise(LPENUMSTATDATA* ppEnum) {
   return OLE_E_ADVISENOTSUPPORTED;
 }
 
-// IAsyncOperation methods
+// IDataObjectAsyncCapability methods
 STDMETHODIMP nsDataObj::EndOperation(HRESULT hResult, IBindCtx* pbcReserved,
                                      DWORD dwEffects) {
   mIsInOperation = FALSE;
@@ -792,14 +790,6 @@ STDMETHODIMP nsDataObj::StartOperation(IBindCtx* pbcReserved) {
   return S_OK;
 }
 
-//-----------------------------------------------------
-// GetData and SetData helper functions
-//-----------------------------------------------------
-HRESULT nsDataObj::AddSetFormat(FORMATETC& aFE) { return S_OK; }
-
-//-----------------------------------------------------
-HRESULT nsDataObj::AddGetFormat(FORMATETC& aFE) { return S_OK; }
-
 //
 // GetDIB
 //
@@ -809,67 +799,68 @@ HRESULT nsDataObj::AddGetFormat(FORMATETC& aFE) { return S_OK; }
 HRESULT
 nsDataObj::GetDib(const nsACString& inFlavor, FORMATETC& aFormat,
                   STGMEDIUM& aSTG) {
-  ULONG result = E_FAIL;
   nsCOMPtr<nsISupports> genericDataWrapper;
-  mTransferable->GetTransferData(PromiseFlatCString(inFlavor).get(),
-                                 getter_AddRefs(genericDataWrapper));
-  nsCOMPtr<imgIContainer> image(do_QueryInterface(genericDataWrapper));
-  if (image) {
-    nsCOMPtr<imgITools> imgTools =
-        do_CreateInstance("@mozilla.org/image/tools;1");
-
-    nsAutoString options;
-    if (aFormat.cfFormat == CF_DIBV5) {
-      options.AppendLiteral("version=5");
-    } else {
-      options.AppendLiteral("version=3");
-    }
-
-    nsCOMPtr<nsIInputStream> inputStream;
-    nsresult rv = imgTools->EncodeImage(image, NS_LITERAL_CSTRING(IMAGE_BMP),
-                                        options, getter_AddRefs(inputStream));
-    if (NS_FAILED(rv) || !inputStream) {
-      return E_FAIL;
-    }
-
-    nsCOMPtr<imgIEncoder> encoder = do_QueryInterface(inputStream);
-    if (!encoder) {
-      return E_FAIL;
-    }
-
-    uint32_t size = 0;
-    rv = encoder->GetImageBufferUsed(&size);
-    if (NS_FAILED(rv) || size <= BFH_LENGTH) {
-      return E_FAIL;
-    }
-
-    char* src = nullptr;
-    rv = encoder->GetImageBuffer(&src);
-    if (NS_FAILED(rv) || !src) {
-      return E_FAIL;
-    }
-
-    // We don't want the file header.
-    src += BFH_LENGTH;
-    size -= BFH_LENGTH;
-
-    HGLOBAL glob = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size);
-    if (!glob) {
-      DWORD err = ::GetLastError();
-      return E_FAIL;
-    }
-
-    char* dst = (char*)::GlobalLock(glob);
-    ::CopyMemory(dst, src, size);
-    ::GlobalUnlock(glob);
-
-    aSTG.hGlobal = glob;
-    aSTG.tymed = TYMED_HGLOBAL;
-    result = S_OK;
-  } else {
-    NS_WARNING("Definitely not an image on clipboard");
+  if (NS_FAILED(
+          mTransferable->GetTransferData(PromiseFlatCString(inFlavor).get(),
+                                         getter_AddRefs(genericDataWrapper)))) {
+    return E_FAIL;
   }
-  return result;
+
+  nsCOMPtr<imgIContainer> image = do_QueryInterface(genericDataWrapper);
+  if (!image) {
+    return E_FAIL;
+  }
+
+  nsCOMPtr<imgITools> imgTools =
+      do_CreateInstance("@mozilla.org/image/tools;1");
+
+  nsAutoString options(NS_LITERAL_STRING("bpp=32;"));
+  if (aFormat.cfFormat == CF_DIBV5) {
+    options.AppendLiteral("version=5");
+  } else {
+    options.AppendLiteral("version=3");
+  }
+
+  nsCOMPtr<nsIInputStream> inputStream;
+  nsresult rv = imgTools->EncodeImage(image, NS_LITERAL_CSTRING(IMAGE_BMP),
+                                      options, getter_AddRefs(inputStream));
+  if (NS_FAILED(rv) || !inputStream) {
+    return E_FAIL;
+  }
+
+  nsCOMPtr<imgIEncoder> encoder = do_QueryInterface(inputStream);
+  if (!encoder) {
+    return E_FAIL;
+  }
+
+  uint32_t size = 0;
+  rv = encoder->GetImageBufferUsed(&size);
+  if (NS_FAILED(rv) || size <= BFH_LENGTH) {
+    return E_FAIL;
+  }
+
+  char* src = nullptr;
+  rv = encoder->GetImageBuffer(&src);
+  if (NS_FAILED(rv) || !src) {
+    return E_FAIL;
+  }
+
+  // We don't want the file header.
+  src += BFH_LENGTH;
+  size -= BFH_LENGTH;
+
+  HGLOBAL glob = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size);
+  if (!glob) {
+    return E_FAIL;
+  }
+
+  char* dst = (char*)::GlobalLock(glob);
+  ::CopyMemory(dst, src, size);
+  ::GlobalUnlock(glob);
+
+  aSTG.hGlobal = glob;
+  aSTG.tymed = TYMED_HGLOBAL;
+  return S_OK;
 }
 
 //
@@ -1155,7 +1146,7 @@ nsDataObj ::GetFileContentsInternetShortcut(FORMATETC& aFE, STGMEDIUM& aSTG) {
     rv = icoFile->GetPath(path);
     NS_ENSURE_SUCCESS(rv, E_FAIL);
 
-    if (NS_IsAscii(path.get())) {
+    if (IsAsciiNullTerminated(static_cast<const char16_t*>(path.get()))) {
       LossyCopyUTF16toASCII(path, asciiPath);
       shortcutFormatStr =
           "[InternetShortcut]\r\nURL=%s\r\n"
@@ -1271,8 +1262,11 @@ HRESULT nsDataObj::GetText(const nsACString& aDataFlavor, FORMATETC& aFE,
 
   // NOTE: CreateDataFromPrimitive creates new memory, that needs to be deleted
   nsCOMPtr<nsISupports> genericDataWrapper;
-  mTransferable->GetTransferData(flavorStr, getter_AddRefs(genericDataWrapper));
-  if (!genericDataWrapper) return E_FAIL;
+  nsresult rv = mTransferable->GetTransferData(
+      flavorStr, getter_AddRefs(genericDataWrapper));
+  if (NS_FAILED(rv) || !genericDataWrapper) {
+    return E_FAIL;
+  }
 
   uint32_t len;
   nsPrimitiveHelpers::CreateDataFromPrimitive(nsDependentCString(flavorStr),
@@ -1377,7 +1371,10 @@ HRESULT nsDataObj::DropFile(FORMATETC& aFE, STGMEDIUM& aSTG) {
   nsresult rv;
   nsCOMPtr<nsISupports> genericDataWrapper;
 
-  mTransferable->GetTransferData(kFileMime, getter_AddRefs(genericDataWrapper));
+  if (NS_FAILED(mTransferable->GetTransferData(
+          kFileMime, getter_AddRefs(genericDataWrapper)))) {
+    return E_FAIL;
+  }
   nsCOMPtr<nsIFile> file(do_QueryInterface(genericDataWrapper));
   if (!file) return E_FAIL;
 
@@ -1426,8 +1423,10 @@ HRESULT nsDataObj::DropImage(FORMATETC& aFE, STGMEDIUM& aSTG) {
   if (!mCachedTempFile) {
     nsCOMPtr<nsISupports> genericDataWrapper;
 
-    mTransferable->GetTransferData(kNativeImageMime,
-                                   getter_AddRefs(genericDataWrapper));
+    if (NS_FAILED(mTransferable->GetTransferData(
+            kNativeImageMime, getter_AddRefs(genericDataWrapper)))) {
+      return E_FAIL;
+    }
     nsCOMPtr<imgIContainer> image(do_QueryInterface(genericDataWrapper));
     if (!image) return E_FAIL;
 
@@ -1435,7 +1434,7 @@ HRESULT nsDataObj::DropImage(FORMATETC& aFE, STGMEDIUM& aSTG) {
         do_CreateInstance("@mozilla.org/image/tools;1");
     nsCOMPtr<nsIInputStream> inputStream;
     rv = imgTools->EncodeImage(image, NS_LITERAL_CSTRING(IMAGE_BMP),
-                               NS_LITERAL_STRING("version=3"),
+                               NS_LITERAL_STRING("bpp=32;version=3"),
                                getter_AddRefs(inputStream));
     if (NS_FAILED(rv) || !inputStream) {
       return E_FAIL;
@@ -1637,25 +1636,6 @@ HRESULT nsDataObj::DropTempFile(FORMATETC& aFE, STGMEDIUM& aSTG) {
 
   return S_OK;
 }
-
-//-----------------------------------------------------
-HRESULT nsDataObj::GetMetafilePict(FORMATETC&, STGMEDIUM&) { return E_NOTIMPL; }
-
-//-----------------------------------------------------
-HRESULT nsDataObj::SetBitmap(FORMATETC&, STGMEDIUM&) { return E_NOTIMPL; }
-
-//-----------------------------------------------------
-HRESULT nsDataObj::SetDib(FORMATETC&, STGMEDIUM&) { return E_FAIL; }
-
-//-----------------------------------------------------
-HRESULT nsDataObj::SetText(FORMATETC& aFE, STGMEDIUM& aSTG) { return E_FAIL; }
-
-//-----------------------------------------------------
-HRESULT nsDataObj::SetMetafilePict(FORMATETC&, STGMEDIUM&) { return E_FAIL; }
-
-//-----------------------------------------------------
-//-----------------------------------------------------
-CLSID nsDataObj::GetClassID() const { return CLSID_nsDataObj; }
 
 //-----------------------------------------------------
 // Registers the DataFlavor/FE pair.
@@ -1941,8 +1921,9 @@ HRESULT nsDataObj::GetDownloadDetails(nsIURI** aSourceURI,
 
   // get the URI from the kFilePromiseURLMime flavor
   nsCOMPtr<nsISupports> urlPrimitive;
-  mTransferable->GetTransferData(kFilePromiseURLMime,
-                                 getter_AddRefs(urlPrimitive));
+  nsresult rv = mTransferable->GetTransferData(kFilePromiseURLMime,
+                                               getter_AddRefs(urlPrimitive));
+  NS_ENSURE_SUCCESS(rv, E_FAIL);
   nsCOMPtr<nsISupportsString> srcUrlPrimitive = do_QueryInterface(urlPrimitive);
   NS_ENSURE_TRUE(srcUrlPrimitive, E_FAIL);
 
@@ -1954,8 +1935,8 @@ HRESULT nsDataObj::GetDownloadDetails(nsIURI** aSourceURI,
 
   nsAutoString srcFileName;
   nsCOMPtr<nsISupports> fileNamePrimitive;
-  mTransferable->GetTransferData(kFilePromiseDestFilename,
-                                 getter_AddRefs(fileNamePrimitive));
+  Unused << mTransferable->GetTransferData(kFilePromiseDestFilename,
+                                           getter_AddRefs(fileNamePrimitive));
   nsCOMPtr<nsISupportsString> srcFileNamePrimitive =
       do_QueryInterface(fileNamePrimitive);
   if (srcFileNamePrimitive) {

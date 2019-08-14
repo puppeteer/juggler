@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Image.h"
-#include "gfxPrefs.h"
+
 #include "Layers.h"  // for LayerManager
 #include "nsRefreshDriver.h"
 #include "nsContentUtils.h"
@@ -97,11 +97,10 @@ void ImageResource::SetCurrentImage(ImageContainer* aContainer,
     aContainer->SetCurrentImages(imageList);
   }
 
-  // If we are generating full frames, and we are animated, then we should
-  // request that the image container be treated as such, to avoid display
-  // list rebuilding to update frames for WebRender.
-  if (gfxPrefs::ImageAnimatedGenerateFullFrames() &&
-      mProgressTracker->GetProgress() & FLAG_IS_ANIMATED) {
+  // If we are animated, then we should request that the image container be
+  // treated as such, to avoid display list rebuilding to update frames for
+  // WebRender.
+  if (mProgressTracker->GetProgress() & FLAG_IS_ANIMATED) {
     if (aDirtyRect) {
       layers::SharedSurfacesChild::UpdateAnimation(aContainer, aSurface,
                                                    aDirtyRect.ref());
@@ -262,7 +261,7 @@ ImgDrawResult ImageResource::GetImageContainerImpl(
   return drawResult;
 }
 
-void ImageResource::UpdateImageContainer(const Maybe<IntRect>& aDirtyRect) {
+bool ImageResource::UpdateImageContainer(const Maybe<IntRect>& aDirtyRect) {
   MOZ_ASSERT(NS_IsMainThread());
 
   for (int i = mImageContainers.Length() - 1; i >= 0; --i) {
@@ -289,6 +288,8 @@ void ImageResource::UpdateImageContainer(const Maybe<IntRect>& aDirtyRect) {
       mImageContainers.RemoveElementAt(i);
     }
   }
+
+  return !mImageContainers.IsEmpty();
 }
 
 void ImageResource::ReleaseImageContainer() {
@@ -398,7 +399,8 @@ void ImageResource::SendOnUnlockedDraw(uint32_t aFlags) {
             tracker->OnUnlockedDraw();
           }
         });
-    eventTarget->Dispatch(ev.forget(), NS_DISPATCH_NORMAL);
+    eventTarget->Dispatch(CreateMediumHighRunnable(ev.forget()),
+                          NS_DISPATCH_NORMAL);
   }
 }
 

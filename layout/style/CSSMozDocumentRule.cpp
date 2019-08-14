@@ -14,12 +14,13 @@ namespace dom {
 
 using namespace mozilla::css;
 
-/* virtual */ JSObject* CSSMozDocumentRule::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* CSSMozDocumentRule::WrapObject(JSContext* aCx,
+                                         JS::Handle<JSObject*> aGivenProto) {
   return CSSMozDocumentRule_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-bool CSSMozDocumentRule::Match(nsIDocument* aDoc, nsIURI* aDocURI,
+bool CSSMozDocumentRule::Match(const Document* aDoc, nsIURI* aDocURI,
                                const nsACString& aDocURISpec,
                                const nsACString& aPattern,
                                DocumentMatchingFunction aMatchingFunction) {
@@ -27,19 +28,19 @@ bool CSSMozDocumentRule::Match(nsIDocument* aDoc, nsIURI* aDocURI,
     case DocumentMatchingFunction::MediaDocument: {
       auto kind = aDoc->MediaDocumentKind();
       if (aPattern.EqualsLiteral("all")) {
-        return kind != nsIDocument::MediaDocumentKind::NotMedia;
+        return kind != Document::MediaDocumentKind::NotMedia;
       }
       MOZ_ASSERT(aPattern.EqualsLiteral("plugin") ||
                  aPattern.EqualsLiteral("image") ||
                  aPattern.EqualsLiteral("video"));
       switch (kind) {
-        case nsIDocument::MediaDocumentKind::NotMedia:
+        case Document::MediaDocumentKind::NotMedia:
           return false;
-        case nsIDocument::MediaDocumentKind::Plugin:
+        case Document::MediaDocumentKind::Plugin:
           return aPattern.EqualsLiteral("plugin");
-        case nsIDocument::MediaDocumentKind::Image:
+        case Document::MediaDocumentKind::Image:
           return aPattern.EqualsLiteral("image");
-        case nsIDocument::MediaDocumentKind::Video:
+        case Document::MediaDocumentKind::Video:
           return aPattern.EqualsLiteral("video");
       }
       MOZ_ASSERT_UNREACHABLE("Unknown media document kind");
@@ -86,7 +87,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CSSMozDocumentRule)
 NS_INTERFACE_MAP_END_INHERITING(css::ConditionRule)
 
 #ifdef DEBUG
-/* virtual */ void CSSMozDocumentRule::List(FILE* out, int32_t aIndent) const {
+/* virtual */
+void CSSMozDocumentRule::List(FILE* out, int32_t aIndent) const {
   nsAutoCString str;
   for (int32_t i = 0; i < aIndent; i++) {
     str.AppendLiteral("  ");
@@ -102,14 +104,20 @@ void CSSMozDocumentRule::GetConditionText(nsAString& aConditionText) {
 
 void CSSMozDocumentRule::SetConditionText(const nsAString& aConditionText,
                                           ErrorResult& aRv) {
+  if (IsReadOnly()) {
+    return;
+  }
+
   aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
 }
 
-/* virtual */ void CSSMozDocumentRule::GetCssText(nsAString& aCssText) const {
+/* virtual */
+void CSSMozDocumentRule::GetCssText(nsAString& aCssText) const {
   Servo_MozDocumentRule_GetCssText(mRawRule, &aCssText);
 }
 
-/* virtual */ size_t CSSMozDocumentRule::SizeOfIncludingThis(
+/* virtual */
+size_t CSSMozDocumentRule::SizeOfIncludingThis(
     MallocSizeOf aMallocSizeOf) const {
   // TODO Implement this!
   return aMallocSizeOf(this);

@@ -5,7 +5,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=440572
 -->
 <head>
   <title>Test for Bug 440572</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>        
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>        
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body onload="runtests()">
@@ -27,9 +27,11 @@ window.addEventListener("message", receiveMessage);
 
 function runtests()
 {
-  is(messages.size, 2, "received the right number of messages.");
+  is(messages.size, 4, "received the right number of messages.");
   is(messages.get("test"), "success", "test in frame failed.");
-  isnot(messages.get("dump"), "success", "parent[\"dump\"] should be the WebIDL property of Window.");
+  is(messages.get("dump"), "success", '"dump" in frame failed.');
+  is(messages.get("open"), "success", '"open" in frame failed.');
+  isnot(messages.get("close"), "success", "parent[\"close\"] should be the WebIDL property of Window.");
 
   SimpleTest.finish();
 }
@@ -40,6 +42,10 @@ SimpleTest.waitForExplicitFinish();
 <iframe name="test" src="http://example.org:80/tests/dom/tests/mochitest/bugs/iframe_bug440572.html"></iframe>
 <br>
 <iframe name="dump" src="http://example.org:80/tests/dom/tests/mochitest/bugs/iframe_bug440572.html"></iframe>
+<br>
+<iframe name="open" src="http://example.org:80/tests/dom/tests/mochitest/bugs/iframe_bug440572.html"></iframe>
+<br>
+<iframe name="close" src="http://example.org:80/tests/dom/tests/mochitest/bugs/iframe_bug440572.html"></iframe>
 </body>
 </html>
 

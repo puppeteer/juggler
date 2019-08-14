@@ -7,7 +7,7 @@
 const { Component } = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
-const Editor = require("devtools/client/sourceeditor/editor");
+const Editor = require("devtools/client/shared/sourceeditor/editor");
 
 const { div } = dom;
 
@@ -52,7 +52,9 @@ class SourceEditor extends Component {
   }
 
   shouldComponentUpdate(nextProps) {
-    return nextProps.mode !== this.props.mode || nextProps.text !== this.props.text;
+    return (
+      nextProps.mode !== this.props.mode || nextProps.text !== this.props.text
+    );
   }
 
   componentDidUpdate(prevProps) {
@@ -90,12 +92,10 @@ class SourceEditor extends Component {
   }
 
   render() {
-    return (
-      div({
-        ref: "editorElement",
-        className: "source-editor-mount devtools-monospace",
-      })
-    );
+    return div({
+      ref: "editorElement",
+      className: "source-editor-mount devtools-monospace",
+    });
   }
 }
 

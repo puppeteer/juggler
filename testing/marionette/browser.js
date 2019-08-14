@@ -5,15 +5,28 @@
 "use strict";
 /* global frame */
 
-const {WebElementEventTarget} = ChromeUtils.import("chrome://marionette/content/dom.js", {});
-ChromeUtils.import("chrome://marionette/content/element.js");
-const {
-  NoSuchWindowError,
-  UnsupportedOperationError,
-} = ChromeUtils.import("chrome://marionette/content/error.js", {});
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+
+const { WebElementEventTarget } = ChromeUtils.import(
+  "chrome://marionette/content/dom.js"
+);
+const { element } = ChromeUtils.import(
+  "chrome://marionette/content/element.js"
+);
+const { NoSuchWindowError, UnsupportedOperationError } = ChromeUtils.import(
+  "chrome://marionette/content/error.js"
+);
+const { Log } = ChromeUtils.import("chrome://marionette/content/log.js");
 const {
   MessageManagerDestroyedPromise,
-} = ChromeUtils.import("chrome://marionette/content/sync.js", {});
+  waitForEvent,
+  waitForObserverTopic,
+} = ChromeUtils.import("chrome://marionette/content/sync.js");
+
+XPCOMUtils.defineLazyGetter(this, "logger", Log.get);
 
 this.EXPORTED_SYMBOLS = ["browser", "Context", "WindowState"];
 
@@ -70,11 +83,11 @@ this.Context = Context;
  */
 browser.getBrowserForTab = function(tab) {
   // Fennec
-  if ("browser" in tab) {
+  if (tab && "browser" in tab) {
     return tab.browser;
 
-  // Firefox
-  } else if ("linkedBrowser" in tab) {
+    // Firefox
+  } else if (tab && "linkedBrowser" in tab) {
     return tab.linkedBrowser;
   }
 
@@ -95,11 +108,11 @@ browser.getTabBrowser = function(window) {
   if ("BrowserApp" in window) {
     return window.BrowserApp;
 
-  // Firefox
+    // Firefox
   } else if ("gBrowser" in window) {
     return window.gBrowser;
 
-  // Thunderbird
+    // Thunderbird
   } else if (window.document.getElementById("tabmail")) {
     return window.document.getElementById("tabmail");
   }
@@ -114,7 +127,6 @@ browser.getTabBrowser = function(window) {
  * the current environment (Firefox, Fennec).
  */
 browser.Context = class {
-
   /**
    * @param {ChromeWindow} win
    *     ChromeWindow that contains the top-level browsing context.
@@ -166,8 +178,10 @@ browser.Context = class {
   get contentBrowser() {
     if (this.tab) {
       return browser.getBrowserForTab(this.tab);
-    } else if (this.tabBrowser &&
-        this.driver.isReftestBrowser(this.tabBrowser)) {
+    } else if (
+      this.tabBrowser &&
+      this.driver.isReftestBrowser(this.tabBrowser)
+    ) {
       return this.tabBrowser;
     }
 
@@ -225,7 +239,8 @@ browser.Context = class {
       return this.contentBrowser.contentTitle;
     }
     throw new NoSuchWindowError(
-        "Current window does not have a content browser");
+      "Current window does not have a content browser"
+    );
   }
 
   /**
@@ -244,7 +259,8 @@ browser.Context = class {
       return this.contentBrowser.currentURI;
     }
     throw new NoSuchWindowError(
-        "Current window does not have a content browser");
+      "Current window does not have a content browser"
+    );
   }
 
   /**
@@ -259,7 +275,6 @@ browser.Context = class {
       y: this.window.screenY,
       width: this.window.outerWidth,
       height: this.window.outerHeight,
-      state: WindowState.from(this.window.windowState),
     };
   }
 
@@ -267,7 +282,7 @@ browser.Context = class {
    * Retrieves the current tabmodal UI object.  According to the browser
    * associated with the currently selected tab.
    */
-  getTabModalUI() {
+  getTabModal() {
     let br = this.contentBrowser;
     if (!br.hasAttribute("tabmodalPromptShowing")) {
       return null;
@@ -275,9 +290,12 @@ browser.Context = class {
 
     // The modal is a direct sibling of the browser element.
     // See tabbrowser.xml's getTabModalPromptBox.
-    let modals = br.parentNode.getElementsByTagNameNS(
-        XUL_NS, "tabmodalprompt");
-    return modals[0].ui;
+    let modalElements = br.parentNode.getElementsByTagNameNS(
+      XUL_NS,
+      "tabmodalprompt"
+    );
+
+    return br.tabModalPromptBox.prompts.get(modalElements[0]);
   }
 
   /**
@@ -287,17 +305,74 @@ browser.Context = class {
    *     A promise which is resolved when the current window has been closed.
    */
   closeWindow() {
-    return new Promise(resolve => {
-      // Wait for the window message manager to be destroyed
-      let destroyed = new MessageManagerDestroyedPromise(
-          this.window.messageManager);
+    let destroyed = new MessageManagerDestroyedPromise(
+      this.window.messageManager
+    );
+    let unloaded = waitForEvent(this.window, "unload");
 
-      this.window.addEventListener("unload", async () => {
-        await destroyed;
-        resolve();
-      }, {once: true});
-      this.window.close();
-    });
+    this.window.close();
+
+    return Promise.all([destroyed, unloaded]);
+  }
+
+  /**
+   * Focus the current window.
+   *
+   * @return {Promise}
+   *     A promise which is resolved when the current window has been focused.
+   */
+  async focusWindow() {
+    if (Services.focus.activeWindow != this.window) {
+      let activated = waitForEvent(this.window, "activate");
+      let focused = waitForEvent(this.window, "focus", { capture: true });
+
+      this.window.focus();
+
+      await Promise.all([activated, focused]);
+    }
+  }
+
+  /**
+   * Open a new browser window.
+   *
+   * @return {Promise}
+   *     A promise resolving to the newly created chrome window.
+   */
+  async openBrowserWindow(focus = false) {
+    switch (this.driver.appName) {
+      case "firefox":
+        // Open new browser window, and wait until it is fully loaded.
+        // Also wait for the window to be focused and activated to prevent a
+        // race condition when promptly focusing to the original window again.
+        let win = this.window.OpenBrowserWindow();
+
+        let activated = waitForEvent(win, "activate");
+        let focused = waitForEvent(win, "focus", { capture: true });
+        let startup = waitForObserverTopic(
+          "browser-delayed-startup-finished",
+          subject => subject == win
+        );
+
+        // Bug 1509380 - Missing focus/activate event when Firefox is not
+        // the top-most application. As such wait for the next tick, and
+        // manually focus the newly opened window.
+        win.setTimeout(() => win.focus(), 0);
+
+        await Promise.all([activated, focused, startup]);
+
+        // The new window shouldn't get focused. As such set the
+        // focus back to the opening window.
+        if (!focus) {
+          await this.focusWindow();
+        }
+
+        return win;
+
+      default:
+        throw new UnsupportedOperationError(
+          `openWindow() not supported in ${this.driver.appName}`
+        );
+    }
   }
 
   /**
@@ -312,47 +387,73 @@ browser.Context = class {
   closeTab() {
     // If the current window is not a browser then close it directly. Do the
     // same if only one remaining tab is open, or no tab selected at all.
-    if (!this.tabBrowser ||
-        !this.tabBrowser.tabs ||
-        this.tabBrowser.tabs.length === 1 ||
-        !this.tab) {
+    if (
+      !this.tabBrowser ||
+      !this.tabBrowser.tabs ||
+      this.tabBrowser.tabs.length === 1 ||
+      !this.tab
+    ) {
       return this.closeWindow();
     }
 
-    return new Promise((resolve, reject) => {
-      // Wait for the browser message manager to be destroyed
-      let browserDetached = async () => {
-        await new MessageManagerDestroyedPromise(this.messageManager);
-        resolve();
-      };
+    let destroyed = new MessageManagerDestroyedPromise(this.messageManager);
+    let tabClosed;
 
-      if (this.tabBrowser.closeTab) {
+    switch (this.driver.appName) {
+      case "fennec":
         // Fennec
-        this.tabBrowser.deck.addEventListener(
-            "TabClose", browserDetached, {once: true});
+        tabClosed = waitForEvent(this.tabBrowser.deck, "TabClose");
         this.tabBrowser.closeTab(this.tab);
+        break;
 
-      } else if (this.tabBrowser.removeTab) {
-        // Firefox
-        this.tab.addEventListener(
-            "TabClose", browserDetached, {once: true});
+      case "firefox":
+        tabClosed = waitForEvent(this.tab, "TabClose");
         this.tabBrowser.removeTab(this.tab);
+        break;
 
-      } else {
-        reject(new UnsupportedOperationError(
-            `closeTab() not supported in ${this.driver.appName}`));
-      }
-    });
+      default:
+        throw new UnsupportedOperationError(
+          `closeTab() not supported in ${this.driver.appName}`
+        );
+    }
+
+    return Promise.all([destroyed, tabClosed]);
   }
 
   /**
-   * Opens a tab with given URI.
-   *
-   * @param {string} uri
-   *      URI to open.
+   * Open a new tab in the currently selected chrome window.
    */
-  addTab(uri) {
-    return this.tabBrowser.addTab(uri, true);
+  async openTab(focus = false) {
+    let tab = null;
+    let tabOpened = waitForEvent(this.window, "TabOpen");
+
+    switch (this.driver.appName) {
+      case "fennec":
+        tab = this.tabBrowser.addTab(null);
+        this.tabBrowser.selectTab(focus ? tab : this.tab);
+        break;
+
+      case "firefox":
+        this.window.BrowserOpenTab();
+        tab = this.tabBrowser.selectedTab;
+
+        // The new tab is always selected by default. If focus is not wanted,
+        // the previously tab needs to be selected again.
+        if (!focus) {
+          this.tabBrowser.selectedTab = this.tab;
+        }
+
+        break;
+
+      default:
+        throw new UnsupportedOperationError(
+          `openTab() not supported in ${this.driver.appName}`
+        );
+    }
+
+    await tabOpened;
+
+    return tab;
   }
 
   /**
@@ -370,7 +471,9 @@ browser.Context = class {
    * @throws UnsupportedOperationError
    *     If tab handling for the current application isn't supported.
    */
-  switchToTab(index, window = undefined, focus = true) {
+  async switchToTab(index, window = undefined, focus = true) {
+    let currentTab = this.tabBrowser.selectedTab;
+
     if (window) {
       this.window = window;
       this.tabBrowser = browser.getTabBrowser(this.window);
@@ -384,19 +487,26 @@ browser.Context = class {
       this.tab = this.tabBrowser.selectedTab;
     } else {
       this.tab = this.tabBrowser.tabs[index];
+    }
 
-      if (focus) {
-        if (this.tabBrowser.selectTab) {
-          // Fennec
+    if (focus && this.tab != currentTab) {
+      let tabSelected = waitForEvent(this.window, "TabSelect");
+
+      switch (this.driver.appName) {
+        case "fennec":
           this.tabBrowser.selectTab(this.tab);
+          await tabSelected;
+          break;
 
-        } else if ("selectedTab" in this.tabBrowser) {
-          // Firefox
+        case "firefox":
           this.tabBrowser.selectedTab = this.tab;
+          await tabSelected;
+          break;
 
-        } else {
-          throw new UnsupportedOperationError("switchToTab() not supported");
-        }
+        default:
+          throw new UnsupportedOperationError(
+            `switchToTab() not supported in ${this.driver.appName}`
+          );
       }
     }
 
@@ -448,15 +558,15 @@ browser.Context = class {
   }
 
   /**
-    * This function intercepts commands interacting with content and queues
-    * or executes them as needed.
-    *
-    * No commands interacting with content are safe to process until
-    * the new listener script is loaded and registered itself.
-    * This occurs when a command whose effect is asynchronous (such
-    * as goBack) results in process change of the frame script and new
-    * commands are subsequently posted to the server.
-    */
+   * This function intercepts commands interacting with content and queues
+   * or executes them as needed.
+   *
+   * No commands interacting with content are safe to process until
+   * the new listener script is loaded and registered itself.
+   * This occurs when a command whose effect is asynchronous (such
+   * as goBack) results in process change of the frame script and new
+   * commands are subsequently posted to the server.
+   */
   executeWhenReady(cb) {
     if (this._needsFlushPendingCommands) {
       this.pendingCommands.push(cb);
@@ -464,7 +574,6 @@ browser.Context = class {
       cb();
     }
   }
-
 };
 
 /**
@@ -482,7 +591,6 @@ browser.Context = class {
  *
  */
 browser.Windows = class extends Map {
-
   /**
    * Save a weak reference to the Window object.
    *
@@ -519,7 +627,6 @@ browser.Windows = class extends Map {
     }
     return wref.get();
   }
-
 };
 
 /**

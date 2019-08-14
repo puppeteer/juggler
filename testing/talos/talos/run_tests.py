@@ -20,7 +20,6 @@ import mozversion
 from talos import utils
 from mozlog import get_proxy_logger
 from talos.config import get_configs, ConfigurationError
-from talos.mitmproxy import mitmproxy
 from talos.results import TalosResults
 from talos.ttest import TTest
 from talos.utils import TalosError, TalosRegression
@@ -224,29 +223,6 @@ def run_tests(config, browser_config):
     if config['gecko_profile']:
         talos_results.add_extra_option('geckoProfile')
 
-    # some tests use mitmproxy to playback pages
-    mitmproxy_recordings_list = config.get('mitmproxy', False)
-    if mitmproxy_recordings_list is not False:
-        # needed so can tell talos ttest to allow external connections
-        browser_config['mitmproxy'] = True
-
-        # start mitmproxy playback; this also generates the CA certificate
-        mitmdump_path = config.get('mitmdumpPath', False)
-        if mitmdump_path is False:
-            # cannot continue, need path for mitmdump playback tool
-            raise TalosError('Aborting: mitmdumpPath not provided on cmd line but is required')
-
-        mitmproxy_recording_path = os.path.join(here, 'mitmproxy')
-        mitmproxy_proc = mitmproxy.start_mitmproxy_playback(mitmdump_path,
-                                                            mitmproxy_recording_path,
-                                                            mitmproxy_recordings_list.split(),
-                                                            browser_config['browser_path'])
-
-        # install the generated CA certificate into Firefox
-        # mitmproxy cert setup needs path to mozharness install; mozharness has set this
-        mitmproxy.install_mitmproxy_cert(mitmproxy_proc,
-                                         browser_config['browser_path'])
-
     testname = None
 
     # run the tests
@@ -321,10 +297,6 @@ def run_tests(config, browser_config):
 
     LOG.info("Completed test suite (%s)" % timer.elapsed())
 
-    # if mitmproxy was used for page playback, stop it
-    if mitmproxy_recordings_list is not False:
-        mitmproxy.stop_mitmproxy_playback(mitmproxy_proc)
-
     # output results
     if results_urls and not browser_config['no_upload_results']:
         talos_results.output(results_urls)
@@ -333,10 +305,10 @@ def run_tests(config, browser_config):
                   % (results_urls['output_urls']))
 
     # when running talos locally with gecko profiling on, use the view-gecko-profile
-    # tool to automatically load the latest gecko profile in perf-html.io
+    # tool to automatically load the latest gecko profile in profiler.firefox.com
     if config['gecko_profile'] and browser_config['develop']:
         if os.environ.get('DISABLE_PROFILE_LAUNCH', '0') == '1':
-            LOG.info("Not launching perf-html.io because DISABLE_PROFILE_LAUNCH=1")
+            LOG.info("Not launching profiler.firefox.com because DISABLE_PROFILE_LAUNCH=1")
         else:
             view_gecko_profile(config['browser_path'])
 
@@ -346,7 +318,7 @@ def run_tests(config, browser_config):
 
 
 def view_gecko_profile(ffox_bin):
-    # automatically load the latest talos gecko-profile archive in perf-html.io
+    # automatically load the latest talos gecko-profile archive in profiler.firefox.com
     if sys.platform.startswith('win') and not ffox_bin.endswith(".exe"):
         ffox_bin = ffox_bin + ".exe"
 
@@ -356,7 +328,7 @@ def view_gecko_profile(ffox_bin):
 
     profile_zip = os.environ.get('TALOS_LATEST_GECKO_PROFILE_ARCHIVE', None)
     if profile_zip is None or not os.path.exists(profile_zip):
-        LOG.info("No local talos gecko profiles were found so not launching perf-html.io")
+        LOG.info("No local talos gecko profiles were found so not launching profiler.firefox.com")
         return
 
     # need the view-gecko-profile tool, it's in repo/testing/tools

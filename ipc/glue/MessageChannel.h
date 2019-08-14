@@ -18,11 +18,10 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/Vector.h"
 #if defined(OS_WIN)
-#include "mozilla/ipc/Neutering.h"
+#  include "mozilla/ipc/Neutering.h"
 #endif  // defined(OS_WIN)
 #include "mozilla/ipc/Transport.h"
 #include "MessageLink.h"
-#include "nsILabelableRunnable.h"
 #include "nsThreadUtils.h"
 
 #include <deque>
@@ -39,6 +38,7 @@ namespace ipc {
 
 class MessageChannel;
 class IToplevelProtocol;
+class ActorLifecycleProxy;
 
 class RefCountedMonitor : public Monitor {
  public:
@@ -111,7 +111,7 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
     virtual ~UntypedCallbackHolder() {}
 
-    void Reject(ResponseRejectReason aReason) { mReject(aReason); }
+    void Reject(ResponseRejectReason&& aReason) { mReject(std::move(aReason)); }
 
     ActorIdType mActorId;
     RejectCallback mReject;
@@ -313,6 +313,11 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
     sIsPumpingMessages = aIsPumping;
   }
 
+  /**
+   * Does this MessageChannel cross process boundaries?
+   */
+  bool IsCrossProcess() const { return mIsCrossProcess; }
+
 #ifdef OS_WIN
   struct MOZ_STACK_CLASS SyncStackFrame {
     SyncStackFrame(MessageChannel* channel, bool interrupt);
@@ -353,10 +358,10 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
  private:
   void SpinInternalEventLoop();
-#if defined(ACCESSIBILITY)
+#  if defined(ACCESSIBILITY)
   bool WaitForSyncNotifyWithA11yReentry();
-#endif  // defined(ACCESSIBILITY)
-#endif  // defined(OS_WIN)
+#  endif  // defined(ACCESSIBILITY)
+#endif    // defined(OS_WIN)
 
  private:
   void CommonThreadOpenInit(MessageChannel* aTargetChan, Side aSide);
@@ -389,11 +394,11 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
   // DispatchMessage will route to one of these functions depending on the
   // protocol type of the message.
-  void DispatchSyncMessage(const Message& aMsg, Message*& aReply);
-  void DispatchUrgentMessage(const Message& aMsg);
-  void DispatchAsyncMessage(const Message& aMsg);
-  void DispatchRPCMessage(const Message& aMsg);
-  void DispatchInterruptMessage(Message&& aMsg, size_t aStackDepth);
+  void DispatchSyncMessage(ActorLifecycleProxy* aProxy, const Message& aMsg,
+                           Message*& aReply);
+  void DispatchAsyncMessage(ActorLifecycleProxy* aProxy, const Message& aMsg);
+  void DispatchInterruptMessage(ActorLifecycleProxy* aProxy, Message&& aMsg,
+                                size_t aStackDepth);
 
   // Return true if the wait ended because a notification was received.
   //
@@ -560,8 +565,7 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
  private:
   class MessageTask : public CancelableRunnable,
                       public LinkedListElement<RefPtr<MessageTask>>,
-                      public nsIRunnablePriority,
-                      public nsILabelableRunnable {
+                      public nsIRunnablePriority {
    public:
     explicit MessageTask(MessageChannel* aChannel, Message&& aMessage);
 
@@ -577,8 +581,6 @@ class MessageChannel : HasResultCodes, MessageLoop::DestructionObserver {
 
     Message& Msg() { return mMessage; }
     const Message& Msg() const { return mMessage; }
-
-    bool GetAffectedSchedulerGroups(SchedulerGroupSet& aGroups) override;
 
    private:
     MessageTask() = delete;

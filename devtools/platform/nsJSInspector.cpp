@@ -8,7 +8,6 @@
 #include "nsThreadUtils.h"
 #include "jsfriendapi.h"
 #include "mozilla/HoldDropJSObjects.h"
-#include "mozilla/ModuleUtils.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsServiceManagerUtils.h"
 #include "nsMemory.h"
@@ -26,8 +25,6 @@
 
 namespace mozilla {
 namespace jsinspector {
-
-NS_GENERIC_FACTORY_CONSTRUCTOR(nsJSInspector)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsJSInspector)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -65,7 +62,7 @@ nsJSInspector::~nsJSInspector() {
 
 NS_IMETHODIMP
 nsJSInspector::EnterNestedEventLoop(JS::Handle<JS::Value> requestor,
-                                    uint32_t *out) {
+                                    uint32_t* out) {
   nsresult rv = NS_OK;
 
   mLastRequestor = requestor;
@@ -91,7 +88,7 @@ nsJSInspector::EnterNestedEventLoop(JS::Handle<JS::Value> requestor,
 }
 
 NS_IMETHODIMP
-nsJSInspector::ExitNestedEventLoop(uint32_t *out) {
+nsJSInspector::ExitNestedEventLoop(uint32_t* out) {
   if (mNestedLoopLevel > 0) {
     mRequestors.RemoveElementAt(--mNestedLoopLevel);
     if (mNestedLoopLevel > 0)
@@ -108,7 +105,7 @@ nsJSInspector::ExitNestedEventLoop(uint32_t *out) {
 }
 
 NS_IMETHODIMP
-nsJSInspector::GetEventLoopNestLevel(uint32_t *out) {
+nsJSInspector::GetEventLoopNestLevel(uint32_t* out) {
   *out = mNestedLoopLevel;
   return NS_OK;
 }
@@ -121,18 +118,3 @@ nsJSInspector::GetLastNestRequestor(JS::MutableHandle<JS::Value> out) {
 
 }  // namespace jsinspector
 }  // namespace mozilla
-
-NS_DEFINE_NAMED_CID(JSINSPECTOR_CID);
-
-static const mozilla::Module::CIDEntry kJSInspectorCIDs[] = {
-    {&kJSINSPECTOR_CID, false, nullptr,
-     mozilla::jsinspector::nsJSInspectorConstructor},
-    {nullptr}};
-
-static const mozilla::Module::ContractIDEntry kJSInspectorContracts[] = {
-    {JSINSPECTOR_CONTRACTID, &kJSINSPECTOR_CID}, {nullptr}};
-
-static const mozilla::Module kJSInspectorModule = {
-    mozilla::Module::kVersion, kJSInspectorCIDs, kJSInspectorContracts};
-
-NSMODULE_DEFN(jsinspector) = &kJSInspectorModule;

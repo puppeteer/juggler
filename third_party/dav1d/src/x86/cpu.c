@@ -25,14 +25,18 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "config.h"
+
 #include <stdint.h>
+
+#include "common/attributes.h"
 
 #include "src/x86/cpu.h"
 
 void dav1d_cpu_cpuid(uint32_t *info, int leaf);
 uint64_t dav1d_cpu_xgetbv(int xcr);
 
-unsigned dav1d_get_cpu_flags_x86(void) {
+COLD unsigned dav1d_get_cpu_flags_x86(void) {
     uint32_t info[4] = {0}, n_ids;
     unsigned flags = 0;
 
@@ -47,13 +51,16 @@ unsigned dav1d_get_cpu_flags_x86(void) {
         if (info[2] & (1 <<  9)) flags |= DAV1D_X86_CPU_FLAG_SSSE3;
         if (info[2] & (1 << 19)) flags |= DAV1D_X86_CPU_FLAG_SSE41;
         if (info[2] & (1 << 20)) flags |= DAV1D_X86_CPU_FLAG_SSE42;
+#if ARCH_X86_64
+        /* We only support >128-bit SIMD on x86-64. */
         if (info[2] & (1 << 27)) /* OSXSAVE */ {
             uint64_t xcr = dav1d_cpu_xgetbv(0);
             if ((xcr & 0x00000006) == 0x00000006) /* XMM/YMM */ {
                 if (info[2] & (1 << 28)) flags |= DAV1D_X86_CPU_FLAG_AVX;
                 if (n_ids >= 7) {
                     dav1d_cpu_cpuid(info, 7);
-                    if (info[1] & (1 <<  5)) flags |= DAV1D_X86_CPU_FLAG_AVX2;
+                    if ((info[1] & 0x00000128) == 0x00000128)
+                        flags |= DAV1D_X86_CPU_FLAG_AVX2;
                     if ((xcr & 0x000000e0) == 0x000000e0) /* ZMM/OPMASK */ {
                         if ((info[1] & 0xd0030000) == 0xd0030000)
                             flags |= DAV1D_X86_CPU_FLAG_AVX512;
@@ -61,6 +68,7 @@ unsigned dav1d_get_cpu_flags_x86(void) {
                 }
             }
         }
+#endif
     }
 
     return flags;

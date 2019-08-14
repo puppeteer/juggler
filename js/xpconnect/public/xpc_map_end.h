@@ -8,15 +8,15 @@
 // of the file doing the including.
 
 #ifndef XPC_MAP_CLASSNAME
-#error "Must #define XPC_MAP_CLASSNAME before #including xpc_map_end.h"
+#  error "Must #define XPC_MAP_CLASSNAME before #including xpc_map_end.h"
 #endif
 
 #ifndef XPC_MAP_QUOTED_CLASSNAME
-#error "Must #define XPC_MAP_QUOTED_CLASSNAME before #including xpc_map_end.h"
+#  error "Must #define XPC_MAP_QUOTED_CLASSNAME before #including xpc_map_end.h"
 #endif
 
 #ifndef XPC_MAP_FLAGS
-#error "Must #define XPC_MAP_FLAGS before #including xpc_map_end.h"
+#  error "Must #define XPC_MAP_FLAGS before #including xpc_map_end.h"
 #endif
 
 #include "js/Id.h"
@@ -58,7 +58,7 @@ NS_IMETHODIMP XPC_MAP_CLASSNAME::PreCreate(nsISupports* nativeObj,
 #if !((XPC_MAP_FLAGS)&XPC_SCRIPTABLE_WANT_NEWENUMERATE)
 NS_IMETHODIMP XPC_MAP_CLASSNAME::NewEnumerate(
     nsIXPConnectWrappedNative* wrapper, JSContext* cx, JSObject* obj,
-    JS::AutoIdVector& properties, bool enumerableOnly, bool* _retval) {
+    JS::MutableHandleIdVector properties, bool enumerableOnly, bool* _retval) {
   NS_ERROR("never called");
   return NS_ERROR_NOT_IMPLEMENTED;
 }

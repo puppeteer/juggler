@@ -12,18 +12,19 @@
 
 
 <dialog id="certAuthAsk" title="&clientAuthAsk.title;"
-  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"      
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
   buttons="accept,cancel"
-  ondialogaccept="return doOK();"
-  ondialogcancel="return doCancel();"
   onload="onLoad();">
 
 <stringbundleset id="stringbundleset">
   <stringbundle id="pippki_bundle" src="chrome://pippki/locale/pippki.properties"/>
 </stringbundleset>
 
-<script type="application/javascript" src="chrome://pippki/content/pippki.js"/>
-<script type="application/javascript" src="chrome://pippki/content/clientauthask.js"/>
+<script src="chrome://pippki/content/pippki.js"/>
+<script src="chrome://pippki/content/clientauthask.js"/>
+<script src="chrome://global/content/globalOverlay.js"/>
+<script src="chrome://global/content/editMenuOverlay.js"/>
 
 <description style="font-weight: bold;">&clientAuthAsk.message1;</description>
 <description id="hostname"/>
@@ -38,8 +39,7 @@
     <menupopup/>
 </menulist>
 <description>&clientAuthAsk.message3;</description>
-<textbox readonly="true" id="details" multiline="true"
-  style="height: 11em;"/>
+<html:textarea readonly="readonly" id="details" style="height: 11em;"/>
 <checkbox id="rememberBox" checked="true"/>
 
 </dialog>

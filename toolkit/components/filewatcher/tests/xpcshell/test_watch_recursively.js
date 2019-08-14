@@ -17,10 +17,12 @@ function run_test() {
  * of the watched sub-directory (recursion).
  */
 add_task(async function test_watch_recursively() {
-
   // Create and watch a sub-directory of the profile directory so we don't
   // catch notifications we're not interested in (i.e. "startupCache").
-  let watchedDir = OS.Path.join(OS.Constants.Path.profileDir, "filewatcher_playground");
+  let watchedDir = OS.Path.join(
+    OS.Constants.Path.profileDir,
+    "filewatcher_playground"
+  );
   await OS.File.makeDir(watchedDir);
 
   // We need at least 2 levels of directories to test recursion.
@@ -48,7 +50,12 @@ add_task(async function test_watch_recursively() {
 
   // Remove the watch and free the associated memory (we need to
   // reuse 'deferred.resolve' and 'deferred.reject' to unregister).
-  await promiseRemovePath(watcher, watchedDir, deferred.resolve, deferred.reject);
+  await promiseRemovePath(
+    watcher,
+    watchedDir,
+    deferred.resolve,
+    deferred.reject
+  );
 
   // Remove the test directory and all of its content.
   await OS.File.removeDir(watchedDir);

@@ -12,7 +12,6 @@
 #include "nsColor.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/dom/HTMLVideoElement.h"
-#include "gfxTextRun.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BasicRenderingContext2D.h"
 #include "mozilla/dom/CanvasGradient.h"
@@ -20,6 +19,7 @@
 #include "mozilla/dom/CanvasPattern.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/UniquePtr.h"
 #include "gfx2DGlue.h"
 #include "imgIEncoder.h"
@@ -30,6 +30,7 @@
 #include "Layers.h"
 #include "nsBidi.h"
 
+class gfxFontGroup;
 class nsGlobalWindowInner;
 class nsXULElement;
 
@@ -376,14 +377,6 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
                   double aH, const nsAString& aBgColor, uint32_t aFlags,
                   mozilla::ErrorResult& aError);
 
-  enum RenderingMode {
-    SoftwareBackendMode,
-    OpenGLBackendMode,
-    DefaultBackendMode
-  };
-
-  bool SwitchRenderingMode(RenderingMode aRenderingMode);
-
   // Eventually this should be deprecated. Keeping for now to keep the binding
   // functional.
   void Demote();
@@ -398,9 +391,9 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   /**
    * Gets the pres shell from either the canvas element or the doc shell
    */
-  nsIPresShell* GetPresShell() final {
+  PresShell* GetPresShell() final {
     if (mCanvasElement) {
-      return mCanvasElement->OwnerDoc()->GetShell();
+      return mCanvasElement->OwnerDoc()->GetPresShell();
     }
     if (mDocShell) {
       return mDocShell->GetPresShell();
@@ -412,17 +405,11 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
       nsIDocShell* aShell, NotNull<gfx::DrawTarget*> aTarget) override;
 
   NS_IMETHOD GetInputStream(const char* aMimeType,
-                            const char16_t* aEncoderOptions,
+                            const nsAString& aEncoderOptions,
                             nsIInputStream** aStream) override;
 
   already_AddRefed<mozilla::gfx::SourceSurface> GetSurfaceSnapshot(
-      gfxAlphaType* aOutAlphaType = nullptr) override {
-    EnsureTarget();
-    if (aOutAlphaType) {
-      *aOutAlphaType = (mOpaque ? gfxAlphaType::Opaque : gfxAlphaType::Premult);
-    }
-    return mTarget->Snapshot();
-  }
+      gfxAlphaType* aOutAlphaType = nullptr) override;
 
   virtual void SetOpaqueValueFromOpaqueAttr(bool aOpaqueAttrValue) override;
   bool GetIsOpaque() override { return mOpaque; }
@@ -509,15 +496,12 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
 
   void OnShutdown();
 
-  // Check the global setup, as well as the compositor type:
-  bool AllowOpenGLCanvas() const;
-
   /**
    * Update CurrentState().filter with the filter description for
    * CurrentState().filterChain.
    * Flushes the PresShell, so the world can change if you call this function.
    */
-  void UpdateFilter();
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY void UpdateFilter();
 
  protected:
   nsresult GetImageDataArray(JSContext* aCx, int32_t aX, int32_t aY,
@@ -576,7 +560,8 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
 
   // Returns whether a filter was successfully parsed.
   bool ParseFilter(const nsAString& aString,
-                   nsTArray<nsStyleFilter>& aFilterChain, ErrorResult& aError);
+                   StyleOwnedSlice<StyleFilter>& aFilterChain,
+                   ErrorResult& aError);
 
   // Returns whether the font was successfully updated.
   bool SetFontInternal(const nsAString& aFont, mozilla::ErrorResult& aError);
@@ -616,16 +601,12 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
    * is in turn an error in creating the sErrorTarget then they would both
    * be null so IsTargetValid() would still return null.
    *
-   * Returns the actual rendering mode being used by the created target.
+   * Returns true on success.
    */
-  RenderingMode EnsureTarget(
-      const gfx::Rect* aCoveredRect = nullptr,
-      RenderingMode aRenderMode = RenderingMode::DefaultBackendMode);
+  bool EnsureTarget(const gfx::Rect* aCoveredRect = nullptr,
+                    bool aWillClear = false);
 
   void RestoreClipsAndTransformToTarget();
-
-  bool TrySkiaGLTarget(RefPtr<gfx::DrawTarget>& aOutDT,
-                       RefPtr<layers::PersistentBufferProvider>& aOutProvider);
 
   bool TrySharedTarget(RefPtr<gfx::DrawTarget>& aOutDT,
                        RefPtr<layers::PersistentBufferProvider>& aOutProvider);
@@ -680,9 +661,9 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   /**
    * Returns true if we know for sure that the pattern for a given style is
    * opaque. Usefull to know if we can discard the content below in certain
-   * situations.
+   * situations. Optionally checks if the pattern is a color pattern.
    */
-  bool PatternIsOpaque(Style aStyle) const;
+  bool PatternIsOpaque(Style aStyle, bool* aIsColor = nullptr) const;
 
   nsLayoutUtils::SurfaceFromElementResult CachedSurfaceFromElement(
       Element* aElement);
@@ -703,19 +684,6 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
 
     return CurrentState().font;
   }
-
-  // This function maintains a list of raw pointers to cycle-collected
-  // objects. We need to ensure that no entries persist beyond unlink,
-  // since the objects are logically destructed at that point.
-  static std::vector<CanvasRenderingContext2D*>& DemotableContexts();
-  static void DemoteOldestContextIfNecessary();
-
-  static void AddDemotableContext(CanvasRenderingContext2D* aContext);
-  static void RemoveDemotableContext(CanvasRenderingContext2D* aContext);
-
-  RenderingMode mRenderingMode;
-
-  layers::LayersBackend mCompositorBackend;
 
   // Member vars
   int32_t mWidth, mHeight;
@@ -742,9 +710,6 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   bool mResetLayer;
   // This is needed for drawing in drawAsyncXULElement
   bool mIPC;
-  // True if the current DrawTarget is using skia-gl, used so we can avoid
-  // requesting the DT from mBufferProvider to check.
-  bool mIsSkiaGL;
 
   bool mHasPendingStableStateCallback;
 
@@ -759,14 +724,6 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   RefPtr<mozilla::gfx::DrawTarget> mTarget;
 
   RefPtr<mozilla::layers::PersistentBufferProvider> mBufferProvider;
-
-  uint32_t SkiaGLTex() const;
-
-  // This observes our draw calls at the beginning of the canvas
-  // lifetime and switches to software or GPU mode depending on
-  // what it thinks is best
-  CanvasDrawObserver* mDrawObserver;
-  void RemoveDrawObserver();
 
   RefPtr<CanvasShutdownObserver> mShutdownObserver;
   void RemoveShutdownObserver();
@@ -919,8 +876,6 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
                              const Optional<double>& aMaxWidth,
                              TextDrawOperation aOp, float* aWidth);
 
-  bool CheckSizeForSkiaGL(mozilla::gfx::IntSize aSize);
-
   // A clip or a transform, recorded and restored in order.
   struct ClipState {
     explicit ClipState(mozilla::gfx::Path* aClip) : clip(aClip) {}
@@ -937,55 +892,9 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   // state stack handling
   class ContextState {
    public:
-    ContextState()
-        : textAlign(TextAlign::START),
-          textBaseline(TextBaseline::ALPHABETIC),
-          shadowColor(0),
-          lineWidth(1.0f),
-          miterLimit(10.0f),
-          globalAlpha(1.0f),
-          shadowBlur(0.0),
-          dashOffset(0.0f),
-          op(mozilla::gfx::CompositionOp::OP_OVER),
-          fillRule(mozilla::gfx::FillRule::FILL_WINDING),
-          lineCap(mozilla::gfx::CapStyle::BUTT),
-          lineJoin(mozilla::gfx::JoinStyle::MITER_OR_BEVEL),
-          filterString(u"none"),
-          filterSourceGraphicTainted(false),
-          imageSmoothingEnabled(true),
-          fontExplicitLanguage(false) {}
-
-    ContextState(const ContextState& aOther)
-        : fontGroup(aOther.fontGroup),
-          fontLanguage(aOther.fontLanguage),
-          fontFont(aOther.fontFont),
-          gradientStyles(aOther.gradientStyles),
-          patternStyles(aOther.patternStyles),
-          colorStyles(aOther.colorStyles),
-          font(aOther.font),
-          textAlign(aOther.textAlign),
-          textBaseline(aOther.textBaseline),
-          shadowColor(aOther.shadowColor),
-          transform(aOther.transform),
-          shadowOffset(aOther.shadowOffset),
-          lineWidth(aOther.lineWidth),
-          miterLimit(aOther.miterLimit),
-          globalAlpha(aOther.globalAlpha),
-          shadowBlur(aOther.shadowBlur),
-          dash(aOther.dash),
-          dashOffset(aOther.dashOffset),
-          op(aOther.op),
-          fillRule(aOther.fillRule),
-          lineCap(aOther.lineCap),
-          lineJoin(aOther.lineJoin),
-          filterString(aOther.filterString),
-          filterChain(aOther.filterChain),
-          autoSVGFiltersObserver(aOther.autoSVGFiltersObserver),
-          filter(aOther.filter),
-          filterAdditionalImages(aOther.filterAdditionalImages),
-          filterSourceGraphicTainted(aOther.filterSourceGraphicTainted),
-          imageSmoothingEnabled(aOther.imageSmoothingEnabled),
-          fontExplicitLanguage(aOther.fontExplicitLanguage) {}
+    ContextState();
+    ContextState(const ContextState& aOther);
+    ~ContextState();
 
     void SetColorStyle(Style aWhichStyle, nscolor aColor) {
       colorStyles[aWhichStyle] = aColor;
@@ -1031,27 +940,28 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
     EnumeratedArray<Style, Style::MAX, nscolor> colorStyles;
 
     nsString font;
-    TextAlign textAlign;
-    TextBaseline textBaseline;
+    TextAlign textAlign = TextAlign::START;
+    TextBaseline textBaseline = TextBaseline::ALPHABETIC;
 
-    nscolor shadowColor;
+    nscolor shadowColor = 0;
 
     mozilla::gfx::Matrix transform;
     mozilla::gfx::Point shadowOffset;
-    mozilla::gfx::Float lineWidth;
-    mozilla::gfx::Float miterLimit;
-    mozilla::gfx::Float globalAlpha;
-    mozilla::gfx::Float shadowBlur;
+    mozilla::gfx::Float lineWidth = 1.0f;
+    mozilla::gfx::Float miterLimit = 10.0f;
+    mozilla::gfx::Float globalAlpha = 1.0f;
+    mozilla::gfx::Float shadowBlur = 0.0f;
+
     nsTArray<mozilla::gfx::Float> dash;
-    mozilla::gfx::Float dashOffset;
+    mozilla::gfx::Float dashOffset = 0.0f;
 
-    mozilla::gfx::CompositionOp op;
-    mozilla::gfx::FillRule fillRule;
-    mozilla::gfx::CapStyle lineCap;
-    mozilla::gfx::JoinStyle lineJoin;
+    mozilla::gfx::CompositionOp op = mozilla::gfx::CompositionOp::OP_OVER;
+    mozilla::gfx::FillRule fillRule = mozilla::gfx::FillRule::FILL_WINDING;
+    mozilla::gfx::CapStyle lineCap = mozilla::gfx::CapStyle::BUTT;
+    mozilla::gfx::JoinStyle lineJoin = mozilla::gfx::JoinStyle::MITER_OR_BEVEL;
 
-    nsString filterString;
-    nsTArray<nsStyleFilter> filterChain;
+    nsString filterString = nsString(u"none");
+    StyleOwnedSlice<StyleFilter> filterChain;
     // RAII object that we obtain when we start to observer SVG filter elements
     // for rendering changes.  When released we stop observing the SVG elements.
     nsCOMPtr<nsISupports> autoSVGFiltersObserver;
@@ -1069,10 +979,10 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
     //
     // We keep track of this to ensure that if this gets out of sync with the
     // tainted state of the canvas itself, we update our filters accordingly.
-    bool filterSourceGraphicTainted;
+    bool filterSourceGraphicTainted = false;
 
-    bool imageSmoothingEnabled;
-    bool fontExplicitLanguage;
+    bool imageSmoothingEnabled = true;
+    bool fontExplicitLanguage = false;
   };
 
   AutoTArray<ContextState, 3> mStyleStack;
@@ -1093,28 +1003,33 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   // other helpers
   void GetAppUnitsValues(int32_t* aPerDevPixel, int32_t* aPerCSSPixel) {
     // If we don't have a canvas element, we just return something generic.
-    int32_t devPixel = 60;
-    int32_t cssPixel = 60;
-
-    nsIPresShell* ps = GetPresShell();
-    nsPresContext* pc;
-
-    if (!ps) goto FINISH;
-    pc = ps->GetPresContext();
-    if (!pc) goto FINISH;
-    devPixel = pc->AppUnitsPerDevPixel();
-    cssPixel = AppUnitsPerCSSPixel();
-
-  FINISH:
-    if (aPerDevPixel) *aPerDevPixel = devPixel;
-    if (aPerCSSPixel) *aPerCSSPixel = cssPixel;
+    if (aPerDevPixel) {
+      *aPerDevPixel = 60;
+    }
+    if (aPerCSSPixel) {
+      *aPerCSSPixel = 60;
+    }
+    PresShell* presShell = GetPresShell();
+    if (!presShell) {
+      return;
+    }
+    nsPresContext* presContext = presShell->GetPresContext();
+    if (!presContext) {
+      return;
+    }
+    if (aPerDevPixel) {
+      *aPerDevPixel = presContext->AppUnitsPerDevPixel();
+    }
+    if (aPerCSSPixel) {
+      *aPerCSSPixel = AppUnitsPerCSSPixel();
+    }
   }
 
   friend struct CanvasBidiProcessor;
   friend class CanvasDrawObserver;
   friend class ImageBitmap;
 
-  void SetWriteOnly() { mWriteOnly = true; }
+  void SetWriteOnly();
 
   bool IsWriteOnly() const { return mWriteOnly; }
 

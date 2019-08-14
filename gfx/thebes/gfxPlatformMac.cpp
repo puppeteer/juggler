@@ -319,12 +319,12 @@ void gfxPlatformMac::GetCommonFallbackFonts(uint32_t aCh, uint32_t aNextCh,
   aFontList.AppendElement(kFontArialUnicodeMS);
 }
 
-/*static*/ void gfxPlatformMac::LookupSystemFont(
+/*static*/
+void gfxPlatformMac::LookupSystemFont(
     mozilla::LookAndFeel::FontID aSystemFontID, nsACString& aSystemFontName,
-    gfxFontStyle& aFontStyle, float aDevPixPerCSSPixel) {
+    gfxFontStyle& aFontStyle) {
   gfxMacPlatformFontList* pfl = gfxMacPlatformFontList::PlatformFontList();
-  return pfl->LookupSystemFont(aSystemFontID, aSystemFontName, aFontStyle,
-                               aDevPixPerCSSPixel);
+  return pfl->LookupSystemFont(aSystemFontID, aSystemFontName, aFontStyle);
 }
 
 uint32_t gfxPlatformMac::ReadAntiAliasingThreshold() {
@@ -375,7 +375,7 @@ class OSXVsyncSource final : public VsyncSource {
       mTimer = NS_NewTimer();
     }
 
-    ~OSXDisplay() override { MOZ_ASSERT(NS_IsMainThread()); }
+    virtual ~OSXDisplay() { MOZ_ASSERT(NS_IsMainThread()); }
 
     static void RetryEnableVsync(nsITimer* aTimer, void* aOsxDisplay) {
       MOZ_ASSERT(NS_IsMainThread());
@@ -493,7 +493,7 @@ class OSXVsyncSource final : public VsyncSource {
   };  // OSXDisplay
 
  private:
-  ~OSXVsyncSource() override = default;
+  virtual ~OSXVsyncSource() = default;
 
   OSXDisplay mGlobalDisplay;
 };  // OSXVsyncSource

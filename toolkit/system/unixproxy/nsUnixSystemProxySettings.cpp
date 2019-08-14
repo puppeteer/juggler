@@ -4,9 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsISystemProxySettings.h"
-#include "mozilla/ModuleUtils.h"
+#include "mozilla/Components.h"
 #include "nsIServiceManager.h"
-#include "nsIGConfService.h"
 #include "nsIURI.h"
 #include "nsReadableUtils.h"
 #include "nsArrayUtils.h"
@@ -21,27 +20,23 @@
 #include "mozilla/Attributes.h"
 #include "nsIURI.h"
 
+using namespace mozilla;
+
 class nsUnixSystemProxySettings final : public nsISystemProxySettings {
  public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSISYSTEMPROXYSETTINGS
 
   nsUnixSystemProxySettings() : mSchemeProxySettings(4) {}
-  nsresult Init();
+  void Init();
 
  private:
   ~nsUnixSystemProxySettings() = default;
 
-  nsCOMPtr<nsIGConfService> mGConf;
   nsCOMPtr<nsIGSettingsService> mGSettings;
   nsCOMPtr<nsIGSettingsCollection> mProxySettings;
   nsInterfaceHashtable<nsCStringHashKey, nsIGSettingsCollection>
       mSchemeProxySettings;
-  bool IsProxyMode(const char* aMode);
-  nsresult SetProxyResultFromGConf(const char* aKeyBase, const char* aType,
-                                   nsACString& aResult);
-  nsresult GetProxyFromGConf(const nsACString& aScheme, const nsACString& aHost,
-                             int32_t aPort, nsACString& aResult);
   nsresult GetProxyFromGSettings(const nsACString& aScheme,
                                  const nsACString& aHost, int32_t aPort,
                                  nsACString& aResult);
@@ -59,25 +54,13 @@ nsUnixSystemProxySettings::GetMainThreadOnly(bool* aMainThreadOnly) {
   return NS_OK;
 }
 
-nsresult nsUnixSystemProxySettings::Init() {
+void nsUnixSystemProxySettings::Init() {
   mGSettings = do_GetService(NS_GSETTINGSSERVICE_CONTRACTID);
   if (mGSettings) {
     mGSettings->GetCollectionForSchema(
         NS_LITERAL_CSTRING("org.gnome.system.proxy"),
         getter_AddRefs(mProxySettings));
   }
-  if (!mProxySettings) {
-    mGConf = do_GetService(NS_GCONFSERVICE_CONTRACTID);
-  }
-
-  return NS_OK;
-}
-
-bool nsUnixSystemProxySettings::IsProxyMode(const char* aMode) {
-  nsAutoCString mode;
-  return NS_SUCCEEDED(mGConf->GetString(
-             NS_LITERAL_CSTRING("/system/proxy/mode"), mode)) &&
-         mode.EqualsASCII(aMode);
 }
 
 nsresult nsUnixSystemProxySettings::GetPACURI(nsACString& aResult) {
@@ -90,16 +73,8 @@ nsresult nsUnixSystemProxySettings::GetPACURI(nsACString& aResult) {
       return mProxySettings->GetString(NS_LITERAL_CSTRING("autoconfig-url"),
                                        aResult);
     }
-    /* The org.gnome.system.proxy schema has been found, but auto mode is not
-     * set. Don't try the GConf and return empty string. */
-    aResult.Truncate();
-    return NS_OK;
   }
 
-  if (mGConf && IsProxyMode("auto")) {
-    return mGConf->GetString(NS_LITERAL_CSTRING("/system/proxy/autoconfig_url"),
-                             aResult);
-  }
   // Return an empty string when auto mode is not set.
   aResult.Truncate();
   return NS_OK;
@@ -167,7 +142,7 @@ static void SetProxyResult(const char* aType, const nsACString& aHost,
   aResult.Append(aHost);
   if (aPort > 0) {
     aResult.Append(':');
-    aResult.Append(nsPrintfCString("%d", aPort));
+    aResult.AppendInt(aPort);
   }
 }
 
@@ -214,30 +189,6 @@ static nsresult GetProxyFromEnvironment(const nsACString& aScheme,
   NS_ENSURE_SUCCESS(rv, rv);
 
   SetProxyResult("PROXY", proxyHost, proxyPort, aResult);
-  return NS_OK;
-}
-
-nsresult nsUnixSystemProxySettings::SetProxyResultFromGConf(
-    const char* aKeyBase, const char* aType, nsACString& aResult) {
-  nsAutoCString hostKey;
-  hostKey.AppendASCII(aKeyBase);
-  hostKey.AppendLiteral("host");
-  nsAutoCString host;
-  nsresult rv = mGConf->GetString(hostKey, host);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (host.IsEmpty()) return NS_ERROR_FAILURE;
-
-  nsAutoCString portKey;
-  portKey.AppendASCII(aKeyBase);
-  portKey.AppendLiteral("port");
-  int32_t port;
-  rv = mGConf->GetInt(portKey, &port);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  /* When port is 0, proxy is not considered as enabled even if host is set. */
-  if (port == 0) return NS_ERROR_FAILURE;
-
-  SetProxyResult(aType, host, port, aResult);
   return NS_OK;
 }
 
@@ -366,63 +317,6 @@ static bool HostIgnoredByProxy(const nsACString& aIgnore,
   return memcmp(&ignoreAddr, &hostAddr, sizeof(PRIPv6Addr)) == 0;
 }
 
-nsresult nsUnixSystemProxySettings::GetProxyFromGConf(const nsACString& aScheme,
-                                                      const nsACString& aHost,
-                                                      int32_t aPort,
-                                                      nsACString& aResult) {
-  bool masterProxySwitch = false;
-  mGConf->GetBool(NS_LITERAL_CSTRING("/system/http_proxy/use_http_proxy"),
-                  &masterProxySwitch);
-  // if no proxy is set in GConf return NS_ERROR_FAILURE
-  if (!(IsProxyMode("manual") || masterProxySwitch)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsCOMPtr<nsIArray> ignoreList;
-  if (NS_SUCCEEDED(mGConf->GetStringList(
-          NS_LITERAL_CSTRING("/system/http_proxy/ignore_hosts"),
-          getter_AddRefs(ignoreList))) &&
-      ignoreList) {
-    uint32_t len = 0;
-    ignoreList->GetLength(&len);
-    for (uint32_t i = 0; i < len; ++i) {
-      nsCOMPtr<nsISupportsString> str = do_QueryElementAt(ignoreList, i);
-      if (str) {
-        nsAutoString s;
-        if (NS_SUCCEEDED(str->GetData(s)) && !s.IsEmpty()) {
-          if (HostIgnoredByProxy(NS_ConvertUTF16toUTF8(s), aHost)) {
-            aResult.AppendLiteral("DIRECT");
-            return NS_OK;
-          }
-        }
-      }
-    }
-  }
-
-  bool useHttpProxyForAll = false;
-  // This setting sometimes doesn't exist, don't bail on failure
-  mGConf->GetBool(NS_LITERAL_CSTRING("/system/http_proxy/use_same_proxy"),
-                  &useHttpProxyForAll);
-
-  nsresult rv;
-  if (!useHttpProxyForAll) {
-    rv = SetProxyResultFromGConf("/system/proxy/socks_", "SOCKS", aResult);
-    if (NS_SUCCEEDED(rv)) return rv;
-  }
-
-  if (aScheme.LowerCaseEqualsLiteral("http") || useHttpProxyForAll) {
-    rv = SetProxyResultFromGConf("/system/http_proxy/", "PROXY", aResult);
-  } else if (aScheme.LowerCaseEqualsLiteral("https")) {
-    rv = SetProxyResultFromGConf("/system/proxy/secure_", "PROXY", aResult);
-  } else if (aScheme.LowerCaseEqualsLiteral("ftp")) {
-    rv = SetProxyResultFromGConf("/system/proxy/ftp_", "PROXY", aResult);
-  } else {
-    rv = NS_ERROR_FAILURE;
-  }
-
-  return rv;
-}
-
 nsresult nsUnixSystemProxySettings::GetProxyFromGSettings(
     const nsACString& aScheme, const nsACString& aHost, int32_t aPort,
     nsACString& aResult) {
@@ -494,32 +388,12 @@ nsresult nsUnixSystemProxySettings::GetProxyForURI(const nsACString& aSpec,
     nsresult rv = GetProxyFromGSettings(aScheme, aHost, aPort, aResult);
     if (NS_SUCCEEDED(rv)) return rv;
   }
-  if (mGConf) return GetProxyFromGConf(aScheme, aHost, aPort, aResult);
 
   return GetProxyFromEnvironment(aScheme, aHost, aPort, aResult);
 }
 
-/* 0fa3158c-d5a7-43de-9181-a285e74cf1d4 */
-#define NS_UNIXSYSTEMPROXYSERVICE_CID                \
-  {                                                  \
-    0x0fa3158c, 0xd5a7, 0x43de, {                    \
-      0x91, 0x81, 0xa2, 0x85, 0xe7, 0x4c, 0xf1, 0xd4 \
-    }                                                \
-  }
-
-NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsUnixSystemProxySettings, Init)
-NS_DEFINE_NAMED_CID(NS_UNIXSYSTEMPROXYSERVICE_CID);
-
-static const mozilla::Module::CIDEntry kUnixProxyCIDs[] = {
-    {&kNS_UNIXSYSTEMPROXYSERVICE_CID, false, nullptr,
-     nsUnixSystemProxySettingsConstructor},
-    {nullptr}};
-
-static const mozilla::Module::ContractIDEntry kUnixProxyContracts[] = {
-    {NS_SYSTEMPROXYSETTINGS_CONTRACTID, &kNS_UNIXSYSTEMPROXYSERVICE_CID},
-    {nullptr}};
-
-static const mozilla::Module kUnixProxyModule = {
-    mozilla::Module::kVersion, kUnixProxyCIDs, kUnixProxyContracts};
-
-NSMODULE_DEFN(nsUnixProxyModule) = &kUnixProxyModule;
+NS_IMPL_COMPONENT_FACTORY(nsUnixSystemProxySettings) {
+  auto result = MakeRefPtr<nsUnixSystemProxySettings>();
+  result->Init();
+  return result.forget().downcast<nsISupports>();
+}

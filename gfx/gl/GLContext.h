@@ -16,17 +16,17 @@
 #include <stack>
 
 #ifdef DEBUG
-#include <string.h>
+#  include <string.h>
 #endif
 
 #ifdef GetClassName
-#undef GetClassName
+#  undef GetClassName
 #endif
 
 // Define MOZ_GL_DEBUG unconditionally to enable GL debugging in opt
 // builds.
 #ifdef DEBUG
-#define MOZ_GL_DEBUG 1
+#  define MOZ_GL_DEBUG 1
 #endif
 
 #include "../../mfbt/RefPtr.h"
@@ -45,10 +45,6 @@
 #include "mozilla/WeakPtr.h"
 #include "gfx2DGlue.h"
 #include "GeckoProfiler.h"
-
-namespace android {
-class GraphicBuffer;
-}  // namespace android
 
 namespace mozilla {
 namespace gfx {
@@ -87,7 +83,6 @@ enum class GLFeature {
   depth_texture,
   draw_buffers,
   draw_instanced,
-  draw_range_elements,
   element_index_uint,
   ES2_compatibility,
   ES3_compatibility,
@@ -108,6 +103,7 @@ enum class GLFeature {
   internalformat_query,
   invalidate_framebuffer,
   map_buffer_range,
+  multiview,
   occlusion_query,
   occlusion_query_boolean,
   occlusion_query2,
@@ -191,8 +187,7 @@ enum class GLRenderer {
   Other
 };
 
-class GLContext : public GLLibraryLoader,
-                  public GenericAtomicRefCounted,
+class GLContext : public GenericAtomicRefCounted,
                   public SupportsWeakPtr<GLContext> {
  public:
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(GLContext)
@@ -358,6 +353,7 @@ class GLContext : public GLLibraryLoader,
     ANGLE_framebuffer_blit,
     ANGLE_framebuffer_multisample,
     ANGLE_instanced_arrays,
+    ANGLE_multiview,
     ANGLE_texture_compression_dxt3,
     ANGLE_texture_compression_dxt5,
     ANGLE_timer_query,
@@ -404,6 +400,8 @@ class GLContext : public GLLibraryLoader,
     ARB_transform_feedback2,
     ARB_uniform_buffer_object,
     ARB_vertex_array_object,
+    CHROMIUM_color_buffer_float_rgb,
+    CHROMIUM_color_buffer_float_rgba,
     EXT_bgra,
     EXT_blend_minmax,
     EXT_color_buffer_float,
@@ -413,7 +411,7 @@ class GLContext : public GLLibraryLoader,
     EXT_draw_buffers,
     EXT_draw_buffers2,
     EXT_draw_instanced,
-    EXT_draw_range_elements,
+    EXT_float_blend,
     EXT_frag_depth,
     EXT_framebuffer_blit,
     EXT_framebuffer_multisample,
@@ -468,6 +466,7 @@ class GLContext : public GLLibraryLoader,
     OES_depth32,
     OES_depth_texture,
     OES_element_index_uint,
+    OES_fbo_render_mipmap,
     OES_framebuffer_object,
     OES_packed_depth_stencil,
     OES_rgb8_rgba8,
@@ -480,6 +479,7 @@ class GLContext : public GLLibraryLoader,
     OES_texture_half_float_linear,
     OES_texture_npot,
     OES_vertex_array_object,
+    OVR_multiview2,
     Extensions_Max,
     Extensions_End
   };
@@ -617,22 +617,22 @@ class GLContext : public GLLibraryLoader,
   // MOZ_GL_DEBUG implementation
  private:
 #ifndef MOZ_FUNCTION_NAME
-#ifdef __GNUC__
-#define MOZ_FUNCTION_NAME __PRETTY_FUNCTION__
-#elif defined(_MSC_VER)
-#define MOZ_FUNCTION_NAME __FUNCTION__
-#else
-#define MOZ_FUNCTION_NAME \
-  __func__  // defined in C99, supported in various C++ compilers. Just raw
-            // function name.
-#endif
+#  ifdef __GNUC__
+#    define MOZ_FUNCTION_NAME __PRETTY_FUNCTION__
+#  elif defined(_MSC_VER)
+#    define MOZ_FUNCTION_NAME __FUNCTION__
+#  else
+#    define MOZ_FUNCTION_NAME \
+      __func__  // defined in C99, supported in various C++ compilers. Just raw
+                // function name.
+#  endif
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
 // Record the name of the GL call for better hang stacks on Android.
-#define ANDROID_ONLY_PROFILER_LABEL AUTO_PROFILER_LABEL(__func__, GRAPHICS);
+#  define ANDROID_ONLY_PROFILER_LABEL AUTO_PROFILER_LABEL(__func__, GRAPHICS);
 #else
-#define ANDROID_ONLY_PROFILER_LABEL
+#  define ANDROID_ONLY_PROFILER_LABEL
 #endif
 
 #define BEFORE_GL_CALL                               \
@@ -684,35 +684,36 @@ class GLContext : public GLLibraryLoader,
 
 #ifdef MOZ_GL_DEBUG
 
-#define TRACKING_CONTEXT(a) \
-  do {                      \
-    TrackingContext()->a;   \
-  } while (0)
+#  define TRACKING_CONTEXT(a) \
+    do {                      \
+      TrackingContext()->a;   \
+    } while (0)
 
-#define ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(ptr) \
-  AssertNotPassingStackBufferToTheGL(ptr)
+#  define ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(ptr) \
+    AssertNotPassingStackBufferToTheGL(ptr)
 
-#define ASSERT_SYMBOL_PRESENT(func)                                            \
-  do {                                                                         \
-    MOZ_ASSERT(strstr(MOZ_FUNCTION_NAME, #func) != nullptr,                    \
-               "Mismatched symbol check.");                                    \
-    if (MOZ_UNLIKELY(!mSymbols.func)) {                                        \
-      printf_stderr("RUNTIME ASSERT: Uninitialized GL function: %s\n", #func); \
-      MOZ_CRASH("GFX: Uninitialized GL function");                             \
-    }                                                                          \
-  } while (0)
+#  define ASSERT_SYMBOL_PRESENT(func)                                    \
+    do {                                                                 \
+      MOZ_ASSERT(strstr(MOZ_FUNCTION_NAME, #func) != nullptr,            \
+                 "Mismatched symbol check.");                            \
+      if (MOZ_UNLIKELY(!mSymbols.func)) {                                \
+        printf_stderr("RUNTIME ASSERT: Uninitialized GL function: %s\n", \
+                      #func);                                            \
+        MOZ_CRASH("GFX: Uninitialized GL function");                     \
+      }                                                                  \
+    } while (0)
 
 #else  // ifdef MOZ_GL_DEBUG
 
-#define TRACKING_CONTEXT(a) \
-  do {                      \
-  } while (0)
-#define ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(ptr) \
-  do {                                             \
-  } while (0)
-#define ASSERT_SYMBOL_PRESENT(func) \
-  do {                              \
-  } while (0)
+#  define TRACKING_CONTEXT(a) \
+    do {                      \
+    } while (0)
+#  define ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(ptr) \
+    do {                                             \
+    } while (0)
+#  define ASSERT_SYMBOL_PRESENT(func) \
+    do {                              \
+    } while (0)
 
 #endif  // ifdef MOZ_GL_DEBUG
 
@@ -2455,26 +2456,6 @@ class GLContext : public GLLibraryLoader,
   }
 
   // -----------------------------------------------------------------------------
-  // Feature draw_range_elements
- public:
-  void fDrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei count,
-                          GLenum type, const GLvoid* indices) {
-    BeforeGLDrawCall();
-    raw_fDrawRangeElements(mode, start, end, count, type, indices);
-    AfterGLDrawCall();
-  }
-
- private:
-  void raw_fDrawRangeElements(GLenum mode, GLuint start, GLuint end,
-                              GLsizei count, GLenum type,
-                              const GLvoid* indices) {
-    BEFORE_GL_CALL;
-    ASSERT_SYMBOL_PRESENT(fDrawRangeElements);
-    mSymbols.fDrawRangeElements(mode, start, end, count, type, indices);
-    AFTER_GL_CALL;
-  }
-
-  // -----------------------------------------------------------------------------
   // Package XXX_framebuffer_blit
  public:
   // Draw/Read
@@ -3300,6 +3281,20 @@ class GLContext : public GLLibraryLoader,
     AFTER_GL_CALL;
   }
 
+  // -----------------------------------------------------------------------------
+  // multiview
+
+  void fFramebufferTextureMultiview(GLenum target, GLenum attachment,
+                                    GLuint texture, GLint level,
+                                    GLint baseViewIndex,
+                                    GLsizei numViews) const {
+    BEFORE_GL_CALL;
+    ASSERT_SYMBOL_PRESENT(fFramebufferTextureMultiview);
+    mSymbols.fFramebufferTextureMultiview(target, attachment, texture, level,
+                                          baseViewIndex, numViews);
+    AFTER_GL_CALL;
+  }
+
 #undef BEFORE_GL_CALL
 #undef AFTER_GL_CALL
 #undef ASSERT_SYMBOL_PRESENT
@@ -3331,10 +3326,6 @@ class GLContext : public GLLibraryLoader,
   typedef gfx::SurfaceFormat SurfaceFormat;
 
  public:
-  virtual bool Init() = 0;
-
-  virtual bool SetupLookupFunction() = 0;
-
   virtual void ReleaseSurface() {}
 
   bool IsDestroyed() const {
@@ -3368,6 +3359,8 @@ class GLContext : public GLLibraryLoader,
    * Releases a color buffer that is being used as a texture
    */
   virtual bool ReleaseTexImage() { return false; }
+
+  virtual Maybe<SymbolLoader> GetSymbolLoader() const = 0;
 
   // Before reads from offscreen texture
   void GuaranteeResolve();
@@ -3451,8 +3444,6 @@ class GLContext : public GLLibraryLoader,
   // Shared code for GL extensions and GLX extensions.
   static bool ListHasExtension(const GLubyte* extensions,
                                const char* extension);
-
-  GLint GetMaxTextureImageSize() { return mMaxTextureImageSize; }
 
  public:
   std::map<GLuint, SharedSurface*> mFBOMapping;
@@ -3564,16 +3555,15 @@ class GLContext : public GLLibraryLoader,
 
   bool IsOffscreenSizeAllowed(const gfx::IntSize& aSize) const;
 
- protected:
-  bool InitWithPrefix(const char* prefix, bool trygl);
+  virtual bool Init();
 
  private:
-  bool InitWithPrefixImpl(const char* prefix, bool trygl);
-  void LoadMoreSymbols(const char* prefix, bool trygl);
-  bool LoadExtSymbols(const char* prefix, bool trygl, const SymLoadStruct* list,
+  bool InitImpl();
+  void LoadMoreSymbols(const SymbolLoader& loader);
+  bool LoadExtSymbols(const SymbolLoader& loader, const SymLoadStruct* list,
                       GLExtensions ext);
-  bool LoadFeatureSymbols(const char* prefix, bool trygl,
-                          const SymLoadStruct* list, GLFeature feature);
+  bool LoadFeatureSymbols(const SymbolLoader& loader, const SymLoadStruct* list,
+                          GLFeature feature);
 
  protected:
   void InitExtensions();
@@ -3584,7 +3574,6 @@ class GLContext : public GLLibraryLoader,
   uint32_t mMaxTexOrRbSize = 0;
   GLint mMaxTextureSize = 0;
   GLint mMaxCubeMapTextureSize = 0;
-  GLint mMaxTextureImageSize = 0;
   GLint mMaxRenderbufferSize = 0;
   GLint mMaxViewportDims[2] = {};
   GLsizei mMaxSamples = 0;

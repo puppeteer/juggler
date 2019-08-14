@@ -25,22 +25,30 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DAV1D_CLI_PARSE_H__
-#define __DAV1D_CLI_PARSE_H__
+#ifndef DAV1D_CLI_PARSE_H
+#define DAV1D_CLI_PARSE_H
 
-#include "dav1d.h"
+#include "dav1d/dav1d.h"
 
 typedef struct {
     const char *outputfile;
     const char *inputfile;
     const char *demuxer;
     const char *muxer;
+    const char *frametimes;
     const char *verify;
     unsigned limit, skip;
     int quiet;
+    enum {
+        REALTIME_DISABLE = 0,
+        REALTIME_INPUT,
+        REALTIME_CUSTOM,
+    } realtime;
+    double realtime_fps;
+    unsigned realtime_cache;
 } CLISettings;
 
 void parse(const int argc, char *const *const argv,
            CLISettings *const cli_settings, Dav1dSettings *const lib_settings);
 
-#endif /* __DAV1D_CLI_PARSE_H__ */
+#endif /* DAV1D_CLI_PARSE_H */

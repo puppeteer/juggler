@@ -13,13 +13,12 @@ async function checkPocket(shouldBeEnabled) {
 
 add_task(async function test_disable_firefox_screenshots() {
   await BrowserTestUtils.withNewTab("data:text/html,Test", async function() {
-
     // Sanity check to make sure Pocket is enabled on tests
     await checkPocket(true);
 
     await setupPolicyEngineWithJson({
-      "policies": {
-        "DisablePocket": true,
+      policies: {
+        DisablePocket: true,
       },
     });
 

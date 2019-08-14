@@ -13,6 +13,7 @@
 #include "jit/BaselineIC.h"
 #include "jit/BaselineJIT.h"
 #include "jit/CompileInfo.h"
+#include "jit/Ion.h"
 #include "jit/JitSpewer.h"
 #include "jit/mips32/Simulator-mips32.h"
 #include "jit/mips64/Simulator-mips64.h"
@@ -424,7 +425,7 @@ struct BaselineStackBuilder {
     (void)priorOffset;
     MOZ_CRASH();
 #else
-#error "Bad architecture!"
+#  error "Bad architecture!"
 #endif
   }
 
@@ -436,26 +437,30 @@ struct BaselineStackBuilder {
 #ifdef DEBUG
 static inline bool IsInlinableFallback(ICFallbackStub* icEntry) {
   return icEntry->isCall_Fallback() || icEntry->isGetProp_Fallback() ||
-         icEntry->isSetProp_Fallback();
+         icEntry->isSetProp_Fallback() || icEntry->isGetElem_Fallback();
 }
 #endif
 
 static inline void* GetStubReturnAddress(JSContext* cx, jsbytecode* pc) {
-  JitRealm* jitRealm = cx->realm()->jitRealm();
+  const BaselineICFallbackCode& code =
+      cx->runtime()->jitRuntime()->baselineICFallbackCode();
 
   if (IsGetPropPC(pc)) {
-    return jitRealm->bailoutReturnAddr(BailoutReturnStub::GetProp);
+    return code.bailoutReturnAddr(BailoutReturnKind::GetProp);
   }
   if (IsSetPropPC(pc)) {
-    return jitRealm->bailoutReturnAddr(BailoutReturnStub::SetProp);
+    return code.bailoutReturnAddr(BailoutReturnKind::SetProp);
+  }
+  if (IsGetElemPC(pc)) {
+    return code.bailoutReturnAddr(BailoutReturnKind::GetElem);
   }
 
   // This should be a call op of some kind, now.
   MOZ_ASSERT(IsCallPC(pc) && !IsSpreadCallPC(pc));
   if (IsConstructorCallPC(pc)) {
-    return jitRealm->bailoutReturnAddr(BailoutReturnStub::New);
+    return code.bailoutReturnAddr(BailoutReturnKind::New);
   }
-  return jitRealm->bailoutReturnAddr(BailoutReturnStub::Call);
+  return code.bailoutReturnAddr(BailoutReturnKind::Call);
 }
 
 static inline jsbytecode* GetNextNonLoopEntryPc(jsbytecode* pc,
@@ -473,21 +478,26 @@ static inline jsbytecode* GetNextNonLoopEntryPc(jsbytecode* pc,
   return pc;
 }
 
-static bool HasLiveStackValueAtDepth(JSScript* script, jsbytecode* pc,
-                                     uint32_t stackDepth) {
+class NoOpTryNoteFilter {
+ public:
+  explicit NoOpTryNoteFilter() = default;
+  bool operator()(const JSTryNote*) { return true; }
+};
+
+class TryNoteIterAll : public TryNoteIter<NoOpTryNoteFilter> {
+ public:
+  TryNoteIterAll(JSContext* cx, JSScript* script, jsbytecode* pc)
+      : TryNoteIter(cx, script, pc, NoOpTryNoteFilter()) {}
+};
+
+static bool HasLiveStackValueAtDepth(JSContext* cx, HandleScript script,
+                                     jsbytecode* pc, uint32_t stackDepth) {
   if (!script->hasTrynotes()) {
     return false;
   }
 
-  uint32_t pcOffset = script->pcToOffset(pc);
-
-  for (const JSTryNote& tn : script->trynotes()) {
-    if (pcOffset < tn.start) {
-      continue;
-    }
-    if (pcOffset >= tn.start + tn.length) {
-      continue;
-    }
+  for (TryNoteIterAll tni(cx, script, pc); !tni.done(); ++tni) {
+    const JSTryNote& tn = **tni;
 
     switch (tn.kind) {
       case JSTRY_FOR_IN:
@@ -508,7 +518,7 @@ static bool HasLiveStackValueAtDepth(JSScript* script, jsbytecode* pc,
         }
         break;
 
-      case JSTRY_DESTRUCTURING_ITERCLOSE:
+      case JSTRY_DESTRUCTURING:
         // Destructuring code that need to call IteratorClose have both
         // the iterator and the "done" value on the stack.
         if (stackDepth == tn.stackDepth || stackDepth == tn.stackDepth - 1) {
@@ -894,9 +904,9 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
   // side. On the caller side this must represent like the function wasn't
   // inlined.
   uint32_t pushedSlots = 0;
-  AutoValueVector savedCallerArgs(cx);
+  RootedValueVector savedCallerArgs(cx);
   bool needToSaveArgs =
-      op == JSOP_FUNAPPLY || IsGetPropPC(pc) || IsSetPropPC(pc);
+      op == JSOP_FUNAPPLY || IsIonInlinableGetterOrSetterPC(pc);
   if (iter.moreFrames() && (op == JSOP_FUNCALL || needToSaveArgs)) {
     uint32_t inlined_args = 0;
     if (op == JSOP_FUNCALL) {
@@ -904,7 +914,7 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
     } else if (op == JSOP_FUNAPPLY) {
       inlined_args = 2 + blFrame->numActualArgs();
     } else {
-      MOZ_ASSERT(IsGetPropPC(pc) || IsSetPropPC(pc));
+      MOZ_ASSERT(IsIonInlinableGetterOrSetterPC(pc));
       inlined_args = 2 + IsSetPropPC(pc);
     }
 
@@ -1012,7 +1022,8 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
       // iterators, however, so read them out. They will be closed by
       // HandleExceptionBaseline.
       MOZ_ASSERT(cx->realm()->isDebuggee());
-      if (iter.moreFrames() || HasLiveStackValueAtDepth(script, pc, i + 1)) {
+      if (iter.moreFrames() ||
+          HasLiveStackValueAtDepth(cx, script, pc, i + 1)) {
         v = iter.read();
       } else {
         iter.skip();
@@ -1062,7 +1073,7 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
 
   const uint32_t pcOff = script->pcToOffset(pc);
   BaselineScript* baselineScript = script->baselineScript();
-  ICScript* icScript = script->icScript();
+  JitScript* jitScript = script->jitScript();
 
 #ifdef DEBUG
   uint32_t expectedDepth;
@@ -1079,16 +1090,18 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
         // include the this. When inlining that is not included.
         // So the exprStackSlots will be one less.
         MOZ_ASSERT(expectedDepth - exprStackSlots <= 1);
-      } else if (iter.moreFrames() && (IsGetPropPC(pc) || IsSetPropPC(pc))) {
+      } else if (iter.moreFrames() && IsIonInlinableGetterOrSetterPC(pc)) {
         // Accessors coming out of ion are inlined via a complete
         // lie perpetrated by the compiler internally. Ion just rearranges
         // the stack, and pretends that it looked like a call all along.
         // This means that the depth is actually one *more* than expected
         // by the interpreter, as there is now a JSFunction, |this| and [arg],
-        // rather than the expected |this| and [arg]
+        // rather than the expected |this| and [arg].
+        // If the inlined accessor is a getelem operation, the numbers do match,
+        // but that's just because getelem expects one more item on the stack.
         // Note that none of that was pushed, but it's still reflected
         // in exprStackSlots.
-        MOZ_ASSERT(exprStackSlots - expectedDepth == 1);
+        MOZ_ASSERT(exprStackSlots - expectedDepth == (IsGetElemPC(pc) ? 0 : 1));
       } else {
         // For fun.apply({}, arguments) the reconstructStackDepth will
         // have stackdepth 4, but it could be that we inlined the
@@ -1123,7 +1136,7 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
       // Not every monitored op has a monitored fallback stub, e.g.
       // JSOP_NEWOBJECT, which always returns the same type for a
       // particular script/pc location.
-      ICEntry& icEntry = icScript->icEntryFromPCOffset(pcOff);
+      ICEntry& icEntry = jitScript->icEntryFromPCOffset(pcOff);
       ICFallbackStub* fallbackStub = icEntry.firstStub()->getChainFallback();
       if (fallbackStub->isMonitoredFallback()) {
         enterMonitorChain = true;
@@ -1140,7 +1153,7 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
     builder.setResumeFramePtr(prevFramePtr);
 
     if (enterMonitorChain) {
-      ICEntry& icEntry = icScript->icEntryFromPCOffset(pcOff);
+      ICEntry& icEntry = jitScript->icEntryFromPCOffset(pcOff);
       ICFallbackStub* fallbackStub = icEntry.firstStub()->getChainFallback();
       MOZ_ASSERT(fallbackStub->isMonitoredFallback());
       JitSpew(JitSpew_BaselineBailouts, "      [TYPE-MONITOR CHAIN]");
@@ -1324,7 +1337,7 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
 
   // Calculate and write out return address.
   // The icEntry in question MUST have an inlinable fallback stub.
-  ICEntry& icEntry = icScript->icEntryFromPCOffset(pcOff);
+  ICEntry& icEntry = jitScript->icEntryFromPCOffset(pcOff);
   MOZ_ASSERT(IsInlinableFallback(icEntry.firstStub()->getChainFallback()));
 
   RetAddrEntry& retAddrEntry =
@@ -2171,6 +2184,7 @@ bool jit::FinishBailoutToBaseline(BaselineBailoutInfo* bailoutInfo) {
     case Bailout_NonObjectInput:
     case Bailout_NonStringInput:
     case Bailout_NonSymbolInput:
+    case Bailout_NonBigIntInput:
     case Bailout_NonSharedTypedArrayInput:
     case Bailout_Debugger:
     case Bailout_UninitializedThis:

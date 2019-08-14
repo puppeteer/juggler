@@ -5,15 +5,12 @@
  * Helper functions extract values from manifest members
  * and reports conformance violations.
  */
-/*globals Components*/
-'use strict';
-const {
-  classes: Cc,
-  interfaces: Ci,
-  utils: Cu
-} = Components;
+/* globals Components*/
+"use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["InspectorUtils"]);
 
@@ -31,21 +28,25 @@ ValueExtractor.prototype = {
   //  objectName: string used to construct the developer warning.
   //  property: the name of the property being extracted.
   //  trim: boolean, if the value should be trimmed (used by string type).
-  extractValue({expectedType, object, objectName, property, trim}) {
+  extractValue({ expectedType, object, objectName, property, trim }) {
     const value = object[property];
     const isArray = Array.isArray(value);
     // We need to special-case "array", as it's not a JS primitive.
-    const type = (isArray) ? 'array' : typeof value;
+    const type = isArray ? "array" : typeof value;
     if (type !== expectedType) {
-      if (type !== 'undefined') {
-        this.console.warn(this.domBundle.formatStringFromName("ManifestInvalidType",
-                                                              [objectName, property, expectedType],
-                                                              3));
+      if (type !== "undefined") {
+        this.console.warn(
+          this.domBundle.formatStringFromName("ManifestInvalidType", [
+            objectName,
+            property,
+            expectedType,
+          ])
+        );
       }
       return undefined;
     }
     // Trim string and returned undefined if the empty string.
-    const shouldTrim = expectedType === 'string' && value && trim;
+    const shouldTrim = expectedType === "string" && value && trim;
     if (shouldTrim) {
       return value.trim() || undefined;
     }
@@ -55,13 +56,34 @@ ValueExtractor.prototype = {
     const value = this.extractValue(spec);
     let color;
     if (InspectorUtils.isValidCSSColor(value)) {
-      color = value;
+      const rgba = InspectorUtils.colorToRGBA(value);
+      color = "#" + ((rgba.r << 16) | (rgba.g << 8) | rgba.b).toString(16);
     } else if (value) {
-      this.console.warn(this.domBundle.formatStringFromName("ManifestInvalidCSSColor",
-                                                            [spec.property, value],
-                                                            2));
+      this.console.warn(
+        this.domBundle.formatStringFromName("ManifestInvalidCSSColor", [
+          spec.property,
+          value,
+        ])
+      );
     }
     return color;
-  }
+  },
+  extractLanguageValue(spec) {
+    let langTag;
+    const value = this.extractValue(spec);
+    if (value !== undefined) {
+      try {
+        langTag = Intl.getCanonicalLocales(value)[0];
+      } catch (err) {
+        console.warn(
+          this.domBundle.formatStringFromName("ManifestLangIsInvalid", [
+            spec.property,
+            value,
+          ])
+        );
+      }
+    }
+    return langTag;
+  },
 };
-var EXPORTED_SYMBOLS = ['ValueExtractor']; // jshint ignore:line
+var EXPORTED_SYMBOLS = ["ValueExtractor"]; // jshint ignore:line

@@ -29,75 +29,54 @@
 
 #if defined(_WIN32)
 
-#include <errno.h>
 #include <process.h>
 #include <stdlib.h>
 #include <windows.h>
 
-#include "config.h"
+#include "common/attributes.h"
+
 #include "src/thread.h"
 
-typedef struct dav1d_win32_thread_t {
-    HANDLE h;
-    void* param;
-    void*(*proc)(void*);
-    void* res;
-} dav1d_win32_thread_t;
-
-static unsigned __stdcall dav1d_thread_entrypoint(void* data) {
-    dav1d_win32_thread_t* t = data;
-    t->res = t->proc(t->param);
+static COLD unsigned __stdcall thread_entrypoint(void *const data) {
+    pthread_t *const t = data;
+    t->arg = t->func(t->arg);
     return 0;
 }
 
-int dav1d_pthread_create(pthread_t* thread, const pthread_attr_t* attr,
-                         void*(*proc)(void*), void* param)
+COLD int dav1d_pthread_create(pthread_t *const thread,
+                              const pthread_attr_t *const attr,
+                              void *(*const func)(void*), void *const arg)
 {
-    dav1d_win32_thread_t* th = *thread = malloc(sizeof(*th));
-    (void)attr;
-    if (th == NULL)
-        return ENOMEM;
-    th->proc = proc;
-    th->param = param;
-    uintptr_t h = _beginthreadex(NULL, 0, dav1d_thread_entrypoint, th, 0, NULL);
-    if ( h == 0 ) {
-        int err = errno;
-        free(th);
-        *thread = NULL;
-        return err;
-    }
-    th->h = (HANDLE)h;
-    return 0;
+    const unsigned stack_size = attr ? attr->stack_size : 0;
+    thread->func = func;
+    thread->arg = arg;
+    thread->h = (HANDLE)_beginthreadex(NULL, stack_size, thread_entrypoint, thread,
+                                       STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
+    return !thread->h;
 }
 
-void dav1d_pthread_join(pthread_t thread, void** res) {
-    dav1d_win32_thread_t* th = thread;
-    WaitForSingleObject(th->h, INFINITE);
+COLD int dav1d_pthread_join(pthread_t *const thread, void **const res) {
+    if (WaitForSingleObject(thread->h, INFINITE))
+        return 1;
 
-    if (res != NULL)
-        *res = th->res;
-    CloseHandle(th->h);
-    free(th);
+    if (res)
+        *res = thread->arg;
+
+    return !CloseHandle(thread->h);
 }
 
-int dav1d_pthread_once(pthread_once_t *once_control,
-                       void (*init_routine)(void))
+COLD int dav1d_pthread_once(pthread_once_t *const once_control,
+                            void (*const init_routine)(void))
 {
-    BOOL fPending = FALSE;
-    BOOL fStatus;
+    BOOL pending = FALSE;
 
-    fStatus = InitOnceBeginInitialize(once_control, 0, &fPending, NULL);
-    if (fStatus != TRUE)
-        return EINVAL;
+    if (InitOnceBeginInitialize(once_control, 0, &pending, NULL) != TRUE)
+        return 1;
 
-    if (fPending == TRUE)
+    if (pending == TRUE)
         init_routine();
 
-    fStatus = InitOnceComplete(once_control, 0, NULL);
-    if (!fStatus)
-        return EINVAL;
-
-    return 0;
+    return !InitOnceComplete(once_control, 0, NULL);
 }
 
 #endif

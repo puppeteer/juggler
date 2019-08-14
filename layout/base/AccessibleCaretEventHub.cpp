@@ -9,19 +9,20 @@
 #include "AccessibleCaretLogger.h"
 #include "AccessibleCaretManager.h"
 #include "Layers.h"
-#include "gfxPrefs.h"
+
 #include "mozilla/AutoRestore.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "nsCanvasFrame.h"
 #include "nsDocShell.h"
 #include "nsFocusManager.h"
 #include "nsFrameSelection.h"
-#include "nsIDocument.h"
 #include "nsITimer.h"
 #include "nsPresContext.h"
 
@@ -80,7 +81,7 @@ class AccessibleCaretEventHub::NoActionState
   }
 
   MOZ_CAN_RUN_SCRIPT
-  void OnSelectionChanged(AccessibleCaretEventHub* aContext, nsIDocument* aDoc,
+  void OnSelectionChanged(AccessibleCaretEventHub* aContext, Document* aDoc,
                           dom::Selection* aSel, int16_t aReason) override {
     aContext->mManager->OnSelectionChanged(aDoc, aSel, aReason);
   }
@@ -209,7 +210,7 @@ class AccessibleCaretEventHub::PressNoCaretState
   }
 
   MOZ_CAN_RUN_SCRIPT
-  void OnSelectionChanged(AccessibleCaretEventHub* aContext, nsIDocument* aDoc,
+  void OnSelectionChanged(AccessibleCaretEventHub* aContext, Document* aDoc,
                           dom::Selection* aSel, int16_t aReason) override {
     aContext->mManager->OnSelectionChanged(aDoc, aSel, aReason);
   }
@@ -320,7 +321,7 @@ MOZ_IMPL_STATE_CLASS_GETTER(PressNoCaretState)
 MOZ_IMPL_STATE_CLASS_GETTER(ScrollState)
 MOZ_IMPL_STATE_CLASS_GETTER(LongTapState)
 
-AccessibleCaretEventHub::AccessibleCaretEventHub(nsIPresShell* aPresShell)
+AccessibleCaretEventHub::AccessibleCaretEventHub(PresShell* aPresShell)
     : mPresShell(aPresShell) {}
 
 void AccessibleCaretEventHub::Init() {
@@ -427,7 +428,7 @@ nsEventStatus AccessibleCaretEventHub::HandleMouseEvent(
     WidgetMouseEvent* aEvent) {
   nsEventStatus rv = nsEventStatus_eIgnore;
 
-  if (aEvent->button != WidgetMouseEvent::eLeftButton) {
+  if (aEvent->mButton != MouseButton::eLeft) {
     return rv;
   }
 
@@ -441,7 +442,7 @@ nsEventStatus AccessibleCaretEventHub::HandleMouseEvent(
       aEvent->mMessage == eMouseLongTap) {
     // Don't reset the source on mouse movement since that can
     // happen anytime, even randomly during a touch sequence.
-    mManager->SetLastInputSource(aEvent->inputSource);
+    mManager->SetLastInputSource(aEvent->mInputSource);
   }
 
   switch (aEvent->mMessage) {
@@ -562,7 +563,7 @@ void AccessibleCaretEventHub::LaunchLongTapInjector() {
     return;
   }
 
-  int32_t longTapDelay = gfxPrefs::UiClickHoldContextMenusDelay();
+  int32_t longTapDelay = StaticPrefs::ui_click_hold_context_menus_delay();
   mLongTapInjectorTimer->InitWithNamedFuncCallback(
       FireLongTap, this, longTapDelay, nsITimer::TYPE_ONE_SHOT,
       "AccessibleCaretEventHub::LaunchLongTapInjector");
@@ -576,8 +577,9 @@ void AccessibleCaretEventHub::CancelLongTapInjector() {
   mLongTapInjectorTimer->Cancel();
 }
 
-/* static */ void AccessibleCaretEventHub::FireLongTap(
-    nsITimer* aTimer, void* aAccessibleCaretEventHub) {
+/* static */
+void AccessibleCaretEventHub::FireLongTap(nsITimer* aTimer,
+                                          void* aAccessibleCaretEventHub) {
   RefPtr<AccessibleCaretEventHub> self =
       static_cast<AccessibleCaretEventHub*>(aAccessibleCaretEventHub);
   self->mState->OnLongTap(self, self->mPressPoint);
@@ -644,7 +646,7 @@ void AccessibleCaretEventHub::ScrollPositionChanged() {
   mState->OnScrollPositionChanged(this);
 }
 
-void AccessibleCaretEventHub::OnSelectionChange(nsIDocument* aDoc,
+void AccessibleCaretEventHub::OnSelectionChange(Document* aDoc,
                                                 dom::Selection* aSel,
                                                 int16_t aReason) {
   if (!mInitialized) {

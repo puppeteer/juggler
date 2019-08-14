@@ -10,17 +10,24 @@ from __future__ import absolute_import, print_function, unicode_literals
 from taskgraph.transforms.task import taskref_or_string
 from taskgraph.transforms.job import run_job_using
 from taskgraph.util.schema import Schema
-from taskgraph.transforms.job.common import support_vcs_checkout
-from voluptuous import Required, Any
+from taskgraph.transforms.job.common import (
+        docker_worker_add_tooltool,
+        support_vcs_checkout
+)
+from voluptuous import Any, Optional, Required
 
 run_task_schema = Schema({
     Required('using'): 'run-task',
 
     # if true, add a cache at ~worker/.cache, which is where things like pip
     # tend to hide their caches.  This cache is never added for level-1 jobs.
+    # TODO Once bug 1526028 is fixed, this and 'use-caches' should be merged.
     Required('cache-dotcache'): bool,
 
-    # if true (the default), perform a checkout in {workdir}/checkouts/gecko
+    # Whether or not to use caches.
+    Optional('use-caches'): bool,
+
+    # if true (the default), perform a checkout of gecko on the worker
     Required('checkout'): bool,
 
     # The sparse checkout profile to use. Value is the filename relative to the
@@ -38,18 +45,30 @@ run_task_schema = Schema({
 
     # Base work directory used to set up the task.
     Required('workdir'): basestring,
+
+    # If not false, tooltool downloads will be enabled via relengAPIProxy
+    # for either just public files, or all files. Only supported on
+    # docker-worker.
+    Required('tooltool-downloads'): Any(
+        False,
+        'public',
+        'internal',
+    ),
+
+    # Whether to run as root. (defaults to False)
+    Optional('run-as-root'): bool,
 })
 
 
-def common_setup(config, job, taskdesc, command, geckodir):
+def common_setup(config, job, taskdesc, command):
     run = job['run']
     if run['checkout']:
         support_vcs_checkout(config, job, taskdesc,
                              sparse=bool(run['sparse-profile']))
-        command.append('--vcs-checkout={}'.format(geckodir))
+        command.append('--gecko-checkout={}'.format(taskdesc['worker']['env']['GECKO_PATH']))
 
     if run['sparse-profile']:
-        command.append('--sparse-profile=build/sparse-profiles/%s' %
+        command.append('--gecko-sparse-profile=build/sparse-profiles/%s' %
                        run['sparse-profile'])
 
     taskdesc['worker'].setdefault('env', {})['MOZ_SCM_LEVEL'] = config.params['level']
@@ -60,12 +79,16 @@ worker_defaults = {
     'checkout': True,
     'comm-checkout': False,
     'sparse-profile': None,
+    'tooltool-downloads': False,
+    'run-as-root': False,
 }
 
 
-def run_task_url(config):
-    return '{}/raw-file/{}/taskcluster/scripts/run-task'.format(
-                config.params['head_repository'], config.params['head_rev'])
+def script_url(config, script):
+    return '{}/raw-file/{}/taskcluster/scripts/{}'.format(
+                config.params['head_repository'],
+                config.params['head_rev'],
+                script)
 
 
 @run_job_using("docker-worker", "run-task", schema=run_task_schema, defaults=worker_defaults)
@@ -73,13 +96,16 @@ def docker_worker_run_task(config, job, taskdesc):
     run = job['run']
     worker = taskdesc['worker'] = job['worker']
     command = ['/builds/worker/bin/run-task']
-    common_setup(config, job, taskdesc, command,
-                 geckodir='{workdir}/checkouts/gecko'.format(**run))
+    common_setup(config, job, taskdesc, command)
+
+    if run['tooltool-downloads']:
+        internal = run['tooltool-downloads'] == 'internal'
+        docker_worker_add_tooltool(config, job, taskdesc, internal=internal)
 
     if run.get('cache-dotcache'):
         worker['caches'].append({
             'type': 'persistent',
-            'name': 'level-{level}-{project}-dotcache'.format(**config.params),
+            'name': '{project}-dotcache'.format(**config.params),
             'mount-point': '{workdir}/.cache'.format(**run),
             'skip-untrusted': True,
         })
@@ -89,29 +115,11 @@ def docker_worker_run_task(config, job, taskdesc):
     if isinstance(run_command, (basestring, dict)):
         run_command = ['bash', '-cx', run_command]
     if run['comm-checkout']:
-        command.append('--comm-checkout={workdir}/checkouts/gecko/comm'.format(**run))
+        command.append('--comm-checkout={}/comm'.format(
+            taskdesc['worker']['env']['GECKO_PATH']))
     command.append('--fetch-hgfingerprint')
-    command.append('--')
-    command.extend(run_command)
-    worker['command'] = command
-
-
-@run_job_using("native-engine", "run-task", schema=run_task_schema, defaults=worker_defaults)
-def native_engine_run_task(config, job, taskdesc):
-    run = job['run']
-    worker = taskdesc['worker'] = job['worker']
-    command = ['./run-task']
-    common_setup(config, job, taskdesc, command,
-                 geckodir='{workdir}/checkouts/gecko'.format(**run))
-
-    worker['context'] = run_task_url(config)
-
-    if run.get('cache-dotcache'):
-        raise Exception("No cache support on native-worker; can't use cache-dotcache")
-
-    run_command = run['command']
-    if isinstance(run_command, basestring):
-        run_command = ['bash', '-cx', run_command]
+    if run['run-as-root']:
+        command.extend(('--user', 'root', '--group', 'root'))
     command.append('--')
     command.extend(run_command)
     worker['command'] = command
@@ -122,28 +130,39 @@ def generic_worker_run_task(config, job, taskdesc):
     run = job['run']
     worker = taskdesc['worker'] = job['worker']
     is_win = worker['os'] == 'windows'
+    is_mac = worker['os'] == 'macosx'
+    is_bitbar = worker['os'] == 'linux-bitbar'
 
     if is_win:
         command = ['C:/mozilla-build/python3/python3.exe', 'run-task']
-        geckodir = './build/src'
+    elif is_mac:
+        command = ['/tools/python37/bin/python3.7', 'run-task']
+        if job['worker-type'].endswith('1014'):
+            command = ['/usr/local/bin/python3', 'run-task']
     else:
         command = ['./run-task']
-        geckodir = '{workdir}/checkouts/gecko'.format(**run)
 
-    common_setup(config, job, taskdesc, command, geckodir=geckodir)
+    common_setup(config, job, taskdesc, command)
 
     worker.setdefault('mounts', [])
     if run.get('cache-dotcache'):
         worker['mounts'].append({
-            'cache-name': 'level-{level}-{project}-dotcache'.format(**config.params),
+            'cache-name': '{project}-dotcache'.format(**config.params),
             'directory': '{workdir}/.cache'.format(**run),
         })
     worker['mounts'].append({
         'content': {
-            'url': run_task_url(config),
+            'url': script_url(config, 'run-task'),
         },
         'file': './run-task',
     })
+    if worker.get('env', {}).get('MOZ_FETCHES'):
+        worker['mounts'].append({
+            'content': {
+                'url': script_url(config, 'misc/fetch-content'),
+            },
+            'file': './fetch-content',
+        })
 
     run_command = run['command']
     if isinstance(run_command, basestring):
@@ -151,7 +170,13 @@ def generic_worker_run_task(config, job, taskdesc):
             run_command = '"{}"'.format(run_command)
         run_command = ['bash', '-cx', run_command]
 
+    if run['run-as-root']:
+        command.extend(('--user', 'root', '--group', 'root'))
     command.append('--')
+    if is_bitbar:
+        # Use the bitbar wrapper script which sets up the device and adb
+        # environment variables
+        command.append('/builds/taskcluster/script.py')
     command.extend(run_command)
 
     if is_win:

@@ -43,8 +43,8 @@
 #include <algorithm>
 
 #ifdef MOZ_XUL
-#include "nsIAutoCompleteInput.h"
-#include "nsIAutoCompletePopup.h"
+#  include "nsIAutoCompleteInput.h"
+#  include "nsIAutoCompletePopup.h"
 #endif
 
 using namespace mozilla;
@@ -143,7 +143,7 @@ using namespace mozilla::places;
 
 // Observed topics.
 #ifdef MOZ_XUL
-#define TOPIC_AUTOCOMPLETE_FEEDBACK_INCOMING "autocomplete-will-enter-text"
+#  define TOPIC_AUTOCOMPLETE_FEEDBACK_INCOMING "autocomplete-will-enter-text"
 #endif
 #define TOPIC_IDLE_DAILY "idle-daily"
 #define TOPIC_PREF_CHANGED "nsPref:changed"
@@ -931,8 +931,7 @@ nsNavHistory::CanAddURI(nsIURI* aURI, bool* canAdd) {
       scheme.EqualsLiteral("imap") || scheme.EqualsLiteral("javascript") ||
       scheme.EqualsLiteral("mailbox") || scheme.EqualsLiteral("moz-anno") ||
       scheme.EqualsLiteral("news") || scheme.EqualsLiteral("page-icon") ||
-      scheme.EqualsLiteral("resource") || scheme.EqualsLiteral("view-source") ||
-      scheme.EqualsLiteral("wyciwyg")) {
+      scheme.EqualsLiteral("resource") || scheme.EqualsLiteral("view-source")) {
     return NS_OK;
   }
   *canAdd = true;
@@ -1620,7 +1619,7 @@ nsresult PlacesSQLQueryBuilder::SelectAsRoots() {
           "null, null, 0, 0, null, null, null, null, 'menu_______v', null), "
           "(null, 'place:parent=" UNFILED_ROOT_GUID
           "', :OtherBookmarksFolderTitle, null, null, null, "
-          "null, null, 0, 0, null, null, null, null, 'unfiled___v', null) ") +
+          "null, null, 0, 0, null, null, null, null, 'unfiled____v', null) ") +
       mobileString + NS_LITERAL_CSTRING(")");
 
   return NS_OK;
@@ -2026,13 +2025,9 @@ nsNavHistory::RemoveObserver(nsINavHistoryObserver* aObserver) {
 }
 
 NS_IMETHODIMP
-nsNavHistory::GetObservers(uint32_t* _count,
-                           nsINavHistoryObserver*** _observers) {
-  NS_ENSURE_ARG_POINTER(_count);
-  NS_ENSURE_ARG_POINTER(_observers);
-
-  *_count = 0;
-  *_observers = nullptr;
+nsNavHistory::GetObservers(
+    nsTArray<RefPtr<nsINavHistoryObserver>>& aObservers) {
+  aObservers.Clear();
 
   // Clear any cached value, cause it's very likely the consumer has made
   // changes to history and is now trying to notify them.
@@ -2040,20 +2035,15 @@ nsNavHistory::GetObservers(uint32_t* _count,
 
   if (!mCanNotify) return NS_OK;
 
-  nsCOMArray<nsINavHistoryObserver> observers;
-
   // Then add the other observers.
   for (uint32_t i = 0; i < mObservers.Length(); ++i) {
-    const nsCOMPtr<nsINavHistoryObserver>& observer =
+    nsCOMPtr<nsINavHistoryObserver> observer =
         mObservers.ElementAt(i).GetValue();
     // Skip nullified weak observers.
-    if (observer) observers.AppendElement(observer);
+    if (observer) {
+      aObservers.AppendElement(observer.forget());
+    }
   }
-
-  if (observers.Count() == 0) return NS_OK;
-
-  *_count = observers.Count();
-  observers.Forget(_observers);
 
   return NS_OK;
 }
@@ -2274,7 +2264,17 @@ nsNavHistory::Observe(nsISupports* aSubject, const char* aTopic,
 
     nsCOMPtr<nsIAutoCompletePopup> popup;
     input->GetPopup(getter_AddRefs(popup));
-    if (!popup) return NS_OK;
+    if (!popup) {
+      nsCOMPtr<Element> popupEl;
+      input->GetPopupElement(getter_AddRefs(popupEl));
+      if (!popupEl) {
+        return NS_OK;
+      }
+      popup = popupEl->AsAutoCompletePopup();
+      if (!popup) {
+        return NS_OK;
+      }
+    }
 
     nsCOMPtr<nsIAutoCompleteController> controller;
     input->GetController(getter_AddRefs(controller));
@@ -2301,13 +2301,14 @@ nsNavHistory::Observe(nsISupports* aSubject, const char* aTopic,
   }
 
   else if (strcmp(aTopic, TOPIC_IDLE_DAILY) == 0) {
-    (void)FixAndDecayFrecency();
+    (void)DecayFrecency();
   }
 
   return NS_OK;
 }
 
-nsresult nsNavHistory::FixAndDecayFrecency() {
+NS_IMETHODIMP
+nsNavHistory::DecayFrecency() {
   float decayRate =
       Preferences::GetFloat(PREF_FREC_DECAY_RATE, PREF_FREC_DECAY_RATE_DEF);
   if (decayRate > 1.0f) {
@@ -2643,8 +2644,9 @@ nsresult nsNavHistory::BindQueryClauseParameters(
   if (tags.Length() > 0) {
     for (uint32_t i = 0; i < tags.Length(); ++i) {
       nsPrintfCString paramName("tag%d_", i);
-      NS_ConvertUTF16toUTF8 tag(tags[i]);
-      ToLowerCase(tag);
+      nsString utf16Tag = tags[i];
+      ToLowerCase(utf16Tag);
+      NS_ConvertUTF16toUTF8 tag(utf16Tag);
       rv = statement->BindUTF8StringByName(paramName, tag);
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -3287,11 +3289,10 @@ void nsNavHistory::GetAgeInDaysString(int32_t aInt, const char* aName,
                                       nsACString& aResult) {
   nsIStringBundle* bundle = GetBundle();
   if (bundle) {
-    nsAutoString intString;
-    intString.AppendInt(aInt);
-    const char16_t* strings[1] = {intString.get()};
+    AutoTArray<nsString, 1> strings;
+    strings.AppendElement()->AppendInt(aInt);
     nsAutoString value;
-    nsresult rv = bundle->FormatStringFromName(aName, strings, 1, value);
+    nsresult rv = bundle->FormatStringFromName(aName, strings, value);
     if (NS_SUCCEEDED(rv)) {
       CopyUTF16toUTF8(value, aResult);
       return;
@@ -3439,11 +3440,12 @@ nsresult nsNavHistory::UpdateFrecency(int64_t aPlaceId) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  mozIStorageBaseStatement* stmts[] = {updateFrecencyStmt.get(),
-                                       updateHiddenStmt.get()};
+  nsTArray<RefPtr<mozIStorageBaseStatement>> stmts = {
+      updateFrecencyStmt.forget(),
+      updateHiddenStmt.forget(),
+  };
   nsCOMPtr<mozIStoragePendingStatement> ps;
-  rv = conn->ExecuteAsync(stmts, ArrayLength(stmts), nullptr,
-                          getter_AddRefs(ps));
+  rv = conn->ExecuteAsync(stmts, nullptr, getter_AddRefs(ps));
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Trigger frecency updates for all affected origins.

@@ -4,7 +4,10 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createFactory,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
 const FontPropertyValue = createFactory(require("./FontPropertyValue"));
@@ -15,6 +18,7 @@ const { getUnitFromValue, getStepForUnit } = require("../utils/font-utils");
 class FontSize extends PureComponent {
   static get propTypes() {
     return {
+      disabled: PropTypes.bool.isRequired,
       onChange: PropTypes.func.isRequired,
       value: PropTypes.string.isRequired,
     };
@@ -58,7 +62,8 @@ class FontSize extends PureComponent {
       : max;
 
     return FontPropertyValue({
-      autoIncrement: true,
+      allowOverflow: true,
+      disabled: this.props.disabled,
       label: getStr("fontinspector.fontSizeLabel"),
       min: 0,
       max: this.historicMax[unit],

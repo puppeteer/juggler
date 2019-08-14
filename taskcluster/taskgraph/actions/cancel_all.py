@@ -9,38 +9,21 @@ from __future__ import absolute_import, print_function, unicode_literals
 import concurrent.futures as futures
 import logging
 import os
+import requests
 
-from taskgraph.util.taskcluster import get_session, cancel_task
+from taskgraph.util.taskcluster import (
+    list_task_group_incomplete_tasks,
+    cancel_task,
+    CONCURRENCY,
+)
 from .registry import register_callback_action
 
-# the maximum number of parallel cancelTask calls to make
-CONCURRENCY = 50
-
-base_url = 'https://queue.taskcluster.net/v1/{}'
-
 logger = logging.getLogger(__name__)
-
-
-def list_group(task_group_id, session):
-    params = {}
-    while True:
-        url = base_url.format('task-group/{}/list'.format(task_group_id))
-        response = session.get(url, stream=True, params=params)
-        response.raise_for_status()
-        response = response.json()
-        for task in [t['status'] for t in response['tasks']]:
-            if task['state'] in ['running', 'pending', 'unscheduled']:
-                yield task['taskId']
-        if response.get('continuationToken'):
-            params = {'continuationToken': response.get('continuationToken')}
-        else:
-            break
 
 
 @register_callback_action(
     title='Cancel All',
     name='cancel-all',
-    kind='hook',
     generic=True,
     symbol='cAll',
     description=(
@@ -50,13 +33,25 @@ def list_group(task_group_id, session):
     order=400,
     context=[]
 )
-def cancel_all_action(parameters, graph_config, input, task_group_id, task_id, task):
-    session = get_session()
+def cancel_all_action(parameters, graph_config, input, task_group_id, task_id):
+    def do_cancel_task(task_id):
+        logger.info('Cancelling task {}'.format(task_id))
+        try:
+            cancel_task(task_id, use_proxy=True)
+        except requests.HTTPError as e:
+            if e.response.status_code == 409:
+                # A 409 response indicates that this task is past its deadline.  It
+                # cannot be cancelled at this time, but it's also not running
+                # anymore, so we can ignore this error.
+                logger.info(
+                    'Task {} is past its deadline and cannot be cancelled.'.format(task_id))
+                return
+            raise
+
     own_task_id = os.environ.get('TASK_ID', '')
+    to_cancel = [t for t in list_task_group_incomplete_tasks(task_group_id) if t != own_task_id]
+    logger.info("Cancelling {} tasks".format(len(to_cancel)))
     with futures.ThreadPoolExecutor(CONCURRENCY) as e:
-        cancels_jobs = [
-            e.submit(cancel_task, t, use_proxy=True)
-            for t in list_group(task_group_id, session) if t != own_task_id
-        ]
-        for job in cancels_jobs:
-            job.result()
+        cancel_futs = [e.submit(do_cancel_task, t) for t in to_cancel]
+        for f in futures.as_completed(cancel_futs):
+            f.result()

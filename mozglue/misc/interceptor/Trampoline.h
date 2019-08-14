@@ -9,8 +9,10 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/CheckedInt.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Types.h"
+#include "mozilla/WindowsProcessMitigations.h"
 
 namespace mozilla {
 namespace interceptor {
@@ -28,8 +30,11 @@ class MOZ_STACK_CLASS Trampoline final {
         mExeOffset(0),
         mMaxOffset(aChunkSize),
         mAccumulatedStatus(true) {
-    ::VirtualProtect(aLocalBase, aChunkSize, MMPolicy::GetTrampWriteProtFlags(),
-                     &mPrevLocalProt);
+    if (!::VirtualProtect(aLocalBase, aChunkSize,
+                          MMPolicy::GetTrampWriteProtFlags(),
+                          &mPrevLocalProt)) {
+      mPrevLocalProt = 0;
+    }
   }
 
   Trampoline(Trampoline&& aOther)
@@ -57,21 +62,128 @@ class MOZ_STACK_CLASS Trampoline final {
 
   Trampoline(const Trampoline&) = delete;
   Trampoline& operator=(const Trampoline&) = delete;
-  Trampoline&& operator=(Trampoline&&) = delete;
 
-  ~Trampoline() {
-    if (!mLocalBase || !mPrevLocalProt) {
+  Trampoline& operator=(Trampoline&& aOther) {
+    Clear();
+
+    mMMPolicy = aOther.mMMPolicy;
+    mPrevLocalProt = aOther.mPrevLocalProt;
+    mLocalBase = aOther.mLocalBase;
+    mRemoteBase = aOther.mRemoteBase;
+    mOffset = aOther.mOffset;
+    mExeOffset = aOther.mExeOffset;
+    mMaxOffset = aOther.mMaxOffset;
+    mAccumulatedStatus = aOther.mAccumulatedStatus;
+
+    aOther.mPrevLocalProt = 0;
+    aOther.mAccumulatedStatus = false;
+
+    return *this;
+  }
+
+  ~Trampoline() { Clear(); }
+
+  explicit operator bool() const {
+    return IsNull() ||
+           (mLocalBase && mRemoteBase && mPrevLocalProt && mAccumulatedStatus);
+  }
+
+  bool IsNull() const { return !mMMPolicy; }
+
+#if defined(_M_ARM64)
+
+  void WriteInstruction(uint32_t aInstruction) {
+    const uint32_t kDelta = sizeof(uint32_t);
+
+    if (!mMMPolicy) {
+      // Null tramp, just track offset
+      mOffset += kDelta;
       return;
     }
 
-    ::VirtualProtect(mLocalBase, mMaxOffset, mPrevLocalProt, &mPrevLocalProt);
+    if (mOffset + kDelta > mMaxOffset) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    *reinterpret_cast<uint32_t*>(mLocalBase + mOffset) = aInstruction;
+    mOffset += kDelta;
   }
 
-  explicit operator bool() const {
-    return mLocalBase && mRemoteBase && mPrevLocalProt && mAccumulatedStatus;
+  void WriteLoadLiteral(const uintptr_t aAddress, const uint8_t aReg) {
+    const uint32_t kDelta = sizeof(uint32_t) + sizeof(uintptr_t);
+
+    if (!mMMPolicy) {
+      // Null tramp, just track offset
+      mOffset += kDelta;
+      return;
+    }
+
+    // We grow the literal pool from the *end* of the tramp,
+    // so we need to ensure that there is enough room for both an instruction
+    // and a pointer
+    if (mOffset + kDelta > mMaxOffset) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    mMaxOffset -= sizeof(uintptr_t);
+    *reinterpret_cast<uintptr_t*>(mLocalBase + mMaxOffset) = aAddress;
+
+    CheckedInt<intptr_t> pc(GetCurrentRemoteAddress());
+    if (!pc.isValid()) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    CheckedInt<intptr_t> literal(reinterpret_cast<uintptr_t>(mLocalBase) +
+                                 mMaxOffset);
+    if (!literal.isValid()) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    CheckedInt<intptr_t> ptrOffset = (literal - pc);
+    if (!ptrOffset.isValid()) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    // ptrOffset must be properly aligned
+    MOZ_ASSERT((ptrOffset.value() % 4) == 0);
+    ptrOffset /= 4;
+
+    CheckedInt<int32_t> offset(ptrOffset.value());
+    if (!offset.isValid()) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    // Ensure that offset falls within the range of a signed 19-bit value
+    if (offset.value() < -0x40000 || offset.value() > 0x3FFFF) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    const int32_t kimm19Mask = 0x7FFFF;
+    int32_t masked = offset.value() & kimm19Mask;
+
+    MOZ_ASSERT(aReg < 32);
+    uint32_t loadInstr = 0x58000000 | (masked << 5) | aReg;
+    WriteInstruction(loadInstr);
   }
+
+#else
 
   void WriteByte(uint8_t aValue) {
+    const uint32_t kDelta = sizeof(uint8_t);
+
+    if (!mMMPolicy) {
+      // Null tramp, just track offset
+      mOffset += kDelta;
+      return;
+    }
+
     if (mOffset >= mMaxOffset) {
       mAccumulatedStatus = false;
       return;
@@ -82,23 +194,73 @@ class MOZ_STACK_CLASS Trampoline final {
   }
 
   void WriteInteger(int32_t aValue) {
-    if (mOffset + sizeof(int32_t) > mMaxOffset) {
+    const uint32_t kDelta = sizeof(int32_t);
+
+    if (!mMMPolicy) {
+      // Null tramp, just track offset
+      mOffset += kDelta;
+      return;
+    }
+
+    if (mOffset + kDelta > mMaxOffset) {
       mAccumulatedStatus = false;
       return;
     }
 
     *reinterpret_cast<int32_t*>(mLocalBase + mOffset) = aValue;
-    mOffset += sizeof(int32_t);
+    mOffset += kDelta;
   }
 
+  void WriteDisp32(uintptr_t aAbsTarget) {
+    const uint32_t kDelta = sizeof(int32_t);
+
+    if (!mMMPolicy) {
+      // Null tramp, just track offset
+      mOffset += kDelta;
+      return;
+    }
+
+    if (mOffset + kDelta > mMaxOffset) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    // This needs to be computed from the remote location
+    intptr_t remoteTrampPosition = static_cast<intptr_t>(mRemoteBase + mOffset);
+
+    intptr_t diff =
+        static_cast<intptr_t>(aAbsTarget) - (remoteTrampPosition + kDelta);
+
+    CheckedInt<int32_t> checkedDisp(diff);
+    MOZ_ASSERT(checkedDisp.isValid());
+    if (!checkedDisp.isValid()) {
+      mAccumulatedStatus = false;
+      return;
+    }
+
+    int32_t disp = checkedDisp.value();
+    *reinterpret_cast<int32_t*>(mLocalBase + mOffset) = disp;
+    mOffset += kDelta;
+  }
+
+#endif
+
   void WritePointer(uintptr_t aValue) {
-    if (mOffset + sizeof(uintptr_t) > mMaxOffset) {
+    const uint32_t kDelta = sizeof(uintptr_t);
+
+    if (!mMMPolicy) {
+      // Null tramp, just track offset
+      mOffset += kDelta;
+      return;
+    }
+
+    if (mOffset + kDelta > mMaxOffset) {
       mAccumulatedStatus = false;
       return;
     }
 
     *reinterpret_cast<uintptr_t*>(mLocalBase + mOffset) = aValue;
-    mOffset += sizeof(uintptr_t);
+    mOffset += kDelta;
   }
 
   void WriteEncodedPointer(void* aValue) {
@@ -126,30 +288,6 @@ class MOZ_STACK_CLASS Trampoline final {
     return Some(ReadOnlyTargetFunction<MMPolicy>::DecodePtr(encoded.value()));
   }
 
-  void WriteDisp32(uintptr_t aAbsTarget) {
-    if (mOffset + sizeof(int32_t) > mMaxOffset) {
-      mAccumulatedStatus = false;
-      return;
-    }
-
-    // This needs to be computed from the remote location
-    intptr_t remoteTrampPosition = static_cast<intptr_t>(mRemoteBase + mOffset);
-
-    intptr_t diff = static_cast<intptr_t>(aAbsTarget) -
-                    (remoteTrampPosition + sizeof(int32_t));
-
-    CheckedInt<int32_t> checkedDisp(diff);
-    MOZ_ASSERT(checkedDisp.isValid());
-    if (!checkedDisp.isValid()) {
-      mAccumulatedStatus = false;
-      return;
-    }
-
-    int32_t disp = checkedDisp.value();
-    *reinterpret_cast<int32_t*>(mLocalBase + mOffset) = disp;
-    mOffset += sizeof(int32_t);
-  }
-
 #if defined(_M_IX86)
   // 32-bit only
   void AdjustDisp32AtOffset(uint32_t aOffset, uintptr_t aAbsTarget) {
@@ -167,6 +305,12 @@ class MOZ_STACK_CLASS Trampoline final {
 #endif  // defined(_M_IX86)
 
   void CopyFrom(uintptr_t aOrigBytes, uint32_t aNumBytes) {
+    if (!mMMPolicy) {
+      // Null tramp, just track offset
+      mOffset += aNumBytes;
+      return;
+    }
+
     if (!mMMPolicy || mOffset + aNumBytes > mMaxOffset) {
       mAccumulatedStatus = false;
       return;
@@ -191,7 +335,7 @@ class MOZ_STACK_CLASS Trampoline final {
   }
 
   void* EndExecutableCode() const {
-    if (!mAccumulatedStatus) {
+    if (!mAccumulatedStatus || !mMMPolicy) {
       return nullptr;
     }
 
@@ -200,6 +344,8 @@ class MOZ_STACK_CLASS Trampoline final {
     return reinterpret_cast<void*>(mRemoteBase + mExeOffset);
   }
 
+  uint32_t GetCurrentExecutableCodeLen() const { return mOffset - mExeOffset; }
+
   Trampoline<MMPolicy>& operator--() {
     MOZ_ASSERT(mOffset);
     --mOffset;
@@ -207,13 +353,29 @@ class MOZ_STACK_CLASS Trampoline final {
   }
 
  private:
+  void Clear() {
+    if (!mLocalBase || !mPrevLocalProt) {
+      return;
+    }
+
+    DebugOnly<bool> ok = !!::VirtualProtect(mLocalBase, mMaxOffset,
+                                            mPrevLocalProt, &mPrevLocalProt);
+    MOZ_ASSERT(ok);
+
+    mLocalBase = nullptr;
+    mRemoteBase = 0;
+    mPrevLocalProt = 0;
+    mAccumulatedStatus = false;
+  }
+
+ private:
   const MMPolicy* mMMPolicy;
   DWORD mPrevLocalProt;
-  uint8_t* const mLocalBase;
-  const uintptr_t mRemoteBase;
+  uint8_t* mLocalBase;
+  uintptr_t mRemoteBase;
   uint32_t mOffset;
   uint32_t mExeOffset;
-  const uint32_t mMaxOffset;
+  uint32_t mMaxOffset;
   bool mAccumulatedStatus;
 };
 
@@ -273,9 +435,18 @@ class MOZ_STACK_CLASS TrampolineCollection final {
       return;
     }
 
-    DebugOnly<BOOL> ok = mMMPolicy.Protect(aLocalBase, aNumTramps * aTrampSize,
-                                           PAGE_EXECUTE_READWRITE, &mPrevProt);
-    MOZ_ASSERT(ok);
+    BOOL ok = mMMPolicy.Protect(aLocalBase, aNumTramps * aTrampSize,
+                                PAGE_EXECUTE_READWRITE, &mPrevProt);
+    if (!ok) {
+      // When destroying a sandboxed process that uses
+      // MITIGATION_DYNAMIC_CODE_DISABLE, we won't be allowed to write to our
+      // executable memory so we just do nothing.  If we fail to get access
+      // to memory for any other reason, we still don't want to crash but we
+      // do assert.
+      MOZ_ASSERT(IsDynamicCodeDisabled());
+      mNumTramps = 0;
+      mPrevProt = 0;
+    }
   }
 
   ~TrampolineCollection() {
@@ -333,7 +504,7 @@ class MOZ_STACK_CLASS TrampolineCollection final {
   uint8_t* const mLocalBase;
   const uintptr_t mRemoteBase;
   const uint32_t mTrampSize;
-  const uint32_t mNumTramps;
+  uint32_t mNumTramps;
   uint32_t mPrevProt;
   CRITICAL_SECTION* mCS;
 

@@ -89,7 +89,7 @@ class UploadLastDir final : public nsIObserver, public nsSupportsWeakReference {
    * @param aFpCallback   the callback object to be run when the file is shown.
    */
   nsresult FetchDirectoryAndDisplayPicker(
-      nsIDocument* aDoc, nsIFilePicker* aFilePicker,
+      Document* aDoc, nsIFilePicker* aFilePicker,
       nsIFilePickerShownCallback* aFpCallback);
 
   /**
@@ -98,7 +98,7 @@ class UploadLastDir final : public nsIObserver, public nsSupportsWeakReference {
    * @param aURI URI of the current page
    * @param aDir Parent directory of the file(s)/directory chosen by the user
    */
-  nsresult StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aDir);
+  nsresult StoreLastUsedDirectory(Document* aDoc, nsIFile* aDir);
 
   class ContentPrefCallback final : public nsIContentPrefCallback2 {
     virtual ~ContentPrefCallback() {}
@@ -144,7 +144,8 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   virtual int32_t TabIndexDefault() override;
   using nsGenericHTMLElement::Focus;
   virtual void Blur(ErrorResult& aError) override;
-  virtual void Focus(ErrorResult& aError) override;
+  virtual void Focus(const FocusOptions& aOptions,
+                     ErrorResult& aError) override;
 
   // nsINode
 #if !defined(ANDROID) && !defined(XP_MACOSX)
@@ -199,10 +200,8 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   MOZ_CAN_RUN_SCRIPT
   void SetValueOfRangeForUserEvent(Decimal aValue);
 
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent) override;
-  virtual void UnbindFromTree(bool aDeep = true,
-                              bool aNullParent = true) override;
+  virtual nsresult BindToTree(BindContext&, nsINode& aParent) override;
+  virtual void UnbindFromTree(bool aNullParent = true) override;
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual void DoneCreatingElement() override;
@@ -244,8 +243,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   NS_IMETHOD_(bool) GetPlaceholderVisibility() override;
   NS_IMETHOD_(bool) GetPreviewVisibility() override;
   NS_IMETHOD_(void) InitializeKeyboardEventListeners() override;
-  NS_IMETHOD_(void)
-  OnValueChanged(bool aNotify, bool aWasInteractiveUserChange) override;
+  NS_IMETHOD_(void) OnValueChanged(bool aNotify, ValueChangeKind) override;
   virtual void GetValueFromSetRangeText(nsAString& aValue) override;
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual nsresult SetValueFromSetRangeText(const nsAString& aValue) override;
@@ -346,6 +344,15 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   // as needed.  aNotify controls whether the element state update
   // needs to notify.
   void UpdateAllValidityStates(bool aNotify);
+  MOZ_CAN_RUN_SCRIPT
+  void MaybeUpdateAllValidityStates(bool aNotify) {
+    // If you need to add new type which supports validationMessage, you should
+    // add test cases into test_MozEditableElement_setUserInput.html.
+    if (mType == NS_FORM_INPUT_EMAIL) {
+      UpdateAllValidityStates(aNotify);
+    }
+  }
+
   // Update all our validity states without updating element state.
   // This should be called instead of UpdateAllValidityStates any time
   // we're guaranteed that element state will be updated anyway.
@@ -405,7 +412,9 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   void UpdateValidityUIBits(bool aIsFocused);
 
   /**
-   * Fires change event if mFocusedValue and current value held are unequal.
+   * Fires change event if mFocusedValue and current value held are unequal and
+   * if a change event may be fired on bluring.
+   * Sets mFocusedValue to value, if a change event is fired.
    */
   void FireChangeEventIfNeeded();
 
@@ -748,16 +757,8 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   void GetDateTimeInputBoxValue(DateTimeValue& aValue);
 
   /*
-   * This locates the inner datetimebox UA Widget element and only the
-   * UA Widget
-   * element. This should fold into GetDateTimeBoxElement() when the XBL binding is removed.
-   */
-  Element* GetDateTimeBoxElementInUAWidget();
-
-  /*
    * This allows chrome JavaScript to dispatch event to the inner datetimebox
-   * anonymous or UA Widget element and access nsIDateTimeInputArea
-   * implementation.
+   * anonymous or UA Widget element.
    */
   Element* GetDateTimeBoxElement();
 
@@ -854,6 +855,8 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
    * Required() returns true whenever @required attribute is set.
    */
   bool IsRequired() const { return State().HasState(NS_EVENT_STATE_REQUIRED); }
+
+  bool HasBeenTypePassword() { return mHasBeenTypePassword; }
 
  protected:
   virtual ~HTMLInputElement();
@@ -1012,7 +1015,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
    * MaybeSubmitForm looks for a submit input or a single text control
    * and submits the form if either is present.
    */
-  nsresult MaybeSubmitForm(nsPresContext* aPresContext);
+  MOZ_CAN_RUN_SCRIPT nsresult MaybeSubmitForm(nsPresContext* aPresContext);
 
   /**
    * Update mFileList with the currently selected file.
@@ -1464,7 +1467,8 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
    * when the element is either changed through a script, focused or dispatches
    * a change event. This is to ensure correct future change event firing.
    * NB: This is ONLY applicable where the element is a text control. ie,
-   * where type= "text", "email", "search", "tel", "url" or "password".
+   * where type= "date", "time", "text", "email", "search", "tel", "url" or
+   * "password".
    */
   nsString mFocusedValue;
 
@@ -1559,6 +1563,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   bool mPickerRunning : 1;
   bool mSelectionCached : 1;
   bool mIsPreviewEnabled : 1;
+  bool mHasBeenTypePassword : 1;
   bool mHasPatternAttribute : 1;
 
  private:
@@ -1593,28 +1598,10 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   static bool IsDateTimeTypeSupported(uint8_t aDateTimeInputType);
 
   /**
-   * Checks preference "dom.webkitBlink.filesystem.enabled" to determine if
-   * webkitEntries should be supported.
-   */
-  static bool IsWebkitFileSystemEnabled();
-
-  /**
-   * Checks preference "dom.input.dirpicker" to determine if file and directory
-   * entries API should be supported.
-   */
-  static bool IsDirPickerEnabled();
-
-  /**
    * Checks preference "dom.experimental_forms" to determine if experimental
    * implementation of input element should be enabled.
    */
   static bool IsExperimentalFormsEnabled();
-
-  /**
-   * Checks preference "dom.forms.datetime" to determine if input date and time
-   * should be supported.
-   */
-  static bool IsInputDateTimeEnabled();
 
   /**
    * Checks preference "dom.forms.datetime.others" to determine if input week,

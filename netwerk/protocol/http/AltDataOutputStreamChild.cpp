@@ -1,6 +1,13 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 #include "mozilla/net/AltDataOutputStreamChild.h"
 #include "mozilla/Unused.h"
 #include "nsIInputStream.h"
+#include "nsStreamUtils.h"
 
 namespace mozilla {
 namespace net {
@@ -30,12 +37,13 @@ NS_IMETHODIMP_(MozExternalRefCountType) AltDataOutputStreamChild::Release() {
 }
 
 NS_INTERFACE_MAP_BEGIN(AltDataOutputStreamChild)
+  NS_INTERFACE_MAP_ENTRY(nsIAsyncOutputStream)
   NS_INTERFACE_MAP_ENTRY(nsIOutputStream)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 AltDataOutputStreamChild::AltDataOutputStreamChild()
-    : mIPCOpen(false), mError(NS_OK) {
+    : mIPCOpen(false), mError(NS_OK), mCallbackFlags(0) {
   MOZ_ASSERT(NS_IsMainThread(), "Main thread only");
 }
 
@@ -48,11 +56,16 @@ void AltDataOutputStreamChild::AddIPDLReference() {
 void AltDataOutputStreamChild::ReleaseIPDLReference() {
   MOZ_ASSERT(mIPCOpen, "Attempt to release nonexistent IPDL reference");
   mIPCOpen = false;
+
+  if (mCallback) {
+    NotifyListener();
+  }
+
   Release();
 }
 
 bool AltDataOutputStreamChild::WriteDataInChunks(
-    const nsDependentCSubstring &data) {
+    const nsDependentCSubstring& data) {
   const uint32_t kChunkSize = 128 * 1024;
   uint32_t next = std::min(data.Length(), kChunkSize);
   for (uint32_t i = 0; i < data.Length();
@@ -67,16 +80,7 @@ bool AltDataOutputStreamChild::WriteDataInChunks(
 }
 
 NS_IMETHODIMP
-AltDataOutputStreamChild::Close() {
-  if (!mIPCOpen) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-  if (NS_FAILED(mError)) {
-    return mError;
-  }
-  Unused << SendClose();
-  return NS_OK;
-}
+AltDataOutputStreamChild::Close() { return CloseWithStatus(NS_OK); }
 
 NS_IMETHODIMP
 AltDataOutputStreamChild::Flush() {
@@ -92,8 +96,8 @@ AltDataOutputStreamChild::Flush() {
 }
 
 NS_IMETHODIMP
-AltDataOutputStreamChild::Write(const char *aBuf, uint32_t aCount,
-                                uint32_t *_retval) {
+AltDataOutputStreamChild::Write(const char* aBuf, uint32_t aCount,
+                                uint32_t* _retval) {
   if (!mIPCOpen) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -108,26 +112,26 @@ AltDataOutputStreamChild::Write(const char *aBuf, uint32_t aCount,
 }
 
 NS_IMETHODIMP
-AltDataOutputStreamChild::WriteFrom(nsIInputStream *aFromStream,
-                                    uint32_t aCount, uint32_t *_retval) {
+AltDataOutputStreamChild::WriteFrom(nsIInputStream* aFromStream,
+                                    uint32_t aCount, uint32_t* _retval) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 AltDataOutputStreamChild::WriteSegments(nsReadSegmentFun aReader,
-                                        void *aClosure, uint32_t aCount,
-                                        uint32_t *_retval) {
+                                        void* aClosure, uint32_t aCount,
+                                        uint32_t* _retval) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-AltDataOutputStreamChild::IsNonBlocking(bool *_retval) {
+AltDataOutputStreamChild::IsNonBlocking(bool* _retval) {
   *_retval = false;
   return NS_OK;
 }
 
 mozilla::ipc::IPCResult AltDataOutputStreamChild::RecvError(
-    const nsresult &err) {
+    const nsresult& err) {
   mError = err;
   return IPC_OK();
 }
@@ -135,6 +139,57 @@ mozilla::ipc::IPCResult AltDataOutputStreamChild::RecvError(
 mozilla::ipc::IPCResult AltDataOutputStreamChild::RecvDeleteSelf() {
   PAltDataOutputStreamChild::Send__delete__(this);
   return IPC_OK();
+}
+
+// nsIAsyncOutputStream
+
+NS_IMETHODIMP
+AltDataOutputStreamChild::CloseWithStatus(nsresult aStatus) {
+  if (!mIPCOpen) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  if (NS_FAILED(mError)) {
+    return mError;
+  }
+  Unused << SendClose(aStatus);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+AltDataOutputStreamChild::AsyncWait(nsIOutputStreamCallback* aCallback,
+                                    uint32_t aFlags, uint32_t aRequestedCount,
+                                    nsIEventTarget* aEventTarget) {
+  mCallback = aCallback;
+  mCallbackFlags = aFlags;
+  mCallbackTarget = aEventTarget;
+
+  if (!mCallback) {
+    return NS_OK;
+  }
+
+  // The stream is blocking so it is writable at any time
+  if (!mIPCOpen || !(aFlags & WAIT_CLOSURE_ONLY)) {
+    NotifyListener();
+  }
+
+  return NS_OK;
+}
+
+void AltDataOutputStreamChild::NotifyListener() {
+  MOZ_ASSERT(mCallback);
+
+  if (!mCallbackTarget) {
+    mCallbackTarget = GetMainThreadEventTarget();
+  }
+
+  nsCOMPtr<nsIOutputStreamCallback> asyncCallback =
+      NS_NewOutputStreamReadyEvent(mCallback, mCallbackTarget);
+
+  mCallback = nullptr;
+  mCallbackTarget = nullptr;
+
+  asyncCallback->OnOutputStreamReady(this);
 }
 
 }  // namespace net

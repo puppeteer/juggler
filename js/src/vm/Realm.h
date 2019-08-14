@@ -20,6 +20,7 @@
 
 #include "builtin/Array.h"
 #include "gc/Barrier.h"
+#include "js/GCVariant.h"
 #include "js/UniquePtr.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/Compartment.h"
@@ -174,6 +175,8 @@ class NewProxyCache {
 // In the presence of internal errors, we do not set the new object's metadata
 // (if it was even allocated) and reset to the previous state on the stack.
 
+// See below in namespace JS for the template specialization for
+// ImmediateMetadata and DelayMetadata.
 struct ImmediateMetadata {};
 struct DelayMetadata {};
 using PendingMetadata = JSObject*;
@@ -181,22 +184,14 @@ using PendingMetadata = JSObject*;
 using NewObjectMetadataState =
     mozilla::Variant<ImmediateMetadata, DelayMetadata, PendingMetadata>;
 
-class MOZ_RAII AutoSetNewObjectMetadata : private JS::CustomAutoRooter {
+class MOZ_RAII AutoSetNewObjectMetadata {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
 
   JSContext* cx_;
-  NewObjectMetadataState prevState_;
+  Rooted<NewObjectMetadataState> prevState_;
 
   AutoSetNewObjectMetadata(const AutoSetNewObjectMetadata& aOther) = delete;
   void operator=(const AutoSetNewObjectMetadata& aOther) = delete;
-
- protected:
-  virtual void trace(JSTracer* trc) override {
-    if (prevState_.is<PendingMetadata>()) {
-      TraceRoot(trc, &prevState_.as<PendingMetadata>(),
-                "Object pending metadata");
-    }
-  }
 
  public:
   explicit AutoSetNewObjectMetadata(
@@ -294,6 +289,15 @@ class ObjectRealm {
 
 }  // namespace js
 
+namespace JS {
+template <>
+struct GCPolicy<js::ImmediateMetadata>
+    : public IgnoreGCPolicy<js::ImmediateMetadata> {};
+template <>
+struct GCPolicy<js::DelayMetadata> : public IgnoreGCPolicy<js::DelayMetadata> {
+};
+}  // namespace JS
+
 class JS::Realm : public JS::shadow::Realm {
   JS::Zone* zone_;
   JSRuntime* runtime_;
@@ -302,7 +306,11 @@ class JS::Realm : public JS::shadow::Realm {
   JS::RealmBehaviors behaviors_;
 
   friend struct ::JSContext;
-  js::ReadBarrieredGlobalObject global_;
+  js::WeakHeapPtrGlobalObject global_;
+
+  // The global lexical environment. This is stored here instead of in
+  // GlobalObject for easier/faster JIT access.
+  js::WeakHeapPtr<js::LexicalEnvironmentObject*> lexicalEnv_;
 
   // Note: this is private to enforce use of ObjectRealm::get(obj).
   js::ObjectRealm objects_;
@@ -355,10 +363,10 @@ class JS::Realm : public JS::shadow::Realm {
   // is true before running any code in this realm.
   bool* validAccessPtr_ = nullptr;
 
-  js::ReadBarriered<js::ArgumentsObject*> mappedArgumentsTemplate_{nullptr};
-  js::ReadBarriered<js::ArgumentsObject*> unmappedArgumentsTemplate_{nullptr};
-  js::ReadBarriered<js::NativeObject*> iterResultTemplate_{nullptr};
-  js::ReadBarriered<js::NativeObject*> iterResultWithoutPrototypeTemplate_{
+  js::WeakHeapPtr<js::ArgumentsObject*> mappedArgumentsTemplate_{nullptr};
+  js::WeakHeapPtr<js::ArgumentsObject*> unmappedArgumentsTemplate_{nullptr};
+  js::WeakHeapPtr<js::NativeObject*> iterResultTemplate_{nullptr};
+  js::WeakHeapPtr<js::NativeObject*> iterResultWithoutPrototypeTemplate_{
       nullptr};
 
   // There are two ways to enter a realm:
@@ -391,7 +399,6 @@ class JS::Realm : public JS::shadow::Realm {
   friend class js::AutoRestoreRealmDebugMode;
 
   bool isSelfHostingRealm_ = false;
-  bool marked_ = true;
   bool isSystem_ = false;
 
  public:
@@ -409,8 +416,6 @@ class JS::Realm : public JS::shadow::Realm {
   js::ArraySpeciesLookup arraySpeciesLookup;
   js::PromiseLookup promiseLookup;
 
-  js::PerformanceGroupHolder performanceMonitoring;
-
   js::UniquePtr<js::ScriptCountsMap> scriptCountsMap;
   js::UniquePtr<js::ScriptNameMap> scriptNameMap;
   js::UniquePtr<js::DebugScriptMap> debugScriptMap;
@@ -422,7 +427,7 @@ class JS::Realm : public JS::shadow::Realm {
    * Lazily initialized script source object to use for scripts cloned
    * from the self-hosting global.
    */
-  js::ReadBarrieredScriptSourceObject selfHostingScriptSource{nullptr};
+  js::WeakHeapPtrScriptSourceObject selfHostingScriptSource{nullptr};
 
   // Last time at which an animation was played for this realm.
   js::MainThreadData<mozilla::TimeStamp> lastAnimationTime;
@@ -436,10 +441,15 @@ class JS::Realm : public JS::shadow::Realm {
    */
   uint32_t globalWriteBarriered = 0;
 
-  uint32_t warnedAboutStringGenericsMethods = 0;
+  uint32_t warnedAboutArrayGenericsMethods = 0;
 #ifdef DEBUG
   bool firedOnNewGlobalObject = false;
 #endif
+
+  // True if all incoming wrappers have been nuked. This happens when
+  // NukeCrossCompartmentWrappers is called with the NukeAllReferences option.
+  // This prevents us from creating new wrappers for the compartment.
+  bool nukedIncomingWrappers = false;
 
  private:
   void updateDebuggerObservesFlag(unsigned flag);
@@ -507,10 +517,16 @@ class JS::Realm : public JS::shadow::Realm {
   /* An unbarriered getter for use while tracing. */
   inline js::GlobalObject* unsafeUnbarrieredMaybeGlobal() const;
 
+  inline js::LexicalEnvironmentObject* unbarrieredLexicalEnvironment() const;
+
   /* True if a global object exists, but it's being collected. */
   inline bool globalIsAboutToBeFinalized();
 
-  inline void initGlobal(js::GlobalObject& global);
+  /* True if a global exists and it's not being collected. */
+  inline bool hasLiveGlobal() const;
+
+  inline void initGlobal(js::GlobalObject& global,
+                         js::LexicalEnvironmentObject& lexicalEnv);
 
   /*
    * This method traces data that is live iff we know that this realm's
@@ -589,6 +605,7 @@ class JS::Realm : public JS::shadow::Realm {
   const void* addressOfMetadataBuilder() const {
     return &allocationMetadataBuilder_;
   }
+  bool isRecordingAllocations();
   void setAllocationMetadataBuilder(
       const js::AllocationMetadataBuilder* builder);
   void forgetAllocationMetadataBuilder();
@@ -598,7 +615,7 @@ class JS::Realm : public JS::shadow::Realm {
     return objectMetadataState_.is<js::PendingMetadata>();
   }
   void setObjectPendingMetadata(JSContext* cx, JSObject* obj) {
-    if (!cx->helperThread()) {
+    if (!cx->isHelperThreadContext()) {
       MOZ_ASSERT(objectMetadataState_.is<js::DelayMetadata>());
       objectMetadataState_ =
           js::NewObjectMetadataState(js::PendingMetadata(obj));
@@ -625,9 +642,7 @@ class JS::Realm : public JS::shadow::Realm {
     realmStats_ = newStats;
   }
 
-  bool marked() const { return marked_; }
-  void mark() { marked_ = true; }
-  void unmark() { marked_ = false; }
+  inline bool marked() const;
 
   /*
    * The principals associated with this realm. Note that the same several
@@ -635,21 +650,7 @@ class JS::Realm : public JS::shadow::Realm {
    * principals during its lifetime (e.g. in case of lazy parsing).
    */
   JSPrincipals* principals() { return principals_; }
-  void setPrincipals(JSPrincipals* principals) {
-    if (principals_ == principals) {
-      return;
-    }
-
-    // If we change principals, we need to unlink immediately this
-    // realm from its PerformanceGroup. For one thing, the performance data
-    // we collect should not be improperly associated with a group to which
-    // we do not belong anymore. For another thing, we use `principals()` as
-    // part of the key to map realms to a `PerformanceGroup`, so if we do
-    // not unlink now, this will be too late once we have updated
-    // `principals_`.
-    performanceMonitoring.unlink();
-    principals_ = principals;
-  }
+  void setPrincipals(JSPrincipals* principals) { principals_ = principals; }
 
   bool isSystem() const { return isSystem_; }
 
@@ -711,7 +712,8 @@ class JS::Realm : public JS::shadow::Realm {
   // True if this realm's global is a debuggee of some Debugger
   // object.
   bool isDebuggee() const { return !!(debugModeBits_ & IsDebuggee); }
-  void setIsDebuggee() { debugModeBits_ |= IsDebuggee; }
+
+  void setIsDebuggee();
   void unsetIsDebuggee();
 
   // True if this compartment's global is a debuggee of some Debugger
@@ -796,8 +798,9 @@ class JS::Realm : public JS::shadow::Realm {
 
   // Recompute the probability with which this realm should record
   // profiling data (stack traces, allocations log, etc.) about each
-  // allocation. We consult the probabilities requested by the Debugger
-  // instances observing us, if any.
+  // allocation. We first consult the JS runtime to see if it is recording
+  // allocations, and if not then check the probabilities requested by the
+  // Debugger instances observing us, if any.
   void chooseAllocationSamplingProbability() {
     savedStacks_.chooseSamplingProbability(this);
   }
@@ -809,6 +812,23 @@ class JS::Realm : public JS::shadow::Realm {
   }
   static constexpr size_t offsetOfRegExps() {
     return offsetof(JS::Realm, regExps);
+  }
+  static constexpr size_t offsetOfDebugModeBits() {
+    return offsetof(JS::Realm, debugModeBits_);
+  }
+  static constexpr uint32_t debugModeIsDebuggeeBit() { return IsDebuggee; }
+
+  // Note: global_ is a read-barriered object, but it's fine to skip the read
+  // barrier when the realm is active. See the comment in JSContext::global().
+  static constexpr size_t offsetOfActiveGlobal() {
+    static_assert(sizeof(global_) == sizeof(uintptr_t),
+                  "JIT code assumes field is pointer-sized");
+    return offsetof(JS::Realm, global_);
+  }
+  static constexpr size_t offsetOfActiveLexicalEnvironment() {
+    static_assert(sizeof(lexicalEnv_) == sizeof(uintptr_t),
+                  "JIT code assumes field is pointer-sized");
+    return offsetof(JS::Realm, lexicalEnv_);
   }
 };
 
@@ -875,6 +895,19 @@ class MOZ_RAII AutoAllocInAtomsZone {
   inline ~AutoAllocInAtomsZone();
 };
 
+// For the one place where we need to enter a realm when we may have been
+// allocating in the the atoms zone, this leaves the atoms zone temporarily.
+class MOZ_RAII AutoMaybeLeaveAtomsZone {
+  JSContext* const cx_;
+  bool wasInAtomsZone_;
+  AutoMaybeLeaveAtomsZone(const AutoMaybeLeaveAtomsZone&) = delete;
+  AutoMaybeLeaveAtomsZone& operator=(const AutoMaybeLeaveAtomsZone&) = delete;
+
+ public:
+  inline explicit AutoMaybeLeaveAtomsZone(JSContext* cx);
+  inline ~AutoMaybeLeaveAtomsZone();
+};
+
 // Enter a realm directly. Only use this where there's no target GC thing
 // to pass to AutoRealm or where you need to avoid the assertions in
 // JS::Compartment::enterCompartmentOf().
@@ -894,24 +927,6 @@ class ErrorCopier {
  public:
   explicit ErrorCopier(mozilla::Maybe<AutoRealm>& ar) : ar(ar) {}
   ~ErrorCopier();
-};
-
-class MOZ_RAII AutoSuppressAllocationMetadataBuilder {
-  JS::Zone* zone;
-  bool saved;
-
- public:
-  explicit AutoSuppressAllocationMetadataBuilder(JSContext* cx)
-      : AutoSuppressAllocationMetadataBuilder(cx->realm()->zone()) {}
-
-  explicit AutoSuppressAllocationMetadataBuilder(JS::Zone* zone)
-      : zone(zone), saved(zone->suppressAllocationMetadataBuilder) {
-    zone->suppressAllocationMetadataBuilder = true;
-  }
-
-  ~AutoSuppressAllocationMetadataBuilder() {
-    zone->suppressAllocationMetadataBuilder = saved;
-  }
 };
 
 } /* namespace js */

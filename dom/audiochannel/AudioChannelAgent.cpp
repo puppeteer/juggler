@@ -6,7 +6,7 @@
 #include "AudioChannelService.h"
 #include "mozilla/Preferences.h"
 #include "nsContentUtils.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsIURI.h"
@@ -86,33 +86,13 @@ nsresult AudioChannelAgent::FindCorrectWindow(nsPIDOMWindowInner* aWindow) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDocument> doc = parent->GetExtantDoc();
+  nsCOMPtr<Document> doc = parent->GetExtantDoc();
   if (!doc) {
     return NS_OK;
   }
 
   if (nsContentUtils::IsChromeDoc(doc)) {
     return NS_OK;
-  }
-
-  nsAutoCString systemAppUrl;
-  nsresult rv =
-      mozilla::Preferences::GetCString("b2g.system_startup_url", systemAppUrl);
-  if (NS_FAILED(rv)) {
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal = doc->NodePrincipal();
-  nsCOMPtr<nsIURI> uri;
-  principal->GetURI(getter_AddRefs(uri));
-
-  if (uri) {
-    nsAutoCString spec;
-    uri->GetSpec(spec);
-
-    if (spec.Equals(systemAppUrl)) {
-      return NS_OK;
-    }
   }
 
   return FindCorrectWindow(parent);

@@ -15,18 +15,20 @@
 #include "nsViewManager.h"
 #include "nsIPersistentProperties2.h"
 
-#include "mozilla/dom/TabParent.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "mozilla/a11y/DocManager.h"
+#include "mozilla/jni/GeckoBundleUtils.h"
 
 #ifdef DEBUG
-#include <android/log.h>
-#define AALOG(args...) \
-  __android_log_print(ANDROID_LOG_INFO, "GeckoAccessibilityNative", ##args)
+#  include <android/log.h>
+#  define AALOG(args...) \
+    __android_log_print(ANDROID_LOG_INFO, "GeckoAccessibilityNative", ##args)
 #else
-#define AALOG(args...) \
-  do {                 \
-  } while (0)
+#  define AALOG(args...) \
+    do {                 \
+    } while (0)
 #endif
 
 template <>
@@ -119,7 +121,8 @@ void SessionAccessibility::Click(int32_t aID) {
 
 SessionAccessibility* SessionAccessibility::GetInstanceFor(
     ProxyAccessible* aAccessible) {
-  auto tab = static_cast<dom::TabParent*>(aAccessible->Document()->Manager());
+  auto tab =
+      static_cast<dom::BrowserParent*>(aAccessible->Document()->Manager());
   dom::Element* frame = tab->GetOwnerElement();
   MOZ_ASSERT(frame);
   if (!frame) {
@@ -133,8 +136,7 @@ SessionAccessibility* SessionAccessibility::GetInstanceFor(
 SessionAccessibility* SessionAccessibility::GetInstanceFor(
     Accessible* aAccessible) {
   RootAccessible* rootAcc = aAccessible->RootAccessible();
-  nsIPresShell* shell = rootAcc->PresShell();
-  nsViewManager* vm = shell->GetViewManager();
+  nsViewManager* vm = rootAcc->PresShellPtr()->GetViewManager();
   if (!vm) {
     return nullptr;
   }
@@ -200,15 +202,13 @@ void SessionAccessibility::SendScrollingEvent(AccessibleWrap* aAccessible,
   mSessionAccessibility->SendEvent(
       java::sdk::AccessibilityEvent::TYPE_VIEW_SCROLLED, virtualViewId,
       aAccessible->AndroidClass(), eventInfo);
-
-  SendWindowContentChangedEvent(aAccessible);
 }
 
-void SessionAccessibility::SendWindowContentChangedEvent(
-    AccessibleWrap* aAccessible) {
+void SessionAccessibility::SendWindowContentChangedEvent() {
   mSessionAccessibility->SendEvent(
       java::sdk::AccessibilityEvent::TYPE_WINDOW_CONTENT_CHANGED,
-      aAccessible->VirtualViewID(), aAccessible->AndroidClass(), nullptr);
+      AccessibleWrap::kNoID, java::SessionAccessibility::CLASSNAME_WEBVIEW,
+      nullptr);
 }
 
 void SessionAccessibility::SendWindowStateChangedEvent(
@@ -324,22 +324,44 @@ void SessionAccessibility::SendSelectedEvent(AccessibleWrap* aAccessible,
       aAccessible->VirtualViewID(), aAccessible->AndroidClass(), eventInfo);
 }
 
+void SessionAccessibility::SendAnnouncementEvent(AccessibleWrap* aAccessible,
+                                                 const nsString& aAnnouncement,
+                                                 uint16_t aPriority) {
+  GECKOBUNDLE_START(eventInfo);
+  GECKOBUNDLE_PUT(eventInfo, "text", jni::StringParam(aAnnouncement));
+  GECKOBUNDLE_FINISH(eventInfo);
+
+  // Announcements should have the root as their source, so we ignore the
+  // accessible of the event.
+  mSessionAccessibility->SendEvent(
+      java::sdk::AccessibilityEvent::TYPE_ANNOUNCEMENT, AccessibleWrap::kNoID,
+      java::SessionAccessibility::CLASSNAME_WEBVIEW, eventInfo);
+}
+
 void SessionAccessibility::ReplaceViewportCache(
     const nsTArray<AccessibleWrap*>& aAccessibles,
     const nsTArray<BatchData>& aData) {
   auto infos = jni::ObjectArray::New<java::GeckoBundle>(aAccessibles.Length());
   for (size_t i = 0; i < aAccessibles.Length(); i++) {
     AccessibleWrap* acc = aAccessibles.ElementAt(i);
+    if (!acc) {
+      MOZ_ASSERT_UNREACHABLE("Updated accessible is gone.");
+      continue;
+    }
+
     if (aData.Length() == aAccessibles.Length()) {
       const BatchData& data = aData.ElementAt(i);
-      auto bundle = acc->ToSmallBundle(data.State(), data.Bounds(), data.ActionCount());
+      auto bundle = acc->ToBundle(
+          data.State(), data.Bounds(), data.ActionCount(), data.Name(),
+          data.TextValue(), data.DOMNodeID(), data.Description());
       infos->SetElement(i, bundle);
     } else {
-      infos->SetElement(i, acc->ToSmallBundle());
+      infos->SetElement(i, acc->ToBundle(true));
     }
   }
 
   mSessionAccessibility->ReplaceViewportCache(infos);
+  SendWindowContentChangedEvent();
 }
 
 void SessionAccessibility::ReplaceFocusPathCache(
@@ -348,14 +370,20 @@ void SessionAccessibility::ReplaceFocusPathCache(
   auto infos = jni::ObjectArray::New<java::GeckoBundle>(aAccessibles.Length());
   for (size_t i = 0; i < aAccessibles.Length(); i++) {
     AccessibleWrap* acc = aAccessibles.ElementAt(i);
+    if (!acc) {
+      MOZ_ASSERT_UNREACHABLE("Updated accessible is gone.");
+      continue;
+    }
+
     if (aData.Length() == aAccessibles.Length()) {
       const BatchData& data = aData.ElementAt(i);
       nsCOMPtr<nsIPersistentProperties> props =
           AccessibleWrap::AttributeArrayToProperties(data.Attributes());
-      auto bundle = acc->ToBundle(
-          data.State(), data.Bounds(), data.ActionCount(), data.Name(),
-          data.TextValue(), data.DOMNodeID(), data.CurValue(), data.MinValue(),
-          data.MaxValue(), data.Step(), props);
+      auto bundle =
+          acc->ToBundle(data.State(), data.Bounds(), data.ActionCount(),
+                        data.Name(), data.TextValue(), data.DOMNodeID(),
+                        data.Description(), data.CurValue(), data.MinValue(),
+                        data.MaxValue(), data.Step(), props);
       infos->SetElement(i, bundle);
     } else {
       infos->SetElement(i, acc->ToBundle());
@@ -378,13 +406,15 @@ void SessionAccessibility::UpdateCachedBounds(
 
     if (aData.Length() == aAccessibles.Length()) {
       const BatchData& data = aData.ElementAt(i);
-      auto bundle =
-          acc->ToSmallBundle(data.State(), data.Bounds(), data.ActionCount());
+      auto bundle = acc->ToBundle(
+          data.State(), data.Bounds(), data.ActionCount(), data.Name(),
+          data.TextValue(), data.DOMNodeID(), data.Description());
       infos->SetElement(i, bundle);
     } else {
-      infos->SetElement(i, acc->ToSmallBundle());
+      infos->SetElement(i, acc->ToBundle(true));
     }
   }
 
   mSessionAccessibility->UpdateCachedBounds(infos);
+  SendWindowContentChangedEvent();
 }

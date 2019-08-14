@@ -5,19 +5,25 @@
 
 package org.mozilla.geckoview_example;
 
+import org.json.JSONObject;
+
 import org.mozilla.geckoview.AllowOrDeny;
 import org.mozilla.geckoview.BasicSelectionActionDelegate;
+import org.mozilla.geckoview.ContentBlocking;
 import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
-import org.mozilla.geckoview.GeckoSession.TrackingProtectionDelegate;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebRequestError;
 
 import android.Manifest;
+import android.app.Activity;
 import android.app.DownloadManager;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -26,11 +32,13 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.SystemClock;
+import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
-import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -43,7 +51,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Locale;
@@ -55,20 +63,25 @@ public class GeckoViewActivity extends AppCompatActivity {
     private static final String FULL_ACCESSIBILITY_TREE_EXTRA = "full_accessibility_tree";
     private static final String SEARCH_URI_BASE = "https://www.google.com/search?q=";
     private static final String ACTION_SHUTDOWN = "org.mozilla.geckoview_example.SHUTDOWN";
+    private static final String CHANNEL_ID = "GeckoViewExample";
     private static final int REQUEST_FILE_PICKER = 1;
     private static final int REQUEST_PERMISSIONS = 2;
     private static final int REQUEST_WRITE_EXTERNAL_STORAGE = 3;
 
     private static GeckoRuntime sGeckoRuntime;
-    private GeckoSession mGeckoSession;
+    private TabSessionManager mTabSessionManager;
     private GeckoView mGeckoView;
     private boolean mUseMultiprocess;
     private boolean mFullAccessibilityTree;
     private boolean mUseTrackingProtection;
     private boolean mUsePrivateBrowsing;
+    private boolean mEnableRemoteDebugging;
     private boolean mKillProcessOnDestroy;
 
-    private LocationView mLocationView;
+    private boolean mShowNotificationsRejected;
+    private ArrayList<String> mAcceptedPersistentStorage = new ArrayList<String>();
+
+    private ToolbarLayout mToolbarView;
     private String mCurrentUri;
     private boolean mCanGoBack;
     private boolean mCanGoForward;
@@ -82,9 +95,9 @@ public class GeckoViewActivity extends AppCompatActivity {
         @Override
         public void onCommit(String text) {
             if ((text.contains(".") || text.contains(":")) && !text.contains(" ")) {
-                mGeckoSession.loadUri(text);
+                mTabSessionManager.getCurrentSession().loadUri(text);
             } else {
-                mGeckoSession.loadUri(SEARCH_URI_BASE + text);
+                mTabSessionManager.getCurrentSession().loadUri(SEARCH_URI_BASE + text);
             }
             mGeckoView.requestFocus();
         }
@@ -95,22 +108,27 @@ public class GeckoViewActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         Log.i(LOGTAG, "zerdatime " + SystemClock.elapsedRealtime() +
               " - application start");
-
+        createNotificationChannel();
         setContentView(R.layout.geckoview_activity);
-        mGeckoView = (GeckoView) findViewById(R.id.gecko_view);
+        mGeckoView = findViewById(R.id.gecko_view);
 
-        setSupportActionBar((Toolbar)findViewById(R.id.toolbar));
+        mTabSessionManager = new TabSessionManager();
 
-        mLocationView = new LocationView(this);
-        mLocationView.setId(R.id.url_bar);
-        getSupportActionBar().setCustomView(mLocationView,
+        setSupportActionBar(findViewById(R.id.toolbar));
+
+        mToolbarView = new ToolbarLayout(this, mTabSessionManager);
+        mToolbarView.setId(R.id.toolbar_layout);
+        mToolbarView.setTabListener(this::switchToSessionAtIndex);
+
+        getSupportActionBar().setCustomView(mToolbarView,
                 new ActionBar.LayoutParams(ActionBar.LayoutParams.MATCH_PARENT,
                         ActionBar.LayoutParams.WRAP_CONTENT));
         getSupportActionBar().setDisplayOptions(ActionBar.DISPLAY_SHOW_CUSTOM);
 
         mUseMultiprocess = getIntent().getBooleanExtra(USE_MULTIPROCESS_EXTRA, true);
+        mEnableRemoteDebugging = true;
         mFullAccessibilityTree = getIntent().getBooleanExtra(FULL_ACCESSIBILITY_TREE_EXTRA, false);
-        mProgressView = (ProgressBar) findViewById(R.id.page_progress);
+        mProgressView = findViewById(R.id.page_progress);
 
         if (sGeckoRuntime == null) {
             final GeckoRuntimeSettings.Builder runtimeSettingsBuilder =
@@ -128,44 +146,66 @@ public class GeckoViewActivity extends AppCompatActivity {
             }
             runtimeSettingsBuilder
                     .useContentProcessHint(mUseMultiprocess)
-                    .remoteDebuggingEnabled(true)
+                    .remoteDebuggingEnabled(mEnableRemoteDebugging)
                     .consoleOutput(true)
-                    .trackingProtectionCategories(TrackingProtectionDelegate.CATEGORY_ALL)
+                    .contentBlocking(new ContentBlocking.Settings.Builder()
+                        .categories(ContentBlocking.AT_DEFAULT)
+                        .build())
                     .crashHandler(ExampleCrashHandler.class);
 
             sGeckoRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
         }
 
-        mGeckoSession = (GeckoSession)getIntent().getParcelableExtra("session");
-        if (mGeckoSession != null) {
-            connectSession(mGeckoSession);
+        if(savedInstanceState == null) {
+            TabSession session = getIntent().getParcelableExtra("session");
+            if (session != null) {
+                connectSession(session);
 
-            if (!mGeckoSession.isOpen()) {
-                mGeckoSession.open(sGeckoRuntime);
+                if (!session.isOpen()) {
+                    session.open(sGeckoRuntime);
+                }
+
+                mUseMultiprocess = session.getSettings().getUseMultiprocess();
+                mFullAccessibilityTree = session.getSettings().getFullAccessibilityTree();
+
+                mTabSessionManager.setCurrentSession(session);
+                mGeckoView.setSession(session);
+            } else {
+                session = createSession();
+                mTabSessionManager.setCurrentSession(session);
+                mGeckoView.setSession(session, sGeckoRuntime);
+
+                loadFromIntent(getIntent());
             }
-
-            mUseMultiprocess = mGeckoSession.getSettings().getBoolean(GeckoSessionSettings.USE_MULTIPROCESS);
-            mFullAccessibilityTree = mGeckoSession.getSettings().getBoolean(GeckoSessionSettings.FULL_ACCESSIBILITY_TREE);
-
-            mGeckoView.setSession(mGeckoSession);
-        } else {
-            mGeckoSession = createSession();
-            mGeckoView.setSession(mGeckoSession, sGeckoRuntime);
-            loadFromIntent(getIntent());
         }
 
-        mLocationView.setCommitListener(mCommitListener);
+        mToolbarView.getLocationView().setCommitListener(mCommitListener);
+        mToolbarView.updateTabCount();
     }
 
-    private GeckoSession createSession() {
-        GeckoSession session = new GeckoSession();
-        session.getSettings().setBoolean(GeckoSessionSettings.USE_MULTIPROCESS, mUseMultiprocess);
-        session.getSettings().setBoolean(GeckoSessionSettings.USE_PRIVATE_MODE, mUsePrivateBrowsing);
-        session.getSettings().setBoolean(
-            GeckoSessionSettings.USE_TRACKING_PROTECTION, mUseTrackingProtection);
-        session.getSettings().setBoolean(
-                GeckoSessionSettings.FULL_ACCESSIBILITY_TREE, mFullAccessibilityTree);
-
+    private void createNotificationChannel() {
+        // Create the NotificationChannel, but only on API 26+ because
+        // the NotificationChannel class is new and not in the support library
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            CharSequence name = getString(R.string.app_name);
+            String description = getString(R.string.activity_label);
+            int importance = NotificationManager.IMPORTANCE_DEFAULT;
+            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, name, importance);
+            channel.setDescription(description);
+            // Register the channel with the system; you can't change the importance
+            // or other notification behaviors after this
+            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            notificationManager.createNotificationChannel(channel);
+        }
+    }
+    
+    private TabSession createSession() {
+        TabSession session = mTabSessionManager.newSession(new GeckoSessionSettings.Builder()
+                .useMultiprocess(mUseMultiprocess)
+                .usePrivateMode(mUsePrivateBrowsing)
+                .useTrackingProtection(mUseTrackingProtection)
+                .fullAccessibilityTree(mFullAccessibilityTree)
+                .build());
         connectSession(session);
 
         return session;
@@ -174,9 +214,9 @@ public class GeckoViewActivity extends AppCompatActivity {
     private void connectSession(GeckoSession session) {
         session.setContentDelegate(new ExampleContentDelegate());
         session.setHistoryDelegate(new ExampleHistoryDelegate());
-        final ExampleTrackingProtectionDelegate tp = new ExampleTrackingProtectionDelegate();
-        session.setTrackingProtectionDelegate(tp);
-        session.setProgressDelegate(new ExampleProgressDelegate(tp));
+        final ExampleContentBlockingDelegate cb = new ExampleContentBlockingDelegate();
+        session.setContentBlockingDelegate(cb);
+        session.setProgressDelegate(new ExampleProgressDelegate(cb));
         session.setNavigationDelegate(new ExampleNavigationDelegate());
 
         final BasicGeckoViewPrompt prompt = new BasicGeckoViewPrompt(this);
@@ -187,34 +227,53 @@ public class GeckoViewActivity extends AppCompatActivity {
         permission.androidPermissionRequestCode = REQUEST_PERMISSIONS;
         session.setPermissionDelegate(permission);
 
+        session.setMediaDelegate(new ExampleMediaDelegate(this));
+
         session.setSelectionActionDelegate(new BasicSelectionActionDelegate(this));
 
         updateTrackingProtection(session);
     }
 
     private void recreateSession() {
-        mGeckoSession.close();
+        recreateSession(mTabSessionManager.getCurrentSession());
+    }
 
-        mGeckoSession = createSession();
-        mGeckoSession.open(sGeckoRuntime);
-        mGeckoView.setSession(mGeckoSession);
-        mGeckoSession.loadUri(mCurrentUri != null ? mCurrentUri : DEFAULT_URL);
+    private void recreateSession(TabSession session) {
+        if(session != null) {
+            mTabSessionManager.closeSession(session);
+        }
+
+        session = createSession();
+        session.open(sGeckoRuntime);
+        mTabSessionManager.setCurrentSession(session);
+        mGeckoView.setSession(session);
+        session.loadUri(mCurrentUri != null ? mCurrentUri : DEFAULT_URL);
+    }
+
+    @Override
+    public void onRestoreInstanceState(Bundle savedInstanceState) {
+        super.onRestoreInstanceState(savedInstanceState);
+        if(savedInstanceState != null) {
+            mTabSessionManager.setCurrentSession((TabSession)mGeckoView.getSession());
+        } else {
+            recreateSession();
+        }
     }
 
     private void updateTrackingProtection(GeckoSession session) {
-        session.getSettings().setBoolean(
-            GeckoSessionSettings.USE_TRACKING_PROTECTION, mUseTrackingProtection);
+        session.getSettings().setUseTrackingProtection(mUseTrackingProtection);
     }
 
     @Override
     public void onBackPressed() {
-        if (mFullScreen) {
-            mGeckoSession.exitFullScreen();
+        GeckoSession session = mTabSessionManager.getCurrentSession();
+        if (mFullScreen && session != null) {
+            session.exitFullScreen();
             return;
         }
 
-        if (mCanGoBack && mGeckoSession != null) {
-            mGeckoSession.goBack();
+        if (mCanGoBack && session != null) {
+            session.goBack();
             return;
         }
 
@@ -233,18 +292,20 @@ public class GeckoViewActivity extends AppCompatActivity {
         menu.findItem(R.id.action_e10s).setChecked(mUseMultiprocess);
         menu.findItem(R.id.action_tp).setChecked(mUseTrackingProtection);
         menu.findItem(R.id.action_pb).setChecked(mUsePrivateBrowsing);
+        menu.findItem(R.id.action_remote_debugging).setChecked(mEnableRemoteDebugging);
         menu.findItem(R.id.action_forward).setEnabled(mCanGoForward);
         return true;
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
+        GeckoSession session = mTabSessionManager.getCurrentSession();
         switch (item.getItemId()) {
             case R.id.action_reload:
-                mGeckoSession.reload();
+                session.reload();
                 break;
             case R.id.action_forward:
-                mGeckoSession.goForward();
+                session.goForward();
                 break;
             case R.id.action_e10s:
                 mUseMultiprocess = !mUseMultiprocess;
@@ -252,18 +313,66 @@ public class GeckoViewActivity extends AppCompatActivity {
                 break;
             case R.id.action_tp:
                 mUseTrackingProtection = !mUseTrackingProtection;
-                updateTrackingProtection(mGeckoSession);
-                mGeckoSession.reload();
+                updateTrackingProtection(session);
+                session.reload();
                 break;
             case R.id.action_pb:
                 mUsePrivateBrowsing = !mUsePrivateBrowsing;
                 recreateSession();
+                break;
+            case R.id.action_new_tab:
+                createNewTab();
+                break;
+            case R.id.action_close_tab:
+                closeTab((TabSession)session);
+                break;
+            case R.id.action_remote_debugging:
+                mEnableRemoteDebugging = !mEnableRemoteDebugging;
+                sGeckoRuntime.getSettings().setRemoteDebuggingEnabled(mEnableRemoteDebugging);
                 break;
             default:
                 return super.onOptionsItemSelected(item);
         }
 
         return true;
+    }
+
+    private void createNewTab() {
+        TabSession newSession = createSession();
+        newSession.open(sGeckoRuntime);
+        setGeckoViewSession(newSession);
+        mToolbarView.updateTabCount();
+    }
+
+    private void closeTab(TabSession session) {
+        if(mTabSessionManager.sessionCount() > 1) {
+            mTabSessionManager.closeSession(session);
+            TabSession tabSession = mTabSessionManager.getCurrentSession();
+            setGeckoViewSession(tabSession);
+            tabSession.reload();
+            mToolbarView.updateTabCount();
+        } else {
+            recreateSession(session);
+        }
+    }
+
+    private void switchToSessionAtIndex(int index) {
+        TabSession nextSession = mTabSessionManager.getSession(index);
+        TabSession currentSession = mTabSessionManager.getCurrentSession();
+        if(nextSession != currentSession) {
+            setGeckoViewSession(nextSession);
+            mCurrentUri = nextSession.getUri();
+            mToolbarView.getLocationView().setText(mCurrentUri);
+        }
+    }
+
+    private void setGeckoViewSession(TabSession session) {
+        mGeckoView.releaseSession();
+        if(!session.isOpen()) {
+            session.open(sGeckoRuntime);
+        }
+        mGeckoView.setSession(session);
+        mTabSessionManager.setCurrentSession(session);
     }
 
     @Override
@@ -295,9 +404,9 @@ public class GeckoViewActivity extends AppCompatActivity {
     }
 
 
-        private void loadFromIntent(final Intent intent) {
+    private void loadFromIntent(final Intent intent) {
         final Uri uri = intent.getData();
-        mGeckoSession.loadUri(uri != null ? uri.toString() : DEFAULT_URL);
+        mTabSessionManager.getCurrentSession().loadUri(uri != null ? uri.toString() : DEFAULT_URL);
     }
 
     @Override
@@ -305,7 +414,7 @@ public class GeckoViewActivity extends AppCompatActivity {
                                     final Intent data) {
         if (requestCode == REQUEST_FILE_PICKER) {
             final BasicGeckoViewPrompt prompt = (BasicGeckoViewPrompt)
-                    mGeckoSession.getPromptDelegate();
+                    mTabSessionManager.getCurrentSession().getPromptDelegate();
             prompt.onFileCallbackResult(resultCode, data);
         } else {
             super.onActivityResult(requestCode, resultCode, data);
@@ -318,7 +427,7 @@ public class GeckoViewActivity extends AppCompatActivity {
                                            final int[] grantResults) {
         if (requestCode == REQUEST_PERMISSIONS) {
             final ExamplePermissionDelegate permission = (ExamplePermissionDelegate)
-                    mGeckoSession.getPermissionDelegate();
+                    mTabSessionManager.getCurrentSession().getPermissionDelegate();
             permission.onRequestPermissionsResult(permissions, grantResults);
         } else if (requestCode == REQUEST_WRITE_EXTERNAL_STORAGE &&
                    grantResults[0] == PackageManager.PERMISSION_GRANTED) {
@@ -338,7 +447,7 @@ public class GeckoViewActivity extends AppCompatActivity {
     }
 
     private void downloadFile(GeckoSession.WebResponseInfo response) {
-        mGeckoSession
+        mTabSessionManager.getCurrentSession()
                 .getUserAgent()
                 .then(new GeckoResult.OnValueListener<String, Void>() {
             @Override
@@ -443,12 +552,22 @@ public class GeckoViewActivity extends AppCompatActivity {
             }
             return GeckoResult.fromValue(visited);
         }
+
+        @Override
+        public void onHistoryStateChange(final GeckoSession session,
+                                         final GeckoSession.HistoryDelegate.HistoryList state) {
+            Log.i(LOGTAG, "History state updated");
+        }
     }
 
     private class ExampleContentDelegate implements GeckoSession.ContentDelegate {
         @Override
         public void onTitleChange(GeckoSession session, String title) {
             Log.i(LOGTAG, "Content title changed to " + title);
+            TabSession tabSession = mTabSessionManager.getSession(session);
+            if (tabSession != null ) {
+                tabSession.setTitle(title);
+            }
         }
 
         @Override
@@ -470,7 +589,7 @@ public class GeckoViewActivity extends AppCompatActivity {
 
         @Override
         public void onCloseRequest(final GeckoSession session) {
-            if (session == mGeckoSession) {
+            if (session == mTabSessionManager.getCurrentSession()) {
                 finish();
             }
         }
@@ -510,13 +629,18 @@ public class GeckoViewActivity extends AppCompatActivity {
         public void onFirstComposite(final GeckoSession session) {
             Log.d(LOGTAG, "onFirstComposite");
         }
+
+        @Override
+        public void onWebAppManifest(final GeckoSession session, JSONObject manifest) {
+            Log.d(LOGTAG, "onWebAppManifest: " + manifest);
+        }
     }
 
     private class ExampleProgressDelegate implements GeckoSession.ProgressDelegate {
-        private ExampleTrackingProtectionDelegate mTp;
+        private ExampleContentBlockingDelegate mCb;
 
-        private ExampleProgressDelegate(final ExampleTrackingProtectionDelegate tp) {
-            mTp = tp;
+        private ExampleProgressDelegate(final ExampleContentBlockingDelegate cb) {
+            mCb = cb;
         }
 
         @Override
@@ -524,7 +648,7 @@ public class GeckoViewActivity extends AppCompatActivity {
             Log.i(LOGTAG, "Starting to load page at " + url);
             Log.i(LOGTAG, "zerdatime " + SystemClock.elapsedRealtime() +
                   " - page load start");
-            mTp.clearCounters();
+            mCb.clearCounters();
         }
 
         @Override
@@ -532,7 +656,7 @@ public class GeckoViewActivity extends AppCompatActivity {
             Log.i(LOGTAG, "Stopping page load " + (success ? "successfully" : "unsuccessfully"));
             Log.i(LOGTAG, "zerdatime " + SystemClock.elapsedRealtime() +
                   " - page load stop");
-            mTp.logCounters();
+            mCb.logCounters();
         }
 
         @Override
@@ -552,12 +676,56 @@ public class GeckoViewActivity extends AppCompatActivity {
         public void onSecurityChange(GeckoSession session, SecurityInformation securityInfo) {
             Log.i(LOGTAG, "Security status changed to " + securityInfo.securityMode);
         }
+
+        @Override
+        public void onSessionStateChange(GeckoSession session, GeckoSession.SessionState state) {
+            Log.i(LOGTAG, "New Session state: " + state.toString());
+        }
     }
 
     private class ExamplePermissionDelegate implements GeckoSession.PermissionDelegate {
 
         public int androidPermissionRequestCode = 1;
         private Callback mCallback;
+
+        class ExampleNotificationCallback implements GeckoSession.PermissionDelegate.Callback {
+            private final GeckoSession.PermissionDelegate.Callback mCallback;
+            ExampleNotificationCallback(final GeckoSession.PermissionDelegate.Callback callback) {
+                mCallback = callback;
+            }
+
+            @Override
+            public void reject() {
+                mShowNotificationsRejected = true;
+                mCallback.reject();
+            }
+
+            @Override
+            public void grant() {
+                mShowNotificationsRejected = false;
+                mCallback.grant();
+            }
+        }
+
+        class ExamplePersistentStorageCallback implements GeckoSession.PermissionDelegate.Callback {
+            private final GeckoSession.PermissionDelegate.Callback mCallback;
+            private final String mUri;
+            ExamplePersistentStorageCallback(final GeckoSession.PermissionDelegate.Callback callback, String uri) {
+                mCallback = callback;
+                mUri = uri;
+            }
+
+            @Override
+            public void reject() {
+                mCallback.reject();
+            }
+
+            @Override
+            public void grant() {
+                mAcceptedPersistentStorage.add(mUri);
+                mCallback.grant();
+            }
+        }
 
         public void onRequestPermissionsResult(final String[] permissions,
                                                final int[] grantResults) {
@@ -593,12 +761,25 @@ public class GeckoViewActivity extends AppCompatActivity {
         public void onContentPermissionRequest(final GeckoSession session, final String uri,
                                              final int type, final Callback callback) {
             final int resId;
+            Callback contentPermissionCallback = callback;
             if (PERMISSION_GEOLOCATION == type) {
                 resId = R.string.request_geolocation;
             } else if (PERMISSION_DESKTOP_NOTIFICATION == type) {
+                if (mShowNotificationsRejected) {
+                    Log.w(LOGTAG, "Desktop notifications already denied by user.");
+                    callback.reject();
+                    return;
+                }
                 resId = R.string.request_notification;
-            } else if (PERMISSION_AUTOPLAY_MEDIA == type) {
-                resId = R.string.request_autoplay;
+                contentPermissionCallback = new ExampleNotificationCallback(callback);
+            } else if (PERMISSION_PERSISTENT_STORAGE == type) {
+                if (mAcceptedPersistentStorage.contains(uri)) {
+                    Log.w(LOGTAG, "Persistent Storage for "+ uri +" already granted by user.");
+                    callback.grant();
+                    return;
+                }
+                resId = R.string.request_storage;
+                contentPermissionCallback = new ExamplePersistentStorageCallback(callback, uri);
             } else {
                 Log.w(LOGTAG, "Unknown permission: " + type);
                 callback.reject();
@@ -607,8 +788,8 @@ public class GeckoViewActivity extends AppCompatActivity {
 
             final String title = getString(resId, Uri.parse(uri).getAuthority());
             final BasicGeckoViewPrompt prompt = (BasicGeckoViewPrompt)
-                    mGeckoSession.getPromptDelegate();
-            prompt.onPermissionPrompt(session, title, callback);
+                    mTabSessionManager.getCurrentSession().getPromptDelegate();
+            prompt.onPermissionPrompt(session, title, contentPermissionCallback);
         }
 
         private String[] normalizeMediaName(final MediaSource[] sources) {
@@ -642,6 +823,20 @@ public class GeckoViewActivity extends AppCompatActivity {
         public void onMediaPermissionRequest(final GeckoSession session, final String uri,
                                            final MediaSource[] video, final MediaSource[] audio,
                                            final MediaCallback callback) {
+            // If we don't have device permissions at this point, just automatically reject the request
+            // as we will have already have requested device permissions before getting to this point
+            // and if we've reached here and we don't have permissions then that means that the user
+            // denied them.
+            if ((audio != null
+                    && ContextCompat.checkSelfPermission(GeckoViewActivity.this,
+                        Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                || (video != null
+                    && ContextCompat.checkSelfPermission(GeckoViewActivity.this,
+                        Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED)) {
+                callback.reject();
+                return;
+            }
+
             final String host = Uri.parse(uri).getAuthority();
             final String title;
             if (audio == null) {
@@ -656,7 +851,7 @@ public class GeckoViewActivity extends AppCompatActivity {
             String[] audioNames = normalizeMediaName(audio);
 
             final BasicGeckoViewPrompt prompt = (BasicGeckoViewPrompt)
-                    mGeckoSession.getPromptDelegate();
+                    mTabSessionManager.getCurrentSession().getPromptDelegate();
             prompt.onMediaPrompt(session, title, video, audio, videoNames, audioNames, callback);
         }
     }
@@ -664,7 +859,7 @@ public class GeckoViewActivity extends AppCompatActivity {
     private class ExampleNavigationDelegate implements GeckoSession.NavigationDelegate {
         @Override
         public void onLocationChange(GeckoSession session, final String url) {
-            mLocationView.setText(url);
+            mToolbarView.getLocationView().setText(url);
             mCurrentUri = url;
         }
 
@@ -691,16 +886,8 @@ public class GeckoViewActivity extends AppCompatActivity {
 
         @Override
         public GeckoResult<GeckoSession> onNewSession(final GeckoSession session, final String uri) {
-            GeckoSession newSession = new GeckoSession(session.getSettings());
-
-            Intent intent = new Intent(GeckoViewActivity.this, SessionActivity.class);
-            intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET);
-            intent.setAction(Intent.ACTION_VIEW);
-            intent.setData(Uri.parse(uri));
-            intent.putExtra("session", newSession);
-
-            startActivity(intent);
-
+            final TabSession newSession = createSession();
+            mToolbarView.updateTabCount();
             return GeckoResult.fromValue(newSession);
         }
 
@@ -836,7 +1023,8 @@ public class GeckoViewActivity extends AppCompatActivity {
         }
     }
 
-    private class ExampleTrackingProtectionDelegate implements GeckoSession.TrackingProtectionDelegate {
+    private class ExampleContentBlockingDelegate
+            implements ContentBlocking.Delegate {
         private int mBlockedAds = 0;
         private int mBlockedAnalytics = 0;
         private int mBlockedSocial = 0;
@@ -860,24 +1048,90 @@ public class GeckoViewActivity extends AppCompatActivity {
         }
 
         @Override
-        public void onTrackerBlocked(final GeckoSession session, final String uri,
-                                     int categories) {
-            Log.d(LOGTAG, "onTrackerBlocked " + categories + " (" + uri + ")");
-            if ((categories & TrackingProtectionDelegate.CATEGORY_TEST) != 0) {
+        public void onContentBlocked(final GeckoSession session,
+                                     final ContentBlocking.BlockEvent event) {
+            Log.d(LOGTAG, "onContentBlocked " + event.categories +
+                  " (" + event.uri + ")");
+            if ((event.categories & ContentBlocking.AT_TEST) != 0) {
                 mBlockedTest++;
             }
-            if ((categories & TrackingProtectionDelegate.CATEGORY_AD) != 0) {
+            if ((event.categories & ContentBlocking.AT_AD) != 0) {
                 mBlockedAds++;
             }
-            if ((categories & TrackingProtectionDelegate.CATEGORY_ANALYTIC) != 0) {
+            if ((event.categories & ContentBlocking.AT_ANALYTIC) != 0) {
                 mBlockedAnalytics++;
             }
-            if ((categories & TrackingProtectionDelegate.CATEGORY_SOCIAL) != 0) {
+            if ((event.categories & ContentBlocking.AT_SOCIAL) != 0) {
                 mBlockedSocial++;
             }
-            if ((categories & TrackingProtectionDelegate.CATEGORY_CONTENT) != 0) {
+            if ((event.categories & ContentBlocking.AT_CONTENT) != 0) {
                 mBlockedContent++;
             }
+        }
+    }
+
+    private class ExampleMediaDelegate
+            implements GeckoSession.MediaDelegate {
+        private Integer mLastNotificationId = 100;
+        private Integer mNotificationId;
+        final private Activity mActivity;
+
+        public ExampleMediaDelegate(Activity activity) {
+            mActivity = activity;
+        }
+
+        @Override
+        public void onRecordingStatusChanged(@NonNull GeckoSession session, RecordingDevice[] devices) {
+            String message;
+            int icon;
+            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(mActivity);
+            RecordingDevice camera = null;
+            RecordingDevice microphone = null;
+
+            for (RecordingDevice device : devices) {
+                if (device.type == RecordingDevice.Type.CAMERA) {
+                    camera = device;
+                } else if (device.type == RecordingDevice.Type.MICROPHONE) {
+                    microphone = device;
+                }
+            }
+            if (camera != null && microphone != null) {
+                Log.d(LOGTAG, "ExampleDeviceDelegate:onRecordingDeviceEvent display alert_mic_camera");
+                message = getResources().getString(R.string.device_sharing_camera_and_mic);
+                icon = R.drawable.alert_mic_camera;
+            } else if (camera != null) {
+                Log.d(LOGTAG, "ExampleDeviceDelegate:onRecordingDeviceEvent display alert_camera");
+                message = getResources().getString(R.string.device_sharing_camera);
+                icon = R.drawable.alert_camera;
+            } else if (microphone != null){
+                Log.d(LOGTAG, "ExampleDeviceDelegate:onRecordingDeviceEvent display alert_mic");
+                message = getResources().getString(R.string.device_sharing_microphone);
+                icon = R.drawable.alert_mic;
+            } else {
+                Log.d(LOGTAG, "ExampleDeviceDelegate:onRecordingDeviceEvent dismiss any notifications");
+                if (mNotificationId != null) {
+                    notificationManager.cancel(mNotificationId);
+                    mNotificationId = null;
+                }
+                return;
+            }
+            if (mNotificationId == null) {
+                mNotificationId = ++mLastNotificationId;
+            }
+
+            Intent intent = new Intent(mActivity, GeckoViewActivity.class);
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+            PendingIntent pendingIntent = PendingIntent.getActivity(mActivity.getApplicationContext(), 0, intent, 0);
+
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(mActivity.getApplicationContext(), CHANNEL_ID)
+                    .setSmallIcon(icon)
+                    .setContentTitle(getResources().getString(R.string.app_name))
+                    .setContentText(message)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setContentIntent(pendingIntent)
+                    .setCategory(NotificationCompat.CATEGORY_SERVICE);
+
+            notificationManager.notify(mNotificationId, builder.build());
         }
     }
 }

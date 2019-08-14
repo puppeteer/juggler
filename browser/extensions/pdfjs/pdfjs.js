@@ -15,11 +15,13 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-ChromeUtils.defineModuleGetter(this, "PdfStreamConverter",
-  "resource://pdf.js/PdfStreamConverter.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "PdfStreamConverter",
+  "resource://pdf.js/PdfStreamConverter.jsm"
+);
 
 // Register/unregister a constructor as a factory.
 function StreamConverterFactory() {
@@ -28,10 +30,5 @@ function StreamConverterFactory() {
   }
   throw Cr.NS_ERROR_FACTORY_NOT_REGISTERED;
 }
-StreamConverterFactory.prototype = {
-  // properties required for XPCOM registration:
-  classID: Components.ID("{d0c5195d-e798-49d4-b1d3-9324328b2291}"),
-  classDescription: "pdf.js Component",
-};
 
-var NSGetFactory = XPCOMUtils.generateNSGetFactory([StreamConverterFactory]);
+var EXPORTED_SYMBOLS = ["StreamConverterFactory"];

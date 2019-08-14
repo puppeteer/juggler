@@ -8,15 +8,10 @@
 
 "use strict";
 
-// Import helpers for the new debugger
-/* import-globals-from ../../../debugger/new/test/mochitest/helpers.js */
-Services.scriptloader.loadSubScript(
-    "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers.js",
-    this);
-
-const TEST_URI = "http://example.com/browser/devtools/client/webconsole/" +
-                 "test/mochitest/" +
-                 "test-closure-optimized-out.html";
+const TEST_URI =
+  "http://example.com/browser/devtools/client/webconsole/" +
+  "test/mochitest/" +
+  "test-closure-optimized-out.html";
 
 add_task(async function() {
   const breakpointLine = 18;
@@ -26,6 +21,7 @@ add_task(async function() {
   const toolbox = gDevTools.getToolbox(hud.target);
   const dbg = createDebuggerContext(toolbox);
 
+  await selectSource(dbg, "test-closure-optimized-out.html");
   await addBreakpoint(dbg, "test-closure-optimized-out.html", breakpointLine);
 
   // Cause the debuggee to pause
@@ -55,9 +51,10 @@ add_task(async function() {
 
 async function pauseDebugger(dbg) {
   info("Waiting for debugger to pause");
+  const onPaused = waitForPaused(dbg);
   ContentTask.spawn(gBrowser.selectedBrowser, {}, async function() {
     const button = content.document.querySelector("button");
     button.click();
   });
-  await waitForPaused(dbg);
+  await onPaused;
 }

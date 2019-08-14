@@ -205,7 +205,7 @@ class PannerNodeEngine final : public AudioNodeEngine {
           RefPtr<PlayingRefChangeHandler> refchanged =
               new PlayingRefChangeHandler(aStream,
                                           PlayingRefChangeHandler::RELEASE);
-          aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
+          aStream->Graph()->DispatchToMainThreadStableState(
               refchanged.forget());
         }
         aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
@@ -217,8 +217,7 @@ class PannerNodeEngine final : public AudioNodeEngine {
         RefPtr<PlayingRefChangeHandler> refchanged =
             new PlayingRefChangeHandler(aStream,
                                         PlayingRefChangeHandler::ADDREF);
-        aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-            refchanged.forget());
+        aStream->Graph()->DispatchToMainThreadStableState(refchanged.forget());
       }
       mLeftOverData = mHRTFPanner->maxTailFrames();
     }
@@ -297,24 +296,21 @@ PannerNode::PannerNode(AudioContext* aContext)
       ,
       mPanningModel(PanningModelType::Equalpower),
       mDistanceModel(DistanceModelType::Inverse),
-      mPositionX(
-          new AudioParam(this, PannerNode::POSITIONX, this->NodeType(), 0.f)),
-      mPositionY(
-          new AudioParam(this, PannerNode::POSITIONY, this->NodeType(), 0.f)),
-      mPositionZ(
-          new AudioParam(this, PannerNode::POSITIONZ, this->NodeType(), 0.f)),
-      mOrientationX(new AudioParam(this, PannerNode::ORIENTATIONX,
-                                   this->NodeType(), 1.0f)),
-      mOrientationY(new AudioParam(this, PannerNode::ORIENTATIONY,
-                                   this->NodeType(), 0.f)),
-      mOrientationZ(new AudioParam(this, PannerNode::ORIENTATIONZ,
-                                   this->NodeType(), 0.f)),
       mRefDistance(1.),
       mMaxDistance(10000.),
       mRolloffFactor(1.),
       mConeInnerAngle(360.),
       mConeOuterAngle(360.),
       mConeOuterGain(0.) {
+  CreateAudioParam(mPositionX, PannerNode::POSITIONX, this->NodeType(), 0.f);
+  CreateAudioParam(mPositionY, PannerNode::POSITIONY, this->NodeType(), 0.f);
+  CreateAudioParam(mPositionZ, PannerNode::POSITIONZ, this->NodeType(), 0.f);
+  CreateAudioParam(mOrientationX, PannerNode::ORIENTATIONX, this->NodeType(),
+                   1.0f);
+  CreateAudioParam(mOrientationY, PannerNode::ORIENTATIONY, this->NodeType(),
+                   0.f);
+  CreateAudioParam(mOrientationZ, PannerNode::ORIENTATIONZ, this->NodeType(),
+                   0.f);
   mStream = AudioNodeStream::Create(
       aContext,
       new PannerNodeEngine(this, aContext->Destination(),
@@ -322,13 +318,10 @@ PannerNode::PannerNode(AudioContext* aContext)
       AudioNodeStream::NO_STREAM_FLAGS, aContext->Graph());
 }
 
-/* static */ already_AddRefed<PannerNode> PannerNode::Create(
-    AudioContext& aAudioContext, const PannerOptions& aOptions,
-    ErrorResult& aRv) {
-  if (aAudioContext.CheckClosed(aRv)) {
-    return nullptr;
-  }
-
+/* static */
+already_AddRefed<PannerNode> PannerNode::Create(AudioContext& aAudioContext,
+                                                const PannerOptions& aOptions,
+                                                ErrorResult& aRv) {
   RefPtr<PannerNode> audioNode = new PannerNode(&aAudioContext);
 
   audioNode->Initialize(aOptions, aRv);

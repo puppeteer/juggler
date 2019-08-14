@@ -12,15 +12,7 @@ from taskgraph.transforms.base import TransformSequence
 from taskgraph.transforms.beetmover import craft_release_properties
 from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
-
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
-
-taskref_or_string = Any(
-    basestring,
-    {Required('task-reference'): basestring})
+from voluptuous import Required, Optional
 
 beetmover_checksums_description_schema = schema.extend({
     Required('depname', default='build'): basestring,
@@ -61,8 +53,7 @@ def make_beetmover_checksums_description(config, jobs):
         extra['partner_path'] = dep_job.task['payload']['upstreamArtifacts'][0]['locale']
         extra['repack_id'] = repack_id
 
-        dependent_kind = str(dep_job.kind)
-        dependencies = {dependent_kind: dep_job.label}
+        dependencies = {dep_job.kind: dep_job.label}
         for k, v in dep_job.dependencies.items():
             if k.startswith('beetmover'):
                 dependencies[k] = v

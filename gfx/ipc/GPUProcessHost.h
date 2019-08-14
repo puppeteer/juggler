@@ -13,6 +13,11 @@
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/ipc/TaskFactory.h"
 
+namespace mozilla {
+namespace ipc {
+class SharedPreferenceSerializer;
+}
+}  // namespace mozilla
 class nsITimer;
 
 namespace mozilla {
@@ -43,9 +48,7 @@ class GPUProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
     virtual void OnRemoteProcessDeviceReset(GPUProcessHost* aHost) {}
   };
 
- public:
   explicit GPUProcessHost(Listener* listener);
-  ~GPUProcessHost();
 
   // Launch the subprocess asynchronously. On failure, false is returned.
   // Otherwise, true is returned, and the OnProcessLaunchComplete listener
@@ -96,6 +99,8 @@ class GPUProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
   void KillProcess();
 
  private:
+  ~GPUProcessHost();
+
   // Called on the main thread.
   void OnChannelConnectedTask();
   void OnChannelErrorTask();
@@ -111,7 +116,6 @@ class GPUProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
 
   void DestroyProcess();
 
- private:
   DISALLOW_COPY_AND_ASSIGN(GPUProcessHost);
 
   Listener* mListener;
@@ -122,6 +126,8 @@ class GPUProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
 
   UniquePtr<GPUChild> mGPUChild;
   uint64_t mProcessToken;
+
+  UniquePtr<mozilla::ipc::SharedPreferenceSerializer> mPrefSerializer;
 
   bool mShutdownRequested;
   bool mChannelClosed;

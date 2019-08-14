@@ -15,6 +15,8 @@
 #include "gfxUtils.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsDisplayList.h"
@@ -26,10 +28,11 @@
 using namespace mozilla;
 using namespace mozilla::gfx;
 
-nsPlaceholderFrame* NS_NewPlaceholderFrame(nsIPresShell* aPresShell,
+nsPlaceholderFrame* NS_NewPlaceholderFrame(PresShell* aPresShell,
                                            ComputedStyle* aStyle,
                                            nsFrameState aTypeBits) {
-  return new (aPresShell) nsPlaceholderFrame(aStyle, aTypeBits);
+  return new (aPresShell)
+      nsPlaceholderFrame(aStyle, aPresShell->GetPresContext(), aTypeBits);
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPlaceholderFrame)
@@ -40,28 +43,29 @@ NS_QUERYFRAME_HEAD(nsPlaceholderFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
 #endif
 
-/* virtual */ nsSize nsPlaceholderFrame::GetXULMinSize(
-    nsBoxLayoutState& aBoxLayoutState) {
+/* virtual */
+nsSize nsPlaceholderFrame::GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) {
   nsSize size(0, 0);
   DISPLAY_MIN_SIZE(this, size);
   return size;
 }
 
-/* virtual */ nsSize nsPlaceholderFrame::GetXULPrefSize(
-    nsBoxLayoutState& aBoxLayoutState) {
+/* virtual */
+nsSize nsPlaceholderFrame::GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) {
   nsSize size(0, 0);
   DISPLAY_PREF_SIZE(this, size);
   return size;
 }
 
-/* virtual */ nsSize nsPlaceholderFrame::GetXULMaxSize(
-    nsBoxLayoutState& aBoxLayoutState) {
-  nsSize size(NS_INTRINSICSIZE, NS_INTRINSICSIZE);
+/* virtual */
+nsSize nsPlaceholderFrame::GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) {
+  nsSize size(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
   DISPLAY_MAX_SIZE(this, size);
   return size;
 }
 
-/* virtual */ void nsPlaceholderFrame::AddInlineMinISize(
+/* virtual */
+void nsPlaceholderFrame::AddInlineMinISize(
     gfxContext* aRenderingContext, nsIFrame::InlineMinISizeData* aData) {
   // Override AddInlineMinWith so that *nothing* happens.  In
   // particular, we don't want to zero out |aData->mTrailingWhitespace|,
@@ -78,7 +82,8 @@ NS_QUERYFRAME_TAIL_INHERITING(nsFrame)
   }
 }
 
-/* virtual */ void nsPlaceholderFrame::AddInlinePrefISize(
+/* virtual */
+void nsPlaceholderFrame::AddInlinePrefISize(
     gfxContext* aRenderingContext, nsIFrame::InlinePrefISizeData* aData) {
   // Override AddInlinePrefWith so that *nothing* happens.  In
   // particular, we don't want to zero out |aData->mTrailingWhitespace|,
@@ -184,7 +189,8 @@ void nsPlaceholderFrame::DestroyFrom(nsIFrame* aDestructRoot,
   nsFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-/* virtual */ bool nsPlaceholderFrame::CanContinueTextRun() const {
+/* virtual */
+bool nsPlaceholderFrame::CanContinueTextRun() const {
   if (!mOutOfFlowFrame) {
     return false;
   }
@@ -201,7 +207,7 @@ ComputedStyle* nsPlaceholderFrame::GetParentComputedStyleForOutOfFlow(
       mContent ? mContent->GetFlattenedTreeParentElement() : nullptr;
   if (parentElement && Servo_Element_IsDisplayContents(parentElement)) {
     RefPtr<ComputedStyle> style =
-        PresShell()->StyleSet()->ResolveServoStyle(*parentElement);
+        ServoStyleSet::ResolveServoStyle(*parentElement);
     *aProviderFrame = nullptr;
     // See the comment in GetParentComputedStyle to see why returning this as a
     // weak ref is fine.
@@ -216,8 +222,9 @@ ComputedStyle* nsPlaceholderFrame::GetLayoutParentStyleForOutOfFlow(
   // Lie about our pseudo so we can step out of all anon boxes and
   // pseudo-elements.  The other option would be to reimplement the
   // {ib} split gunk here.
-  *aProviderFrame =
-      CorrectStyleParentFrame(GetParent(), nsGkAtoms::placeholderFrame);
+  //
+  // See the hack in CorrectStyleParentFrame for why we pass `MAX`.
+  *aProviderFrame = CorrectStyleParentFrame(GetParent(), PseudoStyleType::MAX);
   return *aProviderFrame ? (*aProviderFrame)->Style() : nullptr;
 }
 
@@ -245,13 +252,13 @@ void nsPlaceholderFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                           const nsDisplayListSet& aLists) {
   DO_GLOBAL_REFLOW_COUNT_DSP("nsPlaceholderFrame");
 
-#ifdef DEBUG
+#  ifdef DEBUG
   if (GetShowFrameBorders()) {
-    aLists.Outlines()->AppendToTop(MakeDisplayItem<nsDisplayGeneric>(
+    aLists.Outlines()->AppendNewToTop<nsDisplayGeneric>(
         aBuilder, this, PaintDebugPlaceholder, "DebugPlaceholder",
-        DisplayItemType::TYPE_DEBUG_PLACEHOLDER));
+        DisplayItemType::TYPE_DEBUG_PLACEHOLDER);
   }
-#endif
+#  endif
 }
 #endif  // DEBUG || (MOZ_REFLOW_PERF_DSP && MOZ_REFLOW_PERF)
 
@@ -267,7 +274,7 @@ void nsPlaceholderFrame::List(FILE* out, const char* aPrefix,
 
   if (mOutOfFlowFrame) {
     str += " outOfFlowFrame=";
-    nsFrame::ListTag(str, mOutOfFlowFrame);
+    str += mOutOfFlowFrame->ListTag();
   }
   fprintf_stderr(out, "%s\n", str.get());
 }

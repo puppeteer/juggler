@@ -27,7 +27,7 @@ class PresState;
 template<typename> struct already_AddRefed;
 %}
 
-[scriptable, uuid(aef27cb3-4df9-4eeb-b0b0-ac56cf861d04)]
+[scriptable, builtinclass, uuid(aef27cb3-4df9-4eeb-b0b0-ac56cf861d04)]
 interface nsILayoutHistoryState : nsISupports
 {
   /**
@@ -39,8 +39,7 @@ interface nsILayoutHistoryState : nsISupports
   * Get the keys of all PresStates held by this LayoutHistoryState.
   * Note: Check hasStates first.
   */
-  void getKeys([optional] out uint32_t aCount,
-               [array, size_is(aCount), retval] out string aKeys);
+  Array<ACString> getKeys();
 
   /*
   * Attempts to get the data of the PresState corresponding to
@@ -49,7 +48,7 @@ interface nsILayoutHistoryState : nsISupports
   void getPresState(in ACString aKey,
                     out float aScrollX, out float aScrollY,
                     out boolean aAllowScrollOriginDowngrade,
-                    out float aRes, out boolean aScaleToRes);
+                    out float aRes);
 
   /**
    * Constructs a new PresState object based on the supplied data
@@ -58,7 +57,7 @@ interface nsILayoutHistoryState : nsISupports
   void addNewPresState(in ACString aKey,
                    in float aScrollX, in float aScrollY,
                    in boolean aAllowScrollOriginDowngrade,
-                   in float aRes, in boolean aScaleToRes);
+                   in float aRes);
 
   // Native only interface, converted from the original nsILayoutHistoryState.h
 

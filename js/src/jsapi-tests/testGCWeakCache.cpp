@@ -213,7 +213,7 @@ struct MovableCellHasher<NumberAndObjectEntry> {
 BEGIN_TEST(testIncrementalWeakCacheSweeping) {
   AutoLeaveZeal nozeal(cx);
 
-  JS_SetGCParameter(cx, JSGC_MODE, JSGC_MODE_INCREMENTAL);
+  JS_SetGCParameter(cx, JSGC_MODE, JSGC_MODE_ZONE_INCREMENTAL);
   JS_SetGCZeal(cx, 17, 1000000);
 
   CHECK(TestSet());
@@ -249,7 +249,7 @@ bool SweepCacheAndFinishGC(JSContext* cx, const Cache& cache) {
   CHECK(IsIncrementalGCInProgress(cx));
 
   PrepareForIncrementalGC(cx);
-  IncrementalGCSlice(cx, JS::gcreason::API);
+  IncrementalGCSlice(cx, JS::GCReason::API);
 
   JS::Zone* zone = JS::GetObjectZone(global);
   CHECK(!IsIncrementalGCInProgress(cx));

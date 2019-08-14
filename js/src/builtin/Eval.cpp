@@ -43,13 +43,27 @@ static void AssertInnerizedEnvironmentChain(JSContext* cx, JSObject& env) {
 }
 
 static bool IsEvalCacheCandidate(JSScript* script) {
+  if (!script->isDirectEvalInFunction()) {
+    return false;
+  }
+
   // Make sure there are no inner objects which might use the wrong parent
   // and/or call scope by reusing the previous eval's script.
-  return script->isDirectEvalInFunction() && !script->hasSingletons() &&
-         !script->hasObjects();
+  if (script->hasSingletons()) {
+    return false;
+  }
+
+  for (JS::GCCellPtr gcThing : script->gcthings()) {
+    if (gcThing.is<JSObject>()) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
-/* static */ HashNumber EvalCacheHashPolicy::hash(const EvalCacheLookup& l) {
+/* static */
+HashNumber EvalCacheHashPolicy::hash(const EvalCacheLookup& l) {
   AutoCheckCannotGC nogc;
   uint32_t hash = l.str->hasLatin1Chars()
                       ? HashString(l.str->latin1Chars(nogc), l.str->length())
@@ -57,8 +71,9 @@ static bool IsEvalCacheCandidate(JSScript* script) {
   return AddToHash(hash, l.callerScript.get(), l.pc);
 }
 
-/* static */ bool EvalCacheHashPolicy::match(const EvalCacheEntry& cacheEntry,
-                                             const EvalCacheLookup& l) {
+/* static */
+bool EvalCacheHashPolicy::match(const EvalCacheEntry& cacheEntry,
+                                const EvalCacheLookup& l) {
   MOZ_ASSERT(IsEvalCacheCandidate(cacheEntry.script));
 
   return EqualStrings(cacheEntry.str, l.str) &&
@@ -105,7 +120,6 @@ class EvalScriptGuard {
     if (*p_) {
       script_ = (*p_)->script;
       p_->remove(cx_, cx_->caches().evalCache, lookup_);
-      script_->uncacheForEval();
     }
   }
 
@@ -113,7 +127,6 @@ class EvalScriptGuard {
     // JSScript::initFromEmitter has already called js_CallNewScriptHook.
     MOZ_ASSERT(!script_ && script);
     script_ = script;
-    script_->setActiveEval();
   }
 
   bool foundScript() { return !!script_; }
@@ -285,7 +298,8 @@ static bool EvalKernel(JSContext* cx, HandleValue v, EvalType evalType,
     options.setIsRunOnce(true)
         .setNoScriptRval(false)
         .setMutedErrors(mutedErrors)
-        .maybeMakeStrictMode(evalType == DIRECT_EVAL && IsStrictEvalPC(pc));
+        .maybeMakeStrictMode(evalType == DIRECT_EVAL && IsStrictEvalPC(pc))
+        .setScriptOrModule(maybeScript);
 
     if (introducerFilename) {
       options.setFileAndLine(filename, 1);
@@ -312,7 +326,7 @@ static bool EvalKernel(JSContext* cx, HandleValue v, EvalType evalType,
     }
 
     frontend::EvalScriptInfo info(cx, options, env, enclosing);
-    JSScript* compiled = frontend::CompileEvalScript(info, srcBuf);
+    RootedScript compiled(cx, frontend::CompileEvalScript(info, srcBuf));
     if (!compiled) {
       return false;
     }
@@ -474,7 +488,7 @@ JS_FRIEND_API bool js::ExecuteInFrameScriptEnvironment(
     return false;
   }
 
-  AutoObjectVector envChain(cx);
+  RootedObjectVector envChain(cx);
   if (!envChain.append(objArg)) {
     return false;
   }
@@ -523,14 +537,14 @@ JS_FRIEND_API JSObject* js::NewJSMEnvironment(JSContext* cx) {
 JS_FRIEND_API bool js::ExecuteInJSMEnvironment(JSContext* cx,
                                                HandleScript scriptArg,
                                                HandleObject varEnv) {
-  AutoObjectVector emptyChain(cx);
+  RootedObjectVector emptyChain(cx);
   return ExecuteInJSMEnvironment(cx, scriptArg, varEnv, emptyChain);
 }
 
 JS_FRIEND_API bool js::ExecuteInJSMEnvironment(JSContext* cx,
                                                HandleScript scriptArg,
                                                HandleObject varEnv,
-                                               AutoObjectVector& targetObj) {
+                                               HandleObjectVector targetObj) {
   cx->check(varEnv);
   MOZ_ASSERT(
       ObjectRealm::get(varEnv).getNonSyntacticLexicalEnvironment(varEnv));

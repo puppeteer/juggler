@@ -159,9 +159,7 @@ class JS_PUBLIC_API CallbackTracer : public JSTracer {
   virtual void onSymbolEdge(JS::Symbol** symp) {
     onChild(JS::GCCellPtr(*symp));
   }
-#ifdef ENABLE_BIGINT
   virtual void onBigIntEdge(JS::BigInt** bip) { onChild(JS::GCCellPtr(*bip)); }
-#endif
   virtual void onScriptEdge(JSScript** scriptp) {
     onChild(JS::GCCellPtr(*scriptp));
   }
@@ -241,14 +239,14 @@ class JS_PUBLIC_API CallbackTracer : public JSTracer {
 
 #ifdef DEBUG
   enum class TracerKind {
-    DoNotCare,
+    Unspecified,
     Moving,
     GrayBuffering,
     VerifyTraceProtoAndIface,
     ClearEdges,
     UnmarkGray
   };
-  virtual TracerKind getTracerKind() const { return TracerKind::DoNotCare; }
+  virtual TracerKind getTracerKind() const { return TracerKind::Unspecified; }
 #endif
 
   // In C++, overriding a method hides all methods in the base class with
@@ -259,9 +257,7 @@ class JS_PUBLIC_API CallbackTracer : public JSTracer {
   void dispatchToOnEdge(JSObject** objp) { onObjectEdge(objp); }
   void dispatchToOnEdge(JSString** strp) { onStringEdge(strp); }
   void dispatchToOnEdge(JS::Symbol** symp) { onSymbolEdge(symp); }
-#ifdef ENABLE_BIGINT
   void dispatchToOnEdge(JS::BigInt** bip) { onBigIntEdge(bip); }
-#endif
   void dispatchToOnEdge(JSScript** scriptp) { onScriptEdge(scriptp); }
   void dispatchToOnEdge(js::Shape** shapep) { onShapeEdge(shapep); }
   void dispatchToOnEdge(js::ObjectGroup** groupp) { onObjectGroupEdge(groupp); }
@@ -403,7 +399,7 @@ inline void TraceEdge(JSTracer* trc, JS::TenuredHeap<T>* thingp,
   MOZ_ASSERT(thingp);
   if (T ptr = thingp->unbarrieredGetPtr()) {
     js::gc::TraceExternalEdge(trc, &ptr, name);
-    thingp->setPtr(ptr);
+    thingp->unbarrieredSetPtr(ptr);
   }
 }
 

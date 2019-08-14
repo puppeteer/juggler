@@ -23,14 +23,21 @@
 #include "mozilla/dom/ServiceWorker.h"
 #include "mozilla/dom/ServiceWorkerContainer.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
+#include "mozilla/StorageAccess.h"
+#include "nsIContentSecurityPolicy.h"
 #include "nsContentUtils.h"
+#include "nsFocusManager.h"
 #include "nsIDocShell.h"
 #include "nsPIDOMWindow.h"
+
+#include "mozilla/ipc/BackgroundUtils.h"
 
 namespace mozilla {
 namespace dom {
 
 using mozilla::dom::ipc::StructuredCloneData;
+using mozilla::ipc::CSPInfo;
+using mozilla::ipc::CSPToCSPInfo;
 using mozilla::ipc::PrincipalInfo;
 using mozilla::ipc::PrincipalInfoToPrincipal;
 
@@ -69,13 +76,12 @@ nsresult ClientSource::SnapshotWindowState(ClientState* aStateOut) {
   nsPIDOMWindowInner* window = GetInnerWindow();
   if (!window || !window->IsCurrentInnerWindow() ||
       !window->HasActiveDocument()) {
-    *aStateOut = ClientState(
-        ClientWindowState(VisibilityState::Hidden, TimeStamp(),
-                          nsContentUtils::StorageAccess::eDeny, false));
+    *aStateOut = ClientState(ClientWindowState(
+        VisibilityState::Hidden, TimeStamp(), StorageAccess::eDeny, false));
     return NS_OK;
   }
 
-  nsIDocument* doc = window->GetExtantDoc();
+  Document* doc = window->GetExtantDoc();
   if (NS_WARN_IF(!doc)) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -87,8 +93,7 @@ nsresult ClientSource::SnapshotWindowState(ClientState* aStateOut) {
     return rv.StealNSResult();
   }
 
-  nsContentUtils::StorageAccess storage =
-      nsContentUtils::StorageAllowedForDocument(doc);
+  StorageAccess storage = StorageAllowedForDocument(doc);
 
   *aStateOut = ClientState(ClientWindowState(
       doc->VisibilityState(), doc->LastFocusTime(), storage, focused));
@@ -206,7 +211,8 @@ void ClientSource::WorkerExecutionReady(WorkerPrivate* aWorkerPrivate) {
   // execution ready.  We can't reliably determine what our storage policy
   // is before execution ready, unfortunately.
   if (mController.isSome()) {
-    MOZ_DIAGNOSTIC_ASSERT(aWorkerPrivate->IsStorageAllowed() ||
+    MOZ_DIAGNOSTIC_ASSERT(aWorkerPrivate->StorageAccess() >
+                              StorageAccess::ePrivateBrowsing ||
                           StringBeginsWith(aWorkerPrivate->ScriptURL(),
                                            NS_LITERAL_STRING("blob:")));
   }
@@ -232,7 +238,7 @@ nsresult ClientSource::WindowExecutionReady(nsPIDOMWindowInner* aInnerWindow) {
     return NS_OK;
   }
 
-  nsIDocument* doc = aInnerWindow->GetExtantDoc();
+  Document* doc = aInnerWindow->GetExtantDoc();
   NS_ENSURE_TRUE(doc, NS_ERROR_UNEXPECTED);
 
   nsIURI* uri = doc->GetOriginalURI();
@@ -255,11 +261,10 @@ nsresult ClientSource::WindowExecutionReady(nsPIDOMWindowInner* aInnerWindow) {
   // continue to inherit the SW as well.  We need to avoid triggering the
   // assertion in this corner case.
   if (mController.isSome()) {
-    MOZ_DIAGNOSTIC_ASSERT(
-        spec.LowerCaseEqualsLiteral("about:blank") ||
-        StringBeginsWith(spec, NS_LITERAL_CSTRING("blob:")) ||
-        nsContentUtils::StorageAllowedForWindow(aInnerWindow) ==
-            nsContentUtils::StorageAccess::eAllow);
+    MOZ_DIAGNOSTIC_ASSERT(spec.LowerCaseEqualsLiteral("about:blank") ||
+                          StringBeginsWith(spec, NS_LITERAL_CSTRING("blob:")) ||
+                          StorageAllowedForWindow(aInnerWindow) ==
+                              StorageAccess::eAllow);
   }
 
   nsPIDOMWindowOuter* outer = aInnerWindow->GetOuterWindow();
@@ -377,10 +382,10 @@ void ClientSource::SetController(
     MOZ_DIAGNOSTIC_ASSERT(
         Info().URL().LowerCaseEqualsLiteral("about:blank") ||
         StringBeginsWith(Info().URL(), NS_LITERAL_CSTRING("blob:")) ||
-        nsContentUtils::StorageAllowedForWindow(GetInnerWindow()) ==
-            nsContentUtils::StorageAccess::eAllow);
+        StorageAllowedForWindow(GetInnerWindow()) == StorageAccess::eAllow);
   } else if (GetWorkerPrivate()) {
-    MOZ_DIAGNOSTIC_ASSERT(GetWorkerPrivate()->IsStorageAllowed() ||
+    MOZ_DIAGNOSTIC_ASSERT(GetWorkerPrivate()->StorageAccess() >
+                              StorageAccess::ePrivateBrowsing ||
                           StringBeginsWith(GetWorkerPrivate()->ScriptURL(),
                                            NS_LITERAL_STRING("blob:")));
   }
@@ -431,27 +436,23 @@ RefPtr<ClientOpPromise> ClientSource::Control(
     controlAllowed =
         Info().URL().LowerCaseEqualsLiteral("about:blank") ||
         StringBeginsWith(Info().URL(), NS_LITERAL_CSTRING("blob:")) ||
-        nsContentUtils::StorageAllowedForWindow(GetInnerWindow()) ==
-            nsContentUtils::StorageAccess::eAllow;
+        StorageAllowedForWindow(GetInnerWindow()) == StorageAccess::eAllow;
   } else if (GetWorkerPrivate()) {
     // Local URL workers and workers with access to storage cna be controlled.
-    controlAllowed = GetWorkerPrivate()->IsStorageAllowed() ||
-                     StringBeginsWith(GetWorkerPrivate()->ScriptURL(),
-                                      NS_LITERAL_STRING("blob:"));
+    controlAllowed =
+        GetWorkerPrivate()->StorageAccess() > StorageAccess::ePrivateBrowsing ||
+        StringBeginsWith(GetWorkerPrivate()->ScriptURL(),
+                         NS_LITERAL_STRING("blob:"));
   }
 
-  RefPtr<ClientOpPromise> ref;
-
   if (NS_WARN_IF(!controlAllowed)) {
-    ref = ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
-                                           __func__);
-    return ref.forget();
+    return ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
+                                            __func__);
   }
 
   SetController(ServiceWorkerDescriptor(aArgs.serviceWorker()));
 
-  ref = ClientOpPromise::CreateAndResolve(NS_OK, __func__);
-  return ref.forget();
+  return ClientOpPromise::CreateAndResolve(NS_OK, __func__);
 }
 
 void ClientSource::InheritController(
@@ -506,12 +507,9 @@ void ClientSource::NoteDOMContentLoaded() {
 RefPtr<ClientOpPromise> ClientSource::Focus(const ClientFocusArgs& aArgs) {
   NS_ASSERT_OWNINGTHREAD(ClientSource);
 
-  RefPtr<ClientOpPromise> ref;
-
   if (mClientInfo.Type() != ClientType::Window) {
-    ref = ClientOpPromise::CreateAndReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-                                           __func__);
-    return ref.forget();
+    return ClientOpPromise::CreateAndReject(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+                                            __func__);
   }
   nsPIDOMWindowOuter* outer = nullptr;
 
@@ -526,28 +524,20 @@ RefPtr<ClientOpPromise> ClientSource::Focus(const ClientFocusArgs& aArgs) {
   }
 
   if (!outer) {
-    ref = ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
-                                           __func__);
-    return ref.forget();
+    return ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
+                                            __func__);
   }
 
   MOZ_ASSERT(NS_IsMainThread());
-
-  nsresult rv = nsContentUtils::DispatchFocusChromeEvent(outer);
-  if (NS_FAILED(rv)) {
-    ref = ClientOpPromise::CreateAndReject(rv, __func__);
-    return ref.forget();
-  }
+  nsFocusManager::FocusWindow(outer);
 
   ClientState state;
-  rv = SnapshotState(&state);
+  nsresult rv = SnapshotState(&state);
   if (NS_FAILED(rv)) {
-    ref = ClientOpPromise::CreateAndReject(rv, __func__);
-    return ref.forget();
+    return ClientOpPromise::CreateAndReject(rv, __func__);
   }
 
-  ref = ClientOpPromise::CreateAndResolve(state.ToIPC(), __func__);
-  return ref.forget();
+  return ClientOpPromise::CreateAndResolve(state.ToIPC(), __func__);
 }
 
 RefPtr<ClientOpPromise> ClientSource::PostMessage(
@@ -561,11 +551,10 @@ RefPtr<ClientOpPromise> ClientSource::PostMessage(
     const RefPtr<ServiceWorkerContainer> container =
         window->Navigator()->ServiceWorker();
     container->ReceiveMessage(aArgs);
-    return ClientOpPromise::CreateAndResolve(NS_OK, __func__).forget();
+    return ClientOpPromise::CreateAndResolve(NS_OK, __func__);
   }
 
-  return ClientOpPromise::CreateAndReject(NS_ERROR_NOT_IMPLEMENTED, __func__)
-      .forget();
+  return ClientOpPromise::CreateAndReject(NS_ERROR_NOT_IMPLEMENTED, __func__);
 }
 
 RefPtr<ClientOpPromise> ClientSource::Claim(const ClientClaimArgs& aArgs) {
@@ -574,13 +563,10 @@ RefPtr<ClientOpPromise> ClientSource::Claim(const ClientClaimArgs& aArgs) {
   // In parent-process mode this method should not be called.
   MOZ_DIAGNOSTIC_ASSERT(!ServiceWorkerParentInterceptEnabled());
 
-  RefPtr<ClientOpPromise> ref;
-
   nsIGlobalObject* global = GetGlobal();
   if (NS_WARN_IF(!global)) {
-    ref = ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
-                                           __func__);
-    return ref.forget();
+    return ClientOpPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
+                                            __func__);
   }
 
   // Note, we cannot just mark the ClientSource controlled.  We must go through
@@ -618,35 +604,31 @@ RefPtr<ClientOpPromise> ClientSource::Claim(const ClientClaimArgs& aArgs) {
   auto holder = MakeRefPtr<DOMMozPromiseRequestHolder<GenericPromise>>(global);
 
   innerPromise
-      ->Then(mEventTarget, __func__,
-             [outerPromise, holder](bool aResult) {
-               holder->Complete();
-               outerPromise->Resolve(NS_OK, __func__);
-             },
-             [outerPromise, holder](nsresult aResult) {
-               holder->Complete();
-               outerPromise->Reject(aResult, __func__);
-             })
+      ->Then(
+          mEventTarget, __func__,
+          [outerPromise, holder](bool aResult) {
+            holder->Complete();
+            outerPromise->Resolve(NS_OK, __func__);
+          },
+          [outerPromise, holder](nsresult aResult) {
+            holder->Complete();
+            outerPromise->Reject(aResult, __func__);
+          })
       ->Track(*holder);
 
-  ref = outerPromise;
-  return ref.forget();
+  return outerPromise.forget();
 }
 
 RefPtr<ClientOpPromise> ClientSource::GetInfoAndState(
     const ClientGetInfoAndStateArgs& aArgs) {
-  RefPtr<ClientOpPromise> ref;
-
   ClientState state;
   nsresult rv = SnapshotState(&state);
   if (NS_FAILED(rv)) {
-    ref = ClientOpPromise::CreateAndReject(rv, __func__);
-    return ref.forget();
+    return ClientOpPromise::CreateAndReject(rv, __func__);
   }
 
-  ref = ClientOpPromise::CreateAndResolve(
+  return ClientOpPromise::CreateAndResolve(
       ClientInfoAndState(mClientInfo.ToIPC(), state.ToIPC()), __func__);
-  return ref.forget();
 }
 
 nsresult ClientSource::SnapshotState(ClientState* aStateOut) {
@@ -667,17 +649,49 @@ nsresult ClientSource::SnapshotState(ClientState* aStateOut) {
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
 
-  // Workers only keep a boolean for storage access at the moment.
-  // Map this back to eAllow or eDeny for now.
-  nsContentUtils::StorageAccess storage =
-      workerPrivate->IsStorageAllowed() ? nsContentUtils::StorageAccess::eAllow
-                                        : nsContentUtils::StorageAccess::eDeny;
-
-  *aStateOut = ClientState(ClientWorkerState(storage));
+  *aStateOut = ClientState(ClientWorkerState(workerPrivate->StorageAccess()));
   return NS_OK;
 }
 
 nsISerialEventTarget* ClientSource::EventTarget() const { return mEventTarget; }
+
+void ClientSource::SetCsp(nsIContentSecurityPolicy* aCsp) {
+  NS_ASSERT_OWNINGTHREAD(ClientSource);
+  if (!aCsp) {
+    return;
+  }
+
+  CSPInfo cspInfo;
+  nsresult rv = CSPToCSPInfo(aCsp, &cspInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+  mClientInfo.SetCspInfo(cspInfo);
+}
+
+void ClientSource::SetPreloadCsp(nsIContentSecurityPolicy* aPreloadCsp) {
+  NS_ASSERT_OWNINGTHREAD(ClientSource);
+  if (!aPreloadCsp) {
+    return;
+  }
+
+  CSPInfo cspPreloadInfo;
+  nsresult rv = CSPToCSPInfo(aPreloadCsp, &cspPreloadInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
+  mClientInfo.SetPreloadCspInfo(cspPreloadInfo);
+}
+
+void ClientSource::SetCspInfo(const CSPInfo& aCSPInfo) {
+  NS_ASSERT_OWNINGTHREAD(ClientSource);
+  mClientInfo.SetCspInfo(aCSPInfo);
+}
+
+const Maybe<mozilla::ipc::CSPInfo>& ClientSource::GetCspInfo() {
+  NS_ASSERT_OWNINGTHREAD(ClientSource);
+  return mClientInfo.GetCspInfo();
+}
 
 void ClientSource::Traverse(nsCycleCollectionTraversalCallback& aCallback,
                             const char* aName, uint32_t aFlags) {

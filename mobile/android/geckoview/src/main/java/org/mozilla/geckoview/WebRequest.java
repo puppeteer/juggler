@@ -8,6 +8,7 @@ package org.mozilla.geckoview;
 
 import org.mozilla.gecko.annotation.WrapForJNI;
 
+import android.support.annotation.AnyThread;
 import android.support.annotation.IntDef;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
@@ -22,11 +23,18 @@ import java.nio.ByteBuffer;
  * class via {@link WebRequest.Builder}, and fetch responses via {@link GeckoWebExecutor#fetch(WebRequest)}.
  */
 @WrapForJNI
+@AnyThread
 public class WebRequest extends WebMessage {
     /**
      * The HTTP method for the request. Defaults to "GET".
      */
     public final @NonNull String method;
+
+    /**
+     * The body of the request. Must be a directly-allocated ByteBuffer.
+     * May be null.
+     */
+    public final @Nullable ByteBuffer body;
 
     /**
      * The cache mode for the request. See {@link #CACHE_MODE_DEFAULT}.
@@ -45,7 +53,7 @@ public class WebRequest extends WebMessage {
     @IntDef({CACHE_MODE_DEFAULT, CACHE_MODE_NO_STORE,
             CACHE_MODE_RELOAD, CACHE_MODE_NO_CACHE,
             CACHE_MODE_FORCE_CACHE, CACHE_MODE_ONLY_IF_CACHED})
-    public @interface CacheMode {};
+    /* package */ @interface CacheMode {};
 
     /**
      * Default cache mode. Normal caching rules apply.
@@ -97,16 +105,23 @@ public class WebRequest extends WebMessage {
     /**
      * Constructs a new WebRequest from a {@link WebRequest.Builder}.
      */
-    /* package */ WebRequest(@NonNull Builder builder) {
+    /* package */ WebRequest(final @NonNull Builder builder) {
         super(builder);
         method = builder.mMethod;
         cacheMode = builder.mCacheMode;
         referrer = builder.mReferrer;
+
+        if (builder.mBody != null) {
+            body = builder.mBody.asReadOnlyBuffer();
+        } else {
+            body = null;
+        }
     }
 
     /**
      * Builder offers a convenient way for constructing {@link WebRequest} instances.
      */
+    @AnyThread
     public static class Builder extends WebMessage.Builder {
         /* package */ String mMethod = "GET";
         /* package */ int mCacheMode = CACHE_MODE_DEFAULT;
@@ -122,7 +137,7 @@ public class WebRequest extends WebMessage {
         }
 
         @Override
-        public @NonNull Builder uri(@NonNull String uri) {
+        public @NonNull Builder uri(final @NonNull String uri) {
             super.uri(uri);
             return this;
         }
@@ -139,9 +154,18 @@ public class WebRequest extends WebMessage {
             return this;
         }
 
-        @Override
-        public @NonNull Builder body(@Nullable ByteBuffer buffer) {
-            super.body(buffer);
+        /**
+         * Set the body.
+         *
+         * @param buffer A {@link ByteBuffer} with the data.
+         *               Must be allocated directly via {@link ByteBuffer#allocateDirect(int)}.
+         * @return This Builder instance.
+         */
+        public @NonNull Builder body(final @Nullable ByteBuffer buffer) {
+            if (buffer != null && !buffer.isDirect()) {
+                throw new IllegalArgumentException("body must be directly allocated");
+            }
+            mBody = buffer;
             return this;
         }
 
@@ -159,7 +183,7 @@ public class WebRequest extends WebMessage {
         /**
          * Set the cache mode.
          *
-         * @param mode One of {@link CacheMode}.
+         * @param mode One of the {@link #CACHE_MODE_DEFAULT CACHE_*} flags.
          * @return This Builder instance.
          */
         public @NonNull Builder cacheMode(final @CacheMode int mode) {

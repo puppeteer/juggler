@@ -17,19 +17,19 @@
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEventDispatcherListener.h"
 #include "mozilla/TextEvents.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 
 #include <android/api-level.h>
 #include <android/input.h>
 #include <android/log.h>
 
 #ifdef DEBUG_ANDROID_IME
-#define ALOGIME(args...) \
-  __android_log_print(ANDROID_LOG_INFO, "GeckoEditableSupport", ##args)
+#  define ALOGIME(args...) \
+    __android_log_print(ANDROID_LOG_INFO, "GeckoEditableSupport", ##args)
 #else
-#define ALOGIME(args...) \
-  do {                   \
-  } while (0)
+#  define ALOGIME(args...) \
+    do {                   \
+    } while (0)
 #endif
 
 template <>
@@ -1051,6 +1051,9 @@ void GeckoEditableSupport::OnImeReplaceText(int32_t aStart, int32_t aEnd,
 
 bool GeckoEditableSupport::DoReplaceText(int32_t aStart, int32_t aEnd,
                                          jni::String::Param aText) {
+  ALOGIME("IME: IME_REPLACE_TEXT: text=\"%s\"",
+          NS_ConvertUTF16toUTF8(aText->ToString()).get());
+
   // Return true if processed and we should reply to the OnImeReplaceText
   // event later. Return false if _not_ processed and we should reply to the
   // OnImeReplaceText event now.
@@ -1297,6 +1300,7 @@ bool GeckoEditableSupport::DoUpdateComposition(int32_t aStart, int32_t aEnd,
   }
   mDispatcher->SetPendingComposition(string, mIMERanges);
   mDispatcher->FlushPendingComposition(status);
+  mIMEActiveCompositionCount++;
   mIMERanges->Clear();
   return true;
 }
@@ -1434,17 +1438,19 @@ nsresult GeckoEditableSupport::NotifyIME(
     case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED: {
       ALOGIME("IME: NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED");
 
-      // We often only get one event-handled notification after a pair of
-      // update-composition then replace-text calls. Therefore, only count
-      // the number of composition events for replace-text calls to reduce
-      // the chance of mismatch.
-      if (!(--mIMEActiveCompositionCount) && mIMEDelaySynchronizeReply) {
-        FlushIMEChanges();
-      }
-
-      // Hardware keyboard support requires each string rect.
-      if (mIMEMonitorCursor) {
-        UpdateCompositionRects();
+      // NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED isn't sent per IME call.
+      // Receiving this event means that Gecko has already handled all IME
+      // composing events in queue.
+      //
+      if (mIsRemote) {
+        OnNotifyIMEOfCompositionEventHandled();
+      } else {
+        // Also, when receiving this event, mIMEDelaySynchronizeReply won't
+        // update yet on non-e10s case since IME event is posted before updating
+        // it. So we have to delay handling of this event.
+        RefPtr<GeckoEditableSupport> self(this);
+        nsAppShell::PostEvent(
+            [this, self] { OnNotifyIMEOfCompositionEventHandled(); });
       }
       break;
     }
@@ -1453,6 +1459,20 @@ nsresult GeckoEditableSupport::NotifyIME(
       break;
   }
   return NS_OK;
+}
+
+void GeckoEditableSupport::OnNotifyIMEOfCompositionEventHandled() {
+  // NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED may be merged with multiple events,
+  // so reset count.
+  mIMEActiveCompositionCount = 0;
+  if (mIMEDelaySynchronizeReply) {
+    FlushIMEChanges();
+  }
+
+  // Hardware keyboard support requires each string rect.
+  if (mIMEMonitorCursor) {
+    UpdateCompositionRects();
+  }
 }
 
 void GeckoEditableSupport::OnRemovedFrom(
@@ -1511,8 +1531,11 @@ void GeckoEditableSupport::SetInputContext(const InputContext& aContext,
 void GeckoEditableSupport::NotifyIMEContext(const InputContext& aContext,
                                             const InputContextAction& aAction) {
   const bool inPrivateBrowsing = aContext.mInPrivateBrowsing;
+  // isUserAction is used whether opening virtual keyboard. But long press
+  // shouldn't open it.
   const bool isUserAction =
-      aAction.IsHandlingUserInput() || aContext.mHasHandledUserInput;
+      aAction.mCause != InputContextAction::CAUSE_LONGPRESS &&
+      (aAction.IsHandlingUserInput() || aContext.mHasHandledUserInput);
   const int32_t flags =
       (inPrivateBrowsing ? EditableListener::IME_FLAG_PRIVATE_BROWSING : 0) |
       (isUserAction ? EditableListener::IME_FLAG_USER_ACTION : 0);
@@ -1545,20 +1568,20 @@ void GeckoEditableSupport::TransferParent(jni::Object::Param aEditableParent) {
   }
 }
 
-void GeckoEditableSupport::SetOnTabChild(dom::TabChild* aTabChild) {
+void GeckoEditableSupport::SetOnBrowserChild(dom::BrowserChild* aBrowserChild) {
   MOZ_ASSERT(!XRE_IsParentProcess());
-  NS_ENSURE_TRUE_VOID(aTabChild);
+  NS_ENSURE_TRUE_VOID(aBrowserChild);
 
   const dom::ContentChild* const contentChild =
       dom::ContentChild::GetSingleton();
-  RefPtr<widget::PuppetWidget> widget(aTabChild->WebWidget());
+  RefPtr<widget::PuppetWidget> widget(aBrowserChild->WebWidget());
   NS_ENSURE_TRUE_VOID(contentChild && widget);
 
   // Get the content/tab ID in order to get the correct
   // IGeckoEditableParent object, which GeckoEditableChild uses to
   // communicate with the parent process.
   const uint64_t contentId = contentChild->GetID();
-  const uint64_t tabId = aTabChild->GetTabId();
+  const uint64_t tabId = aBrowserChild->GetTabId();
   NS_ENSURE_TRUE_VOID(contentId && tabId);
 
   RefPtr<widget::TextEventDispatcherListener> listener =
@@ -1580,7 +1603,7 @@ void GeckoEditableSupport::SetOnTabChild(dom::TabChild* aTabChild) {
     AttachNative(editableChild, editableSupport);
     editableSupport->mEditableAttached = true;
 
-    // Connect the new child to a parent that corresponds to the TabChild.
+    // Connect the new child to a parent that corresponds to the BrowserChild.
     java::GeckoServiceChildProcess::GetEditableParent(editableChild, contentId,
                                                       tabId);
     return;
@@ -1604,7 +1627,7 @@ void GeckoEditableSupport::SetOnTabChild(dom::TabChild* aTabChild) {
     support->mEditableAttached = true;
   }
 
-  // Transfer to a new parent that corresponds to the TabChild.
+  // Transfer to a new parent that corresponds to the BrowserChild.
   java::GeckoServiceChildProcess::GetEditableParent(support->GetJavaEditable(),
                                                     contentId, tabId);
 }

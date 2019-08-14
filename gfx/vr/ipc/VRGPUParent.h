@@ -8,6 +8,7 @@
 #define GFX_VR_GPU_PARENT_H
 
 #include "mozilla/gfx/PVRGPUParent.h"
+#include "VRService.h"
 
 namespace mozilla {
 namespace gfx {
@@ -15,26 +16,31 @@ namespace gfx {
 class VRGPUParent final : public PVRGPUParent {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(VRGPUParent)
 
- public:
-  explicit VRGPUParent(ProcessId aChildProcessId);
+  friend class PVRGPUParent;
 
-  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+ public:
   static RefPtr<VRGPUParent> CreateForGPU(Endpoint<PVRGPUParent>&& aEndpoint);
+  virtual void ActorDestroy(ActorDestroyReason aWhy) override;
+  bool IsClosed();
 
  protected:
-  ~VRGPUParent() {}
-
   void Bind(Endpoint<PVRGPUParent>&& aEndpoint);
-  virtual mozilla::ipc::IPCResult RecvStartVRService() override;
-  virtual mozilla::ipc::IPCResult RecvStopVRService() override;
+  mozilla::ipc::IPCResult RecvStartVRService();
+  mozilla::ipc::IPCResult RecvStopVRService();
 
  private:
+  explicit VRGPUParent(ProcessId aChildProcessId);
+  ~VRGPUParent();
+
   void DeferredDestroy();
 
   RefPtr<VRGPUParent> mSelfRef;
 #if !defined(MOZ_WIDGET_ANDROID)
   RefPtr<VRService> mVRService;
 #endif
+  bool mClosed;
+
+  DISALLOW_COPY_AND_ASSIGN(VRGPUParent);
 };
 
 }  // namespace gfx

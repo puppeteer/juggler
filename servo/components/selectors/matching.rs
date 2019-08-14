@@ -261,10 +261,11 @@ where
     let iter = selector.iter_from(selector.len() - from_offset);
     debug_assert!(
         iter.clone().next().is_some() ||
-            (from_offset != selector.len() && matches!(
-                selector.combinator_at_parse_order(from_offset),
-                Combinator::SlotAssignment | Combinator::PseudoElement
-            )),
+            (from_offset != selector.len() &&
+                matches!(
+                    selector.combinator_at_parse_order(from_offset),
+                    Combinator::SlotAssignment | Combinator::PseudoElement
+                )),
         "Got the math wrong: {:?} | {:?} | {} {}",
         selector,
         selector.iter_raw_match_order().as_slice(),
@@ -330,11 +331,9 @@ where
             return false;
         }
 
-        // Advance to the non-pseudo-element part of the selector, but let the
-        // context note that .
-        if iter.next_sequence().is_none() {
-            return true;
-        }
+        // Advance to the non-pseudo-element part of the selector.
+        let next_sequence = iter.next_sequence().unwrap();
+        debug_assert_eq!(next_sequence, Combinator::PseudoElement);
     }
 
     let result =
@@ -449,16 +448,11 @@ where
 
             element.containing_shadow_host()
         },
+        Combinator::Part => element.containing_shadow_host(),
         Combinator::SlotAssignment => {
-            debug_assert!(
-                context.current_host.is_some(),
-                "Should not be trying to match slotted rules in a non-shadow-tree context"
-            );
-            debug_assert!(
-                element
-                    .assigned_slot()
-                    .map_or(true, |s| s.is_html_slot_element())
-            );
+            debug_assert!(element
+                .assigned_slot()
+                .map_or(true, |s| s.is_html_slot_element()));
             let scope = context.current_host?;
             let mut current_slot = element.assigned_slot()?;
             while current_slot.containing_shadow_host().unwrap().opaque() != scope {
@@ -518,15 +512,12 @@ where
         Combinator::Child |
         Combinator::Descendant |
         Combinator::SlotAssignment |
+        Combinator::Part |
         Combinator::PseudoElement => SelectorMatchingResult::NotMatchedGlobally,
     };
 
-    let mut next_element = next_element_for_combinator(
-        element,
-        combinator,
-        &selector_iter,
-        &context,
-    );
+    let mut next_element =
+        next_element_for_combinator(element, combinator, &selector_iter, &context);
 
     // Stop matching :visited as soon as we find a link, or a combinator for
     // something that isn't an ancestor.
@@ -590,12 +581,7 @@ where
             visited_handling = VisitedHandlingMode::AllLinksUnvisited;
         }
 
-        next_element = next_element_for_combinator(
-            &element,
-            combinator,
-            &selector_iter,
-            &context,
-        );
+        next_element = next_element_for_combinator(&element, combinator, &selector_iter, &context);
     }
 }
 
@@ -610,7 +596,7 @@ where
         &local_name.lower_name,
     )
     .borrow();
-    element.local_name() == name
+    element.has_local_name(name)
 }
 
 /// Determines whether the given element matches the given compound selector.
@@ -681,11 +667,11 @@ where
 
     match *selector {
         Component::Combinator(_) => unreachable!(),
+        Component::Part(ref part) => element.is_part(part),
         Component::Slotted(ref selector) => {
             // <slots> are never flattened tree slottables.
-            !element.is_html_slot_element() && element.assigned_slot().is_some() && context
-                .shared
-                .nest(|context| {
+            !element.is_html_slot_element() &&
+                context.shared.nest(|context| {
                     matches_complex_selector(selector.iter(), element, context, flags_setter)
                 })
         },
@@ -695,11 +681,11 @@ where
         Component::LocalName(ref local_name) => matches_local_name(element, local_name),
         Component::ExplicitUniversalType | Component::ExplicitAnyNamespace => true,
         Component::Namespace(_, ref url) | Component::DefaultNamespace(ref url) => {
-            element.namespace() == url.borrow()
+            element.has_namespace(&url.borrow())
         },
         Component::ExplicitNoNamespace => {
             let ns = crate::parser::namespace_empty_string::<E::Impl>();
-            element.namespace() == ns.borrow()
+            element.has_namespace(&ns.borrow())
         },
         Component::ID(ref id) => {
             element.has_id(id, context.shared.classes_and_ids_case_sensitivity())
@@ -912,11 +898,6 @@ where
 }
 
 #[inline]
-fn same_type<E: Element>(a: &E, b: &E) -> bool {
-    a.local_name() == b.local_name() && a.namespace() == b.namespace()
-}
-
-#[inline]
 fn nth_child_index<E>(
     element: &E,
     is_of_type: bool,
@@ -938,7 +919,7 @@ where
             let mut curr = element.clone();
             while let Some(e) = curr.prev_sibling_element() {
                 curr = e;
-                if !is_of_type || same_type(element, &curr) {
+                if !is_of_type || element.is_same_type(&curr) {
                     if let Some(i) = c.lookup(curr.opaque()) {
                         return i - index;
                     }
@@ -959,7 +940,7 @@ where
     };
     while let Some(e) = next(curr) {
         curr = e;
-        if !is_of_type || same_type(element, &curr) {
+        if !is_of_type || element.is_same_type(&curr) {
             // If we're computing indices from the left, check each element in the
             // cache. We handle the indices-from-the-right case at the top of this
             // function.

@@ -54,8 +54,9 @@ LocalStorage::LocalStorage(nsPIDOMWindowInner* aWindow,
                            LocalStorageManager* aManager,
                            LocalStorageCache* aCache,
                            const nsAString& aDocumentURI,
-                           nsIPrincipal* aPrincipal, bool aIsPrivate)
-    : Storage(aWindow, aPrincipal),
+                           nsIPrincipal* aPrincipal,
+                           nsIPrincipal* aStoragePrincipal, bool aIsPrivate)
+    : Storage(aWindow, aPrincipal, aStoragePrincipal),
       mManager(aManager),
       mCache(aCache),
       mDocumentURI(aDocumentURI),
@@ -163,9 +164,9 @@ void LocalStorage::Clear(nsIPrincipal& aSubjectPrincipal, ErrorResult& aRv) {
 
 void LocalStorage::OnChange(const nsAString& aKey, const nsAString& aOldValue,
                             const nsAString& aNewValue) {
-  NotifyChange(/* aStorage */ this, Principal(), aKey, aOldValue, aNewValue,
-               /* aStorageType */ u"localStorage", mDocumentURI, mIsPrivate,
-               /* aImmediateDispatch */ false);
+  NotifyChange(/* aStorage */ this, StoragePrincipal(), aKey, aOldValue,
+               aNewValue, /* aStorageType */ u"localStorage", mDocumentURI,
+               mIsPrivate, /* aImmediateDispatch */ false);
 }
 
 void LocalStorage::ApplyEvent(StorageEvent* aStorageEvent) {
@@ -193,10 +194,6 @@ void LocalStorage::ApplyEvent(StorageEvent* aStorageEvent) {
 
   // Otherwise, we set the new value.
   mCache->SetItem(this, key, value, old, LocalStorageCache::E10sPropagated);
-}
-
-bool LocalStorage::PrincipalEquals(nsIPrincipal* aPrincipal) {
-  return StorageUtils::PrincipalsEqual(mPrincipal, aPrincipal);
 }
 
 void LocalStorage::GetSupportedNames(nsTArray<nsString>& aKeys) {

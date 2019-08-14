@@ -7,10 +7,10 @@
 #include "WebRenderLayerManager.h"
 
 #include "BasicLayers.h"
-#include "gfxPrefs.h"
+
 #include "GeckoProfiler.h"
 #include "LayersLogging.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/gfx/DrawEventRecorder.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
@@ -22,7 +22,7 @@
 #include "WebRenderCanvasRenderer.h"
 
 #ifdef XP_WIN
-#include "gfxDWriteFonts.h"
+#  include "gfxDWriteFonts.h"
 #endif
 
 namespace mozilla {
@@ -39,9 +39,12 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
       mIsFirstPaint(false),
       mTarget(nullptr),
       mPaintSequenceNumber(0),
-      mWebRenderCommandBuilder(this),
-      mLastDisplayListSize(0) {
+      mWebRenderCommandBuilder(this) {
   MOZ_COUNT_CTOR(WebRenderLayerManager);
+  for (auto renderRoot : wr::kRenderRoots) {
+    mStateManagers[renderRoot].mRenderRoot = renderRoot;
+    mStateManagers[renderRoot].mLayerManager = this;
+  }
 }
 
 KnowsCompositor* WebRenderLayerManager::AsKnowsCompositor() { return mWrChild; }
@@ -93,21 +96,13 @@ void WebRenderLayerManager::DoDestroy(bool aIsSync) {
 
   LayerManager::Destroy();
 
-  if (WrBridge()) {
-    // Just clear ImageKeys, they are deleted during WebRenderAPI destruction.
-    DiscardLocalImages();
-    // CompositorAnimations are cleared by WebRenderBridgeParent.
-    mDiscardedCompositorAnimationsIds.Clear();
-    WrBridge()->Destroy(aIsSync);
+  for (auto& stateManager : mStateManagers) {
+    stateManager.Destroy();
   }
 
-  // Clear this before calling RemoveUnusedAndResetWebRenderUserData(),
-  // otherwise that function might destroy some WebRenderAnimationData instances
-  // which will put stuff back into mDiscardedCompositorAnimationsIds. If
-  // mActiveCompositorAnimationIds is empty that won't happen.
-  mActiveCompositorAnimationIds.clear();
-
-  ClearAsyncAnimations();
+  if (WrBridge()) {
+    WrBridge()->Destroy(aIsSync);
+  }
 
   mWebRenderCommandBuilder.Destroy();
 
@@ -157,6 +152,17 @@ void WebRenderLayerManager::StopFrameTimeRecording(
   }
 }
 
+void WebRenderLayerManager::PayloadPresented() {
+  MOZ_CRASH("WebRenderLayerManager::PayloadPresented should not be called");
+}
+
+void WebRenderLayerManager::TakeCompositionPayloads(
+    nsTArray<CompositionPayload>& aPayloads) {
+  aPayloads.Clear();
+
+  std::swap(mPayload, aPayloads);
+}
+
 bool WebRenderLayerManager::BeginTransactionWithTarget(gfxContext* aTarget,
                                                        const nsCString& aURL) {
   mTarget = aTarget;
@@ -176,7 +182,7 @@ bool WebRenderLayerManager::BeginTransaction(const nsCString& aURL) {
   // enabled in this process; it may be enabled in the parent process,
   // and the parent process expects unique sequence numbers.
   ++mPaintSequenceNumber;
-  if (gfxPrefs::APZTestLoggingEnabled()) {
+  if (StaticPrefs::apz_test_logging_enabled()) {
     mApzTestData.StartNewPaint(mPaintSequenceNumber);
   }
   return true;
@@ -200,13 +206,22 @@ bool WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags) {
       mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
 
   if (aFlags & EndTransactionFlags::END_NO_COMPOSITE &&
-      !mWebRenderCommandBuilder.NeedsEmptyTransaction() &&
-      mPendingScrollUpdates.empty()) {
-    MOZ_ASSERT(!mTarget);
-    WrBridge()->SendSetFocusTarget(mFocusTarget);
-    // Revoke TransactionId to trigger next paint.
-    mTransactionIdAllocator->RevokeTransactionId(mLatestTransactionId);
-    return true;
+      !mWebRenderCommandBuilder.NeedsEmptyTransaction()) {
+    bool haveScrollUpdates = false;
+    for (auto renderRoot : wr::kRenderRoots) {
+      if (!mPendingScrollUpdates[renderRoot].empty()) {
+        haveScrollUpdates = true;
+        break;
+      }
+    }
+    if (!haveScrollUpdates) {
+      MOZ_ASSERT(!mTarget);
+      WrBridge()->SendSetFocusTarget(mFocusTarget);
+      // Revoke TransactionId to trigger next paint.
+      mTransactionIdAllocator->RevokeTransactionId(mLatestTransactionId);
+      mLatestTransactionId = mLatestTransactionId.Prev();
+      return true;
+    }
   }
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
@@ -230,13 +245,34 @@ bool WebRenderLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags) {
     }
   }
 
-  WrBridge()->EndEmptyTransaction(mFocusTarget, mPendingScrollUpdates,
-                                  mAsyncResourceUpdates, mPaintSequenceNumber,
-                                  mLatestTransactionId,
-                                  mTransactionIdAllocator->GetVsyncId(),
-                                  refreshStart, mTransactionStart, mURL);
-  ClearPendingScrollInfoUpdate();
+  GetCompositorBridgeChild()->EndCanvasTransaction();
 
+  AutoTArray<RenderRootUpdates, wr::kRenderRootCount> renderRootUpdates;
+  for (auto& stateManager : mStateManagers) {
+    auto renderRoot = stateManager.GetRenderRoot();
+    if (stateManager.mAsyncResourceUpdates ||
+        !mPendingScrollUpdates[renderRoot].empty() ||
+        WrBridge()->HasWebRenderParentCommands(renderRoot)) {
+      auto updates = renderRootUpdates.AppendElement();
+      updates->mRenderRoot = renderRoot;
+      if (stateManager.mAsyncResourceUpdates) {
+        stateManager.mAsyncResourceUpdates->Flush(updates->mResourceUpdates,
+                                                  updates->mSmallShmems,
+                                                  updates->mLargeShmems);
+      }
+      updates->mScrollUpdates = std::move(mPendingScrollUpdates[renderRoot]);
+      for (const auto& entry : updates->mScrollUpdates) {
+        nsLayoutUtils::NotifyPaintSkipTransaction(/*scroll id=*/entry.first);
+      }
+    }
+  }
+
+  Maybe<wr::IpcResourceUpdateQueue> nothing;
+  WrBridge()->EndEmptyTransaction(mFocusTarget, renderRootUpdates,
+                                  mPaintSequenceNumber, mLatestTransactionId,
+                                  mTransactionIdAllocator->GetVsyncId(),
+                                  mTransactionIdAllocator->GetVsyncStart(),
+                                  refreshStart, mTransactionStart, mURL);
   mTransactionStart = TimeStamp();
 
   MakeSnapshotIfRequired(size);
@@ -253,9 +289,8 @@ void WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 
 void WebRenderLayerManager::EndTransactionWithoutLayer(
     nsDisplayList* aDisplayList, nsDisplayListBuilder* aDisplayListBuilder,
-    const nsTArray<wr::WrFilterOp>& aFilters,
-    WebRenderBackgroundData* aBackground) {
-  AUTO_PROFILER_TRACING("Paint", "RenderLayers");
+    WrFiltersHolder&& aFilters, WebRenderBackgroundData* aBackground) {
+  AUTO_PROFILER_TRACING("Paint", "RenderLayers", GRAPHICS);
 
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
@@ -263,9 +298,33 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
   WrBridge()->BeginTransaction();
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
-  wr::LayoutSize contentSize{(float)size.width, (float)size.height};
-  wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize,
-                                 mLastDisplayListSize);
+  if (aDisplayListBuilder) {
+    aDisplayListBuilder->ComputeDefaultRenderRootRect(size);
+  }
+
+  wr::RenderRootArray<LayoutDeviceRect> rects;
+  wr::RenderRootArray<wr::LayoutRect> wrRects;
+  for (auto renderRoot : wr::kRenderRoots) {
+    rects[renderRoot] =
+        aDisplayListBuilder
+            ? aDisplayListBuilder->GetRenderRootRect(renderRoot)
+            : LayoutDeviceRect(LayoutDevicePoint(),
+                               renderRoot == wr::RenderRoot::Default
+                                   ? LayoutDeviceSize(size)
+                                   : LayoutDeviceSize());
+    wrRects[renderRoot] = wr::ToRoundedLayoutRect(rects[renderRoot]);
+  }
+
+  wr::DisplayListBuilder builder(
+      WrBridge()->GetPipeline(), wrRects[wr::RenderRoot::Default].size,
+      mLastDisplayListSizes[wr::RenderRoot::Default]);
+  for (auto renderRoot : wr::kNonDefaultRenderRoots) {
+    if (!rects[renderRoot].IsEmpty()) {
+      builder.CreateSubBuilder(wrRects[renderRoot].size,
+                               mLastDisplayListSizes[renderRoot], renderRoot);
+    }
+  }
+
   wr::IpcResourceUpdateQueue resourceUpdates(WrBridge());
   wr::usize builderDumpIndex = 0;
   bool containsSVGGroup = false;
@@ -283,7 +342,7 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
 
     mWebRenderCommandBuilder.BuildWebRenderCommands(
         builder, resourceUpdates, aDisplayList, aDisplayListBuilder,
-        mScrollData, contentSize, aFilters);
+        mScrollDatas, std::move(aFilters));
     builderDumpIndex = mWebRenderCommandBuilder.GetBuilderDumpIndex();
     containsSVGGroup = mWebRenderCommandBuilder.GetContainsSVGGroup();
   } else {
@@ -297,8 +356,6 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
     }
   }
 
-  DiscardCompositorAnimations();
-
   mWidget->AddWindowOverlayWebRenderCommands(WrBridge(), builder,
                                              resourceUpdates);
   mWindowOverlayChanged = false;
@@ -307,20 +364,28 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
     Unused << builder.Dump(/*indent*/ 1, Some(builderDumpIndex), Nothing());
   }
 
-  if (AsyncPanZoomEnabled()) {
-    mScrollData.SetFocusTarget(mFocusTarget);
-    mFocusTarget = FocusTarget();
+  for (auto& stateManager : mStateManagers) {
+    if (AsyncPanZoomEnabled()) {
+      auto& scrollData = mScrollDatas[stateManager.GetRenderRoot()];
 
-    if (mIsFirstPaint) {
-      mScrollData.SetIsFirstPaint();
-      mIsFirstPaint = false;
+      if (mIsFirstPaint) {
+        // Set the same flag on each scrollData instance (one per render root).
+        // We need to duplicate this because they will get processed by APZ at
+        // separate times and the flag state is relevant each time.
+        scrollData.SetIsFirstPaint();
+      }
+      scrollData.SetPaintSequenceNumber(mPaintSequenceNumber);
     }
-    mScrollData.SetPaintSequenceNumber(mPaintSequenceNumber);
   }
+  mIsFirstPaint = false;
+
   // Since we're sending a full mScrollData that will include the new scroll
   // offsets, and we can throw away the pending scroll updates we had kept for
   // an empty transaction.
-  ClearPendingScrollInfoUpdate();
+  auto scrollIdsUpdated = ClearPendingScrollInfoUpdate();
+  for (ScrollableLayerGuid::ViewID update : scrollIdsUpdated) {
+    nsLayoutUtils::NotifyPaintSkipTransaction(update);
+  }
 
   mLatestTransactionId =
       mTransactionIdAllocator->GetTransactionId(/*aThrottle*/ true);
@@ -332,20 +397,29 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
     refreshStart = mTransactionStart;
   }
 
-  if (mAsyncResourceUpdates) {
-    if (resourceUpdates.IsEmpty()) {
-      resourceUpdates = std::move(mAsyncResourceUpdates.ref());
-    } else {
-      // If we can't just swap the queue, we need to take the slow path and
-      // send the update as a separate message. We don't need to schedule a
-      // composite however because that will happen with EndTransaction.
-      WrBridge()->UpdateResources(mAsyncResourceUpdates.ref());
+  for (auto& stateManager : mStateManagers) {
+    wr::RenderRoot renderRoot = stateManager.GetRenderRoot();
+    if (stateManager.mAsyncResourceUpdates) {
+      if (!resourceUpdates.HasSubQueue(renderRoot) ||
+          resourceUpdates.SubQueue(renderRoot).IsEmpty()) {
+        resourceUpdates.SubQueue(renderRoot)
+            .ReplaceResources(
+                std::move(stateManager.mAsyncResourceUpdates.ref()));
+      } else {
+        WrBridge()->UpdateResources(stateManager.mAsyncResourceUpdates.ref(),
+                                    stateManager.GetRenderRoot());
+      }
+      stateManager.mAsyncResourceUpdates.reset();
     }
-    mAsyncResourceUpdates.reset();
+    stateManager.DiscardImagesInTransaction(
+        resourceUpdates.SubQueue(renderRoot));
   }
 
-  DiscardImagesInTransaction(resourceUpdates);
-  WrBridge()->RemoveExpiredFontKeys(resourceUpdates);
+  for (auto renderRoot : wr::kRenderRoots) {
+    if (resourceUpdates.HasSubQueue(renderRoot)) {
+      WrBridge()->RemoveExpiredFontKeys(resourceUpdates.SubQueue(renderRoot));
+    }
+  }
 
   // Skip the synchronization for buffer since we also skip the painting during
   // device-reset status.
@@ -356,17 +430,42 @@ void WebRenderLayerManager::EndTransactionWithoutLayer(
     }
   }
 
-  wr::BuiltDisplayList dl;
-  builder.Finalize(contentSize, dl);
-  mLastDisplayListSize = dl.dl.inner.capacity;
+  GetCompositorBridgeChild()->EndCanvasTransaction();
 
   {
-    AUTO_PROFILER_TRACING("Paint", "ForwardDPTransaction");
-    WrBridge()->EndTransaction(contentSize, dl, resourceUpdates,
-                               size.ToUnknownSize(), mLatestTransactionId,
-                               mScrollData, containsSVGGroup,
+    AUTO_PROFILER_TRACING("Paint", "ForwardDPTransaction", GRAPHICS);
+    InfallibleTArray<RenderRootDisplayListData> renderRootDLs;
+    for (auto renderRoot : wr::kRenderRoots) {
+      if (builder.GetSendSubBuilderDisplayList(renderRoot)) {
+        auto renderRootDL = renderRootDLs.AppendElement();
+        renderRootDL->mRenderRoot = renderRoot;
+        builder.Finalize(*renderRootDL);
+        mLastDisplayListSizes[renderRoot] = renderRootDL->mDL->mCapacity;
+        resourceUpdates.SubQueue(renderRoot)
+            .Flush(renderRootDL->mResourceUpdates, renderRootDL->mSmallShmems,
+                   renderRootDL->mLargeShmems);
+        renderRootDL->mRect = rects[renderRoot];
+        renderRootDL->mScrollData.emplace(std::move(mScrollDatas[renderRoot]));
+      } else if (WrBridge()->HasWebRenderParentCommands(renderRoot)) {
+        auto renderRootDL = renderRootDLs.AppendElement();
+        renderRootDL->mRenderRoot = renderRoot;
+      }
+    }
+
+    WrBridge()->EndTransaction(renderRootDLs, mLatestTransactionId,
+                               containsSVGGroup,
                                mTransactionIdAllocator->GetVsyncId(),
+                               mTransactionIdAllocator->GetVsyncStart(),
                                refreshStart, mTransactionStart, mURL);
+    WrBridge()->SendSetFocusTarget(mFocusTarget);
+    mFocusTarget = FocusTarget();
+  }
+
+  // Discard animations after calling WrBridge()->EndTransaction().
+  // It updates mWrEpoch in WebRenderBridgeParent. The updated mWrEpoch is
+  // necessary for deleting animations at the correct time.
+  for (auto& stateManager : mStateManagers) {
+    stateManager.DiscardCompositorAnimations();
   }
 
   mTransactionStart = TimeStamp();
@@ -392,9 +491,17 @@ void WebRenderLayerManager::MakeSnapshotIfRequired(LayoutDeviceIntSize aSize) {
   // Only BufferTexture is supported now.
 
   // TODO: fixup for proper surface format.
+  // The GLES spec only guarantees that RGBA can be used with glReadPixels,
+  // so on Android we use RGBA.
+  SurfaceFormat format =
+#ifdef MOZ_WIDGET_ANDROID
+      SurfaceFormat::R8G8B8A8;
+#else
+      SurfaceFormat::B8G8R8A8;
+#endif
   RefPtr<TextureClient> texture = TextureClient::CreateForRawBufferAccess(
-      WrBridge(), SurfaceFormat::B8G8R8A8, aSize.ToUnknownSize(),
-      BackendType::SKIA, TextureFlags::SNAPSHOT);
+      WrBridge(), format, aSize.ToUnknownSize(), BackendType::SKIA,
+      TextureFlags::SNAPSHOT);
   if (!texture) {
     return;
   }
@@ -441,63 +548,19 @@ void WebRenderLayerManager::MakeSnapshotIfRequired(LayoutDeviceIntSize aSize) {
   mTarget = nullptr;
 }
 
-void WebRenderLayerManager::AddImageKeyForDiscard(wr::ImageKey key) {
-  mImageKeysToDelete.AppendElement(key);
-}
-
-void WebRenderLayerManager::AddBlobImageKeyForDiscard(wr::BlobImageKey key) {
-  mBlobImageKeysToDelete.AppendElement(key);
-}
-
-void WebRenderLayerManager::DiscardImagesInTransaction(
-    wr::IpcResourceUpdateQueue& aResources) {
-  for (const auto& key : mImageKeysToDelete) {
-    aResources.DeleteImage(key);
-  }
-  for (const auto& key : mBlobImageKeysToDelete) {
-    aResources.DeleteBlobImage(key);
-  }
-  mImageKeysToDelete.Clear();
-  mBlobImageKeysToDelete.Clear();
-}
-
 void WebRenderLayerManager::DiscardImages() {
   wr::IpcResourceUpdateQueue resources(WrBridge());
-  DiscardImagesInTransaction(resources);
-  WrBridge()->UpdateResources(resources);
-}
-
-void WebRenderLayerManager::AddActiveCompositorAnimationId(uint64_t aId) {
-  // In layers-free mode we track the active compositor animation ids on the
-  // client side so that we don't try to discard the same animation id multiple
-  // times. We could just ignore the multiple-discard on the parent side, but
-  // checking on the content side reduces IPC traffic.
-  mActiveCompositorAnimationIds.insert(aId);
-}
-
-void WebRenderLayerManager::AddCompositorAnimationsIdForDiscard(uint64_t aId) {
-  if (mActiveCompositorAnimationIds.erase(aId)) {
-    // For layers-free ensure we don't try to discard an animation id that
-    // wasn't active. We also remove it from mActiveCompositorAnimationIds so we
-    // don't discard it again unless it gets re-activated.
-    mDiscardedCompositorAnimationsIds.AppendElement(aId);
+  for (auto& stateManager : mStateManagers) {
+    auto& subqueue = resources.SubQueue(stateManager.GetRenderRoot());
+    stateManager.DiscardImagesInTransaction(subqueue);
+    WrBridge()->UpdateResources(subqueue, stateManager.GetRenderRoot());
   }
-}
-
-void WebRenderLayerManager::DiscardCompositorAnimations() {
-  if (WrBridge()->IPCOpen() && !mDiscardedCompositorAnimationsIds.IsEmpty()) {
-    WrBridge()->SendDeleteCompositorAnimations(
-        mDiscardedCompositorAnimationsIds);
-  }
-  mDiscardedCompositorAnimationsIds.Clear();
 }
 
 void WebRenderLayerManager::DiscardLocalImages() {
-  // Removes images but doesn't tell the parent side about them
-  // This is useful in empty / failed transactions where we created
-  // image keys but didn't tell the parent about them yet.
-  mImageKeysToDelete.Clear();
-  mBlobImageKeysToDelete.Clear();
+  for (auto& stateManager : mStateManagers) {
+    stateManager.DiscardLocalImages();
+  }
 }
 
 void WebRenderLayerManager::SetLayersObserverEpoch(LayersObserverEpoch aEpoch) {
@@ -509,6 +572,10 @@ void WebRenderLayerManager::SetLayersObserverEpoch(LayersObserverEpoch aEpoch) {
 void WebRenderLayerManager::DidComposite(
     TransactionId aTransactionId, const mozilla::TimeStamp& aCompositeStart,
     const mozilla::TimeStamp& aCompositeEnd) {
+  if (IsDestroyed()) {
+    return;
+  }
+
   MOZ_ASSERT(mWidget);
 
   // Notifying the observers may tick the refresh driver which can cause
@@ -542,14 +609,16 @@ void WebRenderLayerManager::DidComposite(
 }
 
 void WebRenderLayerManager::ClearCachedResources(Layer* aSubtree) {
+  if (!WrBridge()->IPCOpen()) {
+    gfxCriticalNote << "IPC Channel is already torn down unexpectedly\n";
+    return;
+  }
   WrBridge()->BeginClearCachedResources();
   mWebRenderCommandBuilder.ClearCachedResources();
   DiscardImages();
-  // Clear all active compositor animation ids.
-  // When ClearCachedResources is called, all animations are removed
-  // by WebRenderBridgeParent::RecvClearCachedResources().
-  mActiveCompositorAnimationIds.clear();
-  mDiscardedCompositorAnimationsIds.Clear();
+  for (auto& stateManager : mStateManagers) {
+    stateManager.ClearCachedResources();
+  }
   WrBridge()->EndClearCachedResources();
 }
 
@@ -559,16 +628,16 @@ void WebRenderLayerManager::WrUpdated() {
   DiscardLocalImages();
 
   if (mWidget) {
-    if (dom::TabChild* tabChild = mWidget->GetOwningTabChild()) {
-      tabChild->SchedulePaint();
+    if (dom::BrowserChild* browserChild = mWidget->GetOwningBrowserChild()) {
+      browserChild->SchedulePaint();
     }
   }
 }
 
 dom::TabGroup* WebRenderLayerManager::GetTabGroup() {
   if (mWidget) {
-    if (dom::TabChild* tabChild = mWidget->GetOwningTabChild()) {
-      return tabChild->TabGroup();
+    if (dom::BrowserChild* browserChild = mWidget->GetOwningBrowserChild()) {
+      return browserChild->TabGroup();
     }
   }
   return nullptr;
@@ -635,7 +704,7 @@ void WebRenderLayerManager::FlushRendering() {
   if (WrBridge()->GetCompositorUseDComp() && !resizing) {
     cBridge->SendFlushRenderingAsync();
   } else if (mWidget->SynchronouslyRepaintOnResize() ||
-             gfxPrefs::LayersForceSynchronousResize()) {
+             StaticPrefs::layers_force_synchronous_resize()) {
     cBridge->SendFlushRendering();
   } else {
     cBridge->SendFlushRenderingAsync();
@@ -665,79 +734,30 @@ void WebRenderLayerManager::SetRoot(Layer* aLayer) {
 already_AddRefed<PersistentBufferProvider>
 WebRenderLayerManager::CreatePersistentBufferProvider(
     const gfx::IntSize& aSize, gfx::SurfaceFormat aFormat) {
-  if (gfxPrefs::PersistentBufferProviderSharedEnabled()) {
-    RefPtr<PersistentBufferProvider> provider =
-        PersistentBufferProviderShared::Create(aSize, aFormat,
-                                               AsKnowsCompositor());
-    if (provider) {
-      return provider.forget();
-    }
+  // Ensure devices initialization for canvas 2d. The devices are lazily
+  // initialized with WebRender to reduce memory usage.
+  gfxPlatform::GetPlatform()->EnsureDevicesInitialized();
+
+  RefPtr<PersistentBufferProvider> provider =
+      PersistentBufferProviderShared::Create(aSize, aFormat,
+                                             AsKnowsCompositor());
+  if (provider) {
+    return provider.forget();
   }
+
   return LayerManager::CreatePersistentBufferProvider(aSize, aFormat);
 }
 
-wr::IpcResourceUpdateQueue& WebRenderLayerManager::AsyncResourceUpdates() {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!mAsyncResourceUpdates) {
-    mAsyncResourceUpdates.emplace(WrBridge());
-
-    RefPtr<Runnable> task = NewRunnableMethod(
-        "WebRenderLayerManager::FlushAsyncResourceUpdates", this,
-        &WebRenderLayerManager::FlushAsyncResourceUpdates);
-    NS_DispatchToMainThread(task.forget());
-  }
-
-  return mAsyncResourceUpdates.ref();
-}
-
-void WebRenderLayerManager::FlushAsyncResourceUpdates() {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (!mAsyncResourceUpdates) {
-    return;
-  }
-
-  if (!IsDestroyed() && WrBridge()) {
-    WrBridge()->UpdateResources(mAsyncResourceUpdates.ref());
-  }
-
-  mAsyncResourceUpdates.reset();
-}
-
-void WebRenderLayerManager::RegisterAsyncAnimation(
-    const wr::ImageKey& aKey, SharedSurfacesAnimation* aAnimation) {
-  mAsyncAnimations.insert(std::make_pair(wr::AsUint64(aKey), aAnimation));
-}
-
-void WebRenderLayerManager::DeregisterAsyncAnimation(const wr::ImageKey& aKey) {
-  mAsyncAnimations.erase(wr::AsUint64(aKey));
-}
-
 void WebRenderLayerManager::ClearAsyncAnimations() {
-  for (const auto& i : mAsyncAnimations) {
-    i.second->Invalidate(this);
+  for (auto& stateManager : mStateManagers) {
+    stateManager.ClearAsyncAnimations();
   }
-  mAsyncAnimations.clear();
 }
 
 void WebRenderLayerManager::WrReleasedImages(
     const nsTArray<wr::ExternalImageKeyPair>& aPairs) {
-  // A SharedSurfaceAnimation object's lifetime is tied to its owning
-  // ImageContainer. When the ImageContainer is released,
-  // SharedSurfaceAnimation::Destroy is called which should ensure it is removed
-  // from the layer manager. Whenever the namespace for the
-  // WebRenderLayerManager itself is invalidated (e.g. we changed windows, or
-  // were destroyed ourselves), we callback into the SharedSurfaceAnimation
-  // object to remove its image key for us and any bound surfaces. If, for any
-  // reason, we somehow missed an WrReleasedImages call before the animation
-  // was bound to the layer manager, it will free those associated surfaces on
-  // the next ReleasePreviousFrame call.
-  for (const auto& pair : aPairs) {
-    auto i = mAsyncAnimations.find(wr::AsUint64(pair.key));
-    if (i != mAsyncAnimations.end()) {
-      i->second->ReleasePreviousFrame(this, pair.id);
-    }
+  for (auto& stateManager : mStateManagers) {
+    stateManager.WrReleasedImages(aPairs);
   }
 }
 

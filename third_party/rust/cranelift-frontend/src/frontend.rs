@@ -1,4 +1,6 @@
 //! A frontend for building Cranelift IR from other languages.
+use crate::ssa::{Block, SSABuilder, SideEffects};
+use crate::variable::Variable;
 use cranelift_codegen::cursor::{Cursor, FuncCursor};
 use cranelift_codegen::entity::{EntitySet, SecondaryMap};
 use cranelift_codegen::ir;
@@ -7,13 +9,11 @@ use cranelift_codegen::ir::{
     types, AbiParam, DataFlowGraph, Ebb, ExtFuncData, ExternalName, FuncRef, Function, GlobalValue,
     GlobalValueData, Heap, HeapData, Inst, InstBuilder, InstBuilderBase, InstructionData,
     JumpTable, JumpTableData, LibCall, MemFlags, SigRef, Signature, StackSlot, StackSlotData, Type,
-    Value,
+    Value, ValueLabel, ValueLabelAssignments, ValueLabelStart,
 };
 use cranelift_codegen::isa::{TargetFrontendConfig, TargetIsa};
 use cranelift_codegen::packed_option::PackedOption;
-use ssa::{Block, SSABuilder, SideEffects};
 use std::vec::Vec;
-use variable::Variable;
 
 /// Structure used for translating a series of functions into Cranelift IR.
 ///
@@ -333,6 +333,30 @@ impl<'a> FunctionBuilder<'a> {
             .def_var(var, val, self.position.basic_block.unwrap());
     }
 
+    /// Set label for Value
+    ///
+    /// This will not do anything unless `func.dfg.collect_debug_info` is called first.
+    pub fn set_val_label(&mut self, val: Value, label: ValueLabel) {
+        if let Some(values_labels) = self.func.dfg.values_labels.as_mut() {
+            use std::collections::hash_map::Entry;
+
+            let start = ValueLabelStart {
+                from: self.srcloc,
+                label,
+            };
+
+            match values_labels.entry(val) {
+                Entry::Occupied(mut e) => match e.get_mut() {
+                    ValueLabelAssignments::Starts(starts) => starts.push(start),
+                    _ => panic!("Unexpected ValueLabelAssignments at this stage"),
+                },
+                Entry::Vacant(e) => {
+                    e.insert(ValueLabelAssignments::Starts(vec![start]));
+                }
+            }
+        }
+    }
+
     /// Creates a jump table in the function, to be used by `br_table` instructions.
     pub fn create_jump_table(&mut self, data: JumpTableData) -> JumpTable {
         self.func.create_jump_table(data)
@@ -367,7 +391,10 @@ impl<'a> FunctionBuilder<'a> {
     /// Returns an object with the [`InstBuilder`](../codegen/ir/builder/trait.InstBuilder.html)
     /// trait that allows to conveniently append an instruction to the current `Ebb` being built.
     pub fn ins<'short>(&'short mut self) -> FuncInstBuilder<'short, 'a> {
-        let ebb = self.position.ebb.unwrap();
+        let ebb = self
+            .position
+            .ebb
+            .expect("Please call switch_to_block before inserting instructions");
         FuncInstBuilder::new(self, ebb)
     }
 
@@ -402,6 +429,11 @@ impl<'a> FunctionBuilder<'a> {
     /// parameters. This can be used to set up the ebb parameters for the
     /// entry block.
     pub fn append_ebb_params_for_function_params(&mut self, ebb: Ebb) {
+        debug_assert!(
+            !self.func_ctx.ssa.has_any_predecessors(ebb),
+            "ebb parameters for function parameters should only be added to the entry block"
+        );
+
         // These parameters count as "user" parameters here because they aren't
         // inserted by the SSABuilder.
         let user_param_count = &mut self.func_ctx.ebbs[ebb].user_param_count;
@@ -514,10 +546,12 @@ impl<'a> FunctionBuilder<'a> {
             None => false,
             Some(entry) => self.position.ebb.unwrap() == entry,
         };
-        !is_entry && self.func_ctx.ssa.is_sealed(self.position.ebb.unwrap()) && !self
-            .func_ctx
-            .ssa
-            .has_any_predecessors(self.position.ebb.unwrap())
+        !is_entry
+            && self.func_ctx.ssa.is_sealed(self.position.ebb.unwrap())
+            && !self
+                .func_ctx
+                .ssa
+                .has_any_predecessors(self.position.ebb.unwrap())
     }
 
     /// Returns `true` if and only if no instructions have been added since the last call to
@@ -536,8 +570,8 @@ impl<'a> FunctionBuilder<'a> {
     ///
     /// Useful for debug purposes. Use it with `None` for standard printing.
     // Clippy thinks the lifetime that follows is needless, but rustc needs it
-    #[cfg_attr(feature = "cargo-clippy", allow(needless_lifetimes))]
-    pub fn display<'b, I: Into<Option<&'b TargetIsa>>>(&'b self, isa: I) -> DisplayFunction {
+    #[cfg_attr(feature = "cargo-clippy", allow(clippy::needless_lifetimes))]
+    pub fn display<'b, I: Into<Option<&'b dyn TargetIsa>>>(&'b self, isa: I) -> DisplayFunction {
         self.func.display(isa)
     }
 }
@@ -575,7 +609,7 @@ impl<'a> FunctionBuilder<'a> {
         self.ins().call(libc_memcpy, &[dest, src, size]);
     }
 
-    /// Optimised memcpy for small copys.
+    /// Optimised memcpy for small copies.
     pub fn emit_small_memcpy(
         &mut self,
         config: TargetFrontendConfig,
@@ -588,15 +622,26 @@ impl<'a> FunctionBuilder<'a> {
         // Currently the result of guess work, not actual profiling.
         const THRESHOLD: u64 = 4;
 
+        if size == 0 {
+            return;
+        }
+
         let access_size = greatest_divisible_power_of_two(size);
         assert!(
             access_size.is_power_of_two(),
             "`size` is not a power of two"
         );
         assert!(
-            access_size >= ::std::cmp::min(src_align, dest_align) as u64,
+            access_size >= u64::from(::core::cmp::min(src_align, dest_align)),
             "`size` is smaller than `dest` and `src`'s alignment value."
         );
+
+        let (access_size, int_type) = if access_size <= 8 {
+            (access_size, Type::int((access_size * 8) as u16).unwrap())
+        } else {
+            (8, types::I64)
+        };
+
         let load_and_store_amount = size / access_size;
 
         if load_and_store_amount > THRESHOLD {
@@ -605,7 +650,6 @@ impl<'a> FunctionBuilder<'a> {
             return;
         }
 
-        let int_type = Type::int((access_size * 8) as u16).unwrap();
         let mut flags = MemFlags::new();
         flags.set_aligned();
 
@@ -618,7 +662,7 @@ impl<'a> FunctionBuilder<'a> {
 
     /// Calls libc.memset
     ///
-    /// Writes `size` bytes of value `ch` to memory starting at `buffer`.
+    /// Writes `size` bytes of i8 value `ch` to memory starting at `buffer`.
     pub fn call_memset(
         &mut self,
         config: TargetFrontendConfig,
@@ -652,12 +696,16 @@ impl<'a> FunctionBuilder<'a> {
         &mut self,
         config: TargetFrontendConfig,
         buffer: Value,
-        ch: u32,
+        ch: u8,
         size: u64,
         buffer_align: u8,
     ) {
         // Currently the result of guess work, not actual profiling.
         const THRESHOLD: u64 = 4;
+
+        if size == 0 {
+            return;
+        }
 
         let access_size = greatest_divisible_power_of_two(size);
         assert!(
@@ -665,21 +713,27 @@ impl<'a> FunctionBuilder<'a> {
             "`size` is not a power of two"
         );
         assert!(
-            access_size >= buffer_align as u64,
+            access_size >= u64::from(buffer_align),
             "`size` is smaller than `dest` and `src`'s alignment value."
         );
+
+        let (access_size, int_type) = if access_size <= 8 {
+            (access_size, Type::int((access_size * 8) as u16).unwrap())
+        } else {
+            (8, types::I64)
+        };
+
         let load_and_store_amount = size / access_size;
 
         if load_and_store_amount > THRESHOLD {
-            let ch = self.ins().iconst(types::I32, ch as i64);
+            let ch = self.ins().iconst(types::I8, i64::from(ch));
             let size = self.ins().iconst(config.pointer_type(), size as i64);
             self.call_memset(config, buffer, ch, size);
         } else {
             let mut flags = MemFlags::new();
             flags.set_aligned();
 
-            let ch = ch as u64;
-            let int_type = Type::int((access_size * 8) as u16).unwrap();
+            let ch = u64::from(ch);
             let raw_value = if int_type == types::I64 {
                 (ch << 32) | (ch << 16) | (ch << 8) | ch
             } else if int_type == types::I32 {
@@ -747,7 +801,7 @@ impl<'a> FunctionBuilder<'a> {
             "`size` is not a power of two"
         );
         assert!(
-            access_size >= ::std::cmp::min(src_align, dest_align) as u64,
+            access_size >= u64::from(::core::cmp::min(src_align, dest_align)),
             "`size` is smaller than `dest` and `src`'s alignment value."
         );
         let load_and_store_amount = size / access_size;
@@ -769,7 +823,8 @@ impl<'a> FunctionBuilder<'a> {
                     self.ins().load(config.pointer_type(), flags, src, offset),
                     offset,
                 )
-            }).collect();
+            })
+            .collect();
 
         for (value, offset) in registers {
             self.ins().store(flags, value, dest, offset);
@@ -816,15 +871,15 @@ impl<'a> FunctionBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::greatest_divisible_power_of_two;
+    use crate::frontend::{FunctionBuilder, FunctionBuilderContext};
+    use crate::Variable;
     use cranelift_codegen::entity::EntityRef;
     use cranelift_codegen::ir::types::*;
     use cranelift_codegen::ir::{AbiParam, ExternalName, Function, InstBuilder, Signature};
     use cranelift_codegen::isa::CallConv;
     use cranelift_codegen::settings;
     use cranelift_codegen::verifier::verify_function;
-    use frontend::{FunctionBuilder, FunctionBuilderContext};
     use std::string::ToString;
-    use Variable;
 
     fn sample_function(lazy_seal: bool) {
         let mut sig = Signature::new(CallConv::SystemV);
@@ -931,8 +986,8 @@ mod tests {
 
     #[test]
     fn memcpy() {
+        use core::str::FromStr;
         use cranelift_codegen::{isa, settings};
-        use std::str::FromStr;
 
         let shared_builder = settings::builder();
         let shared_flags = settings::Flags::new(shared_builder);
@@ -992,8 +1047,8 @@ ebb0:
 
     #[test]
     fn small_memcpy() {
+        use core::str::FromStr;
         use cranelift_codegen::{isa, settings};
-        use std::str::FromStr;
 
         let shared_builder = settings::builder();
         let shared_flags = settings::Flags::new(shared_builder);
@@ -1042,6 +1097,175 @@ ebb0:
     v2 = load.i64 aligned v0
     store aligned v2, v1
     return v1
+}
+"
+        );
+    }
+
+    #[test]
+    fn not_so_small_memcpy() {
+        use core::str::FromStr;
+        use cranelift_codegen::{isa, settings};
+
+        let shared_builder = settings::builder();
+        let shared_flags = settings::Flags::new(shared_builder);
+
+        let triple = ::target_lexicon::Triple::from_str("arm").expect("Couldn't create arm triple");
+
+        let target = isa::lookup(triple)
+            .ok()
+            .map(|b| b.finish(shared_flags))
+            .expect("This test requires arm support.");
+
+        let mut sig = Signature::new(target.default_call_conv());
+        sig.returns.push(AbiParam::new(I32));
+
+        let mut fn_ctx = FunctionBuilderContext::new();
+        let mut func = Function::with_name_signature(ExternalName::testcase("sample"), sig);
+        {
+            let mut builder = FunctionBuilder::new(&mut func, &mut fn_ctx);
+
+            let block0 = builder.create_ebb();
+            let x = Variable::new(0);
+            let y = Variable::new(16);
+            builder.declare_var(x, target.pointer_type());
+            builder.declare_var(y, target.pointer_type());
+            builder.append_ebb_params_for_function_params(block0);
+            builder.switch_to_block(block0);
+
+            let src = builder.use_var(x);
+            let dest = builder.use_var(y);
+            let size = 8192;
+            builder.emit_small_memcpy(target.frontend_config(), dest, src, size, 8, 8);
+            builder.ins().return_(&[dest]);
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        assert_eq!(
+            func.display(None).to_string(),
+            "function %sample() -> i32 system_v {
+    sig0 = (i32, i32, i32) system_v
+    fn0 = %Memcpy sig0
+
+ebb0:
+    v4 = iconst.i32 0
+    v1 -> v4
+    v3 = iconst.i32 0
+    v0 -> v3
+    v2 = iconst.i32 8192
+    call fn0(v1, v0, v2)
+    return v1
+}
+"
+        );
+    }
+
+    #[test]
+    fn small_memset() {
+        use core::str::FromStr;
+        use cranelift_codegen::{isa, settings};
+
+        let shared_builder = settings::builder();
+        let shared_flags = settings::Flags::new(shared_builder);
+
+        let triple = ::target_lexicon::Triple::from_str("arm").expect("Couldn't create arm triple");
+
+        let target = isa::lookup(triple)
+            .ok()
+            .map(|b| b.finish(shared_flags))
+            .expect("This test requires arm support.");
+
+        let mut sig = Signature::new(target.default_call_conv());
+        sig.returns.push(AbiParam::new(I32));
+
+        let mut fn_ctx = FunctionBuilderContext::new();
+        let mut func = Function::with_name_signature(ExternalName::testcase("sample"), sig);
+        {
+            let mut builder = FunctionBuilder::new(&mut func, &mut fn_ctx);
+
+            let block0 = builder.create_ebb();
+            let y = Variable::new(16);
+            builder.declare_var(y, target.pointer_type());
+            builder.append_ebb_params_for_function_params(block0);
+            builder.switch_to_block(block0);
+
+            let dest = builder.use_var(y);
+            let size = 8;
+            builder.emit_small_memset(target.frontend_config(), dest, 1, size, 8);
+            builder.ins().return_(&[dest]);
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        assert_eq!(
+            func.display(None).to_string(),
+            "function %sample() -> i32 system_v {
+ebb0:
+    v2 = iconst.i32 0
+    v0 -> v2
+    v1 = iconst.i64 0x0001_0001_0101
+    store aligned v1, v0
+    return v0
+}
+"
+        );
+    }
+
+    #[test]
+    fn not_so_small_memset() {
+        use core::str::FromStr;
+        use cranelift_codegen::{isa, settings};
+
+        let shared_builder = settings::builder();
+        let shared_flags = settings::Flags::new(shared_builder);
+
+        let triple = ::target_lexicon::Triple::from_str("arm").expect("Couldn't create arm triple");
+
+        let target = isa::lookup(triple)
+            .ok()
+            .map(|b| b.finish(shared_flags))
+            .expect("This test requires arm support.");
+
+        let mut sig = Signature::new(target.default_call_conv());
+        sig.returns.push(AbiParam::new(I32));
+
+        let mut fn_ctx = FunctionBuilderContext::new();
+        let mut func = Function::with_name_signature(ExternalName::testcase("sample"), sig);
+        {
+            let mut builder = FunctionBuilder::new(&mut func, &mut fn_ctx);
+
+            let block0 = builder.create_ebb();
+            let y = Variable::new(16);
+            builder.declare_var(y, target.pointer_type());
+            builder.append_ebb_params_for_function_params(block0);
+            builder.switch_to_block(block0);
+
+            let dest = builder.use_var(y);
+            let size = 8192;
+            builder.emit_small_memset(target.frontend_config(), dest, 1, size, 8);
+            builder.ins().return_(&[dest]);
+
+            builder.seal_all_blocks();
+            builder.finalize();
+        }
+
+        assert_eq!(
+            func.display(None).to_string(),
+            "function %sample() -> i32 system_v {
+    sig0 = (i32, i32, i32) system_v
+    fn0 = %Memset sig0
+
+ebb0:
+    v4 = iconst.i32 0
+    v0 -> v4
+    v1 = iconst.i8 1
+    v2 = iconst.i32 8192
+    v3 = uextend.i32 v1
+    call fn0(v0, v3, v2)
+    return v0
 }
 "
         );

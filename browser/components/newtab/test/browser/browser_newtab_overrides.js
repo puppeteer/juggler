@@ -1,18 +1,22 @@
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-
-XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
-                                   "@mozilla.org/browser/aboutnewtab-service;1",
-                                   "nsIAboutNewTabService");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "aboutNewTabService",
+  "@mozilla.org/browser/aboutnewtab-service;1",
+  "nsIAboutNewTabService"
+);
 
 registerCleanupFunction(() => {
   aboutNewTabService.resetNewTabURL();
 });
 
 function nextChangeNotificationPromise(aNewURL, testMessage) {
-  return TestUtils.topicObserved("newtab-url-changed", function observer(aSubject, aData) { // jshint unused:false
+  return TestUtils.topicObserved("newtab-url-changed", function observer(
+    aSubject,
+    aData
+  ) {
+    // jshint unused:false
     Assert.equal(aData, aNewURL, testMessage);
     return true;
   });
@@ -23,13 +27,13 @@ function nextChangeNotificationPromise(aNewURL, testMessage) {
  * even when overridden.
  */
 add_task(async function redirector_ignores_override() {
-  let overrides = [
-    "chrome://browser/content/aboutRobots.xhtml",
-    "about:home",
-  ];
+  let overrides = ["chrome://browser/content/aboutRobots.xhtml", "about:home"];
 
   for (let overrideURL of overrides) {
-    let notificationPromise = nextChangeNotificationPromise(overrideURL, `newtab page now points to ${overrideURL}`);
+    let notificationPromise = nextChangeNotificationPromise(
+      overrideURL,
+      `newtab page now points to ${overrideURL}`
+    );
     aboutNewTabService.newTabURL = overrideURL;
 
     await notificationPromise;
@@ -50,10 +54,16 @@ add_task(async function redirector_ignores_override() {
     await BrowserTestUtils.withNewTab(tabOptions, async browser => {
       await ContentTask.spawn(browser, {}, async () => {
         Assert.equal(content.location.href, "about:newtab", "Got right URL");
-        Assert.equal(content.document.location.href, "about:newtab", "Got right URL");
-        Assert.notEqual(content.document.nodePrincipal,
+        Assert.equal(
+          content.document.location.href,
+          "about:newtab",
+          "Got right URL"
+        );
+        Assert.notEqual(
+          content.document.nodePrincipal,
           Services.scriptSecurityManager.getSystemPrincipal(),
-          "activity stream principal should not match systemPrincipal");
+          "activity stream principal should not match systemPrincipal"
+        );
       });
     }); // jshint ignore:line
   }
@@ -70,7 +80,10 @@ add_task(async function override_loads_in_browser() {
   ];
 
   for (let overrideURL of overrides) {
-    let notificationPromise = nextChangeNotificationPromise(overrideURL.trim(), `newtab page now points to ${overrideURL}`);
+    let notificationPromise = nextChangeNotificationPromise(
+      overrideURL.trim(),
+      `newtab page now points to ${overrideURL}`
+    );
     aboutNewTabService.newTabURL = overrideURL;
 
     await notificationPromise;
@@ -82,9 +95,13 @@ add_task(async function override_loads_in_browser() {
     let browser = gBrowser.selectedBrowser;
     await BrowserTestUtils.browserLoaded(browser);
 
-    await ContentTask.spawn(browser, {url: overrideURL}, async args => {
+    await ContentTask.spawn(browser, { url: overrideURL }, async args => {
       Assert.equal(content.location.href, args.url.trim(), "Got right URL");
-      Assert.equal(content.document.location.href, args.url.trim(), "Got right URL");
+      Assert.equal(
+        content.document.location.href,
+        args.url.trim(),
+        "Got right URL"
+      );
     }); // jshint ignore:line
     BrowserTestUtils.removeTab(gBrowser.selectedTab);
   }
@@ -94,15 +111,13 @@ add_task(async function override_loads_in_browser() {
  * Tests edge cases when someone overrides the newtabpage with whitespace
  */
 add_task(async function override_blank_loads_in_browser() {
-  let overrides = [
-    "",
-    " ",
-    "\n\t",
-    " about:blank",
-  ];
+  let overrides = ["", " ", "\n\t", " about:blank"];
 
   for (let overrideURL of overrides) {
-    let notificationPromise = nextChangeNotificationPromise("about:blank", "newtab page now points to about:blank");
+    let notificationPromise = nextChangeNotificationPromise(
+      "about:blank",
+      "newtab page now points to about:blank"
+    );
     aboutNewTabService.newTabURL = overrideURL;
 
     await notificationPromise;
@@ -116,7 +131,11 @@ add_task(async function override_blank_loads_in_browser() {
 
     await ContentTask.spawn(browser, {}, async () => {
       Assert.equal(content.location.href, "about:blank", "Got right URL");
-      Assert.equal(content.document.location.href, "about:blank", "Got right URL");
+      Assert.equal(
+        content.document.location.href,
+        "about:blank",
+        "Got right URL"
+      );
     }); // jshint ignore:line
     BrowserTestUtils.removeTab(gBrowser.selectedTab);
   }

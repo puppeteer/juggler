@@ -16,22 +16,22 @@
 
 class nsCaret;
 class nsIContent;
-class nsIPresShell;
 class nsPresContext;
 
 // X.h defines KeyPress
 #ifdef KeyPress
-#undef KeyPress
+#  undef KeyPress
 #endif
 
 #ifdef XP_WIN
 // On Windows, we support switching the text direction by pressing Ctrl+Shift
-#define HANDLE_NATIVE_TEXT_DIRECTION_SWITCH
+#  define HANDLE_NATIVE_TEXT_DIRECTION_SWITCH
 #endif
 
 namespace mozilla {
 
 class EditorBase;
+class PresShell;
 
 namespace dom {
 class DragEvent;
@@ -49,7 +49,7 @@ class EditorEventListener : public nsIDOMEventListener {
   NS_DECL_ISUPPORTS
 
   // nsIDOMEventListener
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD HandleEvent(dom::Event* aEvent) override;
 
   void SpellCheckIfNeeded();
@@ -65,6 +65,7 @@ class EditorEventListener : public nsIDOMEventListener {
   MOZ_CAN_RUN_SCRIPT
   nsresult KeyUp(const WidgetKeyboardEvent* aKeyboardEvent);
 #endif
+  MOZ_CAN_RUN_SCRIPT
   nsresult KeyPress(WidgetKeyboardEvent* aKeyboardEvent);
   MOZ_CAN_RUN_SCRIPT
   nsresult HandleChangeComposition(WidgetCompositionEvent* aCompositionEvent);
@@ -73,6 +74,7 @@ class EditorEventListener : public nsIDOMEventListener {
   void HandleEndComposition(WidgetCompositionEvent* aCompositionEvent);
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult MouseDown(dom::MouseEvent* aMouseEvent);
+  MOZ_CAN_RUN_SCRIPT
   virtual nsresult MouseUp(dom::MouseEvent* aMouseEvent) { return NS_OK; }
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult MouseClick(WidgetMouseEvent* aMouseClickEvent);
@@ -85,7 +87,7 @@ class EditorEventListener : public nsIDOMEventListener {
 
   MOZ_CAN_RUN_SCRIPT bool CanDrop(dom::DragEvent* aEvent);
   void CleanupDragDropCaret();
-  nsIPresShell* GetPresShell() const;
+  PresShell* GetPresShell() const;
   nsPresContext* GetPresContext() const;
   nsIContent* GetFocusedRootContent();
   // Returns true if IME consumes the mouse event.

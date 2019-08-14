@@ -14,11 +14,15 @@ add_task(async function test_sidebarpanels_click() {
   const BOOKMARKS_SIDEBAR_TREE_ID = "bookmarks-view";
   const HISTORY_SIDEBAR_ID = "viewHistorySidebar";
   const HISTORY_SIDEBAR_TREE_ID = "historyTree";
-  const TEST_URL = "http://mochi.test:8888/browser/browser/components/places/tests/browser/sidebarpanels_click_test_page.html";
+  const TEST_URL =
+    "http://mochi.test:8888/browser/browser/components/places/tests/browser/sidebarpanels_click_test_page.html";
 
   // If a sidebar is already open, close it.
   if (!document.getElementById("sidebar-box").hidden) {
-    ok(false, "Unexpected sidebar found - a previous test failed to cleanup correctly");
+    ok(
+      false,
+      "Unexpected sidebar found - a previous test failed to cleanup correctly"
+    );
     SidebarUI.hide();
   }
 
@@ -37,10 +41,8 @@ add_task(async function test_sidebarpanels_click() {
         title: "test",
         url: TEST_URL,
       });
-
     },
-    prepare() {
-    },
+    prepare() {},
     async selectNode(tree) {
       tree.selectItems([this._bookmark.guid]);
     },
@@ -57,7 +59,8 @@ add_task(async function test_sidebarpanels_click() {
       // Add a history entry.
       let uri = Services.io.newURI(TEST_URL);
       await PlacesTestUtils.addVisits({
-        uri, visitDate: Date.now() * 1000,
+        uri,
+        visitDate: Date.now() * 1000,
         transition: PlacesUtils.history.TRANSITION_TYPED,
       });
     },
@@ -66,7 +69,11 @@ add_task(async function test_sidebarpanels_click() {
     },
     selectNode(tree) {
       tree.selectNode(tree.view.nodeForTreeIndex(0));
-      is(tree.selectedNode.uri, TEST_URL, "The correct visit has been selected");
+      is(
+        tree.selectedNode.uri,
+        TEST_URL,
+        "The correct visit has been selected"
+      );
       is(tree.selectedNode.itemId, -1, "The selected node is not bookmarked");
     },
     cleanup(aCallback) {
@@ -91,7 +98,7 @@ add_task(async function test_sidebarpanels_click() {
 
     // Remove tabs created by sub-tests.
     while (gBrowser.tabs.length > 1) {
-      gBrowser.removeTab(gBrowser.tabContainer.lastElementChild);
+      gBrowser.removeTab(gBrowser.tabs[gBrowser.tabs.length - 1]);
     }
   }
 });
@@ -100,36 +107,40 @@ async function testPlacesPanel(testInfo, preFunc) {
   await testInfo.init();
 
   let promise = new Promise(resolve => {
-    sidebar.addEventListener("load", function() {
-      executeSoon(async function() {
-        testInfo.prepare();
-
-        preFunc();
-
-        let tree = sidebar.contentDocument.getElementById(testInfo.treeName);
-
-        // Select the inserted places item.
-        await testInfo.selectNode(tree);
-
-        let promiseAlert = promiseAlertDialogObserved();
-
-        synthesizeClickOnSelectedTreeCell(tree);
-        // Now, wait for the observer to catch the alert dialog.
-        // If something goes wrong, the test will time out at this stage.
-        // Note that for the history sidebar, the URL itself is not opened,
-        // and Places will show the load-js-data-url-error prompt as an alert
-        // box, which means that the click actually worked, so it's good enough
-        // for the purpose of this test.
-
-        await promiseAlert;
-
+    sidebar.addEventListener(
+      "load",
+      function() {
         executeSoon(async function() {
-          SidebarUI.hide();
-          await testInfo.cleanup();
-          resolve();
+          testInfo.prepare();
+
+          preFunc();
+
+          let tree = sidebar.contentDocument.getElementById(testInfo.treeName);
+
+          // Select the inserted places item.
+          await testInfo.selectNode(tree);
+
+          let promiseAlert = promiseAlertDialogObserved();
+
+          synthesizeClickOnSelectedTreeCell(tree);
+          // Now, wait for the observer to catch the alert dialog.
+          // If something goes wrong, the test will time out at this stage.
+          // Note that for the history sidebar, the URL itself is not opened,
+          // and Places will show the load-js-data-url-error prompt as an alert
+          // box, which means that the click actually worked, so it's good enough
+          // for the purpose of this test.
+
+          await promiseAlert;
+
+          executeSoon(async function() {
+            SidebarUI.hide();
+            await testInfo.cleanup();
+            resolve();
+          });
         });
-      });
-    }, {capture: true, once: true});
+      },
+      { capture: true, once: true }
+    );
   });
 
   SidebarUI.show(testInfo.sidebarName);
@@ -144,7 +155,11 @@ function promiseAlertDialogObserved() {
       Services.obs.removeObserver(observer, "common-dialog-loaded");
       Services.obs.removeObserver(observer, "tabmodal-dialog-loaded");
 
-      subject.Dialog.ui.button0.click();
+      if (subject.Dialog) {
+        subject.Dialog.ui.button0.click();
+      } else {
+        subject.querySelector(".tabmodalprompt-button0").click();
+      }
       resolve();
     }
     Services.obs.addObserver(observer, "common-dialog-loaded");

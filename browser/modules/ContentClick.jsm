@@ -5,17 +5,28 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = [ "ContentClick" ];
+var EXPORTED_SYMBOLS = ["ContentClick"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-ChromeUtils.defineModuleGetter(this, "PlacesUIUtils",
-                               "resource:///modules/PlacesUIUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "PrivateBrowsingUtils",
-                               "resource://gre/modules/PrivateBrowsingUtils.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "PlacesUIUtils",
+  "resource:///modules/PlacesUIUtils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "E10SUtils",
+  "resource://gre/modules/E10SUtils.jsm"
+);
 
 var ContentClick = {
-  // Listeners are added in nsBrowserGlue.js
+  // Listeners are added in BrowserGlue.jsm
   receiveMessage(message) {
     switch (message.name) {
       case "Content:Click":
@@ -37,8 +48,10 @@ var ContentClick = {
 
     if (!json.href) {
       // Might be middle mouse navigation.
-      if (Services.prefs.getBoolPref("middlemouse.contentLoadURL") &&
-          !Services.prefs.getBoolPref("general.autoScroll")) {
+      if (
+        Services.prefs.getBoolPref("middlemouse.contentLoadURL") &&
+        !Services.prefs.getBoolPref("general.autoScroll")
+      ) {
         window.middleMousePaste(json);
       }
       return;
@@ -56,26 +69,30 @@ var ContentClick = {
     // pages loaded in frames are embed visits and lost with the session, while
     // visits across frames should be preserved.
     try {
-      if (!PrivateBrowsingUtils.isWindowPrivate(window))
+      if (!PrivateBrowsingUtils.isWindowPrivate(window)) {
         PlacesUIUtils.markPageAsFollowedLink(json.href);
-    } catch (ex) { /* Skip invalid URIs. */ }
+      }
+    } catch (ex) {
+      /* Skip invalid URIs. */
+    }
 
     // This part is based on handleLinkClick.
     var where = window.whereToOpenLink(json);
-    if (where == "current")
+    if (where == "current") {
       return;
+    }
 
     // Todo(903022): code for where == save
 
     let params = {
       charset: browser.characterSet,
-      referrerURI: browser.documentURI,
-      referrerPolicy: json.referrerPolicy,
-      noReferrer: json.noReferrer,
+      referrerInfo: E10SUtils.deserializeReferrerInfo(json.referrerInfo),
       allowMixedContent: json.allowMixedContent,
       isContentWindowPrivate: json.isContentWindowPrivate,
       originPrincipal: json.originPrincipal,
+      originStoragePrincipal: json.originStoragePrincipal,
       triggeringPrincipal: json.triggeringPrincipal,
+      csp: json.csp ? E10SUtils.deserializeCSP(json.csp) : null,
       frameOuterWindowID: json.frameOuterWindowID,
     };
 

@@ -107,6 +107,8 @@ class BackgroundParentImpl : public PBackgroundParent {
   virtual bool DeallocPBackgroundLSSimpleRequestParent(
       PBackgroundLSSimpleRequestParent* aActor) override;
 
+  virtual mozilla::ipc::IPCResult RecvLSClearPrivateBrowsing() override;
+
   virtual PBackgroundLocalStorageCacheParent*
   AllocPBackgroundLocalStorageCacheParent(
       const PrincipalInfo& aPrincipalInfo, const nsCString& aOriginKey,
@@ -152,6 +154,19 @@ class BackgroundParentImpl : public PBackgroundParent {
 
   virtual bool DeallocPTemporaryIPCBlobParent(
       PTemporaryIPCBlobParent* aActor) override;
+
+  virtual PFileCreatorParent* AllocPFileCreatorParent(
+      const nsString& aFullPath, const nsString& aType, const nsString& aName,
+      const Maybe<int64_t>& aLastModified, const bool& aExistenceCheck,
+      const bool& aIsFromNsIFile) override;
+
+  virtual mozilla::ipc::IPCResult RecvPFileCreatorConstructor(
+      PFileCreatorParent* actor, const nsString& aFullPath,
+      const nsString& aType, const nsString& aName,
+      const Maybe<int64_t>& aLastModified, const bool& aExistenceCheck,
+      const bool& aIsFromNsIFile) override;
+
+  virtual bool DeallocPFileCreatorParent(PFileCreatorParent* aActor) override;
 
   virtual mozilla::dom::PRemoteWorkerParent* AllocPRemoteWorkerParent(
       const RemoteWorkerData& aData) override;
@@ -241,9 +256,9 @@ class BackgroundParentImpl : public PBackgroundParent {
       dom::cache::PCacheStreamControlParent* aActor) override;
 
   virtual PUDPSocketParent* AllocPUDPSocketParent(
-      const OptionalPrincipalInfo& pInfo, const nsCString& aFilter) override;
+      const Maybe<PrincipalInfo>& pInfo, const nsCString& aFilter) override;
   virtual mozilla::ipc::IPCResult RecvPUDPSocketConstructor(
-      PUDPSocketParent*, const OptionalPrincipalInfo& aPrincipalInfo,
+      PUDPSocketParent*, const Maybe<PrincipalInfo>& aPrincipalInfo,
       const nsCString& aFilter) override;
   virtual bool DeallocPUDPSocketParent(PUDPSocketParent*) override;
 
@@ -261,17 +276,11 @@ class BackgroundParentImpl : public PBackgroundParent {
       const nsID& aUUID, const nsID& aDestinationUUID,
       const uint32_t& aSequenceID) override;
 
-  virtual PAsmJSCacheEntryParent* AllocPAsmJSCacheEntryParent(
-      const dom::asmjscache::OpenMode& aOpenMode,
-      const dom::asmjscache::WriteParams& aWriteParams,
-      const PrincipalInfo& aPrincipalInfo) override;
-
-  virtual bool DeallocPAsmJSCacheEntryParent(
-      PAsmJSCacheEntryParent* aActor) override;
-
   virtual PQuotaParent* AllocPQuotaParent() override;
 
   virtual bool DeallocPQuotaParent(PQuotaParent* aActor) override;
+
+  virtual mozilla::ipc::IPCResult RecvShutdownQuotaManager() override;
 
   virtual PFileSystemRequestParent* AllocPFileSystemRequestParent(
       const FileSystemParams&) override;

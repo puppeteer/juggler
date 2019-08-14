@@ -2,19 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate app_units;
 extern crate euclid;
 extern crate gleam;
 extern crate glutin;
 extern crate webrender;
 extern crate winit;
 
-use app_units::Au;
 use gleam::gl;
 use glutin::GlContext;
 use std::fs::File;
 use std::io::Read;
 use webrender::api::*;
+use webrender::api::units::*;
+use webrender::DebugFlags;
 use winit::dpi::LogicalSize;
 
 struct Notifier {
@@ -28,7 +28,7 @@ impl Notifier {
 }
 
 impl RenderNotifier for Notifier {
-    fn clone(&self) -> Box<RenderNotifier> {
+    fn clone(&self) -> Box<dyn RenderNotifier> {
         Box::new(Notifier {
             events_proxy: self.events_proxy.clone(),
         })
@@ -97,7 +97,7 @@ impl Window {
             ..webrender::RendererOptions::default()
         };
 
-        let framebuffer_size = {
+        let device_size = {
             let size = window
                 .get_inner_size()
                 .unwrap()
@@ -105,9 +105,9 @@ impl Window {
             DeviceIntSize::new(size.width as i32, size.height as i32)
         };
         let notifier = Box::new(Notifier::new(events_loop.create_proxy()));
-        let (renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts, None).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(gl.clone(), notifier, opts, None, device_size).unwrap();
         let api = sender.create_api();
-        let document_id = api.add_document(framebuffer_size, 0);
+        let document_id = api.add_document(device_size, 0);
 
         let epoch = Epoch(0);
         let pipeline_id = PipelineId(0, 0);
@@ -142,6 +142,7 @@ impl Window {
         let mut do_exit = false;
         let my_name = &self.name;
         let renderer = &mut self.renderer;
+        let api = &mut self.api;
 
         self.events_loop.poll_events(|global_event| match global_event {
             winit::Event::WindowEvent { event, .. } => match event {
@@ -163,8 +164,8 @@ impl Window {
                     },
                     ..
                 } => {
-                    println!("toggle flags {}", my_name);
-                    renderer.toggle_debug_flags(webrender::DebugFlags::PROFILER_DBG);
+                    println!("set flags {}", my_name);
+                    api.send_debug_cmd(DebugCommand::SetFlags(DebugFlags::PROFILER_DBG))
                 }
                 _ => {}
             }
@@ -175,33 +176,34 @@ impl Window {
         }
 
         let device_pixel_ratio = self.window.get_hidpi_factor() as f32;
-        let framebuffer_size = {
+        let device_size = {
             let size = self.window
                 .get_inner_size()
                 .unwrap()
                 .to_physical(device_pixel_ratio as f64);
             DeviceIntSize::new(size.width as i32, size.height as i32)
         };
-        let layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
+        let layout_size = device_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
         let mut txn = Transaction::new();
         let mut builder = DisplayListBuilder::new(self.pipeline_id, layout_size);
+        let space_and_clip = SpaceAndClipInfo::root_scroll(self.pipeline_id);
 
         let bounds = LayoutRect::new(LayoutPoint::zero(), builder.content_size());
-        let info = LayoutPrimitiveInfo::new(bounds);
-        builder.push_stacking_context(
-            &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+        builder.push_simple_stacking_context(
+            bounds.origin,
+            space_and_clip.spatial_id,
+            true,
         );
 
-        let info = LayoutPrimitiveInfo::new(LayoutRect::new(
-            LayoutPoint::new(100.0, 100.0),
-            LayoutSize::new(100.0, 200.0)
-        ));
-        builder.push_rect(&info, ColorF::new(0.0, 1.0, 0.0, 1.0));
+        builder.push_rect(
+            &CommonItemProperties::new(
+                LayoutRect::new(
+                    LayoutPoint::new(100.0, 200.0),
+                    LayoutSize::new(100.0, 200.0),
+                ),
+                space_and_clip,
+            ),
+            ColorF::new(0.0, 1.0, 0.0, 1.0));
 
         let text_bounds = LayoutRect::new(
             LayoutPoint::new(100.0, 50.0),
@@ -258,9 +260,12 @@ impl Window {
             },
         ];
 
-        let info = LayoutPrimitiveInfo::new(text_bounds);
         builder.push_text(
-            &info,
+            &CommonItemProperties::new(
+                text_bounds,
+                space_and_clip,
+            ),
+            text_bounds,
             &glyphs,
             self.font_instance_key,
             ColorF::new(1.0, 1.0, 0.0, 1.0),
@@ -278,10 +283,10 @@ impl Window {
         );
         txn.set_root_pipeline(self.pipeline_id);
         txn.generate_frame();
-        self.api.send_transaction(self.document_id, txn);
+        api.send_transaction(self.document_id, txn);
 
         renderer.update();
-        renderer.render(framebuffer_size).unwrap();
+        renderer.render(device_size).unwrap();
         self.window.swap_buffers().ok();
 
         false

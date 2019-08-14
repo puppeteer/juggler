@@ -291,6 +291,7 @@
 .boxmodel-legend {
   position: absolute;
   z-index: 1;
+  cursor: default;
 }
 
 .boxmodel-legend[data-box="margin"] {
@@ -337,6 +338,7 @@
   border: 1px dashed transparent;
   -moz-user-select: none;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .boxmodel-editable[data-box="border"] {
@@ -347,6 +349,35 @@
 
 .boxmodel-editable:hover {
   border-bottom-color: hsl(0, 0%, 50%);
+}
+
+.boxmodel-editable:focus,
+.boxmodel-editable:active {
+  border: 1px solid var(--blue-50);
+  outline: none;
+}
+
+.boxmodel-editable[data-box="margin"]:hover {
+  background-color: var(--marginbox-border-color);
+}
+
+.boxmodel-editable[data-box="padding"]:hover {
+  background-color: #c78fc7b3;
+}
+
+.boxmodel-editable[data-box="border"]:hover {
+  background-color: #545454;
+}
+
+.boxmodel-editable[data-box="content"]:hover {
+  background-color: var(--contentbox-border-color);
+}
+
+.boxmodel-editable[data-box="margin"]:hover,
+.boxmodel-editable[data-box="padding"]:hover,
+.boxmodel-editable[data-box="border"]:hover,
+.boxmodel-editable[data-box="content"]:hover {
+  border-radius: 3px;
 }
 
 .boxmodel-size > span {

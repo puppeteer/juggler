@@ -12,6 +12,7 @@
 #include "jsfriendapi.h"
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
+#include "js/PropertySpec.h"
 #include "js/Proxy.h"
 #include "js/SourceText.h"
 #include "js/StructuredClone.h"
@@ -36,7 +37,6 @@
 #include "mozilla/dom/CSSRuleBinding.h"
 #include "mozilla/dom/DirectoryBinding.h"
 #include "mozilla/dom/DOMParserBinding.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/ElementBinding.h"
 #include "mozilla/dom/EventBinding.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
@@ -52,7 +52,7 @@
 #include "mozilla/dom/RequestBinding.h"
 #include "mozilla/dom/ResponseBinding.h"
 #ifdef MOZ_WEBRTC
-#include "mozilla/dom/RTCIdentityProviderRegistrar.h"
+#  include "mozilla/dom/RTCIdentityProviderRegistrar.h"
 #endif
 #include "mozilla/dom/FileReaderBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
@@ -64,6 +64,7 @@
 #include "mozilla/dom/XMLHttpRequest.h"
 #include "mozilla/dom/XMLSerializerBinding.h"
 #include "mozilla/dom/FormDataBinding.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/DeferredFinalize.h"
 #include "mozilla/NullPrincipal.h"
 
@@ -123,7 +124,7 @@ already_AddRefed<nsIXPCComponents_utils_Sandbox> xpc::NewSandboxConstructor() {
 }
 
 static bool SandboxDump(JSContext* cx, unsigned argc, Value* vp) {
-  if (!DOMPrefs::DumpEnabled()) {
+  if (!nsJSUtils::DumpEnabled()) {
     return true;
   }
 
@@ -343,8 +344,14 @@ static bool SandboxIsProxy(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject obj(cx, &args[0].toObject());
-  obj = js::CheckedUnwrap(obj);
-  NS_ENSURE_TRUE(obj, false);
+  // CheckedUnwrapStatic is OK here, since we only care about whether
+  // it's a scripted proxy and the things CheckedUnwrapStatic fails on
+  // are not.
+  obj = js::CheckedUnwrapStatic(obj);
+  if (!obj) {
+    args.rval().setBoolean(false);
+    return true;
+  }
 
   args.rval().setBoolean(js::IsScriptedProxy(obj));
   return true;
@@ -448,7 +455,6 @@ static const js::ClassOps SandboxClassOps = {
 };
 
 static const js::ClassExtension SandboxClassExtension = {
-    nullptr,      /* weakmapKeyDelegateOp */
     sandbox_moved /* objectMovedOp */
 };
 
@@ -506,16 +512,20 @@ class SandboxProxyHandler : public js::Wrapper {
                    JS::Handle<JS::Value> receiver,
                    JS::ObjectOpResult& result) const override;
 
-  virtual bool getPropertyDescriptor(
-      JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
-      JS::MutableHandle<JS::PropertyDescriptor> desc) const override;
   virtual bool hasOwn(JSContext* cx, JS::Handle<JSObject*> proxy,
                       JS::Handle<jsid> id, bool* bp) const override;
   virtual bool getOwnEnumerablePropertyKeys(
       JSContext* cx, JS::Handle<JSObject*> proxy,
-      JS::AutoIdVector& props) const override;
-  virtual JSObject* enumerate(JSContext* cx,
-                              JS::Handle<JSObject*> proxy) const override;
+      JS::MutableHandleIdVector props) const override;
+  virtual bool enumerate(JSContext* cx, JS::Handle<JSObject*> proxy,
+                         JS::MutableHandleIdVector props) const override;
+
+ private:
+  // Implements the custom getPropertyDescriptor behavior. If the getOwn
+  // argument is true we only look for "own" properties.
+  bool getPropertyDescriptorImpl(
+      JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
+      bool getOwn, JS::MutableHandle<JS::PropertyDescriptor> desc) const;
 };
 
 static const SandboxProxyHandler sandboxProxyHandler;
@@ -659,9 +669,10 @@ bool WrapAccessorFunction(JSContext* cx, Op& op, PropertyDescriptor* desc,
 }
 
 static bool IsMaybeWrappedDOMConstructor(JSObject* obj) {
-  // We really care about the underlying object here, which might be wrapped
-  // in cross-compartment wrappers.
-  obj = js::CheckedUnwrap(obj);
+  // We really care about the underlying object here, which might be wrapped in
+  // cross-compartment wrappers.  CheckedUnwrapStatic is fine, since we just
+  // care whether it's a DOM constructor.
+  obj = js::CheckedUnwrapStatic(obj);
   if (!obj) {
     return false;
   }
@@ -669,14 +680,21 @@ static bool IsMaybeWrappedDOMConstructor(JSObject* obj) {
   return dom::IsDOMConstructor(obj);
 }
 
-bool SandboxProxyHandler::getPropertyDescriptor(
+bool SandboxProxyHandler::getPropertyDescriptorImpl(
     JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
-    JS::MutableHandle<PropertyDescriptor> desc) const {
+    bool getOwn, JS::MutableHandle<PropertyDescriptor> desc) const {
   JS::RootedObject obj(cx, wrappedObject(proxy));
 
   MOZ_ASSERT(js::GetObjectCompartment(obj) == js::GetObjectCompartment(proxy));
-  if (!JS_GetPropertyDescriptorById(cx, obj, id, desc)) {
-    return false;
+
+  if (getOwn) {
+    if (!JS_GetOwnPropertyDescriptorById(cx, obj, id, desc)) {
+      return false;
+    }
+  } else {
+    if (!JS_GetPropertyDescriptorById(cx, obj, id, desc)) {
+      return false;
+    }
   }
 
   if (!desc.object()) {
@@ -711,15 +729,7 @@ bool SandboxProxyHandler::getPropertyDescriptor(
 bool SandboxProxyHandler::getOwnPropertyDescriptor(
     JSContext* cx, JS::Handle<JSObject*> proxy, JS::Handle<jsid> id,
     JS::MutableHandle<PropertyDescriptor> desc) const {
-  if (!getPropertyDescriptor(cx, proxy, id, desc)) {
-    return false;
-  }
-
-  if (desc.object() != wrappedObject(proxy)) {
-    desc.object().set(nullptr);
-  }
-
-  return true;
+  return getPropertyDescriptorImpl(cx, proxy, id, /* getOwn = */ true, desc);
 }
 
 /*
@@ -729,10 +739,9 @@ bool SandboxProxyHandler::getOwnPropertyDescriptor(
 
 bool SandboxProxyHandler::has(JSContext* cx, JS::Handle<JSObject*> proxy,
                               JS::Handle<jsid> id, bool* bp) const {
-  // This uses getPropertyDescriptor for backward compatibility with
-  // the old BaseProxyHandler::has implementation.
+  // This uses JS_GetPropertyDescriptorById for backward compatibility.
   Rooted<PropertyDescriptor> desc(cx);
-  if (!getPropertyDescriptor(cx, proxy, id, &desc)) {
+  if (!getPropertyDescriptorImpl(cx, proxy, id, /* getOwn = */ false, &desc)) {
     return false;
   }
 
@@ -748,10 +757,9 @@ bool SandboxProxyHandler::get(JSContext* cx, JS::Handle<JSObject*> proxy,
                               JS::Handle<JS::Value> receiver,
                               JS::Handle<jsid> id,
                               JS::MutableHandle<Value> vp) const {
-  // This uses getPropertyDescriptor for backward compatibility with
-  // the old BaseProxyHandler::get implementation.
+  // This uses JS_GetPropertyDescriptorById for backward compatibility.
   Rooted<PropertyDescriptor> desc(cx);
-  if (!getPropertyDescriptor(cx, proxy, id, &desc)) {
+  if (!getPropertyDescriptorImpl(cx, proxy, id, /* getOwn = */ false, &desc)) {
     return false;
   }
   desc.assertCompleteIfFound();
@@ -786,13 +794,14 @@ bool SandboxProxyHandler::set(JSContext* cx, JS::Handle<JSObject*> proxy,
 }
 
 bool SandboxProxyHandler::getOwnEnumerablePropertyKeys(
-    JSContext* cx, JS::Handle<JSObject*> proxy, AutoIdVector& props) const {
+    JSContext* cx, JS::Handle<JSObject*> proxy,
+    MutableHandleIdVector props) const {
   return BaseProxyHandler::getOwnEnumerablePropertyKeys(cx, proxy, props);
 }
 
-JSObject* SandboxProxyHandler::enumerate(JSContext* cx,
-                                         JS::Handle<JSObject*> proxy) const {
-  return BaseProxyHandler::enumerate(cx, proxy);
+bool SandboxProxyHandler::enumerate(JSContext* cx, JS::Handle<JSObject*> proxy,
+                                    JS::MutableHandleIdVector props) const {
+  return BaseProxyHandler::enumerate(cx, proxy, props);
 }
 
 bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
@@ -1034,7 +1043,8 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
   // [SecureContext] API (bug 1273687).  In that case we'd call
   // creationOptions.setSecureContext(true).
 
-  if (principal == nsXPConnect::SystemPrincipal()) {
+  bool isSystemPrincipal = principal->IsSystemPrincipal();
+  if (isSystemPrincipal) {
     creationOptions.setClampAndJitterTime(false);
   }
 
@@ -1044,6 +1054,12 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
         js::UncheckedUnwrap(options.sameZoneAs));
   } else if (options.freshZone) {
     creationOptions.setNewCompartmentAndZone();
+  } else if (isSystemPrincipal && !options.invisibleToDebugger &&
+             !options.freshCompartment) {
+    // Use a shared system compartment for system-principal sandboxes that don't
+    // require invisibleToDebugger (this is a compartment property, see bug
+    // 1482215).
+    creationOptions.setExistingCompartment(xpc::PrivilegedJunkScope());
   } else {
     creationOptions.setNewCompartmentInSystemZone();
   }
@@ -1061,12 +1077,8 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
     return NS_ERROR_FAILURE;
   }
 
-  CompartmentPrivate* priv = CompartmentPrivate::Get(sandbox);
-  priv->allowWaivers = options.allowWaivers;
-  priv->isWebExtensionContentScript = options.isWebExtensionContentScript;
-  priv->isContentXBLCompartment = options.isContentXBLScope;
-  priv->isUAWidgetCompartment = options.isUAWidgetScope;
-  priv->isSandboxCompartment = true;
+  // Use exclusive expandos for non-system-principal sandboxes.
+  bool hasExclusiveExpandos = !isSystemPrincipal;
 
   // Set up the wantXrays flag, which indicates whether xrays are desired even
   // for same-origin access.
@@ -1077,7 +1089,30 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
   // Arguably we should just flip the default for chrome and still honor the
   // flag, but such a change would break code in subtle ways for minimal
   // benefit. So we just switch it off here.
-  priv->wantXrays = AccessCheck::isChrome(sandbox) ? false : options.wantXrays;
+  bool wantXrays = AccessCheck::isChrome(sandbox) ? false : options.wantXrays;
+
+  if (creationOptions.compartmentSpecifier() ==
+      JS::CompartmentSpecifier::ExistingCompartment) {
+    // Make sure the compartment we're reusing has flags that match what we
+    // would set on a new compartment.
+    CompartmentPrivate* priv = CompartmentPrivate::Get(sandbox);
+    MOZ_RELEASE_ASSERT(priv->allowWaivers == options.allowWaivers);
+    MOZ_RELEASE_ASSERT(priv->isWebExtensionContentScript ==
+                       options.isWebExtensionContentScript);
+    MOZ_RELEASE_ASSERT(priv->isContentXBLCompartment ==
+                       options.isContentXBLScope);
+    MOZ_RELEASE_ASSERT(priv->isUAWidgetCompartment == options.isUAWidgetScope);
+    MOZ_RELEASE_ASSERT(priv->hasExclusiveExpandos == hasExclusiveExpandos);
+    MOZ_RELEASE_ASSERT(priv->wantXrays == wantXrays);
+  } else {
+    CompartmentPrivate* priv = CompartmentPrivate::Get(sandbox);
+    priv->allowWaivers = options.allowWaivers;
+    priv->isWebExtensionContentScript = options.isWebExtensionContentScript;
+    priv->isContentXBLCompartment = options.isContentXBLScope;
+    priv->isUAWidgetCompartment = options.isUAWidgetScope;
+    priv->hasExclusiveExpandos = hasExclusiveExpandos;
+    priv->wantXrays = wantXrays;
+  }
 
   {
     JSAutoRealm ar(cx, sandbox);
@@ -1107,7 +1142,11 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
       bool useSandboxProxy =
           !!WindowOrNull(js::UncheckedUnwrap(options.proto, false));
       if (!useSandboxProxy) {
-        JSObject* unwrappedProto = js::CheckedUnwrap(options.proto, false);
+        // We just wrapped options.proto into the compartment of whatever Realm
+        // is on the cx, so use that same realm for the CheckedUnwrapDynamic
+        // call.
+        JSObject* unwrappedProto =
+            js::CheckedUnwrapDynamic(options.proto, cx, false);
         if (!unwrappedProto) {
           JS_ReportErrorASCII(cx, "Sandbox must subsume sandboxPrototype");
           return NS_ERROR_INVALID_ARG;
@@ -1134,7 +1173,7 @@ nsresult xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp,
       }
     }
 
-    bool allowComponents = principal == nsXPConnect::SystemPrincipal();
+    bool allowComponents = principal->IsSystemPrincipal();
     if (options.wantComponents && allowComponents &&
         !ObjectScope(sandbox)->AttachComponentsObject(cx))
       return NS_ERROR_XPC_UNEXPECTED;
@@ -1236,7 +1275,8 @@ static bool GetPrincipalOrSOP(JSContext* cx, HandleObject from,
   MOZ_ASSERT(out);
   *out = nullptr;
 
-  nsCOMPtr<nsISupports> native = xpc::UnwrapReflectorToISupports(from);
+  // We might have a Window here, so need ReflectorToISupportsDynamic
+  nsCOMPtr<nsISupports> native = ReflectorToISupportsDynamic(from, cx);
 
   if (nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(native)) {
     sop.forget(out);
@@ -1311,7 +1351,6 @@ static bool GetExpandedPrincipal(JSContext* cx, HandleObject arrayObj,
       return false;
     }
 
-    nsresult rv;
     nsCOMPtr<nsIPrincipal> principal;
     if (allowed.isObject()) {
       // In case of object let's see if it's a Principal or a
@@ -1344,10 +1383,7 @@ static bool GetExpandedPrincipal(JSContext* cx, HandleObject arrayObj,
       }
 
       // We do not allow ExpandedPrincipals to contain any system principals.
-      bool isSystem;
-      rv = nsXPConnect::SecurityManager()->IsSystemPrincipal(principal,
-                                                             &isSystem);
-      NS_ENSURE_SUCCESS(rv, false);
+      bool isSystem = principal->IsSystemPrincipal();
       if (isSystem) {
         JS_ReportErrorASCII(
             cx, "System principal is not allowed in an expanded principal");
@@ -1622,6 +1658,7 @@ bool SandboxOptions::Parse() {
                          &isWebExtensionContentScript) &&
             ParseString("sandboxName", sandboxName) &&
             ParseObject("sameZoneAs", &sameZoneAs) &&
+            ParseBoolean("freshCompartment", &freshCompartment) &&
             ParseBoolean("freshZone", &freshZone) &&
             ParseBoolean("invisibleToDebugger", &invisibleToDebugger) &&
             ParseBoolean("discardSource", &discardSource) &&
@@ -1750,7 +1787,7 @@ nsresult nsXPCComponents_utils_Sandbox::CallOrConstruct(
 
   if (options.metadata.isNullOrUndefined()) {
     // If the caller is running in a sandbox, inherit.
-    RootedObject callerGlobal(cx, CurrentGlobalOrNull(cx));
+    RootedObject callerGlobal(cx, JS::GetScriptedCallerGlobal(cx));
     if (IsSandbox(callerGlobal)) {
       rv = GetSandboxMetadata(cx, callerGlobal, &options.metadata);
       if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1776,7 +1813,9 @@ nsresult xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg,
   rval.set(UndefinedValue());
 
   bool waiveXray = xpc::WrapperFactory::HasWaiveXrayFlag(sandboxArg);
-  RootedObject sandbox(cx, js::CheckedUnwrap(sandboxArg));
+  // CheckedUnwrapStatic is fine here, since we're checking for "is it a
+  // sandbox".
+  RootedObject sandbox(cx, js::CheckedUnwrapStatic(sandboxArg));
   if (!sandbox || !IsSandbox(sandbox)) {
     return NS_ERROR_INVALID_ARG;
   }

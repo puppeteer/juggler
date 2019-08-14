@@ -4,10 +4,9 @@
 "use strict";
 const { combineReducers } = require("devtools/client/shared/vendor/redux");
 
-const { recordingState: {
-  NOT_YET_KNOWN,
-}} = require("devtools/client/performance-new/utils");
-const { DEFAULT_WINDOW_LENGTH } = require("devtools/shared/performance-new/common");
+const {
+  recordingState: { NOT_YET_KNOWN },
+} = require("devtools/client/performance-new/utils");
 /**
  * The current state of the recording.
  * @param state - A recordingState key.
@@ -85,21 +84,6 @@ function entries(state = 10000000, action) {
 }
 
 /**
- * The window length of profiler's circular buffer. Defaults to 20 sec.
- * @param {number} state
- */
-function duration(state = DEFAULT_WINDOW_LENGTH, action) {
-  switch (action.type) {
-    case "CHANGE_DURATION":
-      return action.duration;
-    case "INITIALIZE_STORE":
-      return action.recordingSettingsFromPreferences.duration;
-    default:
-      return state;
-  }
-}
-
-/**
  * The features that are enabled for the profiler.
  * @param {array} state
  */
@@ -130,6 +114,21 @@ function threads(state = ["GeckoMain", "Compositor"], action) {
 }
 
 /**
+ * The current objdirs list.
+ * @param {array of strings} state
+ */
+function objdirs(state = [], action) {
+  switch (action.type) {
+    case "CHANGE_OBJDIRS":
+      return action.objdirs;
+    case "INITIALIZE_STORE":
+      return action.recordingSettingsFromPreferences.objdirs;
+    default:
+      return state;
+  }
+}
+
+/**
  * These are all the values used to initialize the profiler. They should never change
  * once added to the store.
  *
@@ -153,28 +152,14 @@ function initializedValues(state = null, action) {
   }
 }
 
-/**
- * The current actor version
- * @param {number} state
- */
-function actorVersion(state = 0, action) {
-  switch (action.type) {
-    case "INITIALIZE_STORE":
-      return action.actorVersion;
-    default:
-      return state;
-  }
-}
-
 module.exports = combineReducers({
   recordingState,
   recordingUnexpectedlyStopped,
   isSupportedPlatform,
   interval,
   entries,
-  duration,
   features,
   threads,
+  objdirs,
   initializedValues,
-  actorVersion,
 });

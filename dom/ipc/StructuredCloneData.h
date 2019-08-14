@@ -29,8 +29,8 @@ class PBackgroundParent;
 
 namespace dom {
 
-class nsIContentChild;
-class nsIContentParent;
+class ContentChild;
+class ContentParent;
 
 namespace ipc {
 
@@ -52,7 +52,7 @@ class SharedJSAllocatedData final {
   static already_AddRefed<SharedJSAllocatedData> CreateFromExternalData(
       const char* aData, size_t aDataLength) {
     JSStructuredCloneData buf(JS::StructuredCloneScope::DifferentProcess);
-    buf.AppendBytes(aData, aDataLength);
+    NS_ENSURE_TRUE(buf.AppendBytes(aData, aDataLength), nullptr);
     RefPtr<SharedJSAllocatedData> sharedData =
         new SharedJSAllocatedData(std::move(buf));
     return sharedData.forget();
@@ -61,7 +61,7 @@ class SharedJSAllocatedData final {
   static already_AddRefed<SharedJSAllocatedData> CreateFromExternalData(
       const JSStructuredCloneData& aData) {
     JSStructuredCloneData buf(aData.scope());
-    buf.Append(aData);
+    NS_ENSURE_TRUE(buf.Append(aData), nullptr);
     RefPtr<SharedJSAllocatedData> sharedData =
         new SharedJSAllocatedData(std::move(buf));
     return sharedData.forget();
@@ -181,9 +181,9 @@ class StructuredCloneData : public StructuredCloneHolder {
   // by a previous call to Write() into ClonedMessageData IPC representation.
   // (Blobs are represented in IPC by IPCBlob actors, so we need the parent to
   // be able to create them.)
-  bool BuildClonedMessageDataForParent(nsIContentParent* aParent,
+  bool BuildClonedMessageDataForParent(ContentParent* aParent,
                                        ClonedMessageData& aClonedData);
-  bool BuildClonedMessageDataForChild(nsIContentChild* aChild,
+  bool BuildClonedMessageDataForChild(ContentChild* aChild,
                                       ClonedMessageData& aClonedData);
   bool BuildClonedMessageDataForBackgroundParent(
       mozilla::ipc::PBackgroundParent* aParent, ClonedMessageData& aClonedData);

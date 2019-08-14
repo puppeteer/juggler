@@ -25,7 +25,7 @@ bool DrawTargetOffset::Init(DrawTarget* aDrawTarget, IntPoint aOrigin) {
 }
 
 already_AddRefed<SourceSurface> DrawTargetOffset::Snapshot() {
-  return mDrawTarget->Snapshot();
+  return MakeAndAddRef<SourceSurfaceOffset>(mDrawTarget->Snapshot(), mOrigin);
 }
 
 void DrawTargetOffset::DetachAllSnapshots() {}
@@ -57,6 +57,16 @@ OFFSET_COMMAND4(MaskSurface, const Pattern&, SourceSurface*, Point,
                 const DrawOptions&)
 OFFSET_COMMAND4(FillGlyphs, ScaledFont*, const GlyphBuffer&, const Pattern&,
                 const DrawOptions&)
+OFFSET_COMMAND5(StrokeGlyphs, ScaledFont*, const GlyphBuffer&, const Pattern&,
+                const StrokeOptions&, const DrawOptions&)
+OFFSET_COMMAND3(FillRoundedRect, const RoundedRect&, const Pattern&,
+                const DrawOptions&)
+
+bool DrawTargetOffset::Draw3DTransformedSurface(SourceSurface *aSrc,
+                                                const Matrix4x4& aMatrix) {
+    return mDrawTarget->Draw3DTransformedSurface(aSrc, aMatrix);
+}
+
 OFFSET_COMMAND3(Mask, const Pattern&, const Pattern&, const DrawOptions&)
 
 void DrawTargetOffset::DrawFilter(FilterNode* aNode, const Rect& aSourceRect,
@@ -163,6 +173,12 @@ void DrawTargetOffset::PushLayer(bool aOpaque, Float aOpacity,
   mDrawTarget->PushLayer(aOpaque, aOpacity, aMask, aMaskTransform, bounds,
                          aCopyBackground);
   SetPermitSubpixelAA(mDrawTarget->GetPermitSubpixelAA());
+}
+
+already_AddRefed<SourceSurface> DrawTargetOffset::IntoLuminanceSource(
+    LuminanceType aLuminanceType, float aOpacity) {
+  return MakeAndAddRef<SourceSurfaceOffset>(
+      mDrawTarget->IntoLuminanceSource(aLuminanceType, aOpacity), mOrigin);
 }
 
 void DrawTargetOffset::PushLayerWithBlend(bool aOpaque, Float aOpacity,

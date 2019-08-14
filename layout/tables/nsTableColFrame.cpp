@@ -6,12 +6,13 @@
 #include "nsTableColFrame.h"
 #include "nsTableFrame.h"
 #include "nsContainerFrame.h"
-#include "mozilla/ComputedStyle.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
 #include "nsCSSRendering.h"
 #include "nsIContent.h"
+#include "mozilla/ComputedStyle.h"
+#include "mozilla/PresShell.h"
 
 using namespace mozilla;
 
@@ -22,8 +23,9 @@ using namespace mozilla;
 
 using namespace mozilla;
 
-nsTableColFrame::nsTableColFrame(ComputedStyle* aStyle)
-    : nsSplittableFrame(aStyle, kClassID),
+nsTableColFrame::nsTableColFrame(ComputedStyle* aStyle,
+                                 nsPresContext* aPresContext)
+    : nsSplittableFrame(aStyle, aPresContext, kClassID),
       mMinCoord(0),
       mPrefCoord(0),
       mSpanMinCoord(0),
@@ -61,8 +63,8 @@ void nsTableColFrame::SetColType(nsTableColType aType) {
   AddStateBits(nsFrameState(type << COL_TYPE_OFFSET));
 }
 
-/* virtual */ void nsTableColFrame::DidSetComputedStyle(
-    ComputedStyle* aOldComputedStyle) {
+/* virtual */
+void nsTableColFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   nsSplittableFrame::DidSetComputedStyle(aOldComputedStyle);
 
   if (!aOldComputedStyle)  // avoid this on init
@@ -112,7 +114,12 @@ void nsTableColFrame::Reflow(nsPresContext* aPresContext,
 
 void nsTableColFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                        const nsDisplayListSet& aLists) {
-  nsTableFrame::DisplayGenericTablePart(aBuilder, this, aLists);
+  // Per https://drafts.csswg.org/css-tables-3/#global-style-overrides:
+  // "All css properties of table-column and table-column-group boxes are
+  // ignored, except when explicitly specified by this specification."
+  // CSS outlines and box-shadows fall into this category, so we skip them
+  // on these boxes.
+  MOZ_ASSERT_UNREACHABLE("Cols don't paint themselves");
 }
 
 int32_t nsTableColFrame::GetSpan() { return StyleTable()->mSpan; }
@@ -153,9 +160,9 @@ void nsTableColFrame::Dump(int32_t aIndent) {
 #endif
 /* ----- global methods ----- */
 
-nsTableColFrame* NS_NewTableColFrame(nsIPresShell* aPresShell,
+nsTableColFrame* NS_NewTableColFrame(PresShell* aPresShell,
                                      ComputedStyle* aStyle) {
-  return new (aPresShell) nsTableColFrame(aStyle);
+  return new (aPresShell) nsTableColFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsTableColFrame)

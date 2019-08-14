@@ -16,11 +16,12 @@
 #include "nsReadableUtils.h"
 #include "plstr.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/BindContext.h"
+#include "mozilla/dom/Document.h"
 #include "nsContentUtils.h"
 #include "ChildIterator.h"
 #ifdef MOZ_XUL
-#include "XULDocument.h"
+#  include "XULDocument.h"
 #endif
 #include "nsIXMLContentSink.h"
 #include "nsContentCID.h"
@@ -93,7 +94,6 @@ static const JSClass gPrototypeJSClass = {
 // Constructors/Destructors
 nsXBLBinding::nsXBLBinding(nsXBLPrototypeBinding* aBinding)
     : mMarkedForDeath(false),
-      mUsingContentXBLScope(false),
       mPrototypeBinding(aBinding),
       mBoundElement(nullptr) {
   NS_ASSERTION(mPrototypeBinding, "Must have a prototype binding!");
@@ -155,8 +155,7 @@ nsXBLBinding* nsXBLBinding::GetBindingWithContent() {
 }
 
 void nsXBLBinding::BindAnonymousContent(nsIContent* aAnonParent,
-                                        nsIContent* aElement,
-                                        bool aChromeOnlyContent) {
+                                        nsIContent* aElement) {
   // We need to ensure two things.
   // (1) The anonymous content should be fooled into thinking it's in the bound
   // element's document, assuming that the bound element is in a document
@@ -166,18 +165,16 @@ void nsXBLBinding::BindAnonymousContent(nsIContent* aAnonParent,
   // aElement.
   // (2) The children's parent back pointer should not be to this synthetic root
   // but should instead point to the enclosing parent element.
-  nsIDocument* doc = aElement->GetUncomposedDoc();
+  Document* doc = aElement->GetUncomposedDoc();
+  Element* element = aElement->AsElement();
 
   nsAutoScriptBlocker scriptBlocker;
+  BindContext context(*this, *element);
   for (nsIContent* child = aAnonParent->GetFirstChild(); child;
        child = child->GetNextSibling()) {
     child->UnbindFromTree();
-    if (aChromeOnlyContent) {
-      child->SetFlags(NODE_CHROME_ONLY_ACCESS |
-                      NODE_IS_ROOT_OF_CHROME_ONLY_ACCESS);
-    }
     child->SetFlags(NODE_IS_ANONYMOUS_ROOT);
-    nsresult rv = child->BindToTree(doc, aElement, mBoundElement);
+    nsresult rv = child->BindToTree(context, *element);
     if (NS_FAILED(rv)) {
       // Oh, well... Just give up.
       // XXXbz This really shouldn't be a void method!
@@ -192,13 +189,14 @@ void nsXBLBinding::BindAnonymousContent(nsIContent* aAnonParent,
     // FIXME(emilio): Is this needed anymore? Do we really use <linkset> or
     // <link> from XBL stuff?
     if (doc && doc->IsXULDocument()) {
-      doc->AsXULDocument()->AddSubtreeToDocument(child);
+      MOZ_ASSERT(!child->IsXULElement(nsGkAtoms::linkset),
+                 "Linkset not allowed in XBL.");
     }
 #endif
   }
 }
 
-void nsXBLBinding::UnbindAnonymousContent(nsIDocument* aDocument,
+void nsXBLBinding::UnbindAnonymousContent(Document* aDocument,
                                           nsIContent* aAnonParent,
                                           bool aNullParent) {
   nsAutoScriptBlocker scriptBlocker;
@@ -206,36 +204,13 @@ void nsXBLBinding::UnbindAnonymousContent(nsIDocument* aDocument,
   nsCOMPtr<nsIContent> anonParent = aAnonParent;
   for (nsIContent* child = aAnonParent->GetFirstChild(); child;
        child = child->GetNextSibling()) {
-    child->UnbindFromTree(true, aNullParent);
+    child->UnbindFromTree(aNullParent);
   }
 }
 
 void nsXBLBinding::SetBoundElement(Element* aElement) {
   mBoundElement = aElement;
   if (mNextBinding) mNextBinding->SetBoundElement(aElement);
-
-  if (!mBoundElement) {
-    return;
-  }
-
-  // Compute whether we're using an XBL scope.
-  //
-  // We disable XBL scopes for remote XUL, where we care about compat more
-  // than security. So we need to know whether we're using an XBL scope so that
-  // we can decide what to do about untrusted events when "allowuntrusted"
-  // is not given in the handler declaration.
-  nsCOMPtr<nsIGlobalObject> go = mBoundElement->OwnerDoc()->GetScopeObject();
-  NS_ENSURE_TRUE_VOID(go && go->GetGlobalJSObject());
-  mUsingContentXBLScope = xpc::UseContentXBLScope(
-      JS::GetObjectRealmOrNull(go->GetGlobalJSObject()));
-}
-
-bool nsXBLBinding::HasStyleSheets() const {
-  // Find out if we need to re-resolve style.  We'll need to do this
-  // if we have additional stylesheets in our binding document.
-  if (mPrototypeBinding->HasStyleSheets()) return true;
-
-  return mNextBinding ? mNextBinding->HasStyleSheets() : false;
 }
 
 void nsXBLBinding::GenerateAnonymousContent() {
@@ -259,7 +234,7 @@ void nsXBLBinding::GenerateAnonymousContent() {
   // Plan to build the content by default.
   bool hasContent = (contentCount > 0);
   if (hasContent) {
-    nsIDocument* doc = mBoundElement->OwnerDoc();
+    Document* doc = mBoundElement->OwnerDoc();
 
     nsCOMPtr<nsINode> clonedNode = nsNodeUtils::Clone(
         content, true, doc->NodeInfoManager(), nullptr, IgnoreErrors());
@@ -284,8 +259,7 @@ void nsXBLBinding::GenerateAnonymousContent() {
 
     // Do this after looking for <children> as this messes up the parent
     // pointer which would make the GetNextNode call above fail
-    BindAnonymousContent(mContent, mBoundElement,
-                         mPrototypeBinding->ChromeOnlyContent());
+    BindAnonymousContent(mContent, mBoundElement);
 
     // Insert explicit children into insertion points
     if (mDefaultInsertionPoint && mInsertionPoints.IsEmpty()) {
@@ -463,8 +437,7 @@ void nsXBLBinding::InstallEventHandlers() {
 
           bool hasAllowUntrustedAttr = curr->HasAllowUntrustedAttr();
           if ((hasAllowUntrustedAttr && curr->AllowUntrustedEvents()) ||
-              (!hasAllowUntrustedAttr && !isChromeDoc &&
-               !mUsingContentXBLScope)) {
+              (!hasAllowUntrustedAttr && !isChromeDoc)) {
             flags.mAllowUntrustedEvents = true;
           }
 
@@ -479,7 +452,6 @@ void nsXBLBinding::InstallEventHandlers() {
       for (i = 0; i < keyHandlers->Count(); ++i) {
         nsXBLKeyEventHandler* handler = keyHandlers->ObjectAt(i);
         handler->SetIsBoundToChrome(isChromeDoc);
-        handler->SetUsingContentXBLScope(mUsingContentXBLScope);
 
         nsAutoString type;
         handler->GetEventName(type);
@@ -524,13 +496,6 @@ nsresult nsXBLBinding::InstallImplementation() {
   if (AllowScripts()) return mPrototypeBinding->InstallImplementation(this);
 
   return NS_OK;
-}
-
-nsAtom* nsXBLBinding::GetBaseTag(int32_t* aNameSpaceID) {
-  nsAtom* tag = mPrototypeBinding->GetBaseTag(aNameSpaceID);
-  if (!tag && mNextBinding) return mNextBinding->GetBaseTag(aNameSpaceID);
-
-  return tag;
 }
 
 void nsXBLBinding::AttributeChanged(nsAtom* aAttribute, int32_t aNameSpaceID,
@@ -626,8 +591,8 @@ void nsXBLBinding::UnhookEventHandlers() {
   }
 }
 
-void nsXBLBinding::ChangeDocument(nsIDocument* aOldDocument,
-                                  nsIDocument* aNewDocument) {
+void nsXBLBinding::ChangeDocument(Document* aOldDocument,
+                                  Document* aNewDocument) {
   if (aOldDocument == aNewDocument) return;
 
   // Now the binding dies.  Unhook our prototypes.
@@ -719,24 +684,6 @@ void nsXBLBinding::ChangeDocument(nsIDocument* aOldDocument,
 
     ClearInsertionPoints();
   }
-}
-
-bool nsXBLBinding::InheritsStyle() const {
-  // XXX Will have to change if we ever allow multiple bindings to contribute
-  // anonymous content. Most derived binding with anonymous content determines
-  // style inheritance for now.
-
-  // XXX What about bindings with <content> but no kids, e.g., my treecell-text
-  // binding?
-  if (mContent) return mPrototypeBinding->InheritsStyle();
-
-  if (mNextBinding) return mNextBinding->InheritsStyle();
-
-  return true;
-}
-
-const RawServoAuthorStyles* nsXBLBinding::GetServoStyles() const {
-  return mPrototypeBinding->GetServoStyles();
 }
 
 // Internal helper methods /////////////////////////////////////////////////////

@@ -13,7 +13,8 @@
 #include "mozilla/ipc/MessageChannel.h"
 
 #ifdef MOZ_WIDGET_GTK
-#include <gtk/gtk.h>
+#  include <gtk/gtk.h>
+#  include <gdk/gdkx.h>
 #endif
 
 #include "nsIFile.h"
@@ -25,8 +26,8 @@
 #include "nsXULAppAPI.h"
 
 #ifdef MOZ_X11
-#include "nsX11ErrorHandler.h"
-#include "mozilla/X11Util.h"
+#  include "nsX11ErrorHandler.h"
+#  include "mozilla/X11Util.h"
 #endif
 
 #include "mozilla/ipc/CrashReporterClient.h"
@@ -42,21 +43,21 @@
 #include "FunctionBrokerChild.h"
 
 #ifdef XP_WIN
-#include "mozilla/widget/AudioSession.h"
-#include <knownfolders.h>
+#  include "mozilla/widget/AudioSession.h"
+#  include <knownfolders.h>
 #endif
 
 #ifdef MOZ_WIDGET_COCOA
-#include "PluginInterposeOSX.h"
-#include "PluginUtilsOSX.h"
+#  include "PluginInterposeOSX.h"
+#  include "PluginUtilsOSX.h"
 #endif
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ChildProfilerController.h"
+#  include "ChildProfilerController.h"
 #endif
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
-#include "mozilla/Sandbox.h"
+#  include "mozilla/Sandbox.h"
 #endif
 
 using namespace mozilla;
@@ -66,9 +67,9 @@ using namespace mozilla::widget;
 
 #if defined(XP_WIN)
 const wchar_t* kFlashFullscreenClass = L"ShockwaveFlashFullScreen";
-#if defined(MOZ_SANDBOX)
+#  if defined(MOZ_SANDBOX)
 std::wstring sRoamingPath;
-#endif
+#  endif
 #endif
 
 namespace {
@@ -207,8 +208,8 @@ void PluginModuleChild::EnableFlashSandbox(int aLevel,
 #endif
 
 #if defined(OS_WIN) && defined(MOZ_SANDBOX)
-/* static */ void PluginModuleChild::SetFlashRoamingPath(
-    const std::wstring& aRoamingPath) {
+/* static */
+void PluginModuleChild::SetFlashRoamingPath(const std::wstring& aRoamingPath) {
   MOZ_ASSERT(sRoamingPath.empty());
   sRoamingPath = aRoamingPath;
 }
@@ -306,16 +307,15 @@ bool PluginModuleChild::InitForChrome(const std::string& aPluginFilename,
   NS_ENSURE_TRUE(mInitializeFunc, false);
 #else
 
-#error Please copy the initialization code from nsNPAPIPlugin.cpp
+#  error Please copy the initialization code from nsNPAPIPlugin.cpp
 
 #endif
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   if (mFlashSandboxLevel > 0) {
     MacSandboxInfo flashSandboxInfo;
-    flashSandboxInfo.type = MacSandboxType_Plugin;
-    flashSandboxInfo.pluginInfo.type = MacSandboxPluginType_Flash;
-    flashSandboxInfo.pluginInfo.pluginBinaryPath = aPluginFilename;
+    flashSandboxInfo.type = MacSandboxType_Flash;
+    flashSandboxInfo.pluginBinaryPath = aPluginFilename;
     flashSandboxInfo.level = mFlashSandboxLevel;
     flashSandboxInfo.shouldLog = mEnableFlashSandboxLogging;
 
@@ -432,15 +432,15 @@ static gboolean gtk_plug_scroll_event(GtkWidget* widget,
   xevent.xbutton.y_root = gdk_event->y_root;
   xevent.xbutton.state = gdk_event->state;
   xevent.xbutton.button = button;
-  xevent.xbutton.same_screen = True;
+  xevent.xbutton.same_screen = X11True;
 
   gdk_error_trap_push();
 
-  XSendEvent(dpy, xevent.xbutton.window, True, ButtonPressMask, &xevent);
+  XSendEvent(dpy, xevent.xbutton.window, X11True, ButtonPressMask, &xevent);
 
   xevent.xbutton.type = ButtonRelease;
   xevent.xbutton.state |= button_mask;
-  XSendEvent(dpy, xevent.xbutton.window, True, ButtonReleaseMask, &xevent);
+  XSendEvent(dpy, xevent.xbutton.window, X11True, ButtonReleaseMask, &xevent);
 
   gdk_display_sync(gdk_screen_get_display(screen));
   gdk_error_trap_pop();
@@ -520,9 +520,9 @@ void PluginModuleChild::EnteredCxxStack() {
       kNestedLoopDetectorPriority, kNestedLoopDetectorIntervalMs,
       PluginModuleChild::DetectNestedEventLoop, this, nullptr);
 
-#ifdef DEBUG
+#  ifdef DEBUG
   mTopLoopDepth = g_main_depth();
-#endif
+#  endif
 }
 
 void PluginModuleChild::ExitedCxxStack() {
@@ -979,8 +979,10 @@ NPError _geturlnotify(NPP aNPP, const char* aRelativeURL, const char* aTarget,
   auto* sn = new StreamNotifyChild(url);
 
   NPError err;
-  InstCast(aNPP)->CallPStreamNotifyConstructor(sn, url, NullableString(aTarget),
-                                               false, nsCString(), false, &err);
+  if (!InstCast(aNPP)->CallPStreamNotifyConstructor(
+          sn, url, NullableString(aTarget), false, nsCString(), false, &err)) {
+    return NPERR_GENERIC_ERROR;
+  }
 
   if (NPERR_NO_ERROR == err) {
     // If NPN_PostURLNotify fails, the parent will immediately send us
@@ -1082,9 +1084,11 @@ NPError _posturlnotify(NPP aNPP, const char* aRelativeURL, const char* aTarget,
   auto* sn = new StreamNotifyChild(url);
 
   NPError err;
-  InstCast(aNPP)->CallPStreamNotifyConstructor(
-      sn, url, NullableString(aTarget), true, nsCString(aBuffer, aLength),
-      aIsFile, &err);
+  if (!InstCast(aNPP)->CallPStreamNotifyConstructor(
+          sn, url, NullableString(aTarget), true, nsCString(aBuffer, aLength),
+          aIsFile, &err)) {
+    return NPERR_GENERIC_ERROR;
+  }
 
   if (NPERR_NO_ERROR == err) {
     // If NPN_PostURLNotify fails, the parent will immediately send us
@@ -1531,7 +1535,7 @@ mozilla::ipc::IPCResult PluginModuleChild::AnswerNP_GetEntryPoints(
   *_retval = mGetEntryPointsFunc(&mFunctions);
   return IPC_OK();
 #else
-#error Please implement me for your platform
+#  error Please implement me for your platform
 #endif
 }
 
@@ -1553,6 +1557,12 @@ NPError PluginModuleChild::DoNP_Initialize(const PluginSettings& aSettings) {
 #endif
 
 #ifdef MOZ_X11
+#  ifdef MOZ_WIDGET_GTK
+  if (!GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+    // We don't support NPAPI plugins on Wayland.
+    return NPERR_GENERIC_ERROR;
+  }
+#  endif
   // Send the parent our X socket to act as a proxy reference for our X
   // resources.
   int xSocketFd = ConnectionNumber(DefaultXDisplay());
@@ -1565,7 +1575,7 @@ NPError PluginModuleChild::DoNP_Initialize(const PluginSettings& aSettings) {
 #elif defined(OS_WIN) || defined(OS_MACOSX)
   result = mInitializeFunc(&sBrowserFuncs);
 #else
-#error Please implement me for your platform
+#  error Please implement me for your platform
 #endif
 
   return result;
@@ -1672,6 +1682,10 @@ NPObject* PluginModuleChild::NPN_CreateObject(NPP aNPP, NPClass* aClass) {
 
 NPObject* PluginModuleChild::NPN_RetainObject(NPObject* aNPObj) {
   AssertPluginThread();
+
+  if (NS_WARN_IF(!aNPObj)) {
+    return nullptr;
+  }
 
 #ifdef NS_BUILD_REFCNT_LOGGING
   int32_t refCnt =

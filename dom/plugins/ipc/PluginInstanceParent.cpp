@@ -27,7 +27,7 @@
 #include "nsPluginInstanceOwner.h"
 #include "nsFocusManager.h"
 #ifdef MOZ_X11
-#include "gfxXlibSurface.h"
+#  include "gfxXlibSurface.h"
 #endif
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
@@ -35,36 +35,35 @@
 #include "ImageContainer.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
-#include "gfxPrefs.h"
 #include "LayersLogging.h"
 #include "mozilla/layers/TextureWrapperImage.h"
 #include "mozilla/layers/TextureClientRecycleAllocator.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #if defined(XP_WIN)
-#include "mozilla/layers/D3D11ShareHandleImage.h"
-#include "mozilla/gfx/DeviceManagerDx.h"
-#include "mozilla/layers/TextureD3D11.h"
+#  include "mozilla/layers/D3D11ShareHandleImage.h"
+#  include "mozilla/gfx/DeviceManagerDx.h"
+#  include "mozilla/layers/TextureD3D11.h"
 #endif
 
 #ifdef XP_MACOSX
-#include "MacIOSurfaceImage.h"
+#  include "MacIOSurfaceImage.h"
 #endif
 
 #if defined(OS_WIN)
-#include <windowsx.h>
-#include "gfxWindowsPlatform.h"
-#include "mozilla/plugins/PluginSurfaceParent.h"
-#include "nsClassHashtable.h"
-#include "nsHashKeys.h"
-#include "nsIWidget.h"
-#include "nsPluginNativeWindow.h"
-#include "PluginQuirks.h"
+#  include <windowsx.h>
+#  include "gfxWindowsPlatform.h"
+#  include "mozilla/plugins/PluginSurfaceParent.h"
+#  include "nsClassHashtable.h"
+#  include "nsHashKeys.h"
+#  include "nsIWidget.h"
+#  include "nsPluginNativeWindow.h"
+#  include "PluginQuirks.h"
 extern const wchar_t* kFlashFullscreenClass;
 #elif defined(MOZ_WIDGET_GTK)
-#include "mozilla/dom/ContentChild.h"
-#include <gdk/gdk.h>
+#  include "mozilla/dom/ContentChild.h"
+#  include <gdk/gdk.h>
 #elif defined(XP_MACOSX)
-#include <ApplicationServices/ApplicationServices.h>
+#  include <ApplicationServices/ApplicationServices.h>
 #endif  // defined(XP_MACOSX)
 
 using namespace mozilla::plugins;
@@ -234,7 +233,7 @@ PluginInstanceParent::AnswerNPN_GetValue_NPNVnetscapeWindow(
   // TODO: Need Android impl
   int id;
 #else
-#warning Implement me
+#  warning Implement me
 #endif
 
   *result = mNPNIface->getvalue(mNPP, NPNVnetscapeWindow, &id);
@@ -314,14 +313,14 @@ PluginInstanceParent::AnswerNPN_GetValue_NPNVdocumentOrigin(nsCString* value,
 }
 
 static inline bool AllowDirectBitmapSurfaceDrawing() {
-  if (!gfxPrefs::PluginAsyncDrawingEnabled()) {
+  if (!StaticPrefs::dom_ipc_plugins_asyncdrawing_enabled()) {
     return false;
   }
   return gfxPlatform::GetPlatform()->SupportsPluginDirectBitmapDrawing();
 }
 
 static inline bool AllowDirectDXGISurfaceDrawing() {
-  if (!gfxPrefs::PluginAsyncDrawingEnabled()) {
+  if (!StaticPrefs::dom_ipc_plugins_asyncdrawing_enabled()) {
     return false;
   }
 #if defined(XP_WIN)
@@ -849,8 +848,8 @@ mozilla::ipc::IPCResult PluginInstanceParent::RecvShow(
   }
 
   if (mFrontSurface && gfxSharedImageSurface::IsSharedImage(mFrontSurface))
-    *prevSurface =
-        static_cast<gfxSharedImageSurface*>(mFrontSurface.get())->GetShmem();
+    *prevSurface = std::move(
+        static_cast<gfxSharedImageSurface*>(mFrontSurface.get())->GetShmem());
   else
     *prevSurface = null_t();
 
@@ -864,8 +863,7 @@ mozilla::ipc::IPCResult PluginInstanceParent::RecvShow(
 
     bool isPlugin = true;
     RefPtr<gfx::SourceSurface> sourceSurface =
-        gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface,
-                                                               isPlugin);
+        gfxPlatform::GetSourceSurfaceForSurface(nullptr, surface, isPlugin);
     RefPtr<SourceSurfaceImage> image =
         new SourceSurfaceImage(surface->GetSize(), sourceSurface);
 
@@ -1052,9 +1050,8 @@ nsresult PluginInstanceParent::BeginUpdateBackground(const nsIntRect& aRect,
              "Update outside of background area");
 #endif
 
-  RefPtr<gfx::DrawTarget> dt =
-      gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(
-          mBackground, gfx::IntSize(sz.width, sz.height));
+  RefPtr<gfx::DrawTarget> dt = gfxPlatform::CreateDrawTargetForSurface(
+      mBackground, gfx::IntSize(sz.width, sz.height));
   dt.forget(aDrawTarget);
 
   return NS_OK;
@@ -1075,7 +1072,7 @@ nsresult PluginInstanceParent::EndUpdateBackground(const nsIntRect& aRect) {
   // view of its background, but it does mean that the plugin is
   // drawing onto pixels no older than those in the latest
   // EndUpdateBackground().
-  XSync(DefaultXDisplay(), False);
+  XSync(DefaultXDisplay(), X11False);
 #endif
 
   Unused << SendUpdateBackground(BackgroundDescriptor(), aRect);
@@ -1161,7 +1158,7 @@ PluginInstanceParent::BackgroundDescriptor() {
              "Expected shared image surface");
   gfxSharedImageSurface* shmem =
       static_cast<gfxSharedImageSurface*>(mBackground.get());
-  return shmem->GetShmem();
+  return mozilla::plugins::SurfaceDescriptor(std::move(shmem->GetShmem()));
 #endif
 
   // If this is ever used, which it shouldn't be, it will trigger a
@@ -1478,7 +1475,7 @@ int16_t PluginInstanceParent::NPP_HandleEvent(void* event) {
       // Release any active pointer grab so that the plugin X client can
       // grab the pointer if it wishes.
       Display* dpy = DefaultXDisplay();
-#ifdef MOZ_WIDGET_GTK
+#  ifdef MOZ_WIDGET_GTK
       // GDK attempts to (asynchronously) track whether there is an active
       // grab so ungrab through GDK.
       //
@@ -1490,11 +1487,11 @@ int16_t PluginInstanceParent::NPP_HandleEvent(void* event) {
       } else {
         gdk_pointer_ungrab(npevent->xbutton.time);
       }
-#else
+#  else
       XUngrabPointer(dpy, npevent->xbutton.time);
-#endif
+#  endif
       // Wait for the ungrab to complete.
-      XSync(dpy, False);
+      XSync(dpy, X11False);
       break;
   }
 #endif
@@ -1552,8 +1549,8 @@ int16_t PluginInstanceParent::NPP_HandleEvent(void* event) {
         return false;
       }
 
-      if (!CallNPP_HandleEvent_Shmem(npremoteevent, mShSurface, &handled,
-                                     &mShSurface))
+      if (!CallNPP_HandleEvent_Shmem(npremoteevent, std::move(mShSurface),
+                                     &handled, &mShSurface))
         return false;  // no good way to handle errors here...
 
       if (!mShSurface.IsReadable()) {

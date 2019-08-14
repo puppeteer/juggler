@@ -12,15 +12,15 @@
 #include "nsTArray.h"
 #include "nsCOMPtr.h"
 
-class nsIDocument;
 class nsINode;
 class nsRange;
 
 namespace mozilla {
 
 namespace dom {
+class Document;
 class Selection;
-}
+}  // namespace dom
 
 class SelectionChangeEventDispatcher final {
  public:
@@ -31,7 +31,7 @@ class SelectionChangeEventDispatcher final {
   NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(SelectionChangeEventDispatcher)
 
   MOZ_CAN_RUN_SCRIPT
-  void OnSelectionChange(nsIDocument* aDocument, dom::Selection* aSelection,
+  void OnSelectionChange(dom::Document* aDocument, dom::Selection* aSelection,
                          int16_t aReason);
 
   // This field is used to keep track of the ranges which were present in the

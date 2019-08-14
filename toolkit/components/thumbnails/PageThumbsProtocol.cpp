@@ -49,21 +49,11 @@ PageThumbsProtocol::GetProtocolFlags(uint32_t* aProtocolFlags) {
   return NS_OK;
 }
 
-// PageThumbsProtocol::NewURI
-
-NS_IMETHODIMP
-PageThumbsProtocol::NewURI(const nsACString& aSpec, const char* aOriginCharset,
-                           nsIURI* aBaseURI, nsIURI** _retval) {
-  return NS_MutateURI(NS_SIMPLEURIMUTATOR_CONTRACTID)
-      .SetSpec(aSpec)
-      .Finalize(_retval);
-}
-
 // PageThumbsProtocol::NewChannel
 
 NS_IMETHODIMP
-PageThumbsProtocol::NewChannel2(nsIURI* aURI, nsILoadInfo* aLoadInfo,
-                                nsIChannel** _retval) {
+PageThumbsProtocol::NewChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo,
+                               nsIChannel** _retval) {
   // Get the file path for the URL
   nsCOMPtr<nsIFile> filePath;
   nsresult rv = GetFilePathForURL(aURI, getter_AddRefs(filePath));
@@ -84,11 +74,6 @@ PageThumbsProtocol::NewChannel2(nsIURI* aURI, nsILoadInfo* aLoadInfo,
   channel->SetOriginalURI(aURI);
   channel.forget(_retval);
   return NS_OK;
-}
-
-NS_IMETHODIMP
-PageThumbsProtocol::NewChannel(nsIURI* aURI, nsIChannel** _retval) {
-  return NewChannel2(aURI, nullptr, _retval);
 }
 
 // PageThumbsProtocol::AllowPort

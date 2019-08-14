@@ -10,39 +10,37 @@
 
 ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", this);
 
-const { PromisesFront } = require("devtools/shared/fronts/promises");
-
-var EventEmitter = require("devtools/shared/event-emitter");
-
 add_task(async function() {
-  const client = await startTestDebuggerServer("promises-actor-test");
-  const parentProcessActors = await getParentProcessActors(client);
+  const { promisesFront } = await createMainProcessPromisesFront();
 
   ok(Promise.toString().includes("native code"), "Expect native DOM Promise");
 
-  // We have to attach the chrome target actor before playing with the PromiseActor
-  await testPromisesSettled(client, parentProcessActors,
+  await testPromisesSettled(
+    promisesFront,
     v => new Promise(resolve => resolve(v)),
-    v => new Promise((resolve, reject) => reject(v)));
-
-  const response = await listTabs(client);
-  const targetTab = findTab(response.tabs, "promises-actor-test");
-  ok(targetTab, "Found our target tab.");
-
-  await testPromisesSettled(client, targetTab, v => {
-    const debuggee = DebuggerServer.getTestGlobal("promises-actor-test");
-    return debuggee.Promise.resolve(v);
-  }, v => {
-    const debuggee = DebuggerServer.getTestGlobal("promises-actor-test");
-    return debuggee.Promise.reject(v);
-  });
-
-  await close(client);
+    v => new Promise((resolve, reject) => reject(v))
+  );
 });
 
-async function testPromisesSettled(client, form, makeResolvePromise,
-    makeRejectPromise) {
-  const front = PromisesFront(client, form);
+add_task(async function() {
+  const { debuggee, promisesFront } = await createTabPromisesFront();
+
+  await testPromisesSettled(
+    promisesFront,
+    v => {
+      return debuggee.Promise.resolve(v);
+    },
+    v => {
+      return debuggee.Promise.reject(v);
+    }
+  );
+});
+
+async function testPromisesSettled(
+  front,
+  makeResolvePromise,
+  makeRejectPromise
+) {
   const resolution = "MyLittleSecret" + Math.random();
 
   await front.attach();
@@ -67,20 +65,30 @@ async function testPromisesSettled(client, form, makeResolvePromise,
 
 function oncePromiseSettled(front, resolution, resolveValue, rejectValue) {
   return new Promise(resolve => {
-    EventEmitter.on(front, "promises-settled", promises => {
+    front.on("promises-settled", promises => {
       for (const p of promises) {
         equal(p.type, "object", "Expect type to be Object");
         equal(p.class, "Promise", "Expect class to be Promise");
-        equal(typeof p.promiseState.creationTimestamp, "number",
-          "Expect creation timestamp to be a number");
-        equal(typeof p.promiseState.timeToSettle, "number",
-          "Expect time to settle to be a number");
+        equal(
+          typeof p.promiseState.creationTimestamp,
+          "number",
+          "Expect creation timestamp to be a number"
+        );
+        equal(
+          typeof p.promiseState.timeToSettle,
+          "number",
+          "Expect time to settle to be a number"
+        );
 
-        if (p.promiseState.state === "fulfilled" &&
-            p.promiseState.value === resolution) {
+        if (
+          p.promiseState.state === "fulfilled" &&
+          p.promiseState.value === resolution
+        ) {
           resolve(resolveValue);
-        } else if (p.promiseState.state === "rejected" &&
-                   p.promiseState.reason === resolution) {
+        } else if (
+          p.promiseState.state === "rejected" &&
+          p.promiseState.reason === resolution
+        ) {
           resolve(rejectValue);
         } else {
           dump("Found non-target promise\n");

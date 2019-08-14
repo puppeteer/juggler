@@ -1,4 +1,4 @@
-// |reftest| skip-if(!Intl.hasOwnProperty('ListFormat')) -- Intl.ListFormat is not enabled unconditionally
+// |reftest| skip -- Intl.ListFormat is not supported
 // Copyright 2018 Igalia, S.L. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -59,14 +59,14 @@ for (const f of transforms) {
   ]);
   verifyFormatParts(lf.formatToParts(f(["foo", "bar"])), [
     { "type": "element", "value": "foo" },
-    { "type": "literal", "value": " and " },
+    { "type": "literal", "value": " & " },
     { "type": "element", "value": "bar" },
   ]);
   verifyFormatParts(lf.formatToParts(f(["foo", "bar", "baz"])), [
     { "type": "element", "value": "foo" },
     { "type": "literal", "value": ", " },
     { "type": "element", "value": "bar" },
-    { "type": "literal", "value": ", and " },
+    { "type": "literal", "value": ", & " },
     { "type": "element", "value": "baz" },
   ]);
   verifyFormatParts(lf.formatToParts(f(["foo", "bar", "baz", "quux"])), [
@@ -75,7 +75,7 @@ for (const f of transforms) {
     { "type": "element", "value": "bar" },
     { "type": "literal", "value": ", " },
     { "type": "element", "value": "baz" },
-    { "type": "literal", "value": ", and " },
+    { "type": "literal", "value": ", & " },
     { "type": "element", "value": "quux" },
   ]);
 }
@@ -84,7 +84,7 @@ verifyFormatParts(lf.formatToParts("foo"), [
   { "type": "element", "value": "f" },
   { "type": "literal", "value": ", " },
   { "type": "element", "value": "o" },
-  { "type": "literal", "value": ", and " },
+  { "type": "literal", "value": ", & " },
   { "type": "element", "value": "o" },
 ]);
 

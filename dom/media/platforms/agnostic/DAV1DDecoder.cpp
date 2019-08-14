@@ -6,6 +6,8 @@
 
 #include "DAV1DDecoder.h"
 
+#include "nsThreadUtils.h"
+
 #undef LOG
 #define LOG(arg, ...)                                                  \
   DDMOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, "::%s: " arg, __func__, \
@@ -21,14 +23,19 @@ DAV1DDecoder::DAV1DDecoder(const CreateDecoderParams& aParams)
 RefPtr<MediaDataDecoder::InitPromise> DAV1DDecoder::Init() {
   Dav1dSettings settings;
   dav1d_default_settings(&settings);
-  int decoder_threads = 2;
+  size_t decoder_threads = 2;
   if (mInfo.mDisplay.width >= 2048) {
     decoder_threads = 8;
   } else if (mInfo.mDisplay.width >= 1024) {
     decoder_threads = 4;
   }
   settings.n_frame_threads =
-      std::min(decoder_threads, PR_GetNumberOfProcessors());
+      static_cast<int>(std::min(decoder_threads, GetNumberOfProcessors()));
+  // There is not much improvement with more than 2 tile threads at least with
+  // the content being currently served. The ideal number of tile thread would
+  // much the tile count of the content. Maybe dav1d can help to do that in the
+  // future.
+  settings.n_tile_threads = 2;
 
   int res = dav1d_open(&mContext, &settings);
   if (res < 0) {
@@ -55,19 +62,24 @@ void ReleaseDataBuffer_s(const uint8_t* buf, void* user_data) {
 }
 
 void DAV1DDecoder::ReleaseDataBuffer(const uint8_t* buf) {
-  // The release callback may be called on a
-  // different thread defined by third party
-  // dav1d execution. Post a task into TaskQueue
-  // to ensure mDecodingBuffers is only ever
-  // accessed on the TaskQueue
+  // The release callback may be called on a different thread defined by the
+  // third party dav1d execution. In that case post a task into TaskQueue to
+  // ensure that mDecodingBuffers is only ever accessed on the TaskQueue.
   RefPtr<DAV1DDecoder> self = this;
-  nsresult rv = mTaskQueue->Dispatch(
-      NS_NewRunnableFunction("DAV1DDecoder::ReleaseDataBuffer", [self, buf]() {
-        DebugOnly<bool> found = self->mDecodingBuffers.Remove(buf);
-        MOZ_ASSERT(found);
-      }));
-  MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
-  Unused << rv;
+  auto releaseBuffer = [self, buf] {
+    MOZ_ASSERT(self->mTaskQueue->IsCurrentThreadIn());
+    DebugOnly<bool> found = self->mDecodingBuffers.Remove(buf);
+    MOZ_ASSERT(found);
+  };
+
+  if (mTaskQueue->IsCurrentThreadIn()) {
+    releaseBuffer();
+  } else {
+    nsresult rv = mTaskQueue->Dispatch(NS_NewRunnableFunction(
+        "DAV1DDecoder::ReleaseDataBuffer", std::move(releaseBuffer)));
+    MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+    Unused << rv;
+  }
 }
 
 RefPtr<MediaDataDecoder::DecodePromise> DAV1DDecoder::InvokeDecode(
@@ -173,10 +185,22 @@ already_AddRefed<VideoData> DAV1DDecoder::ConstructImage(
 
   // On every other case use the default (BT601).
   if (aPicture.seq_hdr->color_description_present) {
-    if (aPicture.seq_hdr->pri == DAV1D_COLOR_PRI_BT709) {
-      b.mYUVColorSpace = YUVColorSpace::BT709;
+    switch (aPicture.seq_hdr->mtrx) {
+      case DAV1D_MC_BT2020_NCL:
+      case DAV1D_MC_BT2020_CL:
+        b.mYUVColorSpace = YUVColorSpace::BT2020;
+        break;
+      case DAV1D_MC_BT601:
+        b.mYUVColorSpace = YUVColorSpace::BT601;
+        break;
+      case DAV1D_MC_BT709:
+      default:
+        // Set 709 as default, as it's the most sane default.
+        b.mYUVColorSpace = YUVColorSpace::BT709;
+        break;
     }
-  } else if (aPicture.p.h >= 720) {
+  } else {
+    // BT709 is the only default that makes sense in a modern video context.
     b.mYUVColorSpace = YUVColorSpace::BT709;
   }
 

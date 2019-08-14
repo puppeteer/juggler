@@ -17,7 +17,7 @@ run `npm run tddmc`.
 
 ## Debugging tests
 
-To debug tests, you should run them in continous mode with `npm run tddmc`. In the
+To debug tests, you should run them in continuous mode with `npm run tddmc`. In the
 Firefox window that is opened (it should say "Karma... - connected"), click the
 "debug" button and open your console to see test output, set breakpoints, etc.
 
@@ -146,8 +146,3 @@ const {mount} = require("enzyme");
 ...
 const wrapper = mount(<Foo />);
 ```
-
-### Rendering localized components
-
-If you need to render a component that contains localized components, use the
-`shallowWithIntl` and `mountWithIntl` functions in `system-addon/test/unit/utils`.

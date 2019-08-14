@@ -1,9 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
-ChromeUtils.import("resource://services-sync/service.js");
-ChromeUtils.import("resource://services-sync/util.js");
+const { PromiseUtils } = ChromeUtils.import(
+  "resource://gre/modules/PromiseUtils.jsm"
+);
+const { Service } = ChromeUtils.import("resource://services-sync/service.js");
 
 add_task(async function test_findCluster() {
   syncTestLogging();
@@ -13,18 +14,18 @@ add_task(async function test_findCluster() {
     Service.identity.whenReadyToAuthenticate = whenReadyToAuthenticate;
     whenReadyToAuthenticate.resolve(true);
 
-    Service.identity._ensureValidToken = () => Promise.reject(new Error("Connection refused"));
+    Service.identity._ensureValidToken = () =>
+      Promise.reject(new Error("Connection refused"));
 
     _("_findCluster() throws on network errors (e.g. connection refused).");
-    await Assert.rejects(Service.identity._findCluster(),
-      /Connection refused/);
+    await Assert.rejects(Service.identity._findCluster(), /Connection refused/);
 
-    Service.identity._ensureValidToken = () => Promise.resolve({ endpoint: "http://weave.user.node" });
+    Service.identity._ensureValidToken = () =>
+      Promise.resolve({ endpoint: "http://weave.user.node" });
 
     _("_findCluster() returns the user's cluster node");
     let cluster = await Service.identity._findCluster();
     Assert.equal(cluster, "http://weave.user.node/");
-
   } finally {
     Svc.Prefs.resetBranch("");
   }
@@ -40,7 +41,7 @@ add_task(async function test_setCluster() {
     Service.identity._findCluster = () => "http://weave.user.node/";
 
     _("Set the cluster URL.");
-    Assert.ok((await Service.identity.setCluster()));
+    Assert.ok(await Service.identity.setCluster());
     Assert.equal(Service.clusterURL, "http://weave.user.node/");
 
     _("Setting it again won't make a difference if it's the same one.");

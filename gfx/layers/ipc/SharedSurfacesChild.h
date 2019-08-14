@@ -15,6 +15,8 @@
 #include "mozilla/gfx/UserData.h"              // for UserDataKey
 #include "mozilla/webrender/WebRenderTypes.h"  // for wr::ImageKey
 #include "nsTArray.h"                          // for AutoTArray
+#include "nsThreadUtils.h"                     // for Runnable
+#include "ImageTypes.h"                        // for ContainerProducerID
 
 namespace mozilla {
 namespace layers {
@@ -41,9 +43,9 @@ namespace layers {
 
 class CompositorManagerChild;
 class ImageContainer;
-class WebRenderLayerManager;
+class RenderRootStateManager;
 
-class SharedSurfacesChild final {
+class SharedSurfacesChild {
  public:
   /**
    * Request that the surface be mapped into the compositor thread's memory
@@ -67,7 +69,17 @@ class SharedSurfacesChild final {
    * This must be called from the main thread.
    */
   static nsresult Share(gfx::SourceSurfaceSharedData* aSurface,
-                        WebRenderLayerManager* aManager,
+                        RenderRootStateManager* aManager,
+                        wr::IpcResourceUpdateQueue& aResources,
+                        wr::ImageKey& aKey);
+
+  /**
+   * Request that the surface be mapped into the compositor thread's memory
+   * space, and a valid ImageKey be generated for it for use with WebRender.
+   * This must be called from the main thread.
+   */
+  static nsresult Share(gfx::SourceSurface* aSurface,
+                        RenderRootStateManager* aManager,
                         wr::IpcResourceUpdateQueue& aResources,
                         wr::ImageKey& aKey);
 
@@ -79,9 +91,9 @@ class SharedSurfacesChild final {
    * NS_ERROR_NOT_IMPLEMENTED. This must be called from the main thread.
    */
   static nsresult Share(ImageContainer* aContainer,
-                        WebRenderLayerManager* aManager,
+                        RenderRootStateManager* aManager,
                         wr::IpcResourceUpdateQueue& aResources,
-                        wr::ImageKey& aKey);
+                        wr::ImageKey& aKey, ContainerProducerID aProducerId);
 
   /**
    * Get the external ID, if any, bound to the shared surface. Used for memory
@@ -103,9 +115,9 @@ class SharedSurfacesChild final {
 
   class ImageKeyData {
    public:
-    ImageKeyData(WebRenderLayerManager* aManager,
+    ImageKeyData(RenderRootStateManager* aManager,
                  const wr::ImageKey& aImageKey);
-    ~ImageKeyData();
+    virtual ~ImageKeyData();
 
     ImageKeyData(ImageKeyData&& aOther);
     ImageKeyData& operator=(ImageKeyData&& aOther);
@@ -116,7 +128,7 @@ class SharedSurfacesChild final {
 
     Maybe<gfx::IntRect> TakeDirtyRect() { return std::move(mDirtyRect); }
 
-    RefPtr<WebRenderLayerManager> mManager;
+    RefPtr<RenderRootStateManager> mManager;
     Maybe<gfx::IntRect> mDirtyRect;
     wr::ImageKey mImageKey;
   };
@@ -127,20 +139,20 @@ class SharedSurfacesChild final {
 
   friend class SharedSurfacesAnimation;
 
-  class SharedUserData final {
+  class SharedUserData final : public Runnable {
    public:
-    SharedUserData() : mShared(false) {}
-
-    explicit SharedUserData(const wr::ExternalImageId& aId)
-        : mId(aId), mShared(false) {}
-
-    ~SharedUserData();
+    explicit SharedUserData(const wr::ExternalImageId& aId);
+    virtual ~SharedUserData();
 
     SharedUserData(const SharedUserData& aOther) = delete;
     SharedUserData& operator=(const SharedUserData& aOther) = delete;
 
     SharedUserData(SharedUserData&& aOther) = delete;
     SharedUserData& operator=(SharedUserData&& aOther) = delete;
+
+    static void Destroy(void* aClosure);
+
+    NS_IMETHOD Run() override;
 
     const wr::ExternalImageId& Id() const { return mId; }
 
@@ -157,7 +169,7 @@ class SharedSurfacesChild final {
       mShared = true;
     }
 
-    wr::ImageKey UpdateKey(WebRenderLayerManager* aManager,
+    wr::ImageKey UpdateKey(RenderRootStateManager* aManager,
                            wr::IpcResourceUpdateQueue& aResources,
                            const Maybe<gfx::IntRect>& aDirtyRect);
 
@@ -180,16 +192,15 @@ class SharedSurfacesChild final {
 
 class AnimationImageKeyData final : public SharedSurfacesChild::ImageKeyData {
  public:
-  AnimationImageKeyData(WebRenderLayerManager* aManager,
+  AnimationImageKeyData(RenderRootStateManager* aManager,
                         const wr::ImageKey& aImageKey);
 
-  ~AnimationImageKeyData();
+  virtual ~AnimationImageKeyData();
 
   AnimationImageKeyData(AnimationImageKeyData&& aOther);
   AnimationImageKeyData& operator=(AnimationImageKeyData&& aOther);
 
   AutoTArray<RefPtr<gfx::SourceSurface>, 2> mPendingRelease;
-  bool mRecycling;
 };
 
 /**
@@ -200,7 +211,7 @@ class SharedSurfacesAnimation final {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SharedSurfacesAnimation)
 
-  SharedSurfacesAnimation() {}
+  SharedSurfacesAnimation() = default;
 
   void Destroy();
 
@@ -229,7 +240,7 @@ class SharedSurfacesAnimation final {
    */
   nsresult UpdateKey(gfx::SourceSurface* aParentSurface,
                      gfx::SourceSurfaceSharedData* aSurface,
-                     WebRenderLayerManager* aManager,
+                     RenderRootStateManager* aManager,
                      wr::IpcResourceUpdateQueue& aResources,
                      wr::ImageKey& aKey);
 
@@ -237,14 +248,14 @@ class SharedSurfacesAnimation final {
    * Release our reference to all frames up to and including the frame which
    * has an external image ID which matches aId.
    */
-  void ReleasePreviousFrame(WebRenderLayerManager* aManager,
+  void ReleasePreviousFrame(RenderRootStateManager* aManager,
                             const wr::ExternalImageId& aId);
 
   /**
    * Destroy any state information bound for the given layer manager. Any
    * image keys are already invalid.
    */
-  void Invalidate(WebRenderLayerManager* aManager);
+  void Invalidate(RenderRootStateManager* aManager);
 
  private:
   ~SharedSurfacesAnimation();

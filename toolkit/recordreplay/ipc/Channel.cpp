@@ -53,6 +53,8 @@ void OpenChannel(base::ProcessId aMiddlemanPid, uint32_t aChannelId,
 
 }  // namespace parent
 
+static void InitializeSimulatedDelayState();
+
 struct HelloMessage {
   int32_t mMagic;
 };
@@ -65,7 +67,8 @@ Channel::Channel(size_t aId, bool aMiddlemanRecording,
       mConnectionFd(0),
       mFd(0),
       mMessageBuffer(nullptr),
-      mMessageBytes(0) {
+      mMessageBytes(0),
+      mSimulateDelays(false) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   if (IsRecordingOrReplaying()) {
@@ -101,10 +104,17 @@ Channel::Channel(size_t aId, bool aMiddlemanRecording,
     MOZ_RELEASE_ASSERT(rv >= 0);
   }
 
+  // Simulate message delays in channels used to communicate with a replaying
+  // process.
+  mSimulateDelays = IsMiddleman() ? !aMiddlemanRecording : IsReplaying();
+
+  InitializeSimulatedDelayState();
+
   Thread::SpawnNonRecordedThread(ThreadMain, this);
 }
 
-/* static */ void Channel::ThreadMain(void* aChannelArg) {
+/* static */
+void Channel::ThreadMain(void* aChannelArg) {
   Channel* channel = (Channel*)aChannelArg;
 
   static const int32_t MagicValue = 0x914522b9;
@@ -128,6 +138,8 @@ Channel::Channel(size_t aId, bool aMiddlemanRecording,
     MOZ_RELEASE_ASSERT(rv == sizeof(msg));
   }
 
+  channel->mStartTime = channel->mAvailableTime = TimeStamp::Now();
+
   {
     MonitorAutoLock lock(channel->mMonitor);
     channel->mInitialized = true;
@@ -135,15 +147,68 @@ Channel::Channel(size_t aId, bool aMiddlemanRecording,
   }
 
   while (true) {
-    Message* msg = channel->WaitForMessage();
+    Message::UniquePtr msg = channel->WaitForMessage();
     if (!msg) {
       break;
     }
-    channel->mHandler(msg);
+    channel->mHandler(std::move(msg));
   }
 }
 
-void Channel::SendMessage(const Message& aMsg) {
+// Simulated one way latency between middleman and replaying children, in ms.
+static size_t gSimulatedLatency;
+
+// Simulated bandwidth for data transferred between middleman and replaying
+// children, in bytes/ms.
+static size_t gSimulatedBandwidth;
+
+static size_t LoadEnvValue(const char* aEnv) {
+  const char* value = getenv(aEnv);
+  if (value && value[0]) {
+    int n = atoi(value);
+    return n >= 0 ? n : 0;
+  }
+  return 0;
+}
+
+static void InitializeSimulatedDelayState() {
+  // In preparation for shifting computing resources into the cloud when
+  // debugging a recorded execution (see bug 1547081), we need to be able to
+  // test expected performance when there is a significant distance between the
+  // user's machine (running the UI, middleman, and recording process) and
+  // machines in the cloud (running replaying processes). To assess this
+  // expected performance, the environment variables below can be used to
+  // specify the one-way latency and bandwidth to simulate for connections
+  // between the middleman and replaying processes.
+  //
+  // This simulation is approximate: the bandwidth tracked is per connection
+  // instead of the total across all connections, and network restrictions are
+  // not yet simulated when transferring graphics data.
+  //
+  // If there are multiple channels then we will do this initialization multiple
+  // times, so this needs to be idempotent.
+  gSimulatedLatency = LoadEnvValue("MOZ_RECORD_REPLAY_SIMULATED_LATENCY");
+  gSimulatedBandwidth = LoadEnvValue("MOZ_RECORD_REPLAY_SIMULATED_BANDWIDTH");
+}
+
+static bool MessageSubjectToSimulatedDelay(MessageType aType) {
+  switch (aType) {
+    // Middleman call messages are not subject to delays. When replaying
+    // children are in the cloud they will use a local process to perform
+    // middleman calls.
+    case MessageType::MiddlemanCallResponse:
+    case MessageType::MiddlemanCallRequest:
+    case MessageType::ResetMiddlemanCalls:
+    // Don't call system functions when we're in the process of crashing.
+    case MessageType::BeginFatalError:
+    case MessageType::FatalError:
+      return false;
+    default:
+      return true;
+  }
+}
+
+void Channel::SendMessage(Message&& aMsg) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread() ||
                      aMsg.mType == MessageType::BeginFatalError ||
                      aMsg.mType == MessageType::FatalError ||
@@ -158,6 +223,28 @@ void Channel::SendMessage(const Message& aMsg) {
   }
 
   PrintMessage("SendMsg", aMsg);
+
+  if (gSimulatedLatency && gSimulatedBandwidth && mSimulateDelays &&
+      MessageSubjectToSimulatedDelay(aMsg.mType)) {
+    AutoEnsurePassThroughThreadEvents pt;
+
+    // Find the time this message will start sending.
+    TimeStamp sendTime = TimeStamp::Now();
+    if (sendTime < mAvailableTime) {
+      sendTime = mAvailableTime;
+    }
+
+    // Find the time spent sending the message over the channel.
+    size_t sendDurationMs = aMsg.mSize / gSimulatedBandwidth;
+    mAvailableTime = sendTime + TimeDuration::FromMilliseconds(sendDurationMs);
+
+    // The receive time of the message is the time the message finishes sending
+    // plus the connection latency.
+    TimeStamp receiveTime =
+        mAvailableTime + TimeDuration::FromMilliseconds(gSimulatedLatency);
+
+    aMsg.mReceiveTime = (receiveTime - mStartTime).ToMilliseconds();
+  }
 
   const char* ptr = (const char*)&aMsg;
   size_t nbytes = aMsg.mSize;
@@ -175,7 +262,7 @@ void Channel::SendMessage(const Message& aMsg) {
   }
 }
 
-Message* Channel::WaitForMessage() {
+Message::UniquePtr Channel::WaitForMessage() {
   if (!mMessageBuffer) {
     mMessageBuffer = (MessageBuffer*)AllocateMemory(sizeof(MessageBuffer),
                                                     MemoryKind::Generic);
@@ -216,7 +303,7 @@ Message* Channel::WaitForMessage() {
     mMessageBytes += nbytes;
   }
 
-  Message* res = ((Message*)mMessageBuffer->begin())->Clone();
+  Message::UniquePtr res = ((Message*)mMessageBuffer->begin())->Clone();
 
   // Remove the message we just received from the incoming buffer.
   size_t remaining = mMessageBytes - messageSize;
@@ -225,6 +312,16 @@ Message* Channel::WaitForMessage() {
             remaining);
   }
   mMessageBytes = remaining;
+
+  // If there is a simulated delay on the message, wait until it completes.
+  if (res->mReceiveTime) {
+    TimeStamp receiveTime =
+        mStartTime + TimeDuration::FromMilliseconds(res->mReceiveTime);
+    while (receiveTime > TimeStamp::Now()) {
+      MonitorAutoLock lock(mMonitor);
+      mMonitor.WaitUntil(receiveTime);
+    }
+  }
 
   PrintMessage("RecvMsg", *res);
   return res;
@@ -237,59 +334,17 @@ void Channel::PrintMessage(const char* aPrefix, const Message& aMsg) {
   AutoEnsurePassThroughThreadEvents pt;
   nsCString data;
   switch (aMsg.mType) {
-    case MessageType::HitCheckpoint: {
-      const HitCheckpointMessage& nmsg = (const HitCheckpointMessage&)aMsg;
-      data.AppendPrintf("Id %d Endpoint %d Duration %.2f ms",
-                        (int)nmsg.mCheckpointId, nmsg.mRecordingEndpoint,
-                        nmsg.mDurationMicroseconds / 1000.0);
-      break;
-    }
-    case MessageType::HitBreakpoint: {
-      const HitBreakpointMessage& nmsg = (const HitBreakpointMessage&)aMsg;
-      data.AppendPrintf("Endpoint %d", nmsg.mRecordingEndpoint);
-      break;
-    }
-    case MessageType::Resume: {
-      const ResumeMessage& nmsg = (const ResumeMessage&)aMsg;
-      data.AppendPrintf("Forward %d", nmsg.mForward);
-      break;
-    }
-    case MessageType::RestoreCheckpoint: {
-      const RestoreCheckpointMessage& nmsg =
-          (const RestoreCheckpointMessage&)aMsg;
-      data.AppendPrintf("Id %d", (int)nmsg.mCheckpoint);
-      break;
-    }
-    case MessageType::AddBreakpoint: {
-      const AddBreakpointMessage& nmsg = (const AddBreakpointMessage&)aMsg;
-      data.AppendPrintf(
-          "Kind %s, Script %d, Offset %d, Frame %d",
-          nmsg.mPosition.KindString(), (int)nmsg.mPosition.mScript,
-          (int)nmsg.mPosition.mOffset, (int)nmsg.mPosition.mFrameIndex);
-      break;
-    }
-    case MessageType::DebuggerRequest: {
-      const DebuggerRequestMessage& nmsg = (const DebuggerRequestMessage&)aMsg;
+    case MessageType::ManifestStart: {
+      const ManifestStartMessage& nmsg = (const ManifestStartMessage&)aMsg;
       data = NS_ConvertUTF16toUTF8(
-          nsDependentString(nmsg.Buffer(), nmsg.BufferSize()));
+          nsDependentSubstring(nmsg.Buffer(), nmsg.BufferSize()));
       break;
     }
-    case MessageType::DebuggerResponse: {
-      const DebuggerResponseMessage& nmsg =
-          (const DebuggerResponseMessage&)aMsg;
+    case MessageType::ManifestFinished: {
+      const ManifestFinishedMessage& nmsg =
+          (const ManifestFinishedMessage&)aMsg;
       data = NS_ConvertUTF16toUTF8(
-          nsDependentString(nmsg.Buffer(), nmsg.BufferSize()));
-      break;
-    }
-    case MessageType::SetIsActive: {
-      const SetIsActiveMessage& nmsg = (const SetIsActiveMessage&)aMsg;
-      data.AppendPrintf("%d", nmsg.mActive);
-      break;
-    }
-    case MessageType::SetSaveCheckpoint: {
-      const SetSaveCheckpointMessage& nmsg =
-          (const SetSaveCheckpointMessage&)aMsg;
-      data.AppendPrintf("Id %d, Save %d", (int)nmsg.mCheckpoint, nmsg.mSave);
+          nsDependentSubstring(nmsg.Buffer(), nmsg.BufferSize()));
       break;
     }
     default:

@@ -13,9 +13,13 @@
 #include "mozilla/dom/DocGroup.h"
 #include "nsDOMCSSDeclaration.h"
 
-class nsSMILValue;
 struct RawServoUnlockedDeclarationBlock;
+
 namespace mozilla {
+
+class SMILValue;
+class SVGAnimatedLength;
+
 namespace dom {
 class DomGroup;
 class Element;
@@ -25,6 +29,8 @@ class Element;
 class nsDOMCSSAttributeDeclaration final : public nsDOMCSSDeclaration {
  public:
   typedef mozilla::dom::Element Element;
+  typedef mozilla::SMILValue SMILValue;
+  typedef mozilla::SVGAnimatedLength SVGAnimatedLength;
   nsDOMCSSAttributeDeclaration(Element* aContent, bool aIsSMILOverride);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -41,7 +47,9 @@ class nsDOMCSSAttributeDeclaration final : public nsDOMCSSDeclaration {
 
   nsINode* GetParentObject() override { return mElement; }
 
-  nsresult SetSMILValue(const nsCSSPropertyID aPropID, const nsSMILValue&);
+  nsresult SetSMILValue(const nsCSSPropertyID aPropID, const SMILValue& aValue);
+  nsresult SetSMILValue(const nsCSSPropertyID aPropID,
+                        const SVGAnimatedLength& aLength);
 
   nsresult SetPropertyValue(const nsCSSPropertyID aPropID,
                             const nsAString& aValue,
@@ -63,10 +71,10 @@ class nsDOMCSSAttributeDeclaration final : public nsDOMCSSDeclaration {
  protected:
   ~nsDOMCSSAttributeDeclaration();
 
-  virtual nsresult SetCSSDeclaration(
+  nsresult SetCSSDeclaration(
       mozilla::DeclarationBlock* aDecl,
       mozilla::MutationClosureData* aClosureData) override;
-  virtual nsIDocument* DocToUpdate() override;
+  mozilla::dom::Document* DocToUpdate() override;
 
   RefPtr<Element> mElement;
 
@@ -75,6 +83,10 @@ class nsDOMCSSAttributeDeclaration final : public nsDOMCSSDeclaration {
    * than the inline style rule).
    */
   const bool mIsSMILOverride;
+
+ private:
+  template <typename SetterFunc>
+  nsresult SetSMILValueHelper(SetterFunc aFunc);
 };
 
 #endif /* nsDOMCSSAttributeDeclaration_h */

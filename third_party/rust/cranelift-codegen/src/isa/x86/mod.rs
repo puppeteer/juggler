@@ -8,18 +8,18 @@ pub mod settings;
 
 use super::super::settings as shared_settings;
 #[cfg(feature = "testing_hooks")]
-use binemit::CodeSink;
-use binemit::{emit_function, MemoryCodeSink};
-use ir;
-use isa::enc_tables::{self as shared_enc_tables, lookup_enclist, Encodings};
-use isa::Builder as IsaBuilder;
-use isa::{EncInfo, RegClass, RegInfo, TargetIsa};
-use regalloc;
-use result::CodegenResult;
+use crate::binemit::CodeSink;
+use crate::binemit::{emit_function, MemoryCodeSink};
+use crate::ir;
+use crate::isa::enc_tables::{self as shared_enc_tables, lookup_enclist, Encodings};
+use crate::isa::Builder as IsaBuilder;
+use crate::isa::{EncInfo, RegClass, RegInfo, TargetIsa};
+use crate::regalloc;
+use crate::result::CodegenResult;
+use crate::timing;
+use core::fmt;
 use std::boxed::Box;
-use std::fmt;
 use target_lexicon::{PointerWidth, Triple};
-use timing;
 
 #[allow(dead_code)]
 struct Isa {
@@ -42,7 +42,7 @@ fn isa_constructor(
     triple: Triple,
     shared_flags: shared_settings::Flags,
     builder: shared_settings::Builder,
-) -> Box<TargetIsa> {
+) -> Box<dyn TargetIsa> {
     let level1 = match triple.pointer_width().unwrap() {
         PointerWidth::U16 => unimplemented!("x86-16"),
         PointerWidth::U32 => &enc_tables::LEVEL1_I32[..],
@@ -123,7 +123,7 @@ impl TargetIsa for Isa {
         func: &ir::Function,
         inst: ir::Inst,
         divert: &mut regalloc::RegDiversions,
-        sink: &mut CodeSink,
+        sink: &mut dyn CodeSink,
     ) {
         binemit::emit_inst(func, inst, divert, sink)
     }

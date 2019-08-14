@@ -10,8 +10,7 @@
 
 const uint32_t FRAMES = 256;
 
-void test_for_number_of_channels(const uint32_t channels)
-{
+void test_for_number_of_channels(const uint32_t channels) {
   const uint32_t samples = channels * FRAMES;
 
   mozilla::AudioCallbackBufferWrapper<float> mBuffer(channels);
@@ -41,10 +40,10 @@ void test_for_number_of_channels(const uint32_t channels)
   // Check the buffer is now full
   ASSERT_TRUE(mBuffer.Available() == 0);
 
-  for (uint32_t i = 0 ; i < samples; i++) {
-    ASSERT_TRUE(fromCallback[i] == 1.0) <<
-      "Difference at " << i << " (" << fromCallback[i] << " != " << 1.0 <<
-      ")\n";
+  for (uint32_t i = 0; i < samples; i++) {
+    ASSERT_TRUE(fromCallback[i] == 1.0)
+    << "Difference at " << i << " (" << fromCallback[i] << " != " << 1.0
+    << ")\n";
   }
 
   ASSERT_TRUE(b.Fill(other.data(), FRAMES) == 128);

@@ -7,8 +7,8 @@
 #ifndef ProfilerParent_h
 #define ProfilerParent_h
 
-#include "mozilla/RefPtr.h"
 #include "mozilla/PProfilerParent.h"
+#include "mozilla/RefPtr.h"
 
 class nsIProfilerStartParams;
 
@@ -58,6 +58,7 @@ class ProfilerParent final : public PProfilerParent {
   static void ProfilerStopped();
   static void ProfilerPaused();
   static void ProfilerResumed();
+  static void ClearAllPages();
 
  private:
   friend class ProfilerParentTracker;
@@ -67,7 +68,7 @@ class ProfilerParent final : public PProfilerParent {
 
   void Init();
   void ActorDestroy(ActorDestroyReason aActorDestroyReason) override;
-  void DeallocPProfilerParent() override;
+  void ActorDealloc() override;
 
   RefPtr<ProfilerParent> mSelfRef;
   nsTArray<MozPromiseHolder<SingleProcessProfilePromise>>

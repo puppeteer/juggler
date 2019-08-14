@@ -10,7 +10,7 @@
 #define nsINIParser_h__
 
 #ifdef MOZILLA_INTERNAL_API
-#define nsINIParser nsINIParser_internal
+#  define nsINIParser nsINIParser_internal
 #endif
 
 #include "nscore.h"
@@ -115,6 +115,17 @@ class nsINIParser {
    * @throws NS_ERROR_FAILURE if the section did not exist.
    */
   nsresult DeleteSection(const char* aSection);
+
+  /**
+   * Renames the specified section.
+   *
+   * @param aSection      section name
+   * @param aNewName      new section name
+   *
+   * @throws NS_ERROR_FAILURE if the section did not exist.
+   * @throws NS_ERROR_ILLEGAL_VALUE if the new section name already exists.
+   */
+  nsresult RenameSection(const char* aSection, const char* aNewName);
 
   /**
    * Writes the ini data to disk.

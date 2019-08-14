@@ -25,17 +25,17 @@
 #include "mozilla/Attributes.h"
 
 #ifdef MOZ_WIDGET_COCOA
-#include <CoreFoundation/CoreFoundation.h>
-#include "nsILocalFileMac.h"
+#  include <CoreFoundation/CoreFoundation.h>
+#  include "nsILocalFileMac.h"
 #elif defined(XP_WIN)
-#include <windows.h>
-#include <shlobj.h>
+#  include <windows.h>
+#  include <shlobj.h>
 #elif defined(XP_UNIX)
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 #ifdef DEBUG_bsmedberg
-#define DEBUG_COMMANDLINE
+#  define DEBUG_COMMANDLINE
 #endif
 
 #define NS_COMMANDLINE_CID                           \
@@ -187,18 +187,6 @@ nsCommandLine::GetWorkingDirectory(nsIFile** aResult) {
 }
 
 NS_IMETHODIMP
-nsCommandLine::GetWindowContext(nsIDOMWindow** aResult) {
-  NS_IF_ADDREF(*aResult = mWindowContext);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsCommandLine::SetWindowContext(nsIDOMWindow* aValue) {
-  mWindowContext = aValue;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile** aResult) {
   NS_ENSURE_TRUE(mWorkingDir, NS_ERROR_NOT_INITIALIZED);
 
@@ -266,7 +254,7 @@ nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile** aResult) {
   lf.forget(aResult);
   return NS_OK;
 
-#elif defined(XP_WIN32)
+#elif defined(XP_WIN)
   nsCOMPtr<nsIFile> lf(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID));
   NS_ENSURE_TRUE(lf, NS_ERROR_OUT_OF_MEMORY);
 
@@ -294,7 +282,7 @@ nsCommandLine::ResolveFile(const nsAString& aArgument, nsIFile** aResult) {
   return NS_OK;
 
 #else
-#error Need platform-specific logic here.
+#  error Need platform-specific logic here.
 #endif
 }
 

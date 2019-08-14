@@ -3,7 +3,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const TEST_PAGE = "http://example.org/browser/browser/base/content/test/general/zoom_test.html";
+const TEST_PAGE =
+  "http://example.org/browser/browser/base/content/test/general/zoom_test.html";
 
 var gTab1, gTab2, gLevel1;
 
@@ -27,18 +28,31 @@ function zoomTab1() {
     FullZoomHelper.zoomTest(gTab2, 1, "Initial zoom of tab 2 should be 1");
 
     let browser1 = gBrowser.getBrowserForTab(gTab1);
-    await BrowserTestUtils.synthesizeMouse(null, 10, 10, {
-      wheel: true, ctrlKey: true, deltaY: -1, deltaMode: WheelEvent.DOM_DELTA_LINE,
-    }, browser1);
+    await BrowserTestUtils.synthesizeMouse(
+      null,
+      10,
+      10,
+      {
+        wheel: true,
+        ctrlKey: true,
+        deltaY: -1,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+      },
+      browser1
+    );
 
     info("Waiting for tab 1 to be zoomed");
-    await promiseWaitForCondition(() => {
+    await TestUtils.waitForCondition(() => {
       gLevel1 = ZoomManager.getZoomForBrowser(browser1);
       return gLevel1 > 1;
     });
 
     await FullZoomHelper.selectTabAndWaitForLocationChange(gTab2);
-    FullZoomHelper.zoomTest(gTab2, gLevel1, "Tab 2 should have zoomed along with tab 1");
+    FullZoomHelper.zoomTest(
+      gTab2,
+      gLevel1,
+      "Tab 2 should have zoomed along with tab 1"
+    );
   })().then(finishTest, FullZoomHelper.failAndContinue(finish));
 }
 

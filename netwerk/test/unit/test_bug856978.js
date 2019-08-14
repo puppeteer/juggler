@@ -9,8 +9,7 @@
 // authorization header got added at all and if so it gets removed. This test
 // passes iff both succeeds.
 
-ChromeUtils.import("resource://testing-common/httpd.js");
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 
 var notification = "http-on-modify-request";
 
@@ -29,12 +28,11 @@ function authHandler(metadata, response) {
       noAuthHeader = true;
     }
     Assert.ok(noAuthHeader);
-  } else {
-    // Not our test request yet.
-    if (!metadata.hasHeader("Authorization")) {
-      response.setStatusLine(metadata.httpVersion, 401, "Unauthorized");
-      response.setHeader("WWW-Authenticate", 'Basic realm="secret"', false);
-    }
+  }
+  // Not our test request yet.
+  else if (!metadata.hasHeader("Authorization")) {
+    response.setStatusLine(metadata.httpVersion, 401, "Unauthorized");
+    response.setHeader("WWW-Authenticate", 'Basic realm="secret"', false);
   }
 }
 
@@ -43,21 +41,19 @@ function RequestObserver() {
 }
 
 RequestObserver.prototype = {
-  register: function() {
+  register() {
     info("Registering " + notification);
-    Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService).
-      addObserver(this, notification, true);
+    Cc["@mozilla.org/observer-service;1"]
+      .getService(Ci.nsIObserverService)
+      .addObserver(this, notification, true);
   },
 
-  QueryInterface: function(iid) {
-    if (iid.equals(Ci.nsIObserver) || iid.equals(Ci.nsISupportsWeakReference) ||
-        iid.equals(Ci.nsISupports)) {
-      return this;
-    }
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
+  QueryInterface: ChromeUtils.generateQI([
+    "nsIObserver",
+    "nsISupportsWeakReference",
+  ]),
 
-  observe: function(subject, topic, data) {
+  observe(subject, topic, data) {
     if (topic == notification) {
       if (!(subject instanceof Ci.nsIHttpChannel)) {
         do_throw(notification + " observed a non-HTTP channel.");
@@ -74,18 +70,18 @@ RequestObserver.prototype = {
       // We are still here. Let's remove the authorization header now.
       subject.setRequestHeader("Authorization", null, false);
     }
-  }
-}
+  },
+};
 
 var listener = {
-  onStartRequest: function test_onStartR(request, ctx) {},
+  onStartRequest: function test_onStartR(request) {},
 
   onDataAvailable: function test_ODA() {
     do_throw("Should not get any data!");
   },
 
-  onStopRequest: function test_onStopR(request, ctx, status) {
-    if (current_test < (tests.length - 1)) {
+  onStopRequest: function test_onStopR(request, status) {
+    if (current_test < tests.length - 1) {
       current_test++;
       tests[current_test]();
     } else {
@@ -93,12 +89,14 @@ var listener = {
       httpServer.stop(do_test_finished);
     }
     do_test_finished();
-  }
+  },
 };
 
 function makeChan(url) {
-  return NetUtil.newChannel({uri: url, loadUsingSystemPrincipal: true})
-                .QueryInterface(Ci.nsIHttpChannel);
+  return NetUtil.newChannel({
+    uri: url,
+    loadUsingSystemPrincipal: true,
+  }).QueryInterface(Ci.nsIHttpChannel);
 }
 
 var tests = [startAuthHeaderTest, removeAuthHeaderTest];
@@ -117,7 +115,7 @@ function run_test() {
 
 function startAuthHeaderTest() {
   var chan = makeChan(authCredsURL);
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener);
 
   do_test_pending();
 }
@@ -129,7 +127,7 @@ function removeAuthHeaderTest() {
   var chan = makeChan(authURL);
   // Indicating that the request is coming from the second test.
   chan.setRequestHeader("Test", "1", false);
-  chan.asyncOpen2(listener);
+  chan.asyncOpen(listener);
 
   do_test_pending();
 }

@@ -123,25 +123,27 @@
 #include "jit/Registers.h"
 #include "jit/RegisterSets.h"
 #if defined(JS_CODEGEN_ARM)
-#include "jit/arm/Assembler-arm.h"
+#  include "jit/arm/Assembler-arm.h"
 #endif
 #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
-#include "jit/x86-shared/Architecture-x86-shared.h"
-#include "jit/x86-shared/Assembler-x86-shared.h"
+#  include "jit/x86-shared/Architecture-x86-shared.h"
+#  include "jit/x86-shared/Assembler-x86-shared.h"
 #endif
 #if defined(JS_CODEGEN_MIPS32)
-#include "jit/mips-shared/Assembler-mips-shared.h"
-#include "jit/mips32/Assembler-mips32.h"
+#  include "jit/mips-shared/Assembler-mips-shared.h"
+#  include "jit/mips32/Assembler-mips32.h"
 #endif
 #if defined(JS_CODEGEN_MIPS64)
-#include "jit/mips-shared/Assembler-mips-shared.h"
-#include "jit/mips64/Assembler-mips64.h"
+#  include "jit/mips-shared/Assembler-mips-shared.h"
+#  include "jit/mips64/Assembler-mips64.h"
 #endif
 
+#include "wasm/WasmGC.h"
 #include "wasm/WasmGenerator.h"
 #include "wasm/WasmInstance.h"
 #include "wasm/WasmOpIter.h"
 #include "wasm/WasmSignalHandlers.h"
+#include "wasm/WasmStubs.h"
 #include "wasm/WasmValidate.h"
 
 #include "jit/MacroAssembler-inl.h"
@@ -192,9 +194,9 @@ enum class UseABI { Wasm, Builtin, System };
 enum class InterModule { False = false, True = true };
 
 #if defined(JS_CODEGEN_NONE)
-#define RABALDR_SCRATCH_I32
-#define RABALDR_SCRATCH_F32
-#define RABALDR_SCRATCH_F64
+#  define RABALDR_SCRATCH_I32
+#  define RABALDR_SCRATCH_F32
+#  define RABALDR_SCRATCH_F64
 
 static const Register RabaldrScratchI32 = Register::Invalid();
 static const FloatRegister RabaldrScratchF32 = InvalidFloatReg;
@@ -202,11 +204,11 @@ static const FloatRegister RabaldrScratchF64 = InvalidFloatReg;
 #endif
 
 #ifdef JS_CODEGEN_ARM64
-#define RABALDR_CHUNKY_STACK
-#define RABALDR_SCRATCH_I32
-#define RABALDR_SCRATCH_F32
-#define RABALDR_SCRATCH_F64
-#define RABALDR_SCRATCH_F32_ALIASES_F64
+#  define RABALDR_CHUNKY_STACK
+#  define RABALDR_SCRATCH_I32
+#  define RABALDR_SCRATCH_F32
+#  define RABALDR_SCRATCH_F64
+#  define RABALDR_SCRATCH_F32_ALIASES_F64
 
 static const Register RabaldrScratchI32 = Register::FromCode(15);
 
@@ -234,10 +236,10 @@ static_assert(RabaldrScratchF64 != ScratchDoubleReg, "Too busy");
 // persona.  Code for 8-byte atomic operations assumes that
 // RabaldrScratchI32 is in fact ebx.
 
-#define RABALDR_SCRATCH_I32
+#  define RABALDR_SCRATCH_I32
 static const Register RabaldrScratchI32 = ebx;
 
-#define RABALDR_INT_DIV_I64_CALLOUT
+#  define RABALDR_INT_DIV_I64_CALLOUT
 #endif
 
 #ifdef JS_CODEGEN_ARM
@@ -246,32 +248,32 @@ static const Register RabaldrScratchI32 = ebx;
 // work around that in several cases but the mess does not seem
 // worth it yet.  CallTempReg2 seems safe.
 
-#define RABALDR_SCRATCH_I32
+#  define RABALDR_SCRATCH_I32
 static const Register RabaldrScratchI32 = CallTempReg2;
 
-#define RABALDR_INT_DIV_I64_CALLOUT
-#define RABALDR_I64_TO_FLOAT_CALLOUT
-#define RABALDR_FLOAT_TO_I64_CALLOUT
+#  define RABALDR_INT_DIV_I64_CALLOUT
+#  define RABALDR_I64_TO_FLOAT_CALLOUT
+#  define RABALDR_FLOAT_TO_I64_CALLOUT
 #endif
 
 #ifdef JS_CODEGEN_MIPS32
-#define RABALDR_SCRATCH_I32
+#  define RABALDR_SCRATCH_I32
 static const Register RabaldrScratchI32 = CallTempReg2;
 
-#define RABALDR_INT_DIV_I64_CALLOUT
-#define RABALDR_I64_TO_FLOAT_CALLOUT
-#define RABALDR_FLOAT_TO_I64_CALLOUT
+#  define RABALDR_INT_DIV_I64_CALLOUT
+#  define RABALDR_I64_TO_FLOAT_CALLOUT
+#  define RABALDR_FLOAT_TO_I64_CALLOUT
 #endif
 
 #ifdef JS_CODEGEN_MIPS64
-#define RABALDR_SCRATCH_I32
+#  define RABALDR_SCRATCH_I32
 static const Register RabaldrScratchI32 = CallTempReg2;
 #endif
 
 #ifdef RABALDR_SCRATCH_F32_ALIASES_F64
-#if !defined(RABALDR_SCRATCH_F32) || !defined(RABALDR_SCRATCH_F64)
-#error "Bad configuration"
-#endif
+#  if !defined(RABALDR_SCRATCH_F32) || !defined(RABALDR_SCRATCH_F64)
+#    error "Bad configuration"
+#  endif
 #endif
 
 template <MIRType t>
@@ -467,9 +469,9 @@ struct SpecificRegs {
 struct SpecificRegs {};
 #else
 struct SpecificRegs {
-#ifndef JS_64BIT
+#  ifndef JS_64BIT
   RegI64 abiReturnRegI64;
-#endif
+#  endif
 
   SpecificRegs() { MOZ_CRASH("BaseCompiler porting interface: SpecificRegs"); }
 };
@@ -667,15 +669,15 @@ class BaseRegAlloc {
 #endif
 
 #if defined(RABALDR_SCRATCH_F64)
-#ifdef RABALDR_SCRATCH_F32_ALIASES_F64
+#  ifdef RABALDR_SCRATCH_F32_ALIASES_F64
     MOZ_ASSERT(availFPU.has(RabaldrScratchF32));
-#endif
+#  endif
     if (RabaldrScratchF64 != RegF64::Invalid()) {
       availFPU.take(RabaldrScratchF64);
     }
-#ifdef RABALDR_SCRATCH_F32_ALIASES_F64
+#  ifdef RABALDR_SCRATCH_F32_ALIASES_F64
     MOZ_ASSERT(!availFPU.has(RabaldrScratchF32));
-#endif
+#  endif
 #endif
 
 #ifdef DEBUG
@@ -837,12 +839,12 @@ class BaseRegAlloc {
     void addKnownI32(RegI32 r) { knownGPR_.add(r); }
 
     void addKnownI64(RegI64 r) {
-#ifdef JS_PUNBOX64
+#  ifdef JS_PUNBOX64
       knownGPR_.add(r.reg);
-#else
+#  else
       knownGPR_.add(r.high);
       knownGPR_.add(r.low);
-#endif
+#  endif
     }
 
     void addKnownF32(RegF32 r) { knownFPU_.add(r); }
@@ -948,11 +950,11 @@ using ScratchI8 = ScratchI32;
 
 // The stack frame.
 //
-// The frame has four parts ("below" means at lower addresses):
+// The stack frame has four parts ("below" means at lower addresses):
 //
-//  - the Header, comprising the Frame and DebugFrame elements;
-//  - the Local area, allocated below the header with various forms of
-//    alignment;
+//  - the Frame element;
+//  - the Local area, including the DebugFrame element; allocated below the
+//    header with various forms of alignment;
 //  - the Dynamic area, comprising the temporary storage the compiler uses for
 //    register spilling, allocated below the Local area;
 //  - the Arguments area, comprising memory allocated for outgoing calls,
@@ -961,33 +963,31 @@ using ScratchI8 = ScratchI32;
 //                 +============================+
 //                 |    Incoming arg            |
 //                 |    ...                     |
-//                 +----------------------------+
-//                 |    unspecified             |
 // --------------  +============================+
-//  ^              |    Frame (fixed size)      |
-// fixedSize       +----------------------------+ <------------------ FP
-//  |              |    DebugFrame (optional)   |               ^^
-//  |    --------  +============================+ ---------     ||
-//  |       ^      |    Local (static size)     |    ^          ||
-//  | localSize    |    ...                     |    |        framePushed
-//  v       v      |    (padding)               |    |          ||
-// --------------  +============================+ stackHeight   ||
-//          ^      |    Dynamic (variable)      |    |          ||
-//   dynamicSize   |    ...                     |    |          ||
-//          v      |    ...                     |    v          ||
-// --------------  |    (free space, sometimes) | ---------     v|
+//                 |    Frame (fixed size)      |
+// --------------  +============================+ <-------------------- FP
+//          ^      |    DebugFrame (optional)   |    ^                ^^
+//          |      +----------------------------+    |                ||
+//    localSize    |    Local (static size)     |    |                ||
+//          |      |    ...                     |    |        framePushed
+//          v      |    (padding)               |    |                ||
+// --------------  +============================+ currentStackHeight  ||
+//          ^      |    Dynamic (variable size) |    |                ||
+//   dynamicSize   |    ...                     |    |                ||
+//          v      |    ...                     |    v                ||
+// --------------  |    (free space, sometimes) | ---------           v|
 //                 +============================+ <----- SP not-during calls
-//                 |    Arguments (sometimes)   |                |
-//                 |    ...                     |                v
+//                 |    Arguments (sometimes)   |                      |
+//                 |    ...                     |                      v
 //                 +============================+ <----- SP during calls
 //
-// The Header is addressed off the stack pointer.  masm.framePushed() is always
+// The Frame is addressed off the stack pointer.  masm.framePushed() is always
 // correct, and masm.getStackPointer() + masm.framePushed() always addresses the
 // Frame, with the DebugFrame optionally below it.
 //
-// The Local area is laid out by BaseLocalIter and is allocated and deallocated
-// by standard prologue and epilogue functions that manipulate the stack
-// pointer, but it is accessed via BaseStackFrame.
+// The Local area (including the DebugFrame) is laid out by BaseLocalIter and is
+// allocated and deallocated by standard prologue and epilogue functions that
+// manipulate the stack pointer, but it is accessed via BaseStackFrame.
 //
 // The Dynamic area is maintained by and accessed via BaseStackFrame.  On some
 // systems (such as ARM64), the Dynamic memory may be allocated in chunks
@@ -1035,7 +1035,7 @@ void BaseLocalIter::settle() {
       case MIRType::Int64:
       case MIRType::Double:
       case MIRType::Float32:
-      case MIRType::Pointer:
+      case MIRType::RefOrNull:
         if (argsIter_->argInRegister()) {
           frameOffset_ = pushLocal(MIRTypeToSize(mirType_));
         } else {
@@ -1056,7 +1056,11 @@ void BaseLocalIter::settle() {
       case ValType::F32:
       case ValType::F64:
       case ValType::Ref:
+      case ValType::FuncRef:
       case ValType::AnyRef:
+        // TODO/AnyRef-boxing: With boxed immediates and strings, the
+        // debugger must be made aware that AnyRef != Pointer.
+        ASSERT_ANYREF_IS_JSOBJECT;
         mirType_ = ToMIRType(locals_[index_]);
         frameOffset_ = pushLocal(MIRTypeToSize(mirType_));
         break;
@@ -1143,11 +1147,14 @@ class BaseStackFrameAllocator {
   static constexpr uint32_t ChunkSize = 8 * sizeof(void*);
   static constexpr uint32_t InitialChunk = ChunkSize;
 
-  // The current logical height of the frame, ie the sum of space for the
-  // Local and Dynamic areas.  The allocated size of the frame -- provided by
-  // masm.framePushed() -- is usually larger than currentStackHeight_, notably
-  // at the beginning of execution when we've allocated InitialChunk extra
-  // space.
+  // The current logical height of the frame is
+  //   currentStackHeight_ = localSize_ + dynamicSize
+  // where dynamicSize is not accounted for explicitly and localSize_ also
+  // includes size for the DebugFrame.
+  //
+  // The allocated size of the frame, provided by masm.framePushed(), is usually
+  // larger than currentStackHeight_, notably at the beginning of execution when
+  // we've allocated InitialChunk extra space.
 
   uint32_t currentStackHeight_;
 #endif
@@ -1201,9 +1208,10 @@ class BaseStackFrameAllocator {
  public:
   // The fixed amount of memory, in bytes, allocated on the stack below the
   // Header for purposes such as locals and other fixed values.  Includes all
-  // necessary alignment.
+  // necessary alignment, and on ARM64 also the initial chunk for the working
+  // stack memory.
 
-  uint32_t fixedSize() const {
+  uint32_t fixedAllocSize() const {
     MOZ_ASSERT(localSize_ != UINT32_MAX);
 #ifdef RABALDR_CHUNKY_STACK
     return localSize_ + InitialChunk;
@@ -1211,6 +1219,19 @@ class BaseStackFrameAllocator {
     return localSize_;
 #endif
   }
+
+#ifdef RABALDR_CHUNKY_STACK
+  // The allocated frame size is frequently larger than the logical stack
+  // height; we round up to a chunk boundary, and special case the initial
+  // chunk.
+  uint32_t framePushedForHeight(uint32_t logicalHeight) {
+    if (logicalHeight <= fixedAllocSize()) {
+      return fixedAllocSize();
+    }
+    return fixedAllocSize() +
+           AlignBytes(logicalHeight - fixedAllocSize(), ChunkSize);
+  }
+#endif
 
  protected:
   //////////////////////////////////////////////////////////////////////
@@ -1236,17 +1257,18 @@ class BaseStackFrameAllocator {
   void popChunkyBytes(uint32_t bytes) {
     checkChunkyInvariants();
     currentStackHeight_ -= bytes;
-    // Sometimes, popChunkyBytes() is used to pop a larger area, as when we
-    // drop values consumed by a call, and we may need to drop several
-    // chunks.  But never drop the initial chunk.
-    if (masm.framePushed() - currentStackHeight_ >= ChunkSize) {
-      uint32_t target =
-          Max(fixedSize(), AlignBytes(currentStackHeight_, ChunkSize));
-      uint32_t amount = masm.framePushed() - target;
-      if (amount) {
-        masm.freeStack(amount);
+    // Sometimes, popChunkyBytes() is used to pop a larger area, as when we drop
+    // values consumed by a call, and we may need to drop several chunks.  But
+    // never drop the initial chunk.  Crucially, the amount we drop is always an
+    // integral number of chunks.
+    uint32_t freeSpace = masm.framePushed() - currentStackHeight_;
+    if (freeSpace >= ChunkSize) {
+      uint32_t targetAllocSize = framePushedForHeight(currentStackHeight_);
+      uint32_t amountToFree = masm.framePushed() - targetAllocSize;
+      MOZ_ASSERT(amountToFree % ChunkSize == 0);
+      if (amountToFree) {
+        masm.freeStack(amountToFree);
       }
-      MOZ_ASSERT(masm.framePushed() >= fixedSize());
     }
     checkChunkyInvariants();
   }
@@ -1263,9 +1285,11 @@ class BaseStackFrameAllocator {
  private:
 #ifdef RABALDR_CHUNKY_STACK
   void checkChunkyInvariants() {
+    MOZ_ASSERT(masm.framePushed() >= fixedAllocSize());
     MOZ_ASSERT(masm.framePushed() >= currentStackHeight_);
-    MOZ_ASSERT(masm.framePushed() == fixedSize() ||
+    MOZ_ASSERT(masm.framePushed() == fixedAllocSize() ||
                masm.framePushed() - currentStackHeight_ < ChunkSize);
+    MOZ_ASSERT((masm.framePushed() - localSize_) % ChunkSize == 0);
   }
 #endif
 
@@ -1274,12 +1298,8 @@ class BaseStackFrameAllocator {
 
   uint32_t framePushedForHeight(StackHeight stackHeight) {
 #ifdef RABALDR_CHUNKY_STACK
-    // The allocated frame size is frequently larger than the stack height;
-    // we round up to a chunk boundary, and special case the initial chunk.
-    return stackHeight.height <= fixedSize()
-               ? fixedSize()
-               : fixedSize() +
-                     AlignBytes(stackHeight.height - fixedSize(), ChunkSize);
+    // A more complicated adjustment is needed.
+    return framePushedForHeight(stackHeight.height);
 #else
     // The allocated frame size equals the stack height.
     return stackHeight.height;
@@ -1496,7 +1516,9 @@ class BaseStackFrame final : public BaseStackFrameAllocator {
     Local(MIRType type, int32_t offs) : type(type), offs(offs) {}
   };
 
-  using LocalVector = Vector<Local, 8, SystemAllocPolicy>;
+  // Profiling shows that the number of parameters and locals frequently
+  // touches or exceeds 8.  So 16 seems like a reasonable starting point.
+  using LocalVector = Vector<Local, 16, SystemAllocPolicy>;
 
   // Initialize `localInfo` based on the types of `locals` and `args`.
   bool setupLocals(const ValTypeVector& locals, const ValTypeVector& args,
@@ -1582,10 +1604,10 @@ class BaseStackFrame final : public BaseStackFrameAllocator {
     masm.storeFloat32(src, Address(sp_, localOffset(dest)));
   }
 
- private:
   // Offset off of sp_ for `local`.
   int32_t localOffset(const Local& local) { return localOffset(local.offs); }
 
+ private:
   // Offset off of sp_ for a local with offset `offset` from Frame.
   int32_t localOffset(int32_t offset) { return masm.framePushed() - offset; }
 
@@ -1827,12 +1849,567 @@ void BaseStackFrame::zeroLocals(BaseRegAlloc* ra) {
   ra->freeI32(zero);
 }
 
+// Value stack: stack elements
+
+struct Stk {
+ private:
+  Stk() : kind_(Unknown), i64val_(0) {}
+
+ public:
+  enum Kind {
+    // The Mem opcodes are all clustered at the beginning to
+    // allow for a quick test within sync().
+    MemI32,  // 32-bit integer stack value ("offs")
+    MemI64,  // 64-bit integer stack value ("offs")
+    MemF32,  // 32-bit floating stack value ("offs")
+    MemF64,  // 64-bit floating stack value ("offs")
+    MemRef,  // reftype (pointer wide) stack value ("offs")
+
+    // The Local opcodes follow the Mem opcodes for a similar
+    // quick test within hasLocal().
+    LocalI32,  // Local int32 var ("slot")
+    LocalI64,  // Local int64 var ("slot")
+    LocalF32,  // Local float32 var ("slot")
+    LocalF64,  // Local double var ("slot")
+    LocalRef,  // Local reftype (pointer wide) var ("slot")
+
+    RegisterI32,  // 32-bit integer register ("i32reg")
+    RegisterI64,  // 64-bit integer register ("i64reg")
+    RegisterF32,  // 32-bit floating register ("f32reg")
+    RegisterF64,  // 64-bit floating register ("f64reg")
+    RegisterRef,  // reftype (pointer wide) register ("refReg")
+
+    ConstI32,  // 32-bit integer constant ("i32val")
+    ConstI64,  // 64-bit integer constant ("i64val")
+    ConstF32,  // 32-bit floating constant ("f32val")
+    ConstF64,  // 64-bit floating constant ("f64val")
+    ConstRef,  // reftype (pointer wide) constant ("refval")
+
+    Unknown,
+  };
+
+  Kind kind_;
+
+  static const Kind MemLast = MemRef;
+  static const Kind LocalLast = LocalRef;
+
+  union {
+    RegI32 i32reg_;
+    RegI64 i64reg_;
+    RegPtr refReg_;
+    RegF32 f32reg_;
+    RegF64 f64reg_;
+    int32_t i32val_;
+    int64_t i64val_;
+    intptr_t refval_;
+    float f32val_;
+    double f64val_;
+    uint32_t slot_;
+    uint32_t offs_;
+  };
+
+  explicit Stk(RegI32 r) : kind_(RegisterI32), i32reg_(r) {}
+  explicit Stk(RegI64 r) : kind_(RegisterI64), i64reg_(r) {}
+  explicit Stk(RegPtr r) : kind_(RegisterRef), refReg_(r) {}
+  explicit Stk(RegF32 r) : kind_(RegisterF32), f32reg_(r) {}
+  explicit Stk(RegF64 r) : kind_(RegisterF64), f64reg_(r) {}
+  explicit Stk(int32_t v) : kind_(ConstI32), i32val_(v) {}
+  explicit Stk(int64_t v) : kind_(ConstI64), i64val_(v) {}
+  explicit Stk(float v) : kind_(ConstF32), f32val_(v) {}
+  explicit Stk(double v) : kind_(ConstF64), f64val_(v) {}
+  explicit Stk(Kind k, uint32_t v) : kind_(k), slot_(v) {
+    MOZ_ASSERT(k > MemLast && k <= LocalLast);
+  }
+  static Stk StkRef(intptr_t v) {
+    Stk s;
+    s.kind_ = ConstRef;
+    s.refval_ = v;
+    return s;
+  }
+
+  void setOffs(Kind k, uint32_t v) {
+    MOZ_ASSERT(k <= MemLast);
+    kind_ = k;
+    offs_ = v;
+  }
+
+  Kind kind() const { return kind_; }
+  bool isMem() const { return kind_ <= MemLast; }
+
+  RegI32 i32reg() const {
+    MOZ_ASSERT(kind_ == RegisterI32);
+    return i32reg_;
+  }
+  RegI64 i64reg() const {
+    MOZ_ASSERT(kind_ == RegisterI64);
+    return i64reg_;
+  }
+  RegPtr refReg() const {
+    MOZ_ASSERT(kind_ == RegisterRef);
+    return refReg_;
+  }
+  RegF32 f32reg() const {
+    MOZ_ASSERT(kind_ == RegisterF32);
+    return f32reg_;
+  }
+  RegF64 f64reg() const {
+    MOZ_ASSERT(kind_ == RegisterF64);
+    return f64reg_;
+  }
+
+  int32_t i32val() const {
+    MOZ_ASSERT(kind_ == ConstI32);
+    return i32val_;
+  }
+  int64_t i64val() const {
+    MOZ_ASSERT(kind_ == ConstI64);
+    return i64val_;
+  }
+  intptr_t refval() const {
+    MOZ_ASSERT(kind_ == ConstRef);
+    return refval_;
+  }
+
+  // For these two, use an out-param instead of simply returning, to
+  // use the normal stack and not the x87 FP stack (which has effect on
+  // NaNs with the signaling bit set).
+
+  void f32val(float* out) const {
+    MOZ_ASSERT(kind_ == ConstF32);
+    *out = f32val_;
+  }
+  void f64val(double* out) const {
+    MOZ_ASSERT(kind_ == ConstF64);
+    *out = f64val_;
+  }
+
+  uint32_t slot() const {
+    MOZ_ASSERT(kind_ > MemLast && kind_ <= LocalLast);
+    return slot_;
+  }
+  uint32_t offs() const {
+    MOZ_ASSERT(isMem());
+    return offs_;
+  }
+};
+
+typedef Vector<Stk, 0, SystemAllocPolicy> StkVector;
+
+// MachineStackTracker, used for stack-slot pointerness tracking.
+
+class MachineStackTracker {
+  // Simulates the machine's stack, with one bool per word.  Index zero in
+  // this vector corresponds to the highest address in the machine stack.  The
+  // last entry corresponds to what SP currently points at.  This all assumes
+  // a grow-down stack.
+  //
+  // numPtrs_ contains the number of "true" values in vec_, and is therefore
+  // redundant.  But it serves as a constant-time way to detect the common
+  // case where vec_ holds no "true" values.
+  size_t numPtrs_;
+  Vector<bool, 64, SystemAllocPolicy> vec_;
+
+ public:
+  MachineStackTracker() : numPtrs_(0) {}
+
+  ~MachineStackTracker() {
+#ifdef DEBUG
+    size_t n = 0;
+    for (bool b : vec_) {
+      n += (b ? 1 : 0);
+    }
+    MOZ_ASSERT(n == numPtrs_);
+#endif
+  }
+
+  // Clone this MachineStackTracker, writing the result at |dst|.
+  MOZ_MUST_USE bool cloneTo(MachineStackTracker* dst) {
+    MOZ_ASSERT(dst->vec_.empty());
+    if (!dst->vec_.appendAll(vec_)) {
+      return false;
+    }
+    dst->numPtrs_ = numPtrs_;
+    return true;
+  }
+
+  // Notionally push |n| non-pointers on the stack.
+  MOZ_MUST_USE bool pushNonGCPointers(size_t n) {
+    return vec_.appendN(false, n);
+  }
+
+  // Mark the stack slot |offsetFromSP| up from the bottom as holding a
+  // pointer.
+  void setGCPointer(size_t offsetFromSP) {
+    // offsetFromSP == 0 denotes the most recently pushed item, == 1 the
+    // second most recently pushed item, etc.
+    MOZ_ASSERT(offsetFromSP < vec_.length());
+
+    size_t offsetFromTop = vec_.length() - 1 - offsetFromSP;
+    numPtrs_ = numPtrs_ + 1 - (vec_[offsetFromTop] ? 1 : 0);
+    vec_[offsetFromTop] = true;
+  }
+
+  // Query the pointerness of the slot |offsetFromSP| up from the bottom.
+  bool isGCPointer(size_t offsetFromSP) {
+    MOZ_ASSERT(offsetFromSP < vec_.length());
+
+    size_t offsetFromTop = vec_.length() - 1 - offsetFromSP;
+    return vec_[offsetFromTop];
+  }
+
+  // Return the number of words tracked by this MachineStackTracker.
+  size_t length() { return vec_.length(); }
+
+  // Return the number of pointer-typed words tracked by this
+  // MachineStackTracker.
+  size_t numPtrs() {
+    MOZ_ASSERT(numPtrs_ <= length());
+    return numPtrs_;
+  }
+
+  // Discard all contents, but (per mozilla::Vector::clear semantics) don't
+  // free or reallocate any dynamic storage associated with |vec_|.
+  void clear() {
+    vec_.clear();
+    numPtrs_ = 0;
+  }
+};
+
+// StackMapGenerator, which carries all state needed to create stack maps.
+
+enum class HasRefTypedDebugFrame { No, Yes };
+
+struct StackMapGenerator {
+ private:
+  // --- These are constant for the life of the function's compilation ---
+
+  // For generating stack maps, we'll need to know the offsets of registers
+  // as saved by the trap exit stub.
+  const MachineState& trapExitLayout_;
+  const size_t trapExitLayoutNumWords_;
+
+  // Completed stackmaps are added here
+  StackMaps* stackMaps_;
+
+  // So as to be able to get current offset when creating stack maps
+  const MacroAssembler& masm_;
+
+ public:
+  // --- These are constant once we've completed beginFunction() ---
+
+  // The number of words of arguments passed to this function in memory.
+  size_t numStackArgWords;
+
+  MachineStackTracker machineStackTracker;  // tracks machine stack pointerness
+
+  // This holds masm.framePushed at entry to the function's body.  It is a
+  // Maybe because createStackMap needs to know whether or not we're still
+  // in the prologue.  It makes a Nothing-to-Some transition just once per
+  // function.
+  Maybe<uint32_t> framePushedAtEntryToBody;
+
+  // --- These can change at any point ---
+
+  // This holds masm.framePushed at it would be be for a function call
+  // instruction, but excluding the stack area used to pass arguments in
+  // memory.  That is, for an upcoming function call, this will hold
+  //
+  //   masm.framePushed() at the call instruction -
+  //      StackArgAreaSizeUnaligned(argumentTypes)
+  //
+  // This value denotes the lowest-addressed stack word covered by the current
+  // function's stackmap.  Words below this point form the highest-addressed
+  // area of the callee's stackmap.  Note that all alignment padding above the
+  // arguments-in-memory themselves belongs to the caller's stack map, which
+  // is why this is defined in terms of StackArgAreaSizeUnaligned() rather than
+  // StackArgAreaSizeAligned().
+  //
+  // When not inside a function call setup/teardown sequence, it is Nothing.
+  // It can make Nothing-to/from-Some transitions arbitrarily as we progress
+  // through the function body.
+  Maybe<uint32_t> framePushedExcludingOutboundCallArgs;
+
+  // The number of memory-resident, ref-typed entries on the containing
+  // BaseCompiler::stk_.
+  size_t memRefsOnStk;
+
+  // This is a copy of machineStackTracker that is used only within individual
+  // calls to createStackMap. It is here only to avoid possible heap allocation
+  // costs resulting from making it local to createStackMap().
+  MachineStackTracker augmentedMst;
+
+  StackMapGenerator(StackMaps* stackMaps, const MachineState& trapExitLayout,
+                    const size_t trapExitLayoutNumWords,
+                    const MacroAssembler& masm)
+      : trapExitLayout_(trapExitLayout),
+        trapExitLayoutNumWords_(trapExitLayoutNumWords),
+        stackMaps_(stackMaps),
+        masm_(masm),
+        numStackArgWords(0),
+        memRefsOnStk(0) {}
+
+  // At the beginning of a function, we may have live roots in registers (as
+  // arguments) at the point where we perform a stack overflow check.  This
+  // method generates the "extra" stackmap entries to describe that, in the
+  // case that the check fails and we wind up calling into the wasm exit
+  // stub, as generated by GenerateTrapExit().
+  //
+  // The resulting map must correspond precisely with the stack layout
+  // created for the integer registers as saved by (code generated by)
+  // GenerateTrapExit().  To do that we use trapExitLayout_ and
+  // trapExitLayoutNumWords_, which together comprise a description of the
+  // layout and are created by GenerateTrapExitMachineState().
+  MOZ_MUST_USE bool generateStackmapEntriesForTrapExit(
+      const ValTypeVector& args, ExitStubMapVector* extras) {
+    return GenerateStackmapEntriesForTrapExit(args, trapExitLayout_,
+                                              trapExitLayoutNumWords_, extras);
+  }
+
+  // Creates a stackmap associated with the instruction denoted by
+  // |assemblerOffset|, incorporating pointers from the current operand
+  // stack |stk|, incorporating possible extra pointers in |extra| at the
+  // lower addressed end, and possibly with the associated frame having a
+  // ref-typed DebugFrame as indicated by |refDebugFrame|.
+  MOZ_MUST_USE bool createStackMap(const char* who,
+                                   const ExitStubMapVector& extras,
+                                   uint32_t assemblerOffset,
+                                   HasRefTypedDebugFrame refDebugFrame,
+                                   const StkVector& stk) {
+    size_t countedPointers = machineStackTracker.numPtrs() + memRefsOnStk;
+#ifndef DEBUG
+    // An important optimization.  If there are obviously no pointers, as
+    // we expect in the majority of cases, exit quickly.
+    if (countedPointers == 0 && refDebugFrame == HasRefTypedDebugFrame::No) {
+      // We can skip creating the map if there are no |true| elements in
+      // |extras|.
+      bool extrasHasRef = false;
+      for (bool b : extras) {
+        if (b) {
+          extrasHasRef = true;
+          break;
+        }
+      }
+      if (!extrasHasRef) {
+        return true;
+      }
+    }
+#else
+    // In the debug case, create the stack map regardless, and cross-check
+    // the pointer-counting below.  We expect the final map to have
+    // |countedPointers| in total.  This doesn't include those in the
+    // DebugFrame, but they do not appear in the map's bitmap.  Note that
+    // |countedPointers| is debug-only from this point onwards.
+    for (bool b : extras) {
+      countedPointers += (b ? 1 : 0);
+    }
+#endif
+
+    // Start with the frame-setup map, and add operand-stack information to
+    // that.  augmentedMst holds live data only within individual calls to
+    // createStackMap.
+    augmentedMst.clear();
+    if (!machineStackTracker.cloneTo(&augmentedMst)) {
+      return false;
+    }
+
+    // At this point, augmentedMst only contains entries covering the
+    // incoming argument area (if any) and for the area allocated by this
+    // function's prologue.  We now need to calculate how far the machine's
+    // stack pointer is below where it was at the start of the body.  But we
+    // must take care not to include any words pushed as arguments to an
+    // upcoming function call, since those words "belong" to the stackmap of
+    // the callee, not to the stackmap of this function.  Note however that
+    // any alignment padding pushed prior to pushing the args *does* belong to
+    // this function.
+    //
+    // That padding is taken into account at the point where
+    // framePushedExcludingOutboundCallArgs is set, viz, in startCallArgs(),
+    // and comprises two components:
+    //
+    // * call->frameAlignAdjustment
+    // * the padding applied to the stack arg area itself.  That is:
+    //   StackArgAreaSize(argTys) - StackArgAreaSizeUnpadded(argTys)
+    Maybe<uint32_t> framePushedExcludingArgs;
+    if (framePushedAtEntryToBody.isNothing()) {
+      // Still in the prologue.  framePushedExcludingArgs remains Nothing.
+      MOZ_ASSERT(framePushedExcludingOutboundCallArgs.isNothing());
+    } else {
+      // In the body.
+      MOZ_ASSERT(masm_.framePushed() >= framePushedAtEntryToBody.value());
+      if (framePushedExcludingOutboundCallArgs.isSome()) {
+        // In the body, and we've potentially pushed some args onto the stack.
+        // We must ignore them when sizing the stackmap.
+        MOZ_ASSERT(masm_.framePushed() >=
+                   framePushedExcludingOutboundCallArgs.value());
+        MOZ_ASSERT(framePushedExcludingOutboundCallArgs.value() >=
+                   framePushedAtEntryToBody.value());
+        framePushedExcludingArgs =
+            Some(framePushedExcludingOutboundCallArgs.value());
+      } else {
+        // In the body, but not with call args on the stack.  The stackmap
+        // must be sized so as to extend all the way "down" to
+        // masm_.framePushed().
+        framePushedExcludingArgs = Some(masm_.framePushed());
+      }
+    }
+
+    if (framePushedExcludingArgs.isSome()) {
+      uint32_t bodyPushedBytes =
+          framePushedExcludingArgs.value() - framePushedAtEntryToBody.value();
+      MOZ_ASSERT(0 == bodyPushedBytes % sizeof(void*));
+      if (!augmentedMst.pushNonGCPointers(bodyPushedBytes / sizeof(void*))) {
+        return false;
+      }
+    }
+
+    // Scan the operand stack, marking pointers in the just-added new
+    // section.
+    MOZ_ASSERT_IF(framePushedAtEntryToBody.isNothing(), stk.empty());
+    MOZ_ASSERT_IF(framePushedExcludingArgs.isNothing(), stk.empty());
+
+    for (const Stk& v : stk) {
+#ifndef DEBUG
+      // We don't track roots in registers, per rationale below, so if this
+      // doesn't hold, something is seriously wrong, and we're likely to get a
+      // GC-related crash.
+      MOZ_RELEASE_ASSERT(v.kind() != Stk::RegisterRef);
+      if (v.kind() != Stk::MemRef) {
+        continue;
+      }
+#else
+      // Take the opportunity to check everything we reasonably can about
+      // operand stack elements.
+      switch (v.kind()) {
+        case Stk::MemI32:
+        case Stk::MemI64:
+        case Stk::MemF32:
+        case Stk::MemF64:
+        case Stk::ConstI32:
+        case Stk::ConstI64:
+        case Stk::ConstF32:
+        case Stk::ConstF64:
+          // All of these have uninteresting type.
+          continue;
+        case Stk::LocalI32:
+        case Stk::LocalI64:
+        case Stk::LocalF32:
+        case Stk::LocalF64:
+          // These also have uninteresting type.  Check that they live in the
+          // section of stack set up by beginFunction().  The unguarded use of
+          // |value()| here is safe due to the assertion above this loop.
+          MOZ_ASSERT(v.offs() <= framePushedAtEntryToBody.value());
+          continue;
+        case Stk::RegisterI32:
+        case Stk::RegisterI64:
+        case Stk::RegisterF32:
+        case Stk::RegisterF64:
+          // These also have uninteresting type, but more to the point: all
+          // registers holding live values should have been flushed to the
+          // machine stack immediately prior to the instruction to which this
+          // stackmap pertains.  So these can't happen.
+          MOZ_CRASH("createStackMap: operand stack has Register-non-Ref");
+        case Stk::MemRef:
+          // This is the only case we care about.  We'll handle it after the
+          // switch.
+          break;
+        case Stk::LocalRef:
+          // We need the stackmap to mention this pointer, but it should
+          // already be in the machineStackTracker section created by
+          // beginFunction().
+          MOZ_ASSERT(v.offs() <= framePushedAtEntryToBody.value());
+          continue;
+        case Stk::ConstRef:
+          // This can currently only be a null pointer.
+          MOZ_ASSERT(v.refval() == 0);
+          continue;
+        case Stk::RegisterRef:
+          // This can't happen, per rationale above.
+          MOZ_CRASH("createStackMap: operand stack contains RegisterRef");
+        default:
+          MOZ_CRASH("createStackMap: unknown operand stack element");
+      }
+#endif
+      // v.offs() holds masm.framePushed() at the point immediately after it
+      // was pushed on the stack.  Since it's still on the stack,
+      // masm.framePushed() can't be less.
+      MOZ_ASSERT(v.offs() <= framePushedExcludingArgs.value());
+      uint32_t offsFromMapLowest = framePushedExcludingArgs.value() - v.offs();
+      MOZ_ASSERT(0 == offsFromMapLowest % sizeof(void*));
+      augmentedMst.setGCPointer(offsFromMapLowest / sizeof(void*));
+    }
+
+    // Create the final StackMap.  The initial map is zeroed out, so there's
+    // no need to write zero bits in it.
+    const uint32_t extraWords = extras.length();
+    const uint32_t augmentedMstWords = augmentedMst.length();
+    const uint32_t numMappedWords = extraWords + augmentedMstWords;
+    StackMap* stackMap = StackMap::create(numMappedWords);
+    if (!stackMap) {
+      return false;
+    }
+
+    {
+      // First the exit stub extra words, if any.
+      uint32_t i = 0;
+      for (bool b : extras) {
+        if (b) {
+          stackMap->setBit(i);
+        }
+        i++;
+      }
+    }
+    // Followed by the "main" part of the map.
+    for (uint32_t i = 0; i < augmentedMstWords; i++) {
+      if (augmentedMst.isGCPointer(i)) {
+        stackMap->setBit(extraWords + i);
+      }
+    }
+
+    stackMap->setExitStubWords(extraWords);
+
+    // Record in the map, how far down from the highest address the Frame* is.
+    // Take the opportunity to check that we haven't marked any part of the
+    // Frame itself as a pointer.
+    stackMap->setFrameOffsetFromTop(numStackArgWords +
+                                    sizeof(Frame) / sizeof(void*));
+#ifdef DEBUG
+    for (uint32_t i = 0; i < sizeof(Frame) / sizeof(void*); i++) {
+      MOZ_ASSERT(stackMap->getBit(stackMap->numMappedWords -
+                                  stackMap->frameOffsetFromTop + i) == 0);
+    }
+#endif
+
+    // Note the presence of a ref-typed DebugFrame, if any.
+    if (refDebugFrame == HasRefTypedDebugFrame::Yes) {
+      stackMap->setHasRefTypedDebugFrame();
+    }
+
+    // Add the completed map to the running collection thereof.
+    if (!stackMaps_->add((uint8_t*)(uintptr_t)assemblerOffset, stackMap)) {
+      return false;
+    }
+
+#ifdef DEBUG
+    {
+      // Crosscheck the map pointer counting.
+      uint32_t nw = stackMap->numMappedWords;
+      uint32_t np = 0;
+      for (uint32_t i = 0; i < nw; i++) {
+        np += stackMap->getBit(i);
+      }
+      MOZ_ASSERT(size_t(np) == countedPointers);
+    }
+#endif
+
+    return true;
+  }
+};
+
 // The baseline compiler proper.
 
 class BaseCompiler final : public BaseCompilerInterface {
   using Local = BaseStackFrame::Local;
   using LabelVector = Vector<NonAssertingLabel, 8, SystemAllocPolicy>;
-  using MIRTypeVector = Vector<MIRType, 8, SystemAllocPolicy>;
 
   // Bit set used for simple bounds check elimination.  Capping this at 64
   // locals makes sense; even 32 locals would probably be OK in practice.
@@ -1953,17 +2530,6 @@ class BaseCompiler final : public BaseCompilerInterface {
       bceSafe_;  // Locals that have been bounds checked and not updated since
   ValTypeVector SigD_;
   ValTypeVector SigF_;
-  MIRTypeVector SigP_;
-  MIRTypeVector SigPI_;
-  MIRTypeVector SigPL_;
-  MIRTypeVector SigPII_;
-  MIRTypeVector SigPIPI_;
-  MIRTypeVector SigPIII_;
-  MIRTypeVector SigPIIL_;
-  MIRTypeVector SigPIIP_;
-  MIRTypeVector SigPILL_;
-  MIRTypeVector SigPIIII_;
-  MIRTypeVector SigPIIIII_;
   NonAssertingLabel returnLabel_;
 
   LatentOp latentOp_;   // Latent operation for branch (seen next)
@@ -1978,6 +2544,8 @@ class BaseCompiler final : public BaseCompilerInterface {
   MacroAssembler& masm;  // No '_' suffix - too tedious...
   BaseRegAlloc ra;       // Ditto
   BaseStackFrame fr;
+
+  StackMapGenerator stackMapGenerator_;
 
   BaseStackFrame::LocalVector localInfo_;
   Vector<OutOfLineCode*, 8, SystemAllocPolicy> outOfLine_;
@@ -2000,9 +2568,11 @@ class BaseCompiler final : public BaseCompilerInterface {
 
  public:
   BaseCompiler(const ModuleEnvironment& env, const FuncCompileInput& input,
-               const ValTypeVector& locals, Decoder& decoder,
-               ExclusiveDeferredValidationState& dvs, TempAllocator* alloc,
-               MacroAssembler* masm);
+               const ValTypeVector& locals, const MachineState& trapExitLayout,
+               size_t trapExitLayoutNumWords, Decoder& decoder,
+               StkVector& stkSource, TempAllocator* alloc, MacroAssembler* masm,
+               StackMaps* stackMaps);
+  ~BaseCompiler();
 
   MOZ_MUST_USE bool init();
 
@@ -2214,6 +2784,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       case ExprType::I64:
         needI64(joinRegI64_);
         break;
+      case ExprType::FuncRef:
       case ExprType::AnyRef:
       case ExprType::NullRef:
       case ExprType::Ref:
@@ -2231,6 +2802,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       case ExprType::I64:
         freeI64(joinRegI64_);
         break;
+      case ExprType::FuncRef:
       case ExprType::AnyRef:
       case ExprType::NullRef:
       case ExprType::Ref:
@@ -2256,6 +2828,7 @@ class BaseCompiler final : public BaseCompilerInterface {
         break;
       case ExprType::Ref:
       case ExprType::NullRef:
+      case ExprType::FuncRef:
       case ExprType::AnyRef:
         needRef(joinRegPtr_);
         break;
@@ -2280,6 +2853,7 @@ class BaseCompiler final : public BaseCompilerInterface {
         break;
       case ExprType::Ref:
       case ExprType::NullRef:
+      case ExprType::FuncRef:
       case ExprType::AnyRef:
         freeRef(joinRegPtr_);
         break;
@@ -2301,153 +2875,39 @@ class BaseCompiler final : public BaseCompilerInterface {
   // to avoid problems with control flow and messy register usage
   // patterns.
 
-  struct Stk {
-   private:
-    Stk() : kind_(Unknown), i64val_(0) {}
+  // This is the value stack actually used during compilation.  It is a
+  // StkVector rather than a StkVector& since constantly dereferencing a
+  // StkVector& adds about 0.5% or more to the compiler's dynamic instruction
+  // count.
+  StkVector stk_;
 
-   public:
-    enum Kind {
-      // The Mem opcodes are all clustered at the beginning to
-      // allow for a quick test within sync().
-      MemI32,  // 32-bit integer stack value ("offs")
-      MemI64,  // 64-bit integer stack value ("offs")
-      MemF32,  // 32-bit floating stack value ("offs")
-      MemF64,  // 64-bit floating stack value ("offs")
-      MemRef,  // reftype (pointer wide) stack value ("offs")
+  // BaselineCompileFunctions() "lends" us the StkVector to use in this
+  // BaseCompiler object, and that is installed in |stk_| in our constructor.
+  // This is so as to avoid having to malloc/free the vector's contents at
+  // each creation/destruction of a BaseCompiler object.  It does however mean
+  // that we need to hold on to a reference to BaselineCompileFunctions()'s
+  // vector, so we can swap (give) its contents back when this BaseCompiler
+  // object is destroyed.  This significantly reduces the heap turnover of the
+  // baseline compiler.  See bug 1532592.
+  StkVector& stkSource_;
 
-      // The Local opcodes follow the Mem opcodes for a similar
-      // quick test within hasLocal().
-      LocalI32,  // Local int32 var ("slot")
-      LocalI64,  // Local int64 var ("slot")
-      LocalF32,  // Local float32 var ("slot")
-      LocalF64,  // Local double var ("slot")
-      LocalRef,  // Local reftype (pointer wide) var ("slot")
-
-      RegisterI32,  // 32-bit integer register ("i32reg")
-      RegisterI64,  // 64-bit integer register ("i64reg")
-      RegisterF32,  // 32-bit floating register ("f32reg")
-      RegisterF64,  // 64-bit floating register ("f64reg")
-      RegisterRef,  // reftype (pointer wide) register ("refReg")
-
-      ConstI32,  // 32-bit integer constant ("i32val")
-      ConstI64,  // 64-bit integer constant ("i64val")
-      ConstF32,  // 32-bit floating constant ("f32val")
-      ConstF64,  // 64-bit floating constant ("f64val")
-      ConstRef,  // reftype (pointer wide) constant ("refval")
-
-      Unknown,
-    };
-
-    Kind kind_;
-
-    static const Kind MemLast = MemRef;
-    static const Kind LocalLast = LocalRef;
-
-    union {
-      RegI32 i32reg_;
-      RegI64 i64reg_;
-      RegPtr refReg_;
-      RegF32 f32reg_;
-      RegF64 f64reg_;
-      int32_t i32val_;
-      int64_t i64val_;
-      intptr_t refval_;
-      float f32val_;
-      double f64val_;
-      uint32_t slot_;
-      uint32_t offs_;
-    };
-
-    explicit Stk(RegI32 r) : kind_(RegisterI32), i32reg_(r) {}
-    explicit Stk(RegI64 r) : kind_(RegisterI64), i64reg_(r) {}
-    explicit Stk(RegPtr r) : kind_(RegisterRef), refReg_(r) {}
-    explicit Stk(RegF32 r) : kind_(RegisterF32), f32reg_(r) {}
-    explicit Stk(RegF64 r) : kind_(RegisterF64), f64reg_(r) {}
-    explicit Stk(int32_t v) : kind_(ConstI32), i32val_(v) {}
-    explicit Stk(int64_t v) : kind_(ConstI64), i64val_(v) {}
-    explicit Stk(float v) : kind_(ConstF32), f32val_(v) {}
-    explicit Stk(double v) : kind_(ConstF64), f64val_(v) {}
-    explicit Stk(Kind k, uint32_t v) : kind_(k), slot_(v) {
-      MOZ_ASSERT(k > MemLast && k <= LocalLast);
+#ifdef DEBUG
+  size_t countMemRefsOnStk() {
+    size_t nRefs = 0;
+    for (Stk& v : stk_) {
+      if (v.kind() == Stk::MemRef) {
+        nRefs++;
+      }
     }
-    static Stk StkRef(intptr_t v) {
-      Stk s;
-      s.kind_ = ConstRef;
-      s.refval_ = v;
-      return s;
-    }
+    return nRefs;
+  }
+#endif
 
-    void setOffs(Kind k, uint32_t v) {
-      MOZ_ASSERT(k <= MemLast);
-      kind_ = k;
-      offs_ = v;
-    }
-
-    Kind kind() const { return kind_; }
-    bool isMem() const { return kind_ <= MemLast; }
-
-    RegI32 i32reg() const {
-      MOZ_ASSERT(kind_ == RegisterI32);
-      return i32reg_;
-    }
-    RegI64 i64reg() const {
-      MOZ_ASSERT(kind_ == RegisterI64);
-      return i64reg_;
-    }
-    RegPtr refReg() const {
-      MOZ_ASSERT(kind_ == RegisterRef);
-      return refReg_;
-    }
-    RegF32 f32reg() const {
-      MOZ_ASSERT(kind_ == RegisterF32);
-      return f32reg_;
-    }
-    RegF64 f64reg() const {
-      MOZ_ASSERT(kind_ == RegisterF64);
-      return f64reg_;
-    }
-
-    int32_t i32val() const {
-      MOZ_ASSERT(kind_ == ConstI32);
-      return i32val_;
-    }
-    int64_t i64val() const {
-      MOZ_ASSERT(kind_ == ConstI64);
-      return i64val_;
-    }
-    intptr_t refval() const {
-      MOZ_ASSERT(kind_ == ConstRef);
-      return refval_;
-    }
-
-    // For these two, use an out-param instead of simply returning, to
-    // use the normal stack and not the x87 FP stack (which has effect on
-    // NaNs with the signaling bit set).
-
-    void f32val(float* out) const {
-      MOZ_ASSERT(kind_ == ConstF32);
-      *out = f32val_;
-    }
-    void f64val(double* out) const {
-      MOZ_ASSERT(kind_ == ConstF64);
-      *out = f64val_;
-    }
-
-    uint32_t slot() const {
-      MOZ_ASSERT(kind_ > MemLast && kind_ <= LocalLast);
-      return slot_;
-    }
-    uint32_t offs() const {
-      MOZ_ASSERT(isMem());
-      return offs_;
-    }
-  };
-
-  Vector<Stk, 8, SystemAllocPolicy> stk_;
-
-  template <typename... Args>
-  void push(Args&&... args) {
-    stk_.infallibleEmplaceBack(Stk(std::forward<Args>(args)...));
+  template <typename T>
+  void push(T item) {
+    // None of the single-arg Stk constructors create a Stk::MemRef, so
+    // there's no need to increment stackMapGenerator_.memRefsOnStk here.
+    stk_.infallibleEmplaceBack(Stk(item));
   }
 
   void pushConstRef(intptr_t v) { stk_.infallibleEmplaceBack(Stk::StkRef(v)); }
@@ -2493,7 +2953,7 @@ class BaseCompiler final : public BaseCompilerInterface {
   }
 
   void loadLocalRef(const Stk& src, RegPtr dest) {
-    fr.loadLocalPtr(localFromSlot(src.slot(), MIRType::Pointer), dest);
+    fr.loadLocalPtr(localFromSlot(src.slot(), MIRType::RefOrNull), dest);
   }
 
   void loadRegisterRef(const Stk& src, RegPtr dest) {
@@ -2779,17 +3239,62 @@ class BaseCompiler final : public BaseCompilerInterface {
           loadLocalRef(v, scratch);
           uint32_t offs = fr.pushPtr(scratch);
           v.setOffs(Stk::MemRef, offs);
+          stackMapGenerator_.memRefsOnStk++;
           break;
         }
         case Stk::RegisterRef: {
           uint32_t offs = fr.pushPtr(v.refReg());
           freeRef(v.refReg());
           v.setOffs(Stk::MemRef, offs);
+          stackMapGenerator_.memRefsOnStk++;
           break;
         }
-        default: { break; }
+        default: {
+          break;
+        }
       }
     }
+  }
+
+  // Various methods for creating a stack map.  Stack maps are indexed by the
+  // lowest address of the instruction immediately *after* the instruction of
+  // interest.  In practice that means either: the return point of a call, the
+  // instruction immediately after a trap instruction (the "resume"
+  // instruction), or the instruction immediately following a no-op (when
+  // debugging is enabled).
+
+  // Create a vanilla stack map.
+  MOZ_MUST_USE bool createStackMap(const char* who) {
+    const ExitStubMapVector noExtras;
+    return stackMapGenerator_.createStackMap(
+        who, noExtras, masm.currentOffset(), HasRefTypedDebugFrame::No, stk_);
+  }
+
+  // Create a stack map as vanilla, but for a custom assembler offset.
+  MOZ_MUST_USE bool createStackMap(const char* who,
+                                   CodeOffset assemblerOffset) {
+    const ExitStubMapVector noExtras;
+    return stackMapGenerator_.createStackMap(who, noExtras,
+                                             assemblerOffset.offset(),
+                                             HasRefTypedDebugFrame::No, stk_);
+  }
+
+  // Create a stack map as vanilla, and note the presence of a ref-typed
+  // DebugFrame on the stack.
+  MOZ_MUST_USE bool createStackMap(const char* who,
+                                   HasRefTypedDebugFrame refDebugFrame) {
+    const ExitStubMapVector noExtras;
+    return stackMapGenerator_.createStackMap(
+        who, noExtras, masm.currentOffset(), refDebugFrame, stk_);
+  }
+
+  // The most general stack map construction.
+  MOZ_MUST_USE bool createStackMap(const char* who,
+                                   const ExitStubMapVector& extras,
+                                   uint32_t assemblerOffset,
+                                   HasRefTypedDebugFrame refDebugFrame) {
+    return stackMapGenerator_.createStackMap(who, extras, assemblerOffset,
+                                             refDebugFrame, stk_);
   }
 
   // This is an optimization used to avoid calling sync() for
@@ -2824,54 +3329,64 @@ class BaseCompiler final : public BaseCompilerInterface {
 
   void pushI32(RegI32 r) {
     MOZ_ASSERT(!isAvailableI32(r));
-    push(r);
+    push(Stk(r));
   }
 
   void pushI64(RegI64 r) {
     MOZ_ASSERT(!isAvailableI64(r));
-    push(r);
+    push(Stk(r));
   }
 
   void pushRef(RegPtr r) {
     MOZ_ASSERT(!isAvailableRef(r));
-    push(r);
+    push(Stk(r));
   }
 
   void pushF64(RegF64 r) {
     MOZ_ASSERT(!isAvailableF64(r));
-    push(r);
+    push(Stk(r));
   }
 
   void pushF32(RegF32 r) {
     MOZ_ASSERT(!isAvailableF32(r));
-    push(r);
+    push(Stk(r));
   }
 
   // Push the value onto the stack.
 
-  void pushI32(int32_t v) { push(v); }
+  void pushI32(int32_t v) { push(Stk(v)); }
 
-  void pushI64(int64_t v) { push(v); }
+  void pushI64(int64_t v) { push(Stk(v)); }
 
   void pushRef(intptr_t v) { pushConstRef(v); }
 
-  void pushF64(double v) { push(v); }
+  void pushF64(double v) { push(Stk(v)); }
 
-  void pushF32(float v) { push(v); }
+  void pushF32(float v) { push(Stk(v)); }
 
   // Push the local slot onto the stack.  The slot will not be read
   // here; it will be read when it is consumed, or when a side
   // effect to the slot forces its value to be saved.
 
-  void pushLocalI32(uint32_t slot) { push(Stk::LocalI32, slot); }
+  void pushLocalI32(uint32_t slot) {
+    stk_.infallibleEmplaceBack(Stk(Stk::LocalI32, slot));
+  }
 
-  void pushLocalI64(uint32_t slot) { push(Stk::LocalI64, slot); }
+  void pushLocalI64(uint32_t slot) {
+    stk_.infallibleEmplaceBack(Stk(Stk::LocalI64, slot));
+  }
 
-  void pushLocalRef(uint32_t slot) { push(Stk::LocalRef, slot); }
+  void pushLocalRef(uint32_t slot) {
+    stk_.infallibleEmplaceBack(Stk(Stk::LocalRef, slot));
+  }
 
-  void pushLocalF64(uint32_t slot) { push(Stk::LocalF64, slot); }
+  void pushLocalF64(uint32_t slot) {
+    stk_.infallibleEmplaceBack(Stk(Stk::LocalF64, slot));
+  }
 
-  void pushLocalF32(uint32_t slot) { push(Stk::LocalF32, slot); }
+  void pushLocalF32(uint32_t slot) {
+    stk_.infallibleEmplaceBack(Stk(Stk::LocalF32, slot));
+  }
 
   // Call only from other popI32() variants.
   // v must be the stack top.  May pop the CPU stack.
@@ -3018,6 +3533,9 @@ class BaseCompiler final : public BaseCompilerInterface {
     }
 
     stk_.popBack();
+    if (v.kind() == Stk::MemRef) {
+      stackMapGenerator_.memRefsOnStk--;
+    }
     return specific;
   }
 
@@ -3030,6 +3548,9 @@ class BaseCompiler final : public BaseCompilerInterface {
       popRef(v, (r = needRef()));
     }
     stk_.popBack();
+    if (v.kind() == Stk::MemRef) {
+      stackMapGenerator_.memRefsOnStk--;
+    }
     return r;
   }
 
@@ -3262,13 +3783,16 @@ class BaseCompiler final : public BaseCompilerInterface {
       }
       case ExprType::Ref:
       case ExprType::NullRef:
+      case ExprType::FuncRef:
       case ExprType::AnyRef: {
         DebugOnly<Stk::Kind> k(stk_.back().kind());
         MOZ_ASSERT(k == Stk::RegisterRef || k == Stk::ConstRef ||
                    k == Stk::MemRef || k == Stk::LocalRef);
         return Some(AnyReg(popRef(joinRegPtr_)));
       }
-      default: { MOZ_CRASH("Compiler bug: unexpected expression type"); }
+      default: {
+        MOZ_CRASH("Compiler bug: unexpected expression type");
+      }
     }
   }
 
@@ -3298,6 +3822,7 @@ class BaseCompiler final : public BaseCompilerInterface {
         return Some(AnyReg(joinRegF64_));
       case ExprType::Ref:
       case ExprType::NullRef:
+      case ExprType::FuncRef:
       case ExprType::AnyRef:
         MOZ_ASSERT(isAvailableRef(joinRegPtr_));
         needRef(joinRegPtr_);
@@ -3404,6 +3929,9 @@ class BaseCompiler final : public BaseCompilerInterface {
           break;
         case Stk::RegisterRef:
           freeRef(v.refReg());
+          break;
+        case Stk::MemRef:
+          stackMapGenerator_.memRefsOnStk--;
           break;
         default:
           break;
@@ -3527,13 +4055,54 @@ class BaseCompiler final : public BaseCompilerInterface {
   //
   // Function prologue and epilogue.
 
-  void beginFunction() {
+  MOZ_MUST_USE bool beginFunction() {
+    JitSpew(JitSpew_Codegen, "# ========================================");
     JitSpew(JitSpew_Codegen, "# Emitting wasm baseline code");
+    JitSpew(JitSpew_Codegen,
+            "# beginFunction: start of function prologue for index %d",
+            (int)func_.index);
+
+    // Make a start on the stack map for this function.  Inspect the args so
+    // as to determine which of them are both in-memory and pointer-typed, and
+    // add entries to machineStackTracker as appropriate.
+
+    const ValTypeVector& argTys = env_.funcTypes[func_.index]->args();
+
+    size_t nInboundStackArgBytes = StackArgAreaSizeUnaligned(argTys);
+    MOZ_ASSERT(nInboundStackArgBytes % sizeof(void*) == 0);
+    stackMapGenerator_.numStackArgWords = nInboundStackArgBytes / sizeof(void*);
+
+    MOZ_ASSERT(stackMapGenerator_.machineStackTracker.length() == 0);
+    if (!stackMapGenerator_.machineStackTracker.pushNonGCPointers(
+            stackMapGenerator_.numStackArgWords)) {
+      return false;
+    }
+
+    for (ABIArgIter<const ValTypeVector> i(argTys); !i.done(); i++) {
+      ABIArg argLoc = *i;
+      const ValType& ty = argTys[i.index()];
+      MOZ_ASSERT(ToMIRType(ty) != MIRType::Pointer);
+      if (argLoc.kind() != ABIArg::Stack || !ty.isReference()) {
+        continue;
+      }
+      uint32_t offset = argLoc.offsetFromArgBase();
+      MOZ_ASSERT(offset < nInboundStackArgBytes);
+      MOZ_ASSERT(offset % sizeof(void*) == 0);
+      stackMapGenerator_.machineStackTracker.setGCPointer(offset /
+                                                          sizeof(void*));
+    }
 
     GenerateFunctionPrologue(
         masm, env_.funcTypes[func_.index]->id,
         env_.mode() == CompileMode::Tier1 ? Some(func_.index) : Nothing(),
         &offsets_);
+
+    // GenerateFunctionPrologue pushes exactly one wasm::Frame's worth of
+    // stuff, and none of the values are GC pointers.  Hence:
+    if (!stackMapGenerator_.machineStackTracker.pushNonGCPointers(
+            sizeof(Frame) / sizeof(void*))) {
+      return false;
+    }
 
     // Initialize DebugFrame fields before the stack overflow trap so that
     // we have the invariant that all observable Frames in a debugEnabled
@@ -3544,21 +4113,68 @@ class BaseCompiler final : public BaseCompilerInterface {
                     "aligned");
 #endif
       masm.reserveStack(DebugFrame::offsetOfFrame());
+      if (!stackMapGenerator_.machineStackTracker.pushNonGCPointers(
+              DebugFrame::offsetOfFrame() / sizeof(void*))) {
+        return false;
+      }
+
       masm.store32(
           Imm32(func_.index),
           Address(masm.getStackPointer(), DebugFrame::offsetOfFuncIndex()));
       masm.storePtr(ImmWord(0), Address(masm.getStackPointer(),
                                         DebugFrame::offsetOfFlagsWord()));
+      // Zero out pointer values for safety, since it's not easy to establish
+      // whether they will always be defined before a GC.
+
+      // DebugFrame::resultRef_ and ::resultAnyRef_
+      masm.storePtr(ImmWord(0), Address(masm.getStackPointer(),
+                                        DebugFrame::offsetOfResults()));
+
+      // DebugFrame::cachedReturnJSValue_
+      for (size_t i = 0; i < sizeof(js::Value) / sizeof(void*); i++) {
+        masm.storePtr(ImmWord(0),
+                      Address(masm.getStackPointer(),
+                              DebugFrame::offsetOfCachedReturnJSValue() +
+                                  i * sizeof(void*)));
+      }
     }
 
-    fr.checkStack(ABINonArgReg0, BytecodeOffset(func_.lineOrBytecode));
-    masm.reserveStack(fr.fixedSize() - masm.framePushed());
-    fr.onFixedStackAllocated();
+    // Generate a stack-overflow check and its associated stack map.
 
-    // Copy arguments from registers to stack.
+    fr.checkStack(ABINonArgReg0, BytecodeOffset(func_.lineOrBytecode));
 
     const ValTypeVector& args = funcType().args();
+    ExitStubMapVector extras;
+    if (!stackMapGenerator_.generateStackmapEntriesForTrapExit(args, &extras)) {
+      return false;
+    }
+    if (!createStackMap("stack check", extras, masm.currentOffset(),
+                        HasRefTypedDebugFrame::No)) {
+      return false;
+    }
 
+    size_t reservedBytes = fr.fixedAllocSize() - masm.framePushed();
+    MOZ_ASSERT(0 == (reservedBytes % sizeof(void*)));
+
+    masm.reserveStack(reservedBytes);
+    fr.onFixedStackAllocated();
+    if (!stackMapGenerator_.machineStackTracker.pushNonGCPointers(
+            reservedBytes / sizeof(void*))) {
+      return false;
+    }
+
+    // Locals are stack allocated.  Mark ref-typed ones in the stackmap
+    // accordingly.
+    for (const Local& l : localInfo_) {
+      if (l.type == MIRType::RefOrNull) {
+        uint32_t offs = fr.localOffset(l);
+        MOZ_ASSERT(0 == (offs % sizeof(void*)));
+        stackMapGenerator_.machineStackTracker.setGCPointer(offs /
+                                                            sizeof(void*));
+      }
+    }
+
+    // Copy arguments from registers to stack.
     for (ABIArgIter<const ValTypeVector> i(args); !i.done(); i++) {
       if (!i->argInRegister()) {
         continue;
@@ -3571,9 +4187,15 @@ class BaseCompiler final : public BaseCompilerInterface {
         case MIRType::Int64:
           fr.storeLocalI64(RegI64(i->gpr64()), l);
           break;
-        case MIRType::Pointer:
+        case MIRType::RefOrNull: {
+          DebugOnly<uint32_t> offs = fr.localOffset(l);
+          MOZ_ASSERT(0 == (offs % sizeof(void*)));
           fr.storeLocalPtr(RegPtr(i->gpr()), l);
+          // We should have just visited this local in the preceding loop.
+          MOZ_ASSERT(stackMapGenerator_.machineStackTracker.isGCPointer(
+              offs / sizeof(void*)));
           break;
+        }
         case MIRType::Double:
           fr.storeLocalF64(RegF64(i->fpu()), l);
           break;
@@ -3589,7 +4211,18 @@ class BaseCompiler final : public BaseCompilerInterface {
 
     if (env_.debugEnabled()) {
       insertBreakablePoint(CallSiteDesc::EnterFrame);
+      if (!createStackMap("debug: breakable point")) {
+        return false;
+      }
     }
+
+    JitSpew(JitSpew_Codegen,
+            "# beginFunction: enter body with masm.framePushed = %u",
+            masm.framePushed());
+    MOZ_ASSERT(stackMapGenerator_.framePushedAtEntryToBody.isNothing());
+    stackMapGenerator_.framePushedAtEntryToBody.emplace(masm.framePushed());
+
+    return true;
   }
 
   void saveResult() {
@@ -3613,6 +4246,7 @@ class BaseCompiler final : public BaseCompilerInterface {
         masm.storeFloat32(RegF32(ReturnFloat32Reg), resultsAddress);
         break;
       case ExprType::Ref:
+      case ExprType::FuncRef:
       case ExprType::AnyRef:
         masm.storePtr(RegPtr(ReturnReg), resultsAddress);
         break;
@@ -3643,6 +4277,7 @@ class BaseCompiler final : public BaseCompilerInterface {
         masm.loadFloat32(resultsAddress, RegF32(ReturnFloat32Reg));
         break;
       case ExprType::Ref:
+      case ExprType::FuncRef:
       case ExprType::AnyRef:
         masm.loadPtr(resultsAddress, RegPtr(ReturnReg));
         break;
@@ -3652,7 +4287,9 @@ class BaseCompiler final : public BaseCompilerInterface {
     }
   }
 
-  bool endFunction() {
+  MOZ_MUST_USE bool endFunction() {
+    JitSpew(JitSpew_Codegen, "# endFunction: start of function epilogue");
+
     // Always branch to returnLabel_.
     masm.breakpoint();
 
@@ -3670,15 +4307,30 @@ class BaseCompiler final : public BaseCompilerInterface {
     masm.bind(&returnLabel_);
 
     if (env_.debugEnabled()) {
+      // If the return type is a ref, we need to note that in the stack maps
+      // generated here.  Note that this assumes that DebugFrame::result* and
+      // DebugFrame::cachedReturnJSValue_ are either both ref-typed or they
+      // are both not ref-typed.  It can't represent the situation where one
+      // is and the other isn't.
+      HasRefTypedDebugFrame refDebugFrame = funcType().ret().isReference()
+                                                ? HasRefTypedDebugFrame::Yes
+                                                : HasRefTypedDebugFrame::No;
+
       // Store and reload the return value from DebugFrame::return so that
       // it can be clobbered, and/or modified by the debug trap.
       saveResult();
       insertBreakablePoint(CallSiteDesc::Breakpoint);
+      if (!createStackMap("debug: breakpoint", refDebugFrame)) {
+        return false;
+      }
       insertBreakablePoint(CallSiteDesc::LeaveFrame);
+      if (!createStackMap("debug: leave frame", refDebugFrame)) {
+        return false;
+      }
       restoreResult();
     }
 
-    GenerateFunctionEpilogue(masm, fr.fixedSize(), &offsets_);
+    GenerateFunctionEpilogue(masm, fr.fixedAllocSize(), &offsets_);
 
 #if defined(JS_ION_PERF)
     // FIXME - profiling code missing.  No bug for this.
@@ -3687,6 +4339,8 @@ class BaseCompiler final : public BaseCompilerInterface {
     // gen->perfSpewer().noteEndInlineCode(masm);
 #endif
 
+    JitSpew(JitSpew_Codegen, "# endFunction: end of function epilogue");
+    JitSpew(JitSpew_Codegen, "# endFunction: start of OOL code");
     if (!generateOutOfLineCode()) {
       return false;
     }
@@ -3697,6 +4351,8 @@ class BaseCompiler final : public BaseCompilerInterface {
       return false;
     }
 
+    JitSpew(JitSpew_Codegen, "# endFunction: end of OOL code for index %d",
+            (int)func_.index);
     return !masm.oom();
   }
 
@@ -3759,6 +4415,10 @@ class BaseCompiler final : public BaseCompilerInterface {
     size_t adjustment = call.stackArgAreaSize + call.frameAlignAdjustment;
     fr.freeArgAreaAndPopBytes(adjustment, stackSpace);
 
+    MOZ_ASSERT(
+        stackMapGenerator_.framePushedExcludingOutboundCallArgs.isSome());
+    stackMapGenerator_.framePushedExcludingOutboundCallArgs.reset();
+
     if (call.isInterModule) {
       masm.loadWasmTlsRegFromFrame();
       masm.loadWasmPinnedRegsFromTls();
@@ -3773,24 +4433,26 @@ class BaseCompiler final : public BaseCompilerInterface {
     }
   }
 
-  // TODO / OPTIMIZE (Bug 1316821): This is expensive; let's roll the iterator
-  // walking into the walking done for passArg.  See comments in passArg.
+  void startCallArgs(size_t stackArgAreaSizeUnaligned, FunctionCall* call) {
+    size_t stackArgAreaSizeAligned =
+        AlignStackArgAreaSize(stackArgAreaSizeUnaligned);
+    MOZ_ASSERT(stackArgAreaSizeUnaligned <= stackArgAreaSizeAligned);
 
-  // Note, stackArgAreaSize() must process all the arguments to get the
-  // alignment right; the signature must therefore be the complete call
-  // signature.
+    // Record the masm.framePushed() value at this point, before we push args
+    // for the call, but including the alignment space placed above the args.
+    // This defines the lower limit of the stackmap that will be created for
+    // this call.
+    MOZ_ASSERT(
+        stackMapGenerator_.framePushedExcludingOutboundCallArgs.isNothing());
+    stackMapGenerator_.framePushedExcludingOutboundCallArgs.emplace(
+        // However much we've pushed so far
+        masm.framePushed() +
+        // Extra space we'll push to get the frame aligned
+        call->frameAlignAdjustment +
+        // Extra space we'll push to get the outbound arg area 16-aligned
+        (stackArgAreaSizeAligned - stackArgAreaSizeUnaligned));
 
-  template <class T>
-  size_t stackArgAreaSize(const T& args) {
-    ABIArgIter<const T> i(args);
-    while (!i.done()) {
-      i++;
-    }
-    return AlignBytes(i.stackBytesConsumedSoFar(), 16u);
-  }
-
-  void startCallArgs(size_t stackArgAreaSize, FunctionCall* call) {
-    call->stackArgAreaSize = stackArgAreaSize;
+    call->stackArgAreaSize = stackArgAreaSizeAligned;
 
     size_t adjustment = call->stackArgAreaSize + call->frameAlignAdjustment;
     fr.allocArgArea(adjustment);
@@ -3809,17 +4471,17 @@ class BaseCompiler final : public BaseCompilerInterface {
   //
   // The bulk of the work here (60%) is in the next() call, though.
   //
-  // Notably, since next() is so expensive, stackArgAreaSize() becomes
-  // expensive too.
+  // Notably, since next() is so expensive, StackArgAreaSizeUnaligned()
+  // becomes expensive too.
   //
-  // Somehow there could be a trick here where the sequence of
-  // argument types (read from the input stream) leads to a cached
-  // entry for stackArgAreaSize() and for how to pass arguments...
+  // Somehow there could be a trick here where the sequence of argument types
+  // (read from the input stream) leads to a cached entry for
+  // StackArgAreaSizeUnaligned() and for how to pass arguments...
   //
-  // But at least we could reduce the cost of stackArgAreaSize() by
-  // first reading the argument types into a (reusable) vector, then
-  // we have the outgoing size at low cost, and then we can pass
-  // args based on the info we read.
+  // But at least we could reduce the cost of StackArgAreaSizeUnaligned() by
+  // first reading the argument types into a (reusable) vector, then we have
+  // the outgoing size at low cost, and then we can pass args based on the
+  // info we read.
 
   void passArg(ValType type, const Stk& arg, FunctionCall* call) {
     switch (type.code()) {
@@ -3868,21 +4530,21 @@ class BaseCompiler final : public BaseCompilerInterface {
           }
 #if defined(JS_CODEGEN_REGISTER_PAIR)
           case ABIArg::GPR_PAIR: {
-#if defined(JS_CODEGEN_ARM)
+#  if defined(JS_CODEGEN_ARM)
             ScratchF64 scratch(*this);
             loadF64(arg, scratch);
             masm.ma_vxfer(scratch, argLoc.evenGpr(), argLoc.oddGpr());
             break;
-#elif defined(JS_CODEGEN_MIPS32)
+#  elif defined(JS_CODEGEN_MIPS32)
             ScratchF64 scratch(*this);
             loadF64(arg, scratch);
             MOZ_ASSERT(MOZ_LITTLE_ENDIAN);
             masm.moveFromDoubleLo(scratch, argLoc.evenGpr());
             masm.moveFromDoubleHi(scratch, argLoc.oddGpr());
             break;
-#else
+#  else
             MOZ_CRASH("BaseCompiler platform hook: passArg F64 pair");
-#endif
+#  endif
           }
 #endif
           case ABIArg::FPU: {
@@ -3928,8 +4590,9 @@ class BaseCompiler final : public BaseCompilerInterface {
         break;
       }
       case ValType::Ref:
+      case ValType::FuncRef:
       case ValType::AnyRef: {
-        ABIArg argLoc = call->abi.next(MIRType::Pointer);
+        ABIArg argLoc = call->abi.next(MIRType::RefOrNull);
         if (argLoc.kind() == ABIArg::Stack) {
           ScratchPtr scratch(*this);
           loadRef(arg, scratch);
@@ -3947,20 +4610,20 @@ class BaseCompiler final : public BaseCompilerInterface {
     }
   }
 
-  void callDefinition(uint32_t funcIndex, const FunctionCall& call) {
+  CodeOffset callDefinition(uint32_t funcIndex, const FunctionCall& call) {
     CallSiteDesc desc(call.lineOrBytecode, CallSiteDesc::Func);
-    masm.call(desc, funcIndex);
+    return masm.call(desc, funcIndex);
   }
 
-  void callSymbolic(SymbolicAddress callee, const FunctionCall& call) {
+  CodeOffset callSymbolic(SymbolicAddress callee, const FunctionCall& call) {
     CallSiteDesc desc(call.lineOrBytecode, CallSiteDesc::Symbolic);
-    masm.call(desc, callee);
+    return masm.call(desc, callee);
   }
 
   // Precondition: sync()
 
-  void callIndirect(uint32_t funcTypeIndex, uint32_t tableIndex,
-                    const Stk& indexVal, const FunctionCall& call) {
+  CodeOffset callIndirect(uint32_t funcTypeIndex, uint32_t tableIndex,
+                          const Stk& indexVal, const FunctionCall& call) {
     const FuncTypeWithId& funcType = env_.types[funcTypeIndex].funcType();
     MOZ_ASSERT(funcType.id.kind() != FuncTypeIdDescKind::None);
 
@@ -3970,29 +4633,30 @@ class BaseCompiler final : public BaseCompilerInterface {
 
     CallSiteDesc desc(call.lineOrBytecode, CallSiteDesc::Dynamic);
     CalleeDesc callee = CalleeDesc::wasmTable(table, funcType.id);
-    masm.wasmCallIndirect(desc, callee, NeedsBoundsCheck(true));
+    return masm.wasmCallIndirect(desc, callee, NeedsBoundsCheck(true));
   }
 
   // Precondition: sync()
 
-  void callImport(unsigned globalDataOffset, const FunctionCall& call) {
+  CodeOffset callImport(unsigned globalDataOffset, const FunctionCall& call) {
     CallSiteDesc desc(call.lineOrBytecode, CallSiteDesc::Dynamic);
     CalleeDesc callee = CalleeDesc::import(globalDataOffset);
-    masm.wasmCallImport(desc, callee);
+    return masm.wasmCallImport(desc, callee);
   }
 
-  void builtinCall(SymbolicAddress builtin, const FunctionCall& call) {
-    callSymbolic(builtin, call);
+  CodeOffset builtinCall(SymbolicAddress builtin, const FunctionCall& call) {
+    return callSymbolic(builtin, call);
   }
 
-  void builtinInstanceMethodCall(SymbolicAddress builtin,
-                                 const ABIArg& instanceArg,
-                                 const FunctionCall& call) {
+  CodeOffset builtinInstanceMethodCall(const SymbolicAddressSignature& builtin,
+                                       const ABIArg& instanceArg,
+                                       const FunctionCall& call) {
     // Builtin method calls assume the TLS register has been set.
     masm.loadWasmTlsRegFromFrame();
 
     CallSiteDesc desc(call.lineOrBytecode, CallSiteDesc::Symbolic);
-    masm.wasmCallBuiltinInstanceMethod(desc, instanceArg, builtin);
+    return masm.wasmCallBuiltinInstanceMethod(
+        desc, instanceArg, builtin.identity, builtin.failureMode);
   }
 
   //////////////////////////////////////////////////////////////////////
@@ -4013,10 +4677,11 @@ class BaseCompiler final : public BaseCompilerInterface {
 
   void moveImmF64(double d, RegF64 dest) { masm.loadConstantDouble(d, dest); }
 
-  void addInterruptCheck() {
+  MOZ_MUST_USE bool addInterruptCheck() {
     ScratchI32 tmp(*this);
     masm.loadWasmTlsRegFromFrame(tmp);
     masm.wasmInterruptCheck(tmp, bytecodeOffset());
+    return createStackMap("addInterruptCheck");
   }
 
   void jumpTable(const LabelVector& labels, Label* theTable) {
@@ -4055,7 +4720,8 @@ class BaseCompiler final : public BaseCompilerInterface {
     // Flush constant pools: offset must reflect the distance from the MOV
     // to the start of the table; as the address of the MOV is given by the
     // label, nothing must come between the bind() and the ma_mov().
-    AutoForbidPools afp(&masm, /* number of instructions in scope = */ 5);
+    AutoForbidPoolsAndNops afp(&masm,
+                               /* number of instructions in scope = */ 5);
 
     ScratchI32 scratch(*this);
 
@@ -4088,7 +4754,8 @@ class BaseCompiler final : public BaseCompilerInterface {
 
     masm.branchToComputedAddress(BaseIndex(scratch, switchValue, ScalePointer));
 #elif defined(JS_CODEGEN_ARM64)
-    AutoForbidPools afp(&masm, /* number of instructions in scope = */ 4);
+    AutoForbidPoolsAndNops afp(&masm,
+                               /* number of instructions in scope = */ 4);
 
     ScratchI32 scratch(*this);
 
@@ -4212,7 +4879,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       checkDivideSignedOverflowI64(rhs, srcDest, &done, ZeroOnOverflow(false));
     }
 
-#if defined(JS_CODEGEN_X64)
+#  if defined(JS_CODEGEN_X64)
     // The caller must set up the following situation.
     MOZ_ASSERT(srcDest.reg == rax);
     MOZ_ASSERT(reserved == specific_.rdx);
@@ -4223,14 +4890,14 @@ class BaseCompiler final : public BaseCompilerInterface {
       masm.cqo();
       masm.idivq(rhs.reg);
     }
-#elif defined(JS_CODEGEN_MIPS64)
+#  elif defined(JS_CODEGEN_MIPS64)
     if (isUnsigned) {
       masm.as_ddivu(srcDest.reg, rhs.reg);
     } else {
       masm.as_ddiv(srcDest.reg, rhs.reg);
     }
     masm.as_mflo(srcDest.reg);
-#elif defined(JS_CODEGEN_ARM64)
+#  elif defined(JS_CODEGEN_ARM64)
     ARMRegister sd(srcDest.reg, 64);
     ARMRegister r(rhs.reg, 64);
     if (isUnsigned) {
@@ -4238,9 +4905,9 @@ class BaseCompiler final : public BaseCompilerInterface {
     } else {
       masm.Sdiv(sd, sd, r);
     }
-#else
+#  else
     MOZ_CRASH("BaseCompiler platform hook: quotientI64");
-#endif
+#  endif
     masm.bind(&done);
   }
 
@@ -4256,7 +4923,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       checkDivideSignedOverflowI64(rhs, srcDest, &done, ZeroOnOverflow(true));
     }
 
-#if defined(JS_CODEGEN_X64)
+#  if defined(JS_CODEGEN_X64)
     // The caller must set up the following situation.
     MOZ_ASSERT(srcDest.reg == rax);
     MOZ_ASSERT(reserved == specific_.rdx);
@@ -4269,14 +4936,14 @@ class BaseCompiler final : public BaseCompilerInterface {
       masm.idivq(rhs.reg);
     }
     masm.movq(rdx, rax);
-#elif defined(JS_CODEGEN_MIPS64)
+#  elif defined(JS_CODEGEN_MIPS64)
     if (isUnsigned) {
       masm.as_ddivu(srcDest.reg, rhs.reg);
     } else {
       masm.as_ddiv(srcDest.reg, rhs.reg);
     }
     masm.as_mfhi(srcDest.reg);
-#elif defined(JS_CODEGEN_ARM64)
+#  elif defined(JS_CODEGEN_ARM64)
     MOZ_ASSERT(reserved.isInvalid());
     ARMRegister sd(srcDest.reg, 64);
     ARMRegister r(rhs.reg, 64);
@@ -4289,9 +4956,9 @@ class BaseCompiler final : public BaseCompilerInterface {
     }
     masm.Mul(t, t, r);
     masm.Sub(sd, sd, t);
-#else
+#  else
     MOZ_CRASH("BaseCompiler platform hook: remainderI64");
-#endif
+#  endif
     masm.bind(&done);
   }
 #endif  // RABALDR_INT_DIV_I64_CALLOUT
@@ -4424,11 +5091,11 @@ class BaseCompiler final : public BaseCompilerInterface {
 
 #ifndef RABALDR_FLOAT_TO_I64_CALLOUT
   MOZ_MUST_USE RegF64 needTempForFloatingToI64(TruncFlags flags) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+#  if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
     if (flags & TRUNC_UNSIGNED) {
       return needF64();
     }
-#endif
+#  endif
     return RegF64::Invalid();
   }
 
@@ -4477,9 +5144,9 @@ class BaseCompiler final : public BaseCompilerInterface {
     if (to == ValType::F64) {
       needs = isUnsigned && masm.convertUInt64ToDoubleNeedsTemp();
     } else {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+#  if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
       needs = true;
-#endif
+#  endif
     }
     return needs ? needI32() : RegI32::Invalid();
   }
@@ -4947,7 +5614,9 @@ class BaseCompiler final : public BaseCompilerInterface {
         masm.wasmAtomicFetchOp(access, op, rv, srcAddr, temps[0], rd);
 #endif
         break;
-      default: { MOZ_CRASH("Bad type for atomic operation"); }
+      default: {
+        MOZ_CRASH("Bad type for atomic operation");
+      }
     }
   }
 
@@ -5350,7 +6019,7 @@ class BaseCompiler final : public BaseCompilerInterface {
     using Base = PopBase<RegI64>;
 
    public:
-#if defined(JS_CODEGEN_X86)
+#  if defined(JS_CODEGEN_X86)
     explicit PopAtomicLoad64Regs(BaseCompiler* bc) : Base(bc) {
       // The result is in edx:eax, and we need ecx:ebx as a temp.  But we
       // can't reserve ebx yet, so we'll accept it as an argument to the
@@ -5360,33 +6029,33 @@ class BaseCompiler final : public BaseCompilerInterface {
       setRd(bc->specific_.edx_eax);
     }
     ~PopAtomicLoad64Regs() { bc->freeI32(bc->specific_.ecx); }
-#elif defined(JS_CODEGEN_ARM)
+#  elif defined(JS_CODEGEN_ARM)
     explicit PopAtomicLoad64Regs(BaseCompiler* bc) : Base(bc) {
       setRd(bc->needI64Pair());
     }
-#elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+#  elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     explicit PopAtomicLoad64Regs(BaseCompiler* bc) : Base(bc) {
       setRd(bc->needI64());
     }
-#else
+#  else
     explicit PopAtomicLoad64Regs(BaseCompiler* bc) : Base(bc) {
       MOZ_CRASH("BaseCompiler porting interface: PopAtomicLoad64Regs");
     }
-#endif
+#  endif
 
-#ifdef JS_CODEGEN_X86
+#  ifdef JS_CODEGEN_X86
     template <typename T>
     void atomicLoad64(const MemoryAccessDesc& access, T srcAddr, RegI32 ebx) {
       MOZ_ASSERT(ebx == js::jit::ebx);
       bc->masm.wasmAtomicLoad64(access, srcAddr, bc->specific_.ecx_ebx,
                                 getRd());
     }
-#else  // ARM, MIPS32
+#  else  // ARM, MIPS32
     template <typename T>
     void atomicLoad64(const MemoryAccessDesc& access, T srcAddr) {
       bc->masm.wasmAtomicLoad64(access, srcAddr, RegI64::Invalid(), getRd());
     }
-#endif
+#  endif
   };
 #endif  // JS_64BIT
 
@@ -5422,15 +6091,15 @@ class BaseCompiler final : public BaseCompilerInterface {
           rv = bc->popI32();
         }
         setRd(bc->specific_.eax);
-#if defined(JS_CODEGEN_X86)
+#  if defined(JS_CODEGEN_X86)
         // Single-byte is a special case handled very locally with
         // ScratchReg, see atomicRMW32 above.
         if (Scalar::byteSize(viewType) > 1) {
           temps.allocate(bc);
         }
-#else
+#  else
         temps.allocate(bc);
-#endif
+#  endif
       }
     }
     ~PopAtomicRMW32Regs() {
@@ -5799,80 +6468,27 @@ class BaseCompiler final : public BaseCompilerInterface {
 
   void emitPreBarrier(RegPtr valueAddr) {
     Label skipBarrier;
-
-    MOZ_ASSERT(valueAddr == PreBarrierReg);
-
     ScratchPtr scratch(*this);
 
-    // If no incremental GC has started, we don't need the barrier.
     masm.loadWasmTlsRegFromFrame(scratch);
-    masm.loadPtr(
-        Address(scratch, offsetof(TlsData, addressOfNeedsIncrementalBarrier)),
-        scratch);
-    masm.branchTest32(Assembler::Zero, Address(scratch, 0), Imm32(0x1),
-                      &skipBarrier);
+    EmitWasmPreBarrierGuard(masm, scratch, scratch, valueAddr, &skipBarrier);
 
-    // If the previous value is null, we don't need the barrier.
-    masm.loadPtr(Address(valueAddr, 0), scratch);
-    masm.branchTestPtr(Assembler::Zero, scratch, scratch, &skipBarrier);
-
-    // Call the barrier. This assumes PreBarrierReg contains the address of
-    // the stored value.
-    //
-    // PreBarrierReg is volatile and is preserved by the barrier.
     masm.loadWasmTlsRegFromFrame(scratch);
-    masm.loadPtr(Address(scratch, offsetof(TlsData, instance)), scratch);
-    masm.loadPtr(Address(scratch, Instance::offsetOfPreBarrierCode()), scratch);
 #ifdef JS_CODEGEN_ARM64
-    // The prebarrier stub assumes the PseudoStackPointer is set up.  We do
-    // not need to save and restore x28 because it is not yet allocatable.
+    // The prebarrier stub assumes the PseudoStackPointer is set up.  It is OK
+    // to just move the sp to x28 here because x28 is not being used by the
+    // baseline compiler and need not be saved or restored.
     MOZ_ASSERT(!GeneralRegisterSet::All().hasRegisterIndex(x28.asUnsized()));
     masm.Mov(x28, sp);
 #endif
-    masm.call(scratch);
+    EmitWasmPreBarrierCall(masm, scratch, scratch, valueAddr);
 
     masm.bind(&skipBarrier);
   }
 
-  // Emit a GC post-write barrier.  The barrier is needed to ensure that the
-  // GC is aware of slots of tenured things containing references to nursery
-  // values.
-  //
-  // The barrier has five easy steps:
-  //
-  //   Label skipBarrier;
-  //   sync();
-  //   emitPostBarrierGuard(..., &skipBarrier);
-  //   emitPostBarrier(...);
-  //   bind(&skipBarrier);
-  //
-  // These are divided up to allow other actions to be placed between them,
-  // such as saving and restoring live registers.  postBarrier() will make a
-  // call to C++ and will kill all live registers.  The initial sync() is
-  // required to make sure all paths sync the same amount.
-
-  // Pass None for `object` when the field's owner object is known to be
-  // tenured or heap-allocated.
-
-  void emitPostBarrierGuard(const Maybe<RegPtr>& object, RegPtr otherScratch,
-                            RegPtr setValue, Label* skipBarrier) {
-    // If the pointer being stored is null, no barrier.
-    masm.branchTestPtr(Assembler::Zero, setValue, setValue, skipBarrier);
-
-    // If there is a containing object and it is in the nursery, no barrier.
-    if (object) {
-      masm.branchPtrInNurseryChunk(Assembler::Equal, *object, otherScratch,
-                                   skipBarrier);
-    }
-
-    // If the pointer being stored is to a tenured object, no barrier.
-    masm.branchPtrInNurseryChunk(Assembler::NotEqual, setValue, otherScratch,
-                                 skipBarrier);
-  }
-
   // This frees the register `valueAddr`.
 
-  void emitPostBarrier(RegPtr valueAddr) {
+  MOZ_MUST_USE bool emitPostBarrierCall(RegPtr valueAddr) {
     uint32_t bytecodeOffset = iter_.lastOpcodeOffset();
 
     // The `valueAddr` is a raw pointer to the cell within some GC object or
@@ -5880,17 +6496,23 @@ class BaseCompiler final : public BaseCompilerInterface {
     // postbarrier call is active, so push a uintptr_t value.
 #ifdef JS_64BIT
     pushI64(RegI64(Register64(valueAddr)));
-    emitInstanceCall(bytecodeOffset, SigPL_, ExprType::Void,
-                     SymbolicAddress::PostBarrier);
 #else
     pushI32(RegI32(valueAddr));
-    emitInstanceCall(bytecodeOffset, SigPI_, ExprType::Void,
-                     SymbolicAddress::PostBarrier);
 #endif
+    if (!emitInstanceCall(bytecodeOffset, SASigPostBarrier,
+                          /*pushReturnedValue=*/false)) {
+      return false;
+    }
+    return true;
   }
 
-  void emitBarrieredStore(const Maybe<RegPtr>& object, RegPtr valueAddr,
-                          RegPtr value) {
+  MOZ_MUST_USE bool emitBarrieredStore(const Maybe<RegPtr>& object,
+                                       RegPtr valueAddr, RegPtr value,
+                                       ValType valueType) {
+    // TODO/AnyRef-boxing: With boxed immediates and strings, the write
+    // barrier is going to have to be more complicated.
+    ASSERT_ANYREF_IS_JSOBJECT;
+
     emitPreBarrier(valueAddr);  // Preserves valueAddr
     masm.storePtr(value, Address(valueAddr, 0));
 
@@ -5898,11 +6520,14 @@ class BaseCompiler final : public BaseCompilerInterface {
     sync();
 
     RegPtr otherScratch = needRef();
-    emitPostBarrierGuard(object, otherScratch, value, &skipBarrier);
+    EmitWasmPostBarrierGuard(masm, object, otherScratch, value, &skipBarrier);
     freeRef(otherScratch);
 
-    emitPostBarrier(valueAddr);
+    if (!emitPostBarrierCall(valueAddr)) {
+      return false;
+    }
     masm.bind(&skipBarrier);
+    return true;
   }
 
   ////////////////////////////////////////////////////////////
@@ -6094,7 +6719,8 @@ class BaseCompiler final : public BaseCompilerInterface {
   void endIfThenElse(ExprType type);
 
   void doReturn(ExprType returnType, bool popStack);
-  void pushReturnedIfNonVoid(const FunctionCall& call, ExprType type);
+  void pushReturnValueOfCall(const FunctionCall& call, ExprType type);
+  void pushReturnValueOfCall(const FunctionCall& call, MIRType type);
 
   void emitCompareI32(Assembler::Condition compareOp, ValType compareType);
   void emitCompareI64(Assembler::Condition compareOp, ValType compareType);
@@ -6121,7 +6747,8 @@ class BaseCompiler final : public BaseCompilerInterface {
   void emitRemainderI32();
   void emitRemainderU32();
 #ifdef RABALDR_INT_DIV_I64_CALLOUT
-  void emitDivOrModI64BuiltinCall(SymbolicAddress callee, ValType operandType);
+  MOZ_MUST_USE bool emitDivOrModI64BuiltinCall(SymbolicAddress callee,
+                                               ValType operandType);
 #else
   void emitQuotientI64();
   void emitQuotientU64();
@@ -6209,10 +6836,11 @@ class BaseCompiler final : public BaseCompilerInterface {
   void emitReinterpretI32AsF32();
   void emitReinterpretI64AsF64();
   void emitRound(RoundingMode roundingMode, ValType operandType);
-  void emitInstanceCall(uint32_t lineOrBytecode, const MIRTypeVector& sig,
-                        ExprType retType, SymbolicAddress builtin);
-  MOZ_MUST_USE bool emitGrowMemory();
-  MOZ_MUST_USE bool emitCurrentMemory();
+  MOZ_MUST_USE bool emitInstanceCall(uint32_t lineOrBytecode,
+                                     const SymbolicAddressSignature& builtin,
+                                     bool pushReturnedValue = true);
+  MOZ_MUST_USE bool emitMemoryGrow();
+  MOZ_MUST_USE bool emitMemorySize();
 
   MOZ_MUST_USE bool emitRefNull();
   void emitRefIsNull();
@@ -6227,16 +6855,18 @@ class BaseCompiler final : public BaseCompilerInterface {
   MOZ_MUST_USE bool emitAtomicXchg(ValType type, Scalar::Type viewType);
   void emitAtomicXchg64(MemoryAccessDesc* access, ValType type,
                         WantResult wantResult);
-#ifdef ENABLE_WASM_BULKMEM_OPS
+  MOZ_MUST_USE bool bulkmemOpsEnabled();
   MOZ_MUST_USE bool emitMemOrTableCopy(bool isMem);
-  MOZ_MUST_USE bool emitMemOrTableDrop(bool isMem);
+  MOZ_MUST_USE bool emitDataOrElemDrop(bool isData);
   MOZ_MUST_USE bool emitMemFill();
   MOZ_MUST_USE bool emitMemOrTableInit(bool isMem);
-#endif
+#ifdef ENABLE_WASM_REFTYPES
+  MOZ_MUST_USE bool emitTableFill();
   MOZ_MUST_USE bool emitTableGet();
   MOZ_MUST_USE bool emitTableGrow();
   MOZ_MUST_USE bool emitTableSet();
   MOZ_MUST_USE bool emitTableSize();
+#endif
   MOZ_MUST_USE bool emitStructNew();
   MOZ_MUST_USE bool emitStructGet();
   MOZ_MUST_USE bool emitStructSet();
@@ -6500,7 +7130,7 @@ void BaseCompiler::emitRemainderU32() {
 
 #ifndef RABALDR_INT_DIV_I64_CALLOUT
 void BaseCompiler::emitQuotientI64() {
-#ifdef JS_64BIT
+#  ifdef JS_64BIT
   int64_t c;
   uint_fast8_t power;
   if (popConstPositivePowerOfTwoI64(&c, &power, 0)) {
@@ -6524,13 +7154,13 @@ void BaseCompiler::emitQuotientI64() {
     freeI64(rs);
     pushI64(r);
   }
-#else
+#  else
   MOZ_CRASH("BaseCompiler platform hook: emitQuotientI64");
-#endif
+#  endif
 }
 
 void BaseCompiler::emitQuotientU64() {
-#ifdef JS_64BIT
+#  ifdef JS_64BIT
   int64_t c;
   uint_fast8_t power;
   if (popConstPositivePowerOfTwoI64(&c, &power, 0)) {
@@ -6548,13 +7178,13 @@ void BaseCompiler::emitQuotientU64() {
     freeI64(rs);
     pushI64(r);
   }
-#else
+#  else
   MOZ_CRASH("BaseCompiler platform hook: emitQuotientU64");
-#endif
+#  endif
 }
 
 void BaseCompiler::emitRemainderI64() {
-#ifdef JS_64BIT
+#  ifdef JS_64BIT
   int64_t c;
   uint_fast8_t power;
   if (popConstPositivePowerOfTwoI64(&c, &power, 1)) {
@@ -6583,13 +7213,13 @@ void BaseCompiler::emitRemainderI64() {
     freeI64(rs);
     pushI64(r);
   }
-#else
+#  else
   MOZ_CRASH("BaseCompiler platform hook: emitRemainderI64");
-#endif
+#  endif
 }
 
 void BaseCompiler::emitRemainderU64() {
-#ifdef JS_64BIT
+#  ifdef JS_64BIT
   int64_t c;
   uint_fast8_t power;
   if (popConstPositivePowerOfTwoI64(&c, &power, 1)) {
@@ -6605,9 +7235,9 @@ void BaseCompiler::emitRemainderU64() {
     freeI64(rs);
     pushI64(r);
   }
-#else
+#  else
   MOZ_CRASH("BaseCompiler platform hook: emitRemainderU64");
-#endif
+#  endif
 }
 #endif  // RABALDR_INT_DIV_I64_CALLOUT
 
@@ -7395,7 +8025,9 @@ void BaseCompiler::emitBranchSetup(BranchState* b) {
           pop2xF64(&b->f64.lhs, &b->f64.rhs);
           break;
         }
-        default: { MOZ_CRASH("Unexpected type for LatentOp::Compare"); }
+        default: {
+          MOZ_CRASH("Unexpected type for LatentOp::Compare");
+        }
       }
       break;
     }
@@ -7415,7 +8047,9 @@ void BaseCompiler::emitBranchSetup(BranchState* b) {
           b->i64.imm = 0;
           break;
         }
-        default: { MOZ_CRASH("Unexpected type for LatentOp::Eqz"); }
+        default: {
+          MOZ_CRASH("Unexpected type for LatentOp::Eqz");
+        }
       }
       break;
     }
@@ -7460,7 +8094,9 @@ void BaseCompiler::emitBranchPerform(BranchState* b) {
       freeF64(b->f64.rhs);
       break;
     }
-    default: { MOZ_CRASH("Unexpected type for LatentOp::Compare"); }
+    default: {
+      MOZ_CRASH("Unexpected type for LatentOp::Compare");
+    }
   }
   resetLatentOp();
 }
@@ -7540,7 +8176,9 @@ bool BaseCompiler::emitLoop() {
   if (!deadCode_) {
     masm.nopAlign(CodeAlignment);
     masm.bind(&controlItem(0).label);
-    addInterruptCheck();
+    if (!addInterruptCheck()) {
+      return false;
+    }
   }
 
   return true;
@@ -7724,6 +8362,12 @@ bool BaseCompiler::emitEnd() {
   }
 
   switch (kind) {
+    case LabelKind::Body:
+      endBlock(type);
+      iter_.popEnd();
+      MOZ_ASSERT(iter_.controlStackEmpty());
+      doReturn(type, PopStack(false));
+      return iter_.readFunctionEnd(iter_.end());
     case LabelKind::Block:
       endBlock(type);
       break;
@@ -7887,6 +8531,9 @@ bool BaseCompiler::emitDrop() {
 }
 
 void BaseCompiler::doReturn(ExprType type, bool popStack) {
+  if (deadCode_) {
+    return;
+  }
   switch (type.code()) {
     case ExprType::Void: {
       returnCleanup(popStack);
@@ -7918,13 +8565,16 @@ void BaseCompiler::doReturn(ExprType type, bool popStack) {
     }
     case ExprType::Ref:
     case ExprType::NullRef:
+    case ExprType::FuncRef:
     case ExprType::AnyRef: {
       RegPtr rv = popRef(RegPtr(ReturnReg));
       returnCleanup(popStack);
       freeRef(rv);
       break;
     }
-    default: { MOZ_CRASH("Function return type"); }
+    default: {
+      MOZ_CRASH("Function return type");
+    }
   }
 }
 
@@ -7948,7 +8598,7 @@ bool BaseCompiler::emitCallArgs(const ValTypeVector& argTypes,
                                 FunctionCall* baselineCall) {
   MOZ_ASSERT(!deadCode_);
 
-  startCallArgs(stackArgAreaSize(argTypes), baselineCall);
+  startCallArgs(StackArgAreaSizeUnaligned(argTypes), baselineCall);
 
   uint32_t numArgs = argTypes.length();
   for (size_t i = 0; i < numArgs; ++i) {
@@ -7959,43 +8609,45 @@ bool BaseCompiler::emitCallArgs(const ValTypeVector& argTypes,
   return true;
 }
 
-void BaseCompiler::pushReturnedIfNonVoid(const FunctionCall& call,
-                                         ExprType type) {
-  switch (type.code()) {
-    case ExprType::Void:
-      // There's no return value.  Do nothing.
-      break;
-    case ExprType::I32: {
+void BaseCompiler::pushReturnValueOfCall(const FunctionCall& call,
+                                         MIRType type) {
+  switch (type) {
+    case MIRType::Int32: {
       RegI32 rv = captureReturnedI32();
       pushI32(rv);
       break;
     }
-    case ExprType::I64: {
+    case MIRType::Int64: {
       RegI64 rv = captureReturnedI64();
       pushI64(rv);
       break;
     }
-    case ExprType::F32: {
+    case MIRType::Float32: {
       RegF32 rv = captureReturnedF32(call);
       pushF32(rv);
       break;
     }
-    case ExprType::F64: {
+    case MIRType::Double: {
       RegF64 rv = captureReturnedF64(call);
       pushF64(rv);
       break;
     }
-    case ExprType::Ref:
-    case ExprType::AnyRef: {
+    case MIRType::RefOrNull: {
       RegPtr rv = captureReturnedRef();
       pushRef(rv);
       break;
     }
-    case ExprType::NullRef:
-      MOZ_CRASH("NullRef not expressible");
     default:
+      // In particular, passing |type| as MIRType::Void or MIRType::Pointer to
+      // this function is an error.
       MOZ_CRASH("Function return type");
   }
+}
+
+void BaseCompiler::pushReturnValueOfCall(const FunctionCall& call,
+                                         ExprType type) {
+  MOZ_ASSERT(type.code() != ExprType::NullRef);
+  pushReturnValueOfCall(call, ToMIRType(type));
 }
 
 // For now, always sync() at the beginning of the call to easily save live
@@ -8040,17 +8692,25 @@ bool BaseCompiler::emitCall() {
     return false;
   }
 
+  CodeOffset raOffset;
   if (import) {
-    callImport(env_.funcImportGlobalDataOffsets[funcIndex], baselineCall);
+    raOffset =
+        callImport(env_.funcImportGlobalDataOffsets[funcIndex], baselineCall);
   } else {
-    callDefinition(funcIndex, baselineCall);
+    raOffset = callDefinition(funcIndex, baselineCall);
+  }
+
+  if (!createStackMap("emitCall", raOffset)) {
+    return false;
   }
 
   endCall(baselineCall, stackSpace);
 
   popValueStackBy(numArgs);
 
-  pushReturnedIfNonVoid(baselineCall, funcType.ret());
+  if (funcType.ret() != ExprType::Void) {
+    pushReturnValueOfCall(baselineCall, funcType.ret());
+  }
 
   return true;
 }
@@ -8092,13 +8752,19 @@ bool BaseCompiler::emitCallIndirect() {
     return false;
   }
 
-  callIndirect(funcTypeIndex, tableIndex, callee, baselineCall);
+  CodeOffset raOffset =
+      callIndirect(funcTypeIndex, tableIndex, callee, baselineCall);
+  if (!createStackMap("emitCallIndirect", raOffset)) {
+    return false;
+  }
 
   endCall(baselineCall, stackSpace);
 
   popValueStackBy(numArgs);
 
-  pushReturnedIfNonVoid(baselineCall, funcType.ret());
+  if (funcType.ret() != ExprType::Void) {
+    pushReturnValueOfCall(baselineCall, funcType.ret());
+  }
 
   return true;
 }
@@ -8152,19 +8818,23 @@ bool BaseCompiler::emitUnaryMathBuiltinCall(SymbolicAddress callee,
     return false;
   }
 
-  builtinCall(callee, baselineCall);
+  CodeOffset raOffset = builtinCall(callee, baselineCall);
+  if (!createStackMap("emitUnaryMathBuiltin[..]", raOffset)) {
+    return false;
+  }
 
   endCall(baselineCall, stackSpace);
 
   popValueStackBy(numArgs);
 
-  pushReturnedIfNonVoid(baselineCall, retType);
+  // We know retType isn't ExprType::Void here, so there's no need to check it.
+  pushReturnValueOfCall(baselineCall, retType);
 
   return true;
 }
 
 #ifdef RABALDR_INT_DIV_I64_CALLOUT
-void BaseCompiler::emitDivOrModI64BuiltinCall(SymbolicAddress callee,
+bool BaseCompiler::emitDivOrModI64BuiltinCall(SymbolicAddress callee,
                                               ValType operandType) {
   MOZ_ASSERT(operandType == ValType::I64);
   MOZ_ASSERT(!deadCode_);
@@ -8191,12 +8861,16 @@ void BaseCompiler::emitDivOrModI64BuiltinCall(SymbolicAddress callee,
   masm.passABIArg(srcDest.low);
   masm.passABIArg(rhs.high);
   masm.passABIArg(rhs.low);
-  masm.callWithABI(bytecodeOffset(), callee);
+  CodeOffset raOffset = masm.callWithABI(bytecodeOffset(), callee);
+  if (!createStackMap("emitDivOrModI64Bui[..]", raOffset)) {
+    return false;
+  }
 
   masm.bind(&done);
 
   freeI64(rhs);
   pushI64(srcDest);
+  return true;
 }
 #endif  // RABALDR_INT_DIV_I64_CALLOUT
 
@@ -8211,15 +8885,18 @@ bool BaseCompiler::emitConvertInt64ToFloatingCallout(SymbolicAddress callee,
   FunctionCall call(0);
 
   masm.setupWasmABICall();
-#ifdef JS_PUNBOX64
+#  ifdef JS_PUNBOX64
   MOZ_CRASH("BaseCompiler platform hook: emitConvertInt64ToFloatingCallout");
-#else
+#  else
   masm.passABIArg(input.high);
   masm.passABIArg(input.low);
-#endif
-  masm.callWithABI(
+#  endif
+  CodeOffset raOffset = masm.callWithABI(
       bytecodeOffset(), callee,
       resultType == ValType::F32 ? MoveOp::FLOAT32 : MoveOp::DOUBLE);
+  if (!createStackMap("emitConvertInt64To[..]", raOffset)) {
+    return false;
+  }
 
   freeI64(input);
 
@@ -8259,7 +8936,10 @@ bool BaseCompiler::emitConvertFloatingToInt64Callout(SymbolicAddress callee,
 
   masm.setupWasmABICall();
   masm.passABIArg(doubleInput, MoveOp::DOUBLE);
-  masm.callWithABI(bytecodeOffset(), callee);
+  CodeOffset raOffset = masm.callWithABI(bytecodeOffset(), callee);
+  if (!createStackMap("emitConvertFloatin[..]", raOffset)) {
+    return false;
+  }
 
   freeF64(doubleInput);
 
@@ -8328,6 +9008,7 @@ bool BaseCompiler::emitGetLocal() {
       pushLocalF32(slot);
       break;
     case ValType::Ref:
+    case ValType::FuncRef:
     case ValType::AnyRef:
       pushLocalRef(slot);
       break;
@@ -8392,10 +9073,11 @@ bool BaseCompiler::emitSetOrTeeLocal(uint32_t slot) {
       break;
     }
     case ValType::Ref:
+    case ValType::FuncRef:
     case ValType::AnyRef: {
       RegPtr rv = popRef();
       syncLocal(slot);
-      fr.storeLocalPtr(rv, localFromSlot(slot, MIRType::Pointer));
+      fr.storeLocalPtr(rv, localFromSlot(slot, MIRType::RefOrNull));
       if (isSetLocal) {
         freeRef(rv);
       } else {
@@ -8457,10 +9139,12 @@ bool BaseCompiler::emitGetGlobal() {
         pushF64(value.f64());
         break;
       case ValType::Ref:
-      case ValType::NullRef:
+      case ValType::FuncRef:
       case ValType::AnyRef:
-        pushRef(intptr_t(value.ptr()));
+        pushRef(intptr_t(value.ref().forCompiledCode()));
         break;
+      case ValType::NullRef:
+        MOZ_CRASH("NullRef not expressible");
       default:
         MOZ_CRASH("Global constant type");
     }
@@ -8497,6 +9181,7 @@ bool BaseCompiler::emitGetGlobal() {
       break;
     }
     case ValType::Ref:
+    case ValType::FuncRef:
     case ValType::AnyRef: {
       RegPtr rv = needRef();
       ScratchI32 tmp(*this);
@@ -8556,6 +9241,7 @@ bool BaseCompiler::emitSetGlobal() {
       break;
     }
     case ValType::Ref:
+    case ValType::FuncRef:
     case ValType::AnyRef: {
       RegPtr valueAddr(PreBarrierReg);
       needRef(valueAddr);
@@ -8565,7 +9251,10 @@ bool BaseCompiler::emitSetGlobal() {
                                      valueAddr);
       }
       RegPtr rv = popRef();
-      emitBarrieredStore(Nothing(), valueAddr, rv);  // Consumes valueAddr
+      // emitBarrieredStore consumes valueAddr
+      if (!emitBarrieredStore(Nothing(), valueAddr, rv, global.type())) {
+        return false;
+      }
       freeRef(rv);
       break;
     }
@@ -8890,7 +9579,7 @@ bool BaseCompiler::emitSelect() {
   BranchState b(&done);
   emitBranchSetup(&b);
 
-  switch (NonAnyToValType(type).code()) {
+  switch (NonTVarToValType(type).code()) {
     case ValType::I32: {
       RegI32 r, rs;
       pop2xI32(&r, &rs);
@@ -8960,6 +9649,7 @@ bool BaseCompiler::emitSelect() {
     }
     case ValType::Ref:
     case ValType::NullRef:
+    case ValType::FuncRef:
     case ValType::AnyRef: {
       RegPtr r, rs;
       pop2xRef(&r, &rs);
@@ -8970,7 +9660,9 @@ bool BaseCompiler::emitSelect() {
       pushRef(r);
       break;
     }
-    default: { MOZ_CRASH("select type"); }
+    default: {
+      MOZ_CRASH("select type");
+    }
   }
 
   return true;
@@ -9070,62 +9762,77 @@ void BaseCompiler::emitCompareRef(Assembler::Condition compareOp,
   pushI32(rd);
 }
 
-void BaseCompiler::emitInstanceCall(uint32_t lineOrBytecode,
-                                    const MIRTypeVector& sig, ExprType retType,
-                                    SymbolicAddress builtin) {
-  MOZ_ASSERT(sig[0] == MIRType::Pointer);
+bool BaseCompiler::emitInstanceCall(uint32_t lineOrBytecode,
+                                    const SymbolicAddressSignature& builtin,
+                                    bool pushReturnedValue /*=true*/) {
+  const MIRType* argTypes = builtin.argTypes;
+  MOZ_ASSERT(argTypes[0] == MIRType::Pointer);
 
   sync();
 
-  uint32_t numArgs = sig.length() - 1 /* instance */;
-  size_t stackSpace = stackConsumed(numArgs);
+  uint32_t numNonInstanceArgs = builtin.numArgs - 1 /* instance */;
+  size_t stackSpace = stackConsumed(numNonInstanceArgs);
 
   FunctionCall baselineCall(lineOrBytecode);
   beginCall(baselineCall, UseABI::System, InterModule::True);
 
   ABIArg instanceArg = reservePointerArgument(&baselineCall);
 
-  startCallArgs(stackArgAreaSize(sig), &baselineCall);
-  for (uint32_t i = 1; i < sig.length(); i++) {
+  startCallArgs(StackArgAreaSizeUnaligned(builtin), &baselineCall);
+  for (uint32_t i = 1; i < builtin.numArgs; i++) {
     ValType t;
-    switch (sig[i]) {
+    switch (argTypes[i]) {
       case MIRType::Int32:
         t = ValType::I32;
         break;
       case MIRType::Int64:
         t = ValType::I64;
         break;
-      case MIRType::Pointer:
+      case MIRType::RefOrNull:
         t = ValType::AnyRef;
+        break;
+      case MIRType::Pointer:
+        // Instance function args can now be uninterpreted pointers (eg, for
+        // the cases PostBarrier and PostBarrierFilter) so we simply treat
+        // them like the equivalently sized integer.
+        t = sizeof(void*) == 4 ? ValType::I32 : ValType::I64;
         break;
       default:
         MOZ_CRASH("Unexpected type");
     }
-    passArg(t, peek(numArgs - i), &baselineCall);
+    passArg(t, peek(numNonInstanceArgs - i), &baselineCall);
   }
-  builtinInstanceMethodCall(builtin, instanceArg, baselineCall);
+  CodeOffset raOffset =
+      builtinInstanceMethodCall(builtin, instanceArg, baselineCall);
+  if (!createStackMap("emitInstanceCall", raOffset)) {
+    return false;
+  }
+
   endCall(baselineCall, stackSpace);
 
-  popValueStackBy(numArgs);
+  popValueStackBy(numNonInstanceArgs);
 
   // Note, many clients of emitInstanceCall currently assume that pushing the
   // result here does not destroy ReturnReg.
   //
-  // Furthermore, clients assume that even if retType == ExprType::Void, the
-  // callee may have returned a status result and left it in ReturnReg for us
-  // to find, and that that register will not be destroyed here (or above).
-  // In this case the callee will have a C++ declaration stating that there is
-  // a return value.  Examples include memory and table operations that are
-  // implemented as callouts.
+  // Furthermore, clients assume that if builtin.retType != MIRType::None, the
+  // callee will have returned a result and left it in ReturnReg for us to
+  // find, and that that register will not be destroyed here (or above).
 
-  pushReturnedIfNonVoid(baselineCall, retType);
+  if (pushReturnedValue) {
+    // For the return type only, MIRType::None is used to indicate that the
+    // call doesn't return a result, that is, returns a C/C++ "void".
+    MOZ_ASSERT(builtin.retType != MIRType::None);
+    pushReturnValueOfCall(baselineCall, builtin.retType);
+  }
+  return true;
 }
 
-bool BaseCompiler::emitGrowMemory() {
+bool BaseCompiler::emitMemoryGrow() {
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
 
   Nothing arg;
-  if (!iter_.readGrowMemory(&arg)) {
+  if (!iter_.readMemoryGrow(&arg)) {
     return false;
   }
 
@@ -9133,16 +9840,13 @@ bool BaseCompiler::emitGrowMemory() {
     return true;
   }
 
-  // infallible
-  emitInstanceCall(lineOrBytecode, SigPI_, ExprType::I32,
-                   SymbolicAddress::GrowMemory);
-  return true;
+  return emitInstanceCall(lineOrBytecode, SASigMemoryGrow);
 }
 
-bool BaseCompiler::emitCurrentMemory() {
+bool BaseCompiler::emitMemorySize() {
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
 
-  if (!iter_.readCurrentMemory()) {
+  if (!iter_.readMemorySize()) {
     return false;
   }
 
@@ -9150,10 +9854,7 @@ bool BaseCompiler::emitCurrentMemory() {
     return true;
   }
 
-  // infallible
-  emitInstanceCall(lineOrBytecode, SigP_, ExprType::I32,
-                   SymbolicAddress::CurrentMemory);
-  return true;
+  return emitInstanceCall(lineOrBytecode, SASigMemorySize);
 }
 
 bool BaseCompiler::emitRefNull() {
@@ -9267,17 +9968,17 @@ bool BaseCompiler::emitAtomicLoad(ValType type, Scalar::Type viewType) {
   AccessCheck check;
   RegI32 rp = popMemoryAccess(&access, &check);
 
-#ifdef JS_CODEGEN_X86
+#  ifdef JS_CODEGEN_X86
   ScratchEBX ebx(*this);
   RegI32 tls = maybeLoadTlsForAccess(check, ebx);
   auto memaddr = prepareAtomicMemoryAccess(&access, &check, tls, rp);
   regs.atomicLoad64(access, memaddr, ebx);
-#else
+#  else
   RegI32 tls = maybeLoadTlsForAccess(check);
   auto memaddr = prepareAtomicMemoryAccess(&access, &check, tls, rp);
   regs.atomicLoad64(access, memaddr);
   maybeFreeI32(tls);
-#endif
+#  endif
 
   freeI32(rp);
 
@@ -9464,24 +10165,20 @@ bool BaseCompiler::emitWait(ValType type, uint32_t byteSize) {
     return true;
   }
 
-  // Returns -1 on trap, otherwise nonnegative result.
   switch (type.code()) {
     case ValType::I32:
-      emitInstanceCall(lineOrBytecode, SigPIIL_, ExprType::I32,
-                       SymbolicAddress::WaitI32);
+      if (!emitInstanceCall(lineOrBytecode, SASigWaitI32)) {
+        return false;
+      }
       break;
     case ValType::I64:
-      emitInstanceCall(lineOrBytecode, SigPILL_, ExprType::I32,
-                       SymbolicAddress::WaitI64);
+      if (!emitInstanceCall(lineOrBytecode, SASigWaitI64)) {
+        return false;
+      }
       break;
     default:
       MOZ_CRASH();
   }
-
-  Label ok;
-  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
-  trap(Trap::ThrowReported);
-  masm.bind(&ok);
 
   return true;
 }
@@ -9499,20 +10196,24 @@ bool BaseCompiler::emitWake() {
     return true;
   }
 
-  // Returns -1 on trap, otherwise nonnegative result.
-  emitInstanceCall(lineOrBytecode, SigPII_, ExprType::I32,
-                   SymbolicAddress::Wake);
+  return emitInstanceCall(lineOrBytecode, SASigWake);
+}
 
-  Label ok;
-  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
-  trap(Trap::ThrowReported);
-  masm.bind(&ok);
-
+// Bulk memory must be available if shared memory is enabled.
+bool BaseCompiler::bulkmemOpsEnabled() {
+#ifndef ENABLE_WASM_BULKMEM_OPS
+  if (env_.sharedMemoryEnabled == Shareable::False) {
+    return iter_.fail("bulk memory ops disabled");
+  }
+#endif
   return true;
 }
 
-#ifdef ENABLE_WASM_BULKMEM_OPS
 bool BaseCompiler::emitMemOrTableCopy(bool isMem) {
+  if (!bulkmemOpsEnabled()) {
+    return false;
+  }
+
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
 
   uint32_t dstMemOrTableIndex = 0;
@@ -9527,32 +10228,34 @@ bool BaseCompiler::emitMemOrTableCopy(bool isMem) {
     return true;
   }
 
-  // Returns -1 on trap, otherwise 0.
   if (isMem) {
     MOZ_ASSERT(srcMemOrTableIndex == 0);
     MOZ_ASSERT(dstMemOrTableIndex == 0);
-    emitInstanceCall(lineOrBytecode, SigPIII_, ExprType::Void,
-                     SymbolicAddress::MemCopy);
+    if (!emitInstanceCall(lineOrBytecode, SASigMemCopy,
+                          /*pushReturnedValue=*/false)) {
+      return false;
+    }
   } else {
     pushI32(dstMemOrTableIndex);
     pushI32(srcMemOrTableIndex);
-    emitInstanceCall(lineOrBytecode, SigPIIIII_, ExprType::Void,
-                     SymbolicAddress::TableCopy);
+    if (!emitInstanceCall(lineOrBytecode, SASigTableCopy,
+                          /*pushReturnedValue=*/false)) {
+      return false;
+    }
   }
-
-  Label ok;
-  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
-  trap(Trap::ThrowReported);
-  masm.bind(&ok);
 
   return true;
 }
 
-bool BaseCompiler::emitMemOrTableDrop(bool isMem) {
+bool BaseCompiler::emitDataOrElemDrop(bool isData) {
+  if (!bulkmemOpsEnabled()) {
+    return false;
+  }
+
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
 
   uint32_t segIndex = 0;
-  if (!iter_.readMemOrTableDrop(isMem, &segIndex)) {
+  if (!iter_.readDataOrElemDrop(isData, &segIndex)) {
     return false;
   }
 
@@ -9561,22 +10264,18 @@ bool BaseCompiler::emitMemOrTableDrop(bool isMem) {
   }
 
   // Despite the cast to int32_t, the callee regards the value as unsigned.
-  //
-  // Returns -1 on trap, otherwise 0.
   pushI32(int32_t(segIndex));
-  SymbolicAddress callee =
-      isMem ? SymbolicAddress::MemDrop : SymbolicAddress::TableDrop;
-  emitInstanceCall(lineOrBytecode, SigPI_, ExprType::Void, callee);
 
-  Label ok;
-  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
-  trap(Trap::ThrowReported);
-  masm.bind(&ok);
-
-  return true;
+  return emitInstanceCall(lineOrBytecode,
+                          isData ? SASigDataDrop : SASigElemDrop,
+                          /*pushReturnedValue=*/false);
 }
 
 bool BaseCompiler::emitMemFill() {
+  if (!bulkmemOpsEnabled()) {
+    return false;
+  }
+
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
 
   Nothing nothing;
@@ -9588,19 +10287,15 @@ bool BaseCompiler::emitMemFill() {
     return true;
   }
 
-  // Returns -1 on trap, otherwise 0.
-  emitInstanceCall(lineOrBytecode, SigPIII_, ExprType::Void,
-                   SymbolicAddress::MemFill);
-
-  Label ok;
-  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
-  trap(Trap::ThrowReported);
-  masm.bind(&ok);
-
-  return true;
+  return emitInstanceCall(lineOrBytecode, SASigMemFill,
+                          /*pushReturnedValue=*/false);
 }
 
 bool BaseCompiler::emitMemOrTableInit(bool isMem) {
+  if (!bulkmemOpsEnabled()) {
+    return false;
+  }
+
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
 
   uint32_t segIndex = 0;
@@ -9615,25 +10310,43 @@ bool BaseCompiler::emitMemOrTableInit(bool isMem) {
     return true;
   }
 
-  // Returns -1 on trap, otherwise 0.
   pushI32(int32_t(segIndex));
   if (isMem) {
-    emitInstanceCall(lineOrBytecode, SigPIIII_, ExprType::Void,
-                     SymbolicAddress::MemInit);
+    if (!emitInstanceCall(lineOrBytecode, SASigMemInit,
+                          /*pushReturnedValue=*/false)) {
+      return false;
+    }
   } else {
     pushI32(dstTableIndex);
-    emitInstanceCall(lineOrBytecode, SigPIIIII_, ExprType::Void,
-                     SymbolicAddress::TableInit);
+    if (!emitInstanceCall(lineOrBytecode, SASigTableInit,
+                          /*pushReturnedValue=*/false)) {
+      return false;
+    }
   }
-
-  Label ok;
-  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &ok);
-  trap(Trap::ThrowReported);
-  masm.bind(&ok);
 
   return true;
 }
-#endif
+
+#ifdef ENABLE_WASM_REFTYPES
+MOZ_MUST_USE
+bool BaseCompiler::emitTableFill() {
+  uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
+
+  Nothing nothing;
+  uint32_t tableIndex;
+  if (!iter_.readTableFill(&tableIndex, &nothing, &nothing, &nothing)) {
+    return false;
+  }
+
+  if (deadCode_) {
+    return true;
+  }
+
+  // fill(start:u32, val:ref, len:u32, table:u32) -> u32
+  pushI32(tableIndex);
+  return emitInstanceCall(lineOrBytecode, SASigTableFill,
+                          /*pushReturnedValue=*/false);
+}
 
 MOZ_MUST_USE
 bool BaseCompiler::emitTableGet() {
@@ -9646,17 +10359,18 @@ bool BaseCompiler::emitTableGet() {
   if (deadCode_) {
     return true;
   }
-  // get(index:u32, table:u32) -> anyref
-  //
-  // Returns (void*)-1 for error, this will not be confused with a real ref
-  // value.
+  // get(index:u32, table:u32) -> uintptr_t(AnyRef)
   pushI32(tableIndex);
-  emitInstanceCall(lineOrBytecode, SigPII_, ExprType::AnyRef,
-                   SymbolicAddress::TableGet);
-  Label noTrap;
-  masm.branchPtr(Assembler::NotEqual, ReturnReg, Imm32(-1), &noTrap);
-  trap(Trap::ThrowReported);
-  masm.bind(&noTrap);
+  if (!emitInstanceCall(lineOrBytecode, SASigTableGet,
+                        /*pushReturnedValue=*/false)) {
+    return false;
+  }
+
+  // Push the resulting anyref back on the eval stack.  NOTE: needRef() must
+  // not kill the value in the register.
+  RegPtr r = RegPtr(ReturnReg);
+  needRef(r);
+  pushRef(r);
 
   return true;
 }
@@ -9667,20 +10381,15 @@ bool BaseCompiler::emitTableGrow() {
   Nothing delta;
   Nothing initValue;
   uint32_t tableIndex;
-  if (!iter_.readTableGrow(&tableIndex, &delta, &initValue)) {
+  if (!iter_.readTableGrow(&tableIndex, &initValue, &delta)) {
     return false;
   }
   if (deadCode_) {
     return true;
   }
-  // grow(delta:u32, initValue:anyref, table:u32) -> u32
-  //
-  // infallible.
+  // grow(initValue:anyref, delta:u32, table:u32) -> u32
   pushI32(tableIndex);
-  emitInstanceCall(lineOrBytecode, SigPIPI_, ExprType::I32,
-                   SymbolicAddress::TableGrow);
-
-  return true;
+  return emitInstanceCall(lineOrBytecode, SASigTableGrow);
 }
 
 MOZ_MUST_USE
@@ -9695,16 +10404,9 @@ bool BaseCompiler::emitTableSet() {
     return true;
   }
   // set(index:u32, value:ref, table:u32) -> i32
-  //
-  // Returns -1 on range error, otherwise 0 (which is then ignored).
   pushI32(tableIndex);
-  emitInstanceCall(lineOrBytecode, SigPIPI_, ExprType::Void,
-                   SymbolicAddress::TableSet);
-  Label noTrap;
-  masm.branchTest32(Assembler::NotSigned, ReturnReg, ReturnReg, &noTrap);
-  trap(Trap::ThrowReported);
-  masm.bind(&noTrap);
-  return true;
+  return emitInstanceCall(lineOrBytecode, SASigTableSet,
+                          /*pushReturnedValue=*/false);
 }
 
 MOZ_MUST_USE
@@ -9718,13 +10420,10 @@ bool BaseCompiler::emitTableSize() {
     return true;
   }
   // size(table:u32) -> u32
-  //
-  // infallible.
   pushI32(tableIndex);
-  emitInstanceCall(lineOrBytecode, SigPI_, ExprType::I32,
-                   SymbolicAddress::TableSize);
-  return true;
+  return emitInstanceCall(lineOrBytecode, SASigTableSize);
 }
+#endif
 
 bool BaseCompiler::emitStructNew() {
   uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
@@ -9747,15 +10446,9 @@ bool BaseCompiler::emitStructNew() {
   const StructType& structType = env_.types[typeIndex].structType();
 
   pushI32(structType.moduleIndex_);
-  emitInstanceCall(lineOrBytecode, SigPI_, ExprType::AnyRef,
-                   SymbolicAddress::StructNew);
-
-  // Null pointer check.
-
-  Label ok;
-  masm.branchTestPtr(Assembler::NonZero, ReturnReg, ReturnReg, &ok);
-  trap(Trap::ThrowReported);
-  masm.bind(&ok);
+  if (!emitInstanceCall(lineOrBytecode, SASigStructNew)) {
+    return false;
+  }
 
   // As many arguments as there are fields.
 
@@ -9808,6 +10501,7 @@ bool BaseCompiler::emitStructNew() {
         break;
       }
       case ValType::Ref:
+      case ValType::FuncRef:
       case ValType::AnyRef: {
         RegPtr value = popRef();
         masm.storePtr(value, Address(rdata, offs));
@@ -9828,7 +10522,8 @@ bool BaseCompiler::emitStructNew() {
         }
 
         RegPtr otherScratch = needRef();
-        emitPostBarrierGuard(Some(rowner), otherScratch, value, &skipBarrier);
+        EmitWasmPostBarrierGuard(masm, Some(rowner), otherScratch, value,
+                                 &skipBarrier);
         freeRef(otherScratch);
 
         if (!structType.isInline_) {
@@ -9837,11 +10532,17 @@ bool BaseCompiler::emitStructNew() {
 
         freeRef(value);
 
+        // TODO/AnyRef-boxing: With boxed immediates and strings, the write
+        // barrier is going to have to be more complicated.
+        ASSERT_ANYREF_IS_JSOBJECT;
+
         pushRef(rp);  // Save rp across the call
         RegPtr valueAddr = needRef();
         masm.computeEffectiveAddress(Address(rdata, offs), valueAddr);
-        emitPostBarrier(valueAddr);  // Consumes valueAddr
-        popRef(rp);                  // Restore rp
+        if (!emitPostBarrierCall(valueAddr)) {  // Consumes valueAddr
+          return false;
+        }
+        popRef(rp);  // Restore rp
         if (!structType.isInline_) {
           masm.loadPtr(Address(rp, OutlineTypedObject::offsetOfData()), rdata);
         }
@@ -9851,7 +10552,9 @@ bool BaseCompiler::emitStructNew() {
       }
       case ValType::NullRef:
         MOZ_CRASH("NullRef not expressible");
-      default: { MOZ_CRASH("Unexpected field type"); }
+      default: {
+        MOZ_CRASH("Unexpected field type");
+      }
     }
   }
 
@@ -9916,6 +10619,7 @@ bool BaseCompiler::emitStructGet() {
       break;
     }
     case ValType::Ref:
+    case ValType::FuncRef:
     case ValType::AnyRef: {
       RegPtr r = needRef();
       masm.loadPtr(Address(rp, offs), r);
@@ -9925,7 +10629,9 @@ bool BaseCompiler::emitStructGet() {
     case ValType::NullRef: {
       MOZ_CRASH("NullRef not expressible");
     }
-    default: { MOZ_CRASH("Unexpected field type"); }
+    default: {
+      MOZ_CRASH("Unexpected field type");
+    }
   }
 
   freeRef(rp);
@@ -9975,6 +10681,7 @@ bool BaseCompiler::emitStructSet() {
       rd = popF64();
       break;
     case ValType::Ref:
+    case ValType::FuncRef:
     case ValType::AnyRef:
       rr = popRef();
       break;
@@ -10018,16 +10725,23 @@ bool BaseCompiler::emitStructSet() {
       break;
     }
     case ValType::Ref:
+    case ValType::FuncRef:
     case ValType::AnyRef: {
       masm.computeEffectiveAddress(Address(rp, offs), valueAddr);
-      emitBarrieredStore(Some(rp), valueAddr, rr);  // Consumes valueAddr
+      // emitBarrieredStore consumes valueAddr
+      if (!emitBarrieredStore(Some(rp), valueAddr, rr,
+                              structType.fields_[fieldIndex].type)) {
+        return false;
+      }
       freeRef(rr);
       break;
     }
     case ValType::NullRef: {
       MOZ_CRASH("NullRef not expressible");
     }
-    default: { MOZ_CRASH("Unexpected field type"); }
+    default: {
+      MOZ_CRASH("Unexpected field type");
+    }
   }
 
   freeRef(rp);
@@ -10048,6 +10762,10 @@ bool BaseCompiler::emitStructNarrow() {
     return true;
   }
 
+  // Currently not supported by struct.narrow validation.
+  MOZ_ASSERT(inputType != ValType::FuncRef);
+  MOZ_ASSERT(outputType != ValType::FuncRef);
+
   // AnyRef -> AnyRef is a no-op, just leave the value on the stack.
 
   if (inputType == ValType::AnyRef && outputType == ValType::AnyRef) {
@@ -10061,21 +10779,18 @@ bool BaseCompiler::emitStructNarrow() {
   bool mustUnboxAnyref = inputType == ValType::AnyRef;
 
   // Dynamic downcast (ref T) -> (ref U), leaves rp or null
-  //
-  // Infallible.
   const StructType& outputStruct =
       env_.types[outputType.refTypeIndex()].structType();
 
   pushI32(mustUnboxAnyref);
   pushI32(outputStruct.moduleIndex_);
   pushRef(rp);
-  emitInstanceCall(lineOrBytecode, SigPIIP_, ExprType::AnyRef,
-                   SymbolicAddress::StructNarrow);
-
-  return true;
+  return emitInstanceCall(lineOrBytecode, SASigStructNarrow);
 }
 
 bool BaseCompiler::emitBody() {
+  MOZ_ASSERT(stackMapGenerator_.framePushedAtEntryToBody.isSome());
+
   if (!iter_.readFunctionStart(funcType().ret())) {
     return false;
   }
@@ -10116,14 +10831,34 @@ bool BaseCompiler::emitBody() {
 
 #define emitIntDivCallout(doEmit, symbol, type)   \
   iter_.readBinary(type, &unused_a, &unused_b) && \
-      (deadCode_ || (doEmit(symbol, type), true))
+      (deadCode_ || doEmit(symbol, type))
+
+#ifdef DEBUG
+    // Check that the number of ref-typed entries in the operand stack matches
+    // reality.
+#  define CHECK_POINTER_COUNT                                             \
+    do {                                                                  \
+      MOZ_ASSERT(countMemRefsOnStk() == stackMapGenerator_.memRefsOnStk); \
+    } while (0)
+#else
+#  define CHECK_POINTER_COUNT \
+    do {                      \
+    } while (0)
+#endif
 
 #define CHECK(E) \
   if (!(E)) return false
-#define NEXT() continue
+#define NEXT()           \
+  {                      \
+    CHECK_POINTER_COUNT; \
+    continue;            \
+  }
 #define CHECK_NEXT(E)     \
   if (!(E)) return false; \
-  continue
+  {                       \
+    CHECK_POINTER_COUNT;  \
+    continue;             \
+  }
 
     // TODO / EVALUATE (bug 1316845): Not obvious that this attempt at
     // reducing overhead is really paying off relative to making the check
@@ -10156,19 +10891,28 @@ bool BaseCompiler::emitBody() {
       sync();
 
       insertBreakablePoint(CallSiteDesc::Breakpoint);
+      if (!createStackMap("debug: per insn")) {
+        return false;
+      }
     }
+
+    // Going below framePushedAtEntryToBody would imply that we've
+    // popped off the machine stack, part of the frame created by
+    // beginFunction().
+    MOZ_ASSERT(masm.framePushed() >=
+               stackMapGenerator_.framePushedAtEntryToBody.value());
+
+    // At this point we're definitely not generating code for a function call.
+    MOZ_ASSERT(
+        stackMapGenerator_.framePushedExcludingOutboundCallArgs.isNothing());
 
     switch (op.b0) {
       case uint16_t(Op::End):
         if (!emitEnd()) {
           return false;
         }
-
         if (iter_.controlStackEmpty()) {
-          if (!deadCode_) {
-            doReturn(funcType().ret(), PopStack(false));
-          }
-          return iter_.readFunctionEnd(iter_.end());
+          return true;
         }
         NEXT();
 
@@ -10218,6 +10962,12 @@ bool BaseCompiler::emitBody() {
         CHECK_NEXT(emitGetGlobal());
       case uint16_t(Op::SetGlobal):
         CHECK_NEXT(emitSetGlobal());
+#ifdef ENABLE_WASM_REFTYPES
+      case uint16_t(Op::TableGet):
+        CHECK_NEXT(emitTableGet());
+      case uint16_t(Op::TableSet):
+        CHECK_NEXT(emitTableSet());
+#endif
 
       // Select
       case uint16_t(Op::Select):
@@ -10710,28 +11460,24 @@ bool BaseCompiler::emitBody() {
             emitConversion(emitExtendI64_32, ValType::I64, ValType::I64));
 
       // Memory Related
-      case uint16_t(Op::GrowMemory):
-        CHECK_NEXT(emitGrowMemory());
-      case uint16_t(Op::CurrentMemory):
-        CHECK_NEXT(emitCurrentMemory());
+      case uint16_t(Op::MemoryGrow):
+        CHECK_NEXT(emitMemoryGrow());
+      case uint16_t(Op::MemorySize):
+        CHECK_NEXT(emitMemorySize());
 
 #ifdef ENABLE_WASM_GC
       case uint16_t(Op::RefEq):
-        if (env_.gcTypesEnabled() == HasGcTypes::False) {
+        if (!env_.gcTypesEnabled()) {
           return iter_.unrecognizedOpcode(&op);
         }
         CHECK_NEXT(
             emitComparison(emitCompareRef, ValType::AnyRef, Assembler::Equal));
+#endif
+#ifdef ENABLE_WASM_REFTYPES
       case uint16_t(Op::RefNull):
-        if (env_.gcTypesEnabled() == HasGcTypes::False) {
-          return iter_.unrecognizedOpcode(&op);
-        }
         CHECK_NEXT(emitRefNull());
         break;
       case uint16_t(Op::RefIsNull):
-        if (env_.gcTypesEnabled() == HasGcTypes::False) {
-          return iter_.unrecognizedOpcode(&op);
-        }
         CHECK_NEXT(
             emitConversion(emitRefIsNull, ValType::AnyRef, ValType::I32));
         break;
@@ -10740,21 +11486,21 @@ bool BaseCompiler::emitBody() {
       // "Miscellaneous" operations
       case uint16_t(Op::MiscPrefix): {
         switch (op.b1) {
-          case uint16_t(MiscOp::I32TruncSSatF32):
+          case uint32_t(MiscOp::I32TruncSSatF32):
             CHECK_NEXT(emitConversionOOM(emitTruncateF32ToI32<TRUNC_SATURATING>,
                                          ValType::F32, ValType::I32));
-          case uint16_t(MiscOp::I32TruncUSatF32):
+          case uint32_t(MiscOp::I32TruncUSatF32):
             CHECK_NEXT(emitConversionOOM(
                 emitTruncateF32ToI32<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                 ValType::F32, ValType::I32));
-          case uint16_t(MiscOp::I32TruncSSatF64):
+          case uint32_t(MiscOp::I32TruncSSatF64):
             CHECK_NEXT(emitConversionOOM(emitTruncateF64ToI32<TRUNC_SATURATING>,
                                          ValType::F64, ValType::I32));
-          case uint16_t(MiscOp::I32TruncUSatF64):
+          case uint32_t(MiscOp::I32TruncUSatF64):
             CHECK_NEXT(emitConversionOOM(
                 emitTruncateF64ToI32<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                 ValType::F64, ValType::I32));
-          case uint16_t(MiscOp::I64TruncSSatF32):
+          case uint32_t(MiscOp::I64TruncSSatF32):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
             CHECK_NEXT(emitCalloutConversionOOM(
                 emitConvertFloatingToInt64Callout,
@@ -10764,7 +11510,7 @@ bool BaseCompiler::emitBody() {
             CHECK_NEXT(emitConversionOOM(emitTruncateF32ToI64<TRUNC_SATURATING>,
                                          ValType::F32, ValType::I64));
 #endif
-          case uint16_t(MiscOp::I64TruncUSatF32):
+          case uint32_t(MiscOp::I64TruncUSatF32):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
             CHECK_NEXT(emitCalloutConversionOOM(
                 emitConvertFloatingToInt64Callout,
@@ -10775,7 +11521,7 @@ bool BaseCompiler::emitBody() {
                 emitTruncateF32ToI64<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                 ValType::F32, ValType::I64));
 #endif
-          case uint16_t(MiscOp::I64TruncSSatF64):
+          case uint32_t(MiscOp::I64TruncSSatF64):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
             CHECK_NEXT(emitCalloutConversionOOM(
                 emitConvertFloatingToInt64Callout,
@@ -10785,7 +11531,7 @@ bool BaseCompiler::emitBody() {
             CHECK_NEXT(emitConversionOOM(emitTruncateF64ToI64<TRUNC_SATURATING>,
                                          ValType::F64, ValType::I64));
 #endif
-          case uint16_t(MiscOp::I64TruncUSatF64):
+          case uint32_t(MiscOp::I64TruncUSatF64):
 #ifdef RABALDR_FLOAT_TO_I64_CALLOUT
             CHECK_NEXT(emitCalloutConversionOOM(
                 emitConvertFloatingToInt64Callout,
@@ -10796,50 +11542,46 @@ bool BaseCompiler::emitBody() {
                 emitTruncateF64ToI64<TRUNC_UNSIGNED | TRUNC_SATURATING>,
                 ValType::F64, ValType::I64));
 #endif
-#ifdef ENABLE_WASM_BULKMEM_OPS
-          case uint16_t(MiscOp::MemCopy):
+          case uint32_t(MiscOp::MemCopy):
             CHECK_NEXT(emitMemOrTableCopy(/*isMem=*/true));
-          case uint16_t(MiscOp::MemDrop):
-            CHECK_NEXT(emitMemOrTableDrop(/*isMem=*/true));
-          case uint16_t(MiscOp::MemFill):
+          case uint32_t(MiscOp::DataDrop):
+            CHECK_NEXT(emitDataOrElemDrop(/*isData=*/true));
+          case uint32_t(MiscOp::MemFill):
             CHECK_NEXT(emitMemFill());
-          case uint16_t(MiscOp::MemInit):
+          case uint32_t(MiscOp::MemInit):
             CHECK_NEXT(emitMemOrTableInit(/*isMem=*/true));
-          case uint16_t(MiscOp::TableCopy):
+          case uint32_t(MiscOp::TableCopy):
             CHECK_NEXT(emitMemOrTableCopy(/*isMem=*/false));
-          case uint16_t(MiscOp::TableDrop):
-            CHECK_NEXT(emitMemOrTableDrop(/*isMem=*/false));
-          case uint16_t(MiscOp::TableInit):
+          case uint32_t(MiscOp::ElemDrop):
+            CHECK_NEXT(emitDataOrElemDrop(/*isData=*/false));
+          case uint32_t(MiscOp::TableInit):
             CHECK_NEXT(emitMemOrTableInit(/*isMem=*/false));
-#endif  // ENABLE_WASM_BULKMEM_OPS
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
-          case uint16_t(MiscOp::TableGet):
-            CHECK_NEXT(emitTableGet());
-          case uint16_t(MiscOp::TableGrow):
+#ifdef ENABLE_WASM_REFTYPES
+          case uint32_t(MiscOp::TableFill):
+            CHECK_NEXT(emitTableFill());
+          case uint32_t(MiscOp::TableGrow):
             CHECK_NEXT(emitTableGrow());
-          case uint16_t(MiscOp::TableSet):
-            CHECK_NEXT(emitTableSet());
-          case uint16_t(MiscOp::TableSize):
+          case uint32_t(MiscOp::TableSize):
             CHECK_NEXT(emitTableSize());
 #endif
 #ifdef ENABLE_WASM_GC
-          case uint16_t(MiscOp::StructNew):
-            if (env_.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructNew):
+            if (!env_.gcTypesEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
             CHECK_NEXT(emitStructNew());
-          case uint16_t(MiscOp::StructGet):
-            if (env_.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructGet):
+            if (!env_.gcTypesEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
             CHECK_NEXT(emitStructGet());
-          case uint16_t(MiscOp::StructSet):
-            if (env_.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructSet):
+            if (!env_.gcTypesEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
             CHECK_NEXT(emitStructSet());
-          case uint16_t(MiscOp::StructNarrow):
-            if (env_.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructNarrow):
+            if (!env_.gcTypesEnabled()) {
               return iter_.unrecognizedOpcode(&op);
             }
             CHECK_NEXT(emitStructNarrow());
@@ -10853,182 +11595,182 @@ bool BaseCompiler::emitBody() {
       // Thread operations
       case uint16_t(Op::ThreadPrefix): {
         switch (op.b1) {
-          case uint16_t(ThreadOp::Wake):
+          case uint32_t(ThreadOp::Wake):
             CHECK_NEXT(emitWake());
 
-          case uint16_t(ThreadOp::I32Wait):
+          case uint32_t(ThreadOp::I32Wait):
             CHECK_NEXT(emitWait(ValType::I32, 4));
-          case uint16_t(ThreadOp::I64Wait):
+          case uint32_t(ThreadOp::I64Wait):
             CHECK_NEXT(emitWait(ValType::I64, 8));
 
-          case uint16_t(ThreadOp::I32AtomicLoad):
+          case uint32_t(ThreadOp::I32AtomicLoad):
             CHECK_NEXT(emitAtomicLoad(ValType::I32, Scalar::Int32));
-          case uint16_t(ThreadOp::I64AtomicLoad):
+          case uint32_t(ThreadOp::I64AtomicLoad):
             CHECK_NEXT(emitAtomicLoad(ValType::I64, Scalar::Int64));
-          case uint16_t(ThreadOp::I32AtomicLoad8U):
+          case uint32_t(ThreadOp::I32AtomicLoad8U):
             CHECK_NEXT(emitAtomicLoad(ValType::I32, Scalar::Uint8));
-          case uint16_t(ThreadOp::I32AtomicLoad16U):
+          case uint32_t(ThreadOp::I32AtomicLoad16U):
             CHECK_NEXT(emitAtomicLoad(ValType::I32, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicLoad8U):
+          case uint32_t(ThreadOp::I64AtomicLoad8U):
             CHECK_NEXT(emitAtomicLoad(ValType::I64, Scalar::Uint8));
-          case uint16_t(ThreadOp::I64AtomicLoad16U):
+          case uint32_t(ThreadOp::I64AtomicLoad16U):
             CHECK_NEXT(emitAtomicLoad(ValType::I64, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicLoad32U):
+          case uint32_t(ThreadOp::I64AtomicLoad32U):
             CHECK_NEXT(emitAtomicLoad(ValType::I64, Scalar::Uint32));
 
-          case uint16_t(ThreadOp::I32AtomicStore):
+          case uint32_t(ThreadOp::I32AtomicStore):
             CHECK_NEXT(emitAtomicStore(ValType::I32, Scalar::Int32));
-          case uint16_t(ThreadOp::I64AtomicStore):
+          case uint32_t(ThreadOp::I64AtomicStore):
             CHECK_NEXT(emitAtomicStore(ValType::I64, Scalar::Int64));
-          case uint16_t(ThreadOp::I32AtomicStore8U):
+          case uint32_t(ThreadOp::I32AtomicStore8U):
             CHECK_NEXT(emitAtomicStore(ValType::I32, Scalar::Uint8));
-          case uint16_t(ThreadOp::I32AtomicStore16U):
+          case uint32_t(ThreadOp::I32AtomicStore16U):
             CHECK_NEXT(emitAtomicStore(ValType::I32, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicStore8U):
+          case uint32_t(ThreadOp::I64AtomicStore8U):
             CHECK_NEXT(emitAtomicStore(ValType::I64, Scalar::Uint8));
-          case uint16_t(ThreadOp::I64AtomicStore16U):
+          case uint32_t(ThreadOp::I64AtomicStore16U):
             CHECK_NEXT(emitAtomicStore(ValType::I64, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicStore32U):
+          case uint32_t(ThreadOp::I64AtomicStore32U):
             CHECK_NEXT(emitAtomicStore(ValType::I64, Scalar::Uint32));
 
-          case uint16_t(ThreadOp::I32AtomicAdd):
+          case uint32_t(ThreadOp::I32AtomicAdd):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Int32, AtomicFetchAddOp));
-          case uint16_t(ThreadOp::I64AtomicAdd):
+          case uint32_t(ThreadOp::I64AtomicAdd):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Int64, AtomicFetchAddOp));
-          case uint16_t(ThreadOp::I32AtomicAdd8U):
+          case uint32_t(ThreadOp::I32AtomicAdd8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint8, AtomicFetchAddOp));
-          case uint16_t(ThreadOp::I32AtomicAdd16U):
+          case uint32_t(ThreadOp::I32AtomicAdd16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint16, AtomicFetchAddOp));
-          case uint16_t(ThreadOp::I64AtomicAdd8U):
+          case uint32_t(ThreadOp::I64AtomicAdd8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint8, AtomicFetchAddOp));
-          case uint16_t(ThreadOp::I64AtomicAdd16U):
+          case uint32_t(ThreadOp::I64AtomicAdd16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint16, AtomicFetchAddOp));
-          case uint16_t(ThreadOp::I64AtomicAdd32U):
+          case uint32_t(ThreadOp::I64AtomicAdd32U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint32, AtomicFetchAddOp));
 
-          case uint16_t(ThreadOp::I32AtomicSub):
+          case uint32_t(ThreadOp::I32AtomicSub):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Int32, AtomicFetchSubOp));
-          case uint16_t(ThreadOp::I64AtomicSub):
+          case uint32_t(ThreadOp::I64AtomicSub):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Int64, AtomicFetchSubOp));
-          case uint16_t(ThreadOp::I32AtomicSub8U):
+          case uint32_t(ThreadOp::I32AtomicSub8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint8, AtomicFetchSubOp));
-          case uint16_t(ThreadOp::I32AtomicSub16U):
+          case uint32_t(ThreadOp::I32AtomicSub16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint16, AtomicFetchSubOp));
-          case uint16_t(ThreadOp::I64AtomicSub8U):
+          case uint32_t(ThreadOp::I64AtomicSub8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint8, AtomicFetchSubOp));
-          case uint16_t(ThreadOp::I64AtomicSub16U):
+          case uint32_t(ThreadOp::I64AtomicSub16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint16, AtomicFetchSubOp));
-          case uint16_t(ThreadOp::I64AtomicSub32U):
+          case uint32_t(ThreadOp::I64AtomicSub32U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint32, AtomicFetchSubOp));
 
-          case uint16_t(ThreadOp::I32AtomicAnd):
+          case uint32_t(ThreadOp::I32AtomicAnd):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Int32, AtomicFetchAndOp));
-          case uint16_t(ThreadOp::I64AtomicAnd):
+          case uint32_t(ThreadOp::I64AtomicAnd):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Int64, AtomicFetchAndOp));
-          case uint16_t(ThreadOp::I32AtomicAnd8U):
+          case uint32_t(ThreadOp::I32AtomicAnd8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint8, AtomicFetchAndOp));
-          case uint16_t(ThreadOp::I32AtomicAnd16U):
+          case uint32_t(ThreadOp::I32AtomicAnd16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint16, AtomicFetchAndOp));
-          case uint16_t(ThreadOp::I64AtomicAnd8U):
+          case uint32_t(ThreadOp::I64AtomicAnd8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint8, AtomicFetchAndOp));
-          case uint16_t(ThreadOp::I64AtomicAnd16U):
+          case uint32_t(ThreadOp::I64AtomicAnd16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint16, AtomicFetchAndOp));
-          case uint16_t(ThreadOp::I64AtomicAnd32U):
+          case uint32_t(ThreadOp::I64AtomicAnd32U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint32, AtomicFetchAndOp));
 
-          case uint16_t(ThreadOp::I32AtomicOr):
+          case uint32_t(ThreadOp::I32AtomicOr):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Int32, AtomicFetchOrOp));
-          case uint16_t(ThreadOp::I64AtomicOr):
+          case uint32_t(ThreadOp::I64AtomicOr):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Int64, AtomicFetchOrOp));
-          case uint16_t(ThreadOp::I32AtomicOr8U):
+          case uint32_t(ThreadOp::I32AtomicOr8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint8, AtomicFetchOrOp));
-          case uint16_t(ThreadOp::I32AtomicOr16U):
+          case uint32_t(ThreadOp::I32AtomicOr16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint16, AtomicFetchOrOp));
-          case uint16_t(ThreadOp::I64AtomicOr8U):
+          case uint32_t(ThreadOp::I64AtomicOr8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint8, AtomicFetchOrOp));
-          case uint16_t(ThreadOp::I64AtomicOr16U):
+          case uint32_t(ThreadOp::I64AtomicOr16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint16, AtomicFetchOrOp));
-          case uint16_t(ThreadOp::I64AtomicOr32U):
+          case uint32_t(ThreadOp::I64AtomicOr32U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint32, AtomicFetchOrOp));
 
-          case uint16_t(ThreadOp::I32AtomicXor):
+          case uint32_t(ThreadOp::I32AtomicXor):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Int32, AtomicFetchXorOp));
-          case uint16_t(ThreadOp::I64AtomicXor):
+          case uint32_t(ThreadOp::I64AtomicXor):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Int64, AtomicFetchXorOp));
-          case uint16_t(ThreadOp::I32AtomicXor8U):
+          case uint32_t(ThreadOp::I32AtomicXor8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint8, AtomicFetchXorOp));
-          case uint16_t(ThreadOp::I32AtomicXor16U):
+          case uint32_t(ThreadOp::I32AtomicXor16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I32, Scalar::Uint16, AtomicFetchXorOp));
-          case uint16_t(ThreadOp::I64AtomicXor8U):
+          case uint32_t(ThreadOp::I64AtomicXor8U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint8, AtomicFetchXorOp));
-          case uint16_t(ThreadOp::I64AtomicXor16U):
+          case uint32_t(ThreadOp::I64AtomicXor16U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint16, AtomicFetchXorOp));
-          case uint16_t(ThreadOp::I64AtomicXor32U):
+          case uint32_t(ThreadOp::I64AtomicXor32U):
             CHECK_NEXT(
                 emitAtomicRMW(ValType::I64, Scalar::Uint32, AtomicFetchXorOp));
 
-          case uint16_t(ThreadOp::I32AtomicXchg):
+          case uint32_t(ThreadOp::I32AtomicXchg):
             CHECK_NEXT(emitAtomicXchg(ValType::I32, Scalar::Int32));
-          case uint16_t(ThreadOp::I64AtomicXchg):
+          case uint32_t(ThreadOp::I64AtomicXchg):
             CHECK_NEXT(emitAtomicXchg(ValType::I64, Scalar::Int64));
-          case uint16_t(ThreadOp::I32AtomicXchg8U):
+          case uint32_t(ThreadOp::I32AtomicXchg8U):
             CHECK_NEXT(emitAtomicXchg(ValType::I32, Scalar::Uint8));
-          case uint16_t(ThreadOp::I32AtomicXchg16U):
+          case uint32_t(ThreadOp::I32AtomicXchg16U):
             CHECK_NEXT(emitAtomicXchg(ValType::I32, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicXchg8U):
+          case uint32_t(ThreadOp::I64AtomicXchg8U):
             CHECK_NEXT(emitAtomicXchg(ValType::I64, Scalar::Uint8));
-          case uint16_t(ThreadOp::I64AtomicXchg16U):
+          case uint32_t(ThreadOp::I64AtomicXchg16U):
             CHECK_NEXT(emitAtomicXchg(ValType::I64, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicXchg32U):
+          case uint32_t(ThreadOp::I64AtomicXchg32U):
             CHECK_NEXT(emitAtomicXchg(ValType::I64, Scalar::Uint32));
 
-          case uint16_t(ThreadOp::I32AtomicCmpXchg):
+          case uint32_t(ThreadOp::I32AtomicCmpXchg):
             CHECK_NEXT(emitAtomicCmpXchg(ValType::I32, Scalar::Int32));
-          case uint16_t(ThreadOp::I64AtomicCmpXchg):
+          case uint32_t(ThreadOp::I64AtomicCmpXchg):
             CHECK_NEXT(emitAtomicCmpXchg(ValType::I64, Scalar::Int64));
-          case uint16_t(ThreadOp::I32AtomicCmpXchg8U):
+          case uint32_t(ThreadOp::I32AtomicCmpXchg8U):
             CHECK_NEXT(emitAtomicCmpXchg(ValType::I32, Scalar::Uint8));
-          case uint16_t(ThreadOp::I32AtomicCmpXchg16U):
+          case uint32_t(ThreadOp::I32AtomicCmpXchg16U):
             CHECK_NEXT(emitAtomicCmpXchg(ValType::I32, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicCmpXchg8U):
+          case uint32_t(ThreadOp::I64AtomicCmpXchg8U):
             CHECK_NEXT(emitAtomicCmpXchg(ValType::I64, Scalar::Uint8));
-          case uint16_t(ThreadOp::I64AtomicCmpXchg16U):
+          case uint32_t(ThreadOp::I64AtomicCmpXchg16U):
             CHECK_NEXT(emitAtomicCmpXchg(ValType::I64, Scalar::Uint16));
-          case uint16_t(ThreadOp::I64AtomicCmpXchg32U):
+          case uint32_t(ThreadOp::I64AtomicCmpXchg32U):
             CHECK_NEXT(emitAtomicCmpXchg(ValType::I64, Scalar::Uint32));
 
           default:
@@ -11048,6 +11790,7 @@ bool BaseCompiler::emitBody() {
 #undef CHECK
 #undef NEXT
 #undef CHECK_NEXT
+#undef CHECK_POINTER_COUNT
 #undef emitBinary
 #undef emitUnary
 #undef emitComparison
@@ -11062,7 +11805,9 @@ bool BaseCompiler::emitBody() {
 }
 
 bool BaseCompiler::emitFunction() {
-  beginFunction();
+  if (!beginFunction()) {
+    return false;
+  }
 
   if (!emitBody()) {
     return false;
@@ -11077,11 +11822,13 @@ bool BaseCompiler::emitFunction() {
 
 BaseCompiler::BaseCompiler(const ModuleEnvironment& env,
                            const FuncCompileInput& func,
-                           const ValTypeVector& locals, Decoder& decoder,
-                           ExclusiveDeferredValidationState& dvs,
-                           TempAllocator* alloc, MacroAssembler* masm)
+                           const ValTypeVector& locals,
+                           const MachineState& trapExitLayout,
+                           size_t trapExitLayoutNumWords, Decoder& decoder,
+                           StkVector& stkSource, TempAllocator* alloc,
+                           MacroAssembler* masm, StackMaps* stackMaps)
     : env_(env),
-      iter_(env, decoder, dvs),
+      iter_(env, decoder),
       func_(func),
       lastReadCallSite_(0),
       alloc_(*alloc),
@@ -11095,63 +11842,40 @@ BaseCompiler::BaseCompiler(const ModuleEnvironment& env,
       masm(*masm),
       ra(*this),
       fr(*masm),
+      stackMapGenerator_(stackMaps, trapExitLayout, trapExitLayoutNumWords,
+                         *masm),
       joinRegI32_(RegI32(ReturnReg)),
       joinRegI64_(RegI64(ReturnReg64)),
       joinRegPtr_(RegPtr(ReturnReg)),
       joinRegF32_(RegF32(ReturnFloat32Reg)),
-      joinRegF64_(RegF64(ReturnDoubleReg)) {}
+      joinRegF64_(RegF64(ReturnDoubleReg)),
+      stkSource_(stkSource) {
+  // Our caller, BaselineCompileFunctions, will lend us the vector contents to
+  // use for the eval stack.  To get hold of those contents, we'll temporarily
+  // installing an empty one in its place.
+  MOZ_ASSERT(stk_.empty());
+  stk_.swap(stkSource_);
+
+  // Assuming that previously processed wasm functions are well formed, the
+  // eval stack should now be empty.  But empty it anyway; any non-emptyness
+  // at this point will cause chaos.
+  stk_.clear();
+}
+
+BaseCompiler::~BaseCompiler() {
+  stk_.swap(stkSource_);
+  // We've returned the eval stack vector contents to our caller,
+  // BaselineCompileFunctions.  We expect the vector we get in return to be
+  // empty since that's what we swapped for the stack vector in our
+  // constructor.
+  MOZ_ASSERT(stk_.empty());
+}
 
 bool BaseCompiler::init() {
   if (!SigD_.append(ValType::F64)) {
     return false;
   }
   if (!SigF_.append(ValType::F32)) {
-    return false;
-  }
-  if (!SigP_.append(MIRType::Pointer)) {
-    return false;
-  }
-  if (!SigPI_.append(MIRType::Pointer) || !SigPI_.append(MIRType::Int32)) {
-    return false;
-  }
-  if (!SigPL_.append(MIRType::Pointer) || !SigPL_.append(MIRType::Int64)) {
-    return false;
-  }
-  if (!SigPII_.append(MIRType::Pointer) || !SigPII_.append(MIRType::Int32) ||
-      !SigPII_.append(MIRType::Int32)) {
-    return false;
-  }
-  if (!SigPIPI_.append(MIRType::Pointer) || !SigPIPI_.append(MIRType::Int32) ||
-      !SigPIPI_.append(MIRType::Pointer) || !SigPIPI_.append(MIRType::Int32)) {
-    return false;
-  }
-  if (!SigPIII_.append(MIRType::Pointer) || !SigPIII_.append(MIRType::Int32) ||
-      !SigPIII_.append(MIRType::Int32) || !SigPIII_.append(MIRType::Int32)) {
-    return false;
-  }
-  if (!SigPIIL_.append(MIRType::Pointer) || !SigPIIL_.append(MIRType::Int32) ||
-      !SigPIIL_.append(MIRType::Int32) || !SigPIIL_.append(MIRType::Int64)) {
-    return false;
-  }
-  if (!SigPIIP_.append(MIRType::Pointer) || !SigPIIP_.append(MIRType::Int32) ||
-      !SigPIIP_.append(MIRType::Int32) || !SigPIIP_.append(MIRType::Pointer)) {
-    return false;
-  }
-  if (!SigPILL_.append(MIRType::Pointer) || !SigPILL_.append(MIRType::Int32) ||
-      !SigPILL_.append(MIRType::Int64) || !SigPILL_.append(MIRType::Int64)) {
-    return false;
-  }
-  if (!SigPIIII_.append(MIRType::Pointer) ||
-      !SigPIIII_.append(MIRType::Int32) || !SigPIIII_.append(MIRType::Int32) ||
-      !SigPIIII_.append(MIRType::Int32) || !SigPIIII_.append(MIRType::Int32)) {
-    return false;
-  }
-  if (!SigPIIIII_.append(MIRType::Pointer) ||
-      !SigPIIIII_.append(MIRType::Int32) ||
-      !SigPIIIII_.append(MIRType::Int32) ||
-      !SigPIIIII_.append(MIRType::Int32) ||
-      !SigPIIIII_.append(MIRType::Int32) ||
-      !SigPIIIII_.append(MIRType::Int32)) {
     return false;
   }
 
@@ -11166,6 +11890,9 @@ bool BaseCompiler::init() {
 FuncOffsets BaseCompiler::finish() {
   MOZ_ASSERT(done(), "all bytes must be consumed");
   MOZ_ASSERT(func_.callSiteLineNums.length() == lastReadCallSite_);
+
+  MOZ_ASSERT(stk_.empty());
+  MOZ_ASSERT(stackMapGenerator_.memRefsOnStk == 0);
 
   masm.flushBuffer();
 
@@ -11201,7 +11928,6 @@ bool js::wasm::BaselineCompileFunctions(const ModuleEnvironment& env,
                                         LifoAlloc& lifo,
                                         const FuncCompileInputVector& inputs,
                                         CompiledCode* code,
-                                        ExclusiveDeferredValidationState& dvs,
                                         UniqueChars* error) {
   MOZ_ASSERT(env.tier() == Tier::Baseline);
   MOZ_ASSERT(env.kind == ModuleKind::Wasm);
@@ -11219,6 +11945,19 @@ bool js::wasm::BaselineCompileFunctions(const ModuleEnvironment& env,
     return false;
   }
 
+  // Create a description of the stack layout created by GenerateTrapExit().
+  MachineState trapExitLayout;
+  size_t trapExitLayoutNumWords;
+  GenerateTrapExitMachineState(&trapExitLayout, &trapExitLayoutNumWords);
+
+  // The compiler's operand stack.  We reuse it across all functions so as to
+  // avoid malloc/free.  Presize it to 128 elements in the hope of avoiding
+  // reallocation later.
+  StkVector stk;
+  if (!stk.reserve(128)) {
+    return false;
+  }
+
   for (const FuncCompileInput& func : inputs) {
     Decoder d(func.begin, func.end, func.lineOrBytecode, error);
 
@@ -11228,14 +11967,14 @@ bool js::wasm::BaselineCompileFunctions(const ModuleEnvironment& env,
     if (!locals.appendAll(env.funcTypes[func.index]->args())) {
       return false;
     }
-    if (!DecodeLocalEntries(d, env.kind, env.types, env.gcTypesEnabled(),
-                            &locals)) {
+    if (!DecodeLocalEntries(d, env.types, env.gcTypesEnabled(), &locals)) {
       return false;
     }
 
     // One-pass baseline compilation.
 
-    BaseCompiler f(env, func, locals, d, dvs, &alloc, &masm);
+    BaseCompiler f(env, func, locals, trapExitLayout, trapExitLayoutNumWords, d,
+                   stk, &alloc, &masm, &code->stackMaps);
     if (!f.init()) {
       return false;
     }
@@ -11255,6 +11994,44 @@ bool js::wasm::BaselineCompileFunctions(const ModuleEnvironment& env,
 
   return code->swap(masm);
 }
+
+#ifdef DEBUG
+bool js::wasm::IsValidStackMapKey(bool debugEnabled, const uint8_t* nextPC) {
+#  if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
+  const uint8_t* insn = nextPC;
+  return (insn[-2] == 0x0F && insn[-1] == 0x0B) ||  // ud2
+         (insn[-2] == 0xFF && insn[-1] == 0xD0) ||  // call *%{rax,eax}
+         insn[-5] == 0xE8 ||                        // call simm32
+         (debugEnabled && insn[-5] == 0x0F && insn[-4] == 0x1F &&
+          insn[-3] == 0x44 && insn[-2] == 0x00 &&
+          insn[-1] == 0x00);  // nop_five
+
+#  elif defined(JS_CODEGEN_ARM)
+  const uint32_t* insn = (const uint32_t*)nextPC;
+  return ((uintptr_t(insn) & 3) == 0) &&              // must be ARM, not Thumb
+         (insn[-1] == 0xe7f000f0 ||                   // udf
+          (insn[-1] & 0xfffffff0) == 0xe12fff30 ||    // blx reg (ARM, enc A1)
+          (insn[-1] & 0xff000000) == 0xeb000000 ||    // bl simm24 (ARM, enc A1)
+          (debugEnabled && insn[-1] == 0xe320f000));  // "as_nop"
+
+#  elif defined(JS_CODEGEN_ARM64)
+#    ifdef JS_SIMULATOR_ARM64
+  const uint32_t hltInsn = 0xd45bd600;
+#    else
+  const uint32_t hltInsn = 0xd4a00000;
+#    endif
+  const uint32_t* insn = (const uint32_t*)nextPC;
+  return ((uintptr_t(insn) & 3) == 0) &&
+         (insn[-1] == hltInsn ||                      // hlt
+          (insn[-1] & 0xfffffc1f) == 0xd63f0000 ||    // blr reg
+          (insn[-1] & 0xfc000000) == 0x94000000 ||    // bl simm26
+          (debugEnabled && insn[-1] == 0xd503201f));  // nop
+
+#  else
+  MOZ_CRASH("IsValidStackMapKey: requires implementation on this platform");
+#  endif
+}
+#endif
 
 #undef RABALDR_INT_DIV_I64_CALLOUT
 #undef RABALDR_I64_TO_FLOAT_CALLOUT

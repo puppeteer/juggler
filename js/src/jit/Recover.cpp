@@ -13,6 +13,7 @@
 #include "builtin/String.h"
 #include "builtin/TypedObject.h"
 #include "gc/Heap.h"
+#include "jit/Ion.h"
 #include "jit/JitSpewer.h"
 #include "jit/JSJitFrameIter.h"
 #include "jit/MIR.h"
@@ -87,8 +88,8 @@ bool MResumePoint::writeRecoverData(CompactBufferWriter& writer) const {
         // include the this. When inlining that is not included.  So the
         // exprStackSlots will be one less.
         MOZ_ASSERT(stackDepth - exprStack <= 1);
-      } else if (JSOp(*bailPC) != JSOP_FUNAPPLY && !IsGetPropPC(bailPC) &&
-                 !IsSetPropPC(bailPC)) {
+      } else if (JSOp(*bailPC) != JSOP_FUNAPPLY &&
+                 !IsIonInlinableGetterOrSetterPC(bailPC)) {
         // For fun.apply({}, arguments) the reconstructStackDepth will
         // have stackdepth 4, but it could be that we inlined the
         // funapply. In that case exprStackSlots, will have the real
@@ -824,7 +825,7 @@ RHypot::RHypot(CompactBufferReader& reader)
     : numOperands_(reader.readUnsigned()) {}
 
 bool RHypot::recover(JSContext* cx, SnapshotIterator& iter) const {
-  JS::AutoValueVector vec(cx);
+  JS::RootedValueVector vec(cx);
 
   if (!vec.reserve(numOperands_)) {
     return false;
@@ -974,7 +975,7 @@ bool RStringSplit::recover(JSContext* cx, SnapshotIterator& iter) const {
   }
   RootedValue result(cx);
 
-  JSObject* res = str_split_string(cx, group, str, sep, INT32_MAX);
+  JSObject* res = StringSplitString(cx, group, str, sep, INT32_MAX);
   if (!res) {
     return false;
   }
@@ -1213,7 +1214,7 @@ bool RNewTypedArray::recover(JSContext* cx, SnapshotIterator& iter) const {
 
   uint32_t length = templateObject.as<TypedArrayObject>()->length();
   JSObject* resultObject =
-      TypedArrayCreateWithTemplate(cx, templateObject, length);
+      NewTypedArrayWithTemplateAndLength(cx, templateObject, length);
   if (!resultObject) {
     return false;
   }
@@ -1227,11 +1228,13 @@ bool MNewArray::writeRecoverData(CompactBufferWriter& writer) const {
   MOZ_ASSERT(canRecoverOnBailout());
   writer.writeUnsigned(uint32_t(RInstruction::Recover_NewArray));
   writer.writeUnsigned(length());
+  writer.writeByte(uint8_t(convertDoubleElements()));
   return true;
 }
 
 RNewArray::RNewArray(CompactBufferReader& reader) {
   count_ = reader.readUnsigned();
+  convertDoubleElements_ = reader.readByte();
 }
 
 bool RNewArray::recover(JSContext* cx, SnapshotIterator& iter) const {
@@ -1240,7 +1243,7 @@ bool RNewArray::recover(JSContext* cx, SnapshotIterator& iter) const {
   RootedObjectGroup group(cx, templateObject->group());
 
   ArrayObject* resultObject =
-      NewFullyAllocatedArrayTryUseGroup(cx, group, count_);
+      NewArrayWithGroup(cx, count_, group, convertDoubleElements_);
   if (!resultObject) {
     return false;
   }
@@ -1253,13 +1256,10 @@ bool RNewArray::recover(JSContext* cx, SnapshotIterator& iter) const {
 bool MNewArrayCopyOnWrite::writeRecoverData(CompactBufferWriter& writer) const {
   MOZ_ASSERT(canRecoverOnBailout());
   writer.writeUnsigned(uint32_t(RInstruction::Recover_NewArrayCopyOnWrite));
-  writer.writeByte(initialHeap());
   return true;
 }
 
-RNewArrayCopyOnWrite::RNewArrayCopyOnWrite(CompactBufferReader& reader) {
-  initialHeap_ = gc::InitialHeap(reader.readByte());
-}
+RNewArrayCopyOnWrite::RNewArrayCopyOnWrite(CompactBufferReader& reader) {}
 
 bool RNewArrayCopyOnWrite::recover(JSContext* cx,
                                    SnapshotIterator& iter) const {
@@ -1267,8 +1267,7 @@ bool RNewArrayCopyOnWrite::recover(JSContext* cx,
                                    &iter.read().toObject().as<ArrayObject>());
   RootedValue result(cx);
 
-  ArrayObject* resultObject =
-      NewDenseCopyOnWriteArray(cx, templateObject, initialHeap_);
+  ArrayObject* resultObject = NewDenseCopyOnWriteArray(cx, templateObject);
   if (!resultObject) {
     return false;
   }
@@ -1300,6 +1299,9 @@ bool RNewIterator::recover(JSContext* cx, SnapshotIterator& iter) const {
       break;
     case MNewIterator::StringIterator:
       resultObject = NewStringIteratorObject(cx);
+      break;
+    case MNewIterator::RegExpStringIterator:
+      resultObject = NewRegExpStringIteratorObject(cx);
       break;
   }
 
@@ -1351,7 +1353,7 @@ bool RCreateThisWithTemplate::recover(JSContext* cx,
   RootedObject templateObject(cx, &iter.read().toObject());
 
   // See CodeGenerator::visitCreateThisWithTemplate
-  JSObject* resultObject = NewObjectOperationWithTemplate(cx, templateObject);
+  JSObject* resultObject = CreateThisWithTemplate(cx, templateObject);
   if (!resultObject) {
     return false;
   }
@@ -1447,41 +1449,12 @@ RObjectState::RObjectState(CompactBufferReader& reader) {
 bool RObjectState::recover(JSContext* cx, SnapshotIterator& iter) const {
   RootedObject object(cx, &iter.read().toObject());
   RootedValue val(cx);
+  RootedNativeObject nativeObject(cx, &object->as<NativeObject>());
+  MOZ_ASSERT(nativeObject->slotSpan() == numSlots());
 
-  if (object->is<UnboxedPlainObject>()) {
-    const UnboxedLayout& layout = object->as<UnboxedPlainObject>().layout();
-
-    RootedId id(cx);
-    RootedValue receiver(cx, ObjectValue(*object));
-    const UnboxedLayout::PropertyVector& properties = layout.properties();
-    for (size_t i = 0; i < properties.length(); i++) {
-      val = iter.read();
-
-      // This is the default placeholder value of MObjectState, when no
-      // properties are defined yet.
-      if (val.isUndefined()) {
-        continue;
-      }
-
-      id = NameToId(properties[i].name);
-      ObjectOpResult result;
-
-      // SetProperty can only fail due to OOM.
-      if (!SetProperty(cx, object, id, val, receiver, result)) {
-        return false;
-      }
-      if (!result) {
-        return result.reportError(cx, object, id);
-      }
-    }
-  } else {
-    RootedNativeObject nativeObject(cx, &object->as<NativeObject>());
-    MOZ_ASSERT(nativeObject->slotSpan() == numSlots());
-
-    for (size_t i = 0; i < numSlots(); i++) {
-      val = iter.read();
-      nativeObject->setSlot(i, val);
-    }
+  for (size_t i = 0; i < numSlots(); i++) {
+    val = iter.read();
+    nativeObject->setSlot(i, val);
   }
 
   val.setObject(*object);
@@ -1608,7 +1581,7 @@ bool RStringReplace::recover(JSContext* cx, SnapshotIterator& iter) const {
 
   JSString* result =
       isFlatReplacement_
-          ? js::str_flat_replace_string(cx, string, pattern, replace)
+          ? js::StringFlatReplaceString(cx, string, pattern, replace)
           : js::str_replace_string_raw(cx, string, pattern, replace);
 
   if (!result) {

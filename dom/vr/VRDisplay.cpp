@@ -14,9 +14,9 @@
 #include "mozilla/dom/VRDisplayBinding.h"
 #include "mozilla/Base64.h"
 #include "mozilla/EventStateManager.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/gfx/DataSurfaceHelpers.h"
 #include "Navigator.h"
-#include "gfxPrefs.h"
 #include "gfxUtils.h"
 #include "gfxVR.h"
 #include "VRDisplayClient.h"
@@ -68,13 +68,15 @@ uint32_t VRDisplayCapabilities::MaxLayers() const {
   return CanPresent() ? 1 : 0;
 }
 
-/*static*/ bool VRDisplay::RefreshVRDisplays(uint64_t aWindowId) {
+/*static*/
+bool VRDisplay::RefreshVRDisplays(uint64_t aWindowId) {
   gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
   return vm && vm->RefreshVRDisplaysWithCallback(aWindowId);
 }
 
-/*static*/ void VRDisplay::UpdateVRDisplays(
-    nsTArray<RefPtr<VRDisplay>>& aDisplays, nsPIDOMWindowInner* aWindow) {
+/*static*/
+void VRDisplay::UpdateVRDisplays(nsTArray<RefPtr<VRDisplay>>& aDisplays,
+                                 nsPIDOMWindowInner* aWindow) {
   nsTArray<RefPtr<VRDisplay>> displays;
 
   gfx::VRManagerChild* vm = gfx::VRManagerChild::Get();
@@ -244,7 +246,9 @@ void VRPose::GetPosition(JSContext* aCx, JS::MutableHandle<JSObject*> aRetval,
   SetFloat32Array(
       aCx, aRetval, mPosition, mVRState.pose.position, 3,
       !mPosition &&
-          bool(mVRState.flags & gfx::VRDisplayCapabilityFlags::Cap_Position),
+          (bool(mVRState.flags & gfx::VRDisplayCapabilityFlags::Cap_Position) ||
+           bool(mVRState.flags &
+                gfx::VRDisplayCapabilityFlags::Cap_PositionEmulated)),
       aRv);
 }
 
@@ -305,8 +309,9 @@ JSObject* VRPose::WrapObject(JSContext* aCx,
   return VRPose_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* virtual */ JSObject* VRDisplay::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* VRDisplay::WrapObject(JSContext* aCx,
+                                JS::Handle<JSObject*> aGivenProto) {
   return VRDisplay_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -321,7 +326,7 @@ VRDisplay::VRDisplay(nsPIDOMWindowInner* aWindow, gfx::VRDisplayClient* aClient)
       mShutdown(false) {
   const gfx::VRDisplayInfo& info = aClient->GetDisplayInfo();
   mDisplayId = info.GetDisplayID();
-  mDisplayName = NS_ConvertASCIItoUTF16(info.GetDisplayName());
+  mDisplayName = NS_ConvertUTF8toUTF16(info.GetDisplayName());
   mCapabilities = new VRDisplayCapabilities(aWindow, info.GetCapabilities());
   if (info.GetCapabilities() &
       gfx::VRDisplayCapabilityFlags::Cap_StageParameters) {
@@ -376,7 +381,7 @@ void VRDisplay::UpdateFrameInfo() {
    * should return the latest frame data always.
    */
   if (mFrameInfo.IsDirty() || !mPresentation) {
-    gfx::VRHMDSensorState state = mClient->GetSensorState();
+    const gfx::VRHMDSensorState& state = mClient->GetSensorState();
     const gfx::VRDisplayInfo& info = mClient->GetDisplayInfo();
     mFrameInfo.Update(info, state, mDepthNear, mDepthFar);
   }
@@ -393,38 +398,6 @@ bool VRDisplay::GetFrameData(VRFrameData& aFrameData) {
   return true;
 }
 
-bool VRDisplay::GetSubmitFrameResult(VRSubmitFrameResult& aResult) {
-  if (!mPresentation) {
-    return false;
-  }
-
-  VRSubmitFrameResultInfo resultInfo;
-  mClient->GetSubmitFrameResult(resultInfo);
-  if (!resultInfo.mBase64Image.Length()) {
-    return false;  // The submit frame result is not ready.
-  }
-
-  nsAutoCString decodedImg;
-  if (Base64Decode(resultInfo.mBase64Image, decodedImg) != NS_OK) {
-    MOZ_ASSERT(false, "Failed to do decode base64 images.");
-    return false;
-  }
-
-  const char* srcData = decodedImg.get();
-  const gfx::IntSize size(resultInfo.mWidth, resultInfo.mHeight);
-  RefPtr<DataSourceSurface> dataSurface = gfx::CreateDataSourceSurfaceFromData(
-      size, resultInfo.mFormat, (uint8_t*)srcData,
-      StrideForFormatAndWidth(resultInfo.mFormat, resultInfo.mWidth));
-  if (!dataSurface || !dataSurface->IsValid()) {
-    MOZ_ASSERT(false, "dataSurface is null.");
-    return false;
-  }
-
-  nsAutoCString encodedImg(gfxUtils::GetAsDataURI(dataSurface));
-  aResult.Update(resultInfo.mFrameNum, encodedImg);
-  return true;
-}
-
 already_AddRefed<VRPose> VRDisplay::GetPose() {
   UpdateFrameInfo();
   RefPtr<VRPose> obj = new VRPose(GetParentObject(), mFrameInfo.mVRState);
@@ -432,7 +405,12 @@ already_AddRefed<VRPose> VRDisplay::GetPose() {
   return obj.forget();
 }
 
-void VRDisplay::ResetPose() { mClient->ZeroSensor(); }
+void VRDisplay::ResetPose() {
+  // ResetPose is deprecated and unimplemented
+  // We must keep this stub function around as its referenced by
+  // VRDisplay.webidl. Not asserting here, as that could break existing web
+  // content.
+}
 
 void VRDisplay::StartVRNavigation() { mClient->StartVRNavigation(); }
 
@@ -440,7 +418,7 @@ void VRDisplay::StartHandlingVRNavigationEvent() {
   mHandlingVRNavigationEventStart = TimeStamp::Now();
   ++mVRNavigationEventDepth;
   TimeDuration timeout =
-      TimeDuration::FromMilliseconds(gfxPrefs::VRNavigationTimeout());
+      TimeDuration::FromMilliseconds(StaticPrefs::dom_vr_navigation_timeout());
   // A 0 or negative TimeDuration indicates that content may take
   // as long as it wishes to respond to the event, as long as
   // it happens before the event exits.
@@ -465,7 +443,7 @@ bool VRDisplay::IsHandlingVRNavigationEvent() {
     return false;
   }
   TimeDuration timeout =
-      TimeDuration::FromMilliseconds(gfxPrefs::VRNavigationTimeout());
+      TimeDuration::FromMilliseconds(StaticPrefs::dom_vr_navigation_timeout());
   return timeout.ToMilliseconds() <= 0 ||
          (TimeStamp::Now() - mHandlingVRNavigationEventStart) <= timeout;
 }
@@ -489,7 +467,7 @@ already_AddRefed<Promise> VRDisplay::RequestPresent(
       isChromePresentation ? gfx::kVRGroupChrome : gfx::kVRGroupContent;
 
   if (!EventStateManager::IsHandlingUserInput() && !isChromePresentation &&
-      !IsHandlingVRNavigationEvent() && gfxPrefs::VRRequireGesture() &&
+      !IsHandlingVRNavigationEvent() && StaticPrefs::dom_vr_require_gesture() &&
       !IsPresenting()) {
     // The WebVR API states that if called outside of a user gesture, the
     // promise must be rejected.  We allow VR presentations to start within
@@ -586,7 +564,7 @@ void VRDisplay::GetLayers(nsTArray<VRLayer>& result) {
 }
 
 void VRDisplay::SubmitFrame() {
-  AUTO_PROFILER_TRACING("VR", "SubmitFrameAtVRDisplay");
+  AUTO_PROFILER_TRACING("VR", "SubmitFrameAtVRDisplay", OTHER);
 
   if (mClient && !mClient->IsPresentationGenerationCurrent()) {
     mPresentation = nullptr;
@@ -699,7 +677,8 @@ VRFrameData::VRFrameData(nsISupports* aParent)
 
 VRFrameData::~VRFrameData() { mozilla::DropJSObjects(this); }
 
-/* static */ already_AddRefed<VRFrameData> VRFrameData::Constructor(
+/* static */
+already_AddRefed<VRFrameData> VRFrameData::Constructor(
     const GlobalObject& aGlobal, ErrorResult& aRv) {
   RefPtr<VRFrameData> obj = new VRFrameData(aGlobal.GetAsSupports());
   return obj.forget();
@@ -723,9 +702,6 @@ void VRFrameData::LazyCreateMatrix(JS::Heap<JSObject*>& aArray,
       aRv.NoteJSContextException(aCx);
       return;
     }
-  }
-  if (aArray) {
-    JS::ExposeObjectToActiveJS(aArray);
   }
   aRetval.set(aArray);
 }
@@ -802,11 +778,11 @@ void VRFrameInfo::Update(const gfx::VRDisplayInfo& aInfo,
   }
 
   const gfx::VRFieldOfView leftFOV =
-      aInfo.mDisplayState.mEyeFOV[gfx::VRDisplayState::Eye_Left];
+      aInfo.mDisplayState.eyeFOV[gfx::VRDisplayState::Eye_Left];
   mLeftProjection =
       leftFOV.ConstructProjectionMatrix(aDepthNear, aDepthFar, true);
   const gfx::VRFieldOfView rightFOV =
-      aInfo.mDisplayState.mEyeFOV[gfx::VRDisplayState::Eye_Right];
+      aInfo.mDisplayState.eyeFOV[gfx::VRDisplayState::Eye_Right];
   mRightProjection =
       rightFOV.ConstructProjectionMatrix(aDepthNear, aDepthFar, true);
   memcpy(mLeftView.components, aState.leftViewMatrix,
@@ -824,42 +800,6 @@ VRFrameInfo::VRFrameInfo() : mTimeStampOffset(0.0f) {
 bool VRFrameInfo::IsDirty() { return mVRState.timestamp == 0; }
 
 void VRFrameInfo::Clear() { mVRState.Clear(); }
-
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(VRSubmitFrameResult, mParent)
-NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(VRSubmitFrameResult, AddRef)
-NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(VRSubmitFrameResult, Release)
-
-VRSubmitFrameResult::VRSubmitFrameResult(nsISupports* aParent)
-    : mParent(aParent), mFrameNum(0) {
-  mozilla::HoldJSObjects(this);
-}
-
-VRSubmitFrameResult::~VRSubmitFrameResult() { mozilla::DropJSObjects(this); }
-
-/* static */ already_AddRefed<VRSubmitFrameResult>
-VRSubmitFrameResult::Constructor(const GlobalObject& aGlobal,
-                                 ErrorResult& aRv) {
-  RefPtr<VRSubmitFrameResult> obj =
-      new VRSubmitFrameResult(aGlobal.GetAsSupports());
-  return obj.forget();
-}
-
-JSObject* VRSubmitFrameResult::WrapObject(JSContext* aCx,
-                                          JS::Handle<JSObject*> aGivenProto) {
-  return VRSubmitFrameResult_Binding::Wrap(aCx, this, aGivenProto);
-}
-
-void VRSubmitFrameResult::Update(uint64_t aFrameNum,
-                                 const nsACString& aBase64Image) {
-  mFrameNum = aFrameNum;
-  mBase64Image = NS_ConvertASCIItoUTF16(aBase64Image);
-}
-
-double VRSubmitFrameResult::FrameNum() const { return mFrameNum; }
-
-void VRSubmitFrameResult::GetBase64Image(nsAString& aImage) const {
-  aImage = mBase64Image;
-}
 
 }  // namespace dom
 }  // namespace mozilla

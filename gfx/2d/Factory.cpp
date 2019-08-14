@@ -8,44 +8,43 @@
 #include "Swizzle.h"
 
 #ifdef USE_CAIRO
-#include "DrawTargetCairo.h"
-#include "SourceSurfaceCairo.h"
+#  include "DrawTargetCairo.h"
+#  include "SourceSurfaceCairo.h"
 #endif
 
 #ifdef USE_SKIA
-#include "DrawTargetSkia.h"
-#include "ScaledFontBase.h"
+#  include "DrawTargetSkia.h"
+#  include "ScaledFontBase.h"
 #endif
 
 #if defined(WIN32)
-#include "ScaledFontWin.h"
-#include "NativeFontResourceGDI.h"
-#include "UnscaledFontGDI.h"
+#  include "ScaledFontWin.h"
+#  include "NativeFontResourceGDI.h"
+#  include "UnscaledFontGDI.h"
 #endif
 
 #ifdef XP_DARWIN
-#include "ScaledFontMac.h"
-#include "NativeFontResourceMac.h"
+#  include "ScaledFontMac.h"
+#  include "NativeFontResourceMac.h"
 #endif
 
 #ifdef MOZ_WIDGET_GTK
-#include "ScaledFontFontconfig.h"
-#include "NativeFontResourceFreeType.h"
-#include "UnscaledFontFreeType.h"
+#  include "ScaledFontFontconfig.h"
+#  include "NativeFontResourceFreeType.h"
+#  include "UnscaledFontFreeType.h"
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "ScaledFontFreeType.h"
-#include "NativeFontResourceFreeType.h"
+#  include "ScaledFontFreeType.h"
+#  include "NativeFontResourceFreeType.h"
 #endif
 
 #ifdef WIN32
-#include "DrawTargetD2D1.h"
-#include "ScaledFontDWrite.h"
-#include "NativeFontResourceDWrite.h"
-#include <d3d10_1.h>
-#include "HelpersD2D.h"
-#include "HelpersWinFonts.h"
+#  include "DrawTargetD2D1.h"
+#  include "ScaledFontDWrite.h"
+#  include "NativeFontResourceDWrite.h"
+#  include <d3d10_1.h>
+#  include "HelpersD2D.h"
 #endif
 
 #include "DrawTargetCapture.h"
@@ -64,10 +63,12 @@
 #include "mozilla/CheckedInt.h"
 
 #ifdef MOZ_ENABLE_FREETYPE
-#include "ft2build.h"
-#include FT_FREETYPE_H
+#  include "ft2build.h"
+#  include FT_FREETYPE_H
 #endif
 #include "MainThreadUtils.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 
 #if defined(MOZ_LOGGING)
 GFX2D_API mozilla::LogModule* GetGFX2DLog() {
@@ -82,11 +83,11 @@ enum CPUIDRegister { eax = 0, ebx = 1, ecx = 2, edx = 3 };
 
 #ifdef HAVE_CPUID_H
 
-#if !(defined(__SSE2__) || defined(_M_X64) ||      \
-      (defined(_M_IX86_FP) && _M_IX86_FP >= 2)) || \
-    !defined(__SSE4__)
+#  if !(defined(__SSE2__) || defined(_M_X64) ||      \
+        (defined(_M_IX86_FP) && _M_IX86_FP >= 2)) || \
+      !defined(__SSE4__)
 // cpuid.h is available on gcc 4.3 and higher on i386 and x86_64
-#include <cpuid.h>
+#    include <cpuid.h>
 
 static inline bool HasCPUIDBit(unsigned int level, CPUIDRegister reg,
                                unsigned int bit) {
@@ -94,20 +95,20 @@ static inline bool HasCPUIDBit(unsigned int level, CPUIDRegister reg,
   return __get_cpuid(level, &regs[0], &regs[1], &regs[2], &regs[3]) &&
          (regs[reg] & bit);
 }
-#endif
+#  endif
 
-#define HAVE_CPU_DETECTION
+#  define HAVE_CPU_DETECTION
 #else
 
-#if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_AMD64))
+#  if defined(_MSC_VER) && (defined(_M_IX86) || defined(_M_AMD64))
 // MSVC 2005 or later supports __cpuid by intrin.h
-#include <intrin.h>
+#    include <intrin.h>
 
-#define HAVE_CPU_DETECTION
-#elif defined(__SUNPRO_CC) && (defined(__i386) || defined(__x86_64__))
+#    define HAVE_CPU_DETECTION
+#  elif defined(__SUNPRO_CC) && (defined(__i386) || defined(__x86_64__))
 
 // Define a function identical to MSVC function.
-#ifdef __i386
+#    ifdef __i386
 static void __cpuid(int CPUInfo[4], int InfoType) {
   asm("xchg %esi, %ebx\n"
       "cpuid\n"
@@ -121,7 +122,7 @@ static void __cpuid(int CPUInfo[4], int InfoType) {
         "D"(CPUInfo)    // %edi
       : "%ecx", "%edx", "%esi");
 }
-#else
+#    else
 static void __cpuid(int CPUInfo[4], int InfoType) {
   asm("xchg %rsi, %rbx\n"
       "cpuid\n"
@@ -136,11 +137,11 @@ static void __cpuid(int CPUInfo[4], int InfoType) {
       : "%ecx", "%edx", "%rsi");
 }
 
-#define HAVE_CPU_DETECTION
-#endif
-#endif
+#      define HAVE_CPU_DETECTION
+#    endif
+#  endif
 
-#ifdef HAVE_CPU_DETECTION
+#  ifdef HAVE_CPU_DETECTION
 static inline bool HasCPUIDBit(unsigned int level, CPUIDRegister reg,
                                unsigned int bit) {
   // Check that the level in question is supported.
@@ -150,7 +151,7 @@ static inline bool HasCPUIDBit(unsigned int level, CPUIDRegister reg,
   __cpuid((int*)regs, level);
   return !!(unsigned(regs[reg]) & bit);
 }
-#endif
+#  endif
 #endif
 
 #ifdef MOZ_ENABLE_FREETYPE
@@ -189,8 +190,9 @@ void mozilla_UnlockFTLibrary(FT_Library aFTLibrary) {
 namespace mozilla {
 namespace gfx {
 
-// In Gecko, this value is managed by gfx.logging.level in gfxPrefs.
-int32_t LoggingPrefs::sGfxLogLevel = LOG_DEFAULT;
+// In Gecko, this value is managed by gfx.logging.level and gets updated when
+// the pref change.
+Atomic<int32_t> LoggingPrefs::sGfxLogLevel(LOG_DEFAULT);
 
 #ifdef MOZ_ENABLE_FREETYPE
 FT_Library Factory::mFTLibrary = nullptr;
@@ -203,19 +205,32 @@ static uint32_t mDeviceSeq = 0;
 StaticRefPtr<ID3D11Device> Factory::mD3D11Device;
 StaticRefPtr<ID2D1Device> Factory::mD2D1Device;
 StaticRefPtr<IDWriteFactory> Factory::mDWriteFactory;
+StaticRefPtr<ID2D1DeviceContext> Factory::mMTDC;
+StaticRefPtr<ID2D1DeviceContext> Factory::mOffMTDC;
 bool Factory::mDWriteFactoryInitialized = false;
 StaticRefPtr<IDWriteFontCollection> Factory::mDWriteSystemFonts;
 StaticMutex Factory::mDeviceLock;
 StaticMutex Factory::mDTDependencyLock;
 #endif
 
+bool Factory::mBGRSubpixelOrder = false;
+
 DrawEventRecorder* Factory::mRecorder;
 
 mozilla::gfx::Config* Factory::sConfig = nullptr;
 
+static void PrefChanged(const char* aPref, void*) {
+  mozilla::gfx::LoggingPrefs::sGfxLogLevel =
+      Preferences::GetInt(StaticPrefs::GetPrefName_gfx_logging_level(),
+                          StaticPrefs::GetPrefDefault_gfx_logging_level());
+}
+
 void Factory::Init(const Config& aConfig) {
   MOZ_ASSERT(!sConfig);
   sConfig = new Config(aConfig);
+  Preferences::RegisterCallback(
+      PrefChanged,
+      nsDependentCString(StaticPrefs::GetPrefName_gfx_logging_level()));
 }
 
 void Factory::ShutDown() {
@@ -505,6 +520,7 @@ bool Factory::DoesBackendSupportDataDrawtarget(BackendType aType) {
     case BackendType::DIRECT2D:
     case BackendType::DIRECT2D1_1:
     case BackendType::RECORDING:
+    case BackendType::CAPTURE:
     case BackendType::NONE:
     case BackendType::BACKEND_LAST:
     case BackendType::WEBRENDER_TEXT:
@@ -542,13 +558,13 @@ already_AddRefed<ScaledFont> Factory::CreateScaledFontForNativeFont(
     case NativeFontType::GDI_LOGFONT: {
       RefPtr<ScaledFontWin> font = MakeAndAddRef<ScaledFontWin>(
           static_cast<LOGFONT*>(aNativeFont.mFont), aUnscaledFont, aSize);
-#ifdef USE_CAIRO
+#  ifdef USE_CAIRO
       if (aScaledFont) {
         font->SetCairoScaledFont(aScaledFont);
       } else {
         font->PopulateCairoScaledFont();
       }
-#endif
+#  endif
       return font.forget();
     }
 #elif defined(MOZ_WIDGET_GTK)
@@ -655,6 +671,10 @@ already_AddRefed<SourceSurface> Factory::CreateDualSourceSurface(
   return newSource.forget();
 }
 
+void Factory::SetBGRSubpixelOrder(bool aBGR) { mBGRSubpixelOrder = aBGR; }
+
+bool Factory::GetBGRSubpixelOrder() { return mBGRSubpixelOrder; }
+
 #ifdef MOZ_ENABLE_FREETYPE
 void Factory::SetFTLibrary(FT_Library aFTLibrary) { mFTLibrary = aFTLibrary; }
 
@@ -718,6 +738,30 @@ FT_Error Factory::LoadFTGlyph(FT_Face aFace, uint32_t aGlyphIndex,
 }
 #endif
 
+AutoSerializeWithMoz2D::AutoSerializeWithMoz2D(BackendType aBackendType) {
+#ifdef WIN32
+  // We use a multi-threaded ID2D1Factory1, so that makes the calls through the
+  // Direct2D API thread-safe. However, if the Moz2D objects are using Direct3D
+  // resources we need to make sure that calls through the Direct3D or DXGI API
+  // use the Direct2D synchronization. It's possible that this should be pushed
+  // down into the TextureD3D11 objects, so that we always use this.
+  if (aBackendType == BackendType::DIRECT2D1_1 ||
+      aBackendType == BackendType::DIRECT2D) {
+    D2DFactory()->QueryInterface(
+        static_cast<ID2D1Multithread**>(getter_AddRefs(mMT)));
+    mMT->Enter();
+  }
+#endif
+}
+
+AutoSerializeWithMoz2D::~AutoSerializeWithMoz2D() {
+#ifdef WIN32
+  if (mMT) {
+    mMT->Leave();
+  }
+#endif
+};
+
 #ifdef WIN32
 already_AddRefed<DrawTarget> Factory::CreateDrawTargetForD3D11Texture(
     ID3D11Texture2D* aTexture, SurfaceFormat aFormat) {
@@ -755,6 +799,8 @@ bool Factory::SetDirect3D11Device(ID3D11Device* aDevice) {
 
   if (mD2D1Device) {
     mD2D1Device = nullptr;
+    mMTDC = nullptr;
+    mOffMTDC = nullptr;
   }
 
   if (!aDevice) {
@@ -853,6 +899,40 @@ RefPtr<IDWriteFontCollection> Factory::GetDWriteSystemFonts(bool aUpdate) {
   return mDWriteSystemFonts;
 }
 
+RefPtr<ID2D1DeviceContext> Factory::GetD2DDeviceContext() {
+  StaticRefPtr<ID2D1DeviceContext>* ptr;
+
+  if (NS_IsMainThread()) {
+    ptr = &mMTDC;
+  } else {
+    ptr = &mOffMTDC;
+  }
+
+  if (*ptr) {
+    return *ptr;
+  }
+
+  RefPtr<ID2D1Device> device = GetD2D1Device();
+
+  if (!device) {
+    return nullptr;
+  }
+
+  RefPtr<ID2D1DeviceContext> dc;
+  HRESULT hr = device->CreateDeviceContext(
+      D2D1_DEVICE_CONTEXT_OPTIONS_ENABLE_MULTITHREADED_OPTIMIZATIONS,
+      getter_AddRefs(dc));
+
+  if (FAILED(hr)) {
+    gfxCriticalError() << "Failed to create global device context";
+    return nullptr;
+  }
+
+  *ptr = dc;
+
+  return *ptr;
+}
+
 bool Factory::SupportsD2D1() { return !!D2DFactory(); }
 
 BYTE sSystemTextQuality = CLEARTYPE_QUALITY;
@@ -879,26 +959,15 @@ void Factory::D2DCleanup() {
 already_AddRefed<ScaledFont> Factory::CreateScaledFontForDWriteFont(
     IDWriteFontFace* aFontFace, const gfxFontStyle* aStyle,
     const RefPtr<UnscaledFont>& aUnscaledFont, float aSize,
-    bool aUseEmbeddedBitmap, bool aForceGDIMode,
+    bool aUseEmbeddedBitmap, int aRenderingMode,
     IDWriteRenderingParams* aParams, Float aGamma, Float aContrast) {
   return MakeAndAddRef<ScaledFontDWrite>(aFontFace, aUnscaledFont, aSize,
-                                         aUseEmbeddedBitmap, aForceGDIMode,
+                                         aUseEmbeddedBitmap,
+                                         (DWRITE_RENDERING_MODE)aRenderingMode,
                                          aParams, aGamma, aContrast, aStyle);
 }
 
 #endif  // WIN32
-
-#ifdef USE_SKIA_GPU
-already_AddRefed<DrawTarget> Factory::CreateDrawTargetSkiaWithGrContext(
-    GrContext* aGrContext, const IntSize& aSize, SurfaceFormat aFormat) {
-  RefPtr<DrawTarget> newTarget = new DrawTargetSkia();
-  if (!newTarget->InitWithGrContext(aGrContext, aSize, aFormat)) {
-    return nullptr;
-  }
-  return newTarget.forget();
-}
-
-#endif  // USE_SKIA_GPU
 
 #ifdef USE_SKIA
 already_AddRefed<DrawTarget> Factory::CreateDrawTargetWithSkCanvas(
@@ -1074,6 +1143,18 @@ void CriticalLogger::CrashAction(LogReason aReason) {
     Factory::GetLogForwarder()->CrashAction(aReason);
   }
 }
+
+#ifdef WIN32
+void LogWStr(const wchar_t* aWStr, std::stringstream& aOut) {
+  int n =
+      WideCharToMultiByte(CP_ACP, 0, aWStr, -1, nullptr, 0, nullptr, nullptr);
+  if (n > 1) {
+    std::vector<char> str(n);
+    WideCharToMultiByte(CP_ACP, 0, aWStr, -1, str.data(), n, nullptr, nullptr);
+    aOut << str.data();
+  }
+}
+#endif
 
 }  // namespace gfx
 }  // namespace mozilla

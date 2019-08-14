@@ -511,15 +511,26 @@ void nr_ice_gather_finished_cb(NR_SOCKET s, int h, void *cb_arg)
     int r;
     nr_ice_candidate *cand=cb_arg;
     nr_ice_ctx *ctx;
+    nr_ice_media_stream *stream;
+    int component_id;
 
 
     assert(cb_arg);
     if (!cb_arg)
       return;
     ctx = cand->ctx;
+    stream = cand->stream;
+    component_id = cand->component_id;
 
     ctx->uninitialized_candidates--;
-    r_log(LOG_ICE,LOG_DEBUG,"ICE(%s)/CAND(%s): initialized, %d remaining",ctx->label,cand->codeword,ctx->uninitialized_candidates);
+    if (cand->state == NR_ICE_CAND_STATE_FAILED) {
+      r_log(LOG_ICE, LOG_WARNING,
+            "ICE(%s)/CAND(%s): failed to initialize, %d remaining", ctx->label,
+            cand->label, ctx->uninitialized_candidates);
+    } else {
+      r_log(LOG_ICE, LOG_DEBUG, "ICE(%s)/CAND(%s): initialized, %d remaining",
+            ctx->label, cand->label, ctx->uninitialized_candidates);
+    }
 
     /* Avoid the need for yet another initialization function */
     if (cand->state == NR_ICE_CAND_STATE_INITIALIZING && cand->type == HOST)
@@ -533,9 +544,13 @@ void nr_ice_gather_finished_cb(NR_SOCKET s, int h, void *cb_arg)
           r_log(LOG_ICE, LOG_NOTICE, "ICE(%s): Problem pruning candidates",ctx->label);
       }
 
+      if (was_pruned) {
+        cand = NULL;
+      }
+
       /* If we are initialized, the candidate wasn't pruned,
          and we have a trickle ICE callback fire the callback */
-      if (ctx->trickle_cb && !was_pruned &&
+      if (ctx->trickle_cb && cand &&
           !nr_ice_ctx_hide_candidate(ctx, cand)) {
         ctx->trickle_cb(ctx->trickle_cb_arg, ctx, cand->stream, cand->component_id, cand);
 
@@ -544,15 +559,22 @@ void nr_ice_gather_finished_cb(NR_SOCKET s, int h, void *cb_arg)
           /* But continue */
         }
       }
+
+      if (nr_ice_media_stream_is_done_gathering(stream) &&
+          ctx->trickle_cb) {
+        ctx->trickle_cb(ctx->trickle_cb_arg, ctx, stream, component_id, NULL);
+      }
     }
 
     if(ctx->uninitialized_candidates==0){
-      r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): All candidates initialized",ctx->label);
+      r_log(LOG_ICE, LOG_INFO, "ICE(%s): All candidates initialized",
+            ctx->label);
       if (ctx->done_cb) {
         ctx->done_cb(0,0,ctx->cb_arg);
       }
       else {
-        r_log(LOG_ICE,LOG_DEBUG,"ICE(%s): No done_cb. We were probably destroyed.",ctx->label);
+        r_log(LOG_ICE, LOG_INFO,
+              "ICE(%s): No done_cb. We were probably destroyed.", ctx->label);
       }
     }
     else {
@@ -789,8 +811,11 @@ int nr_ice_gather(nr_ice_ctx *ctx, NR_async_cb done_cb, void *cb_arg)
     /* Initialize all the media stream/component pairs */
     stream=STAILQ_FIRST(&ctx->streams);
     while(stream){
-      if(r=nr_ice_media_stream_initialize(ctx,stream))
-        ABORT(r);
+      if(!stream->obsolete) {
+        if(r=nr_ice_media_stream_initialize(ctx,stream)) {
+          ABORT(r);
+        }
+      }
 
       stream=STAILQ_NEXT(stream,entry);
     }

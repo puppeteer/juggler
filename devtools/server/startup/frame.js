@@ -4,7 +4,8 @@
 
 "use strict";
 
-/* global addEventListener, addMessageListener, removeMessageListener, sendAsyncMessage */
+/* global content, addEventListener, addMessageListener, removeMessageListener,
+  sendAsyncMessage */
 
 /*
  * Frame script that listens for requests to start a `DebuggerServer` for a frame in a
@@ -17,7 +18,25 @@ try {
 
   // Encapsulate in its own scope to allows loading this frame script more than once.
   (function() {
-    const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+    // In most cases, we are debugging a tab in content process, without chrome
+    // privileges. But in some tests, we are attaching to privileged document.
+    // Because the debugger can't be running in the same compartment than its debuggee,
+    // we have to load the server in a dedicated Loader, flagged with
+    // invisibleToDebugger, which will force it to be loaded in another compartment.
+    let loader,
+      customLoader = false;
+    if (content.document.nodePrincipal.isSystemPrincipal) {
+      const { DevToolsLoader } = ChromeUtils.import(
+        "resource://devtools/shared/Loader.jsm"
+      );
+      loader = new DevToolsLoader();
+      loader.invisibleToDebugger = true;
+      customLoader = true;
+    } else {
+      // Otherwise, use the shared loader.
+      loader = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
+    }
+    const { require } = loader;
 
     const DevToolsUtils = require("devtools/shared/DevToolsUtils");
     const { dumpn } = DevToolsUtils;
@@ -39,34 +58,34 @@ try {
       const prefix = msg.data.prefix;
       const addonId = msg.data.addonId;
 
-      // Using the JS debugger causes problems when we're trying to
-      // schedule those zone groups across different threads. Calling
-      // blockThreadedExecution causes Gecko to switch to a simpler
-      // single-threaded model until unblockThreadedExecution is
-      // called later. We cannot start the debugger until the callback
-      // passed to blockThreadedExecution has run, signaling that
-      // we're running single-threaded.
-      Cu.blockThreadedExecution(() => {
-        const conn = DebuggerServer.connectToParent(prefix, mm);
-        conn.parentMessageManager = mm;
-        connections.set(prefix, conn);
+      const conn = DebuggerServer.connectToParent(prefix, mm);
+      conn.parentMessageManager = mm;
+      connections.set(prefix, conn);
 
-        let actor;
+      let actor;
 
-        if (addonId) {
-          const { WebExtensionTargetActor } = require("devtools/server/actors/targets/webextension");
-          actor = new WebExtensionTargetActor(conn, chromeGlobal, prefix, addonId);
-        } else {
-          const { FrameTargetActor } = require("devtools/server/actors/targets/frame");
-          actor = new FrameTargetActor(conn, chromeGlobal);
-        }
+      if (addonId) {
+        const {
+          WebExtensionTargetActor,
+        } = require("devtools/server/actors/targets/webextension");
+        actor = new WebExtensionTargetActor(
+          conn,
+          chromeGlobal,
+          prefix,
+          addonId
+        );
+      } else {
+        const {
+          FrameTargetActor,
+        } = require("devtools/server/actors/targets/frame");
+        actor = new FrameTargetActor(conn, chromeGlobal);
+      }
 
-        const actorPool = new ActorPool(conn);
-        actorPool.addActor(actor);
-        conn.addActorPool(actorPool);
+      const actorPool = new ActorPool(conn);
+      actorPool.addActor(actor);
+      conn.addActorPool(actorPool);
 
-        sendAsyncMessage("debug:actor", {actor: actor.form(), prefix: prefix});
-      });
+      sendAsyncMessage("debug:actor", { actor: actor.form(), prefix: prefix });
     });
 
     addMessageListener("debug:connect", onConnect);
@@ -90,13 +109,15 @@ try {
         const errorMessage =
           "Exception during actor module setup running in the child process: ";
         DevToolsUtils.reportException(errorMessage + e);
-        dumpn(`ERROR: ${errorMessage}\n\t module: '${module}'\n\t ` +
-              `setupChild: '${setupChild}'\n${DevToolsUtils.safeErrorString(e)}`);
+        dumpn(
+          `ERROR: ${errorMessage}\n\t module: '${module}'\n\t ` +
+            `setupChild: '${setupChild}'\n${DevToolsUtils.safeErrorString(e)}`
+        );
         return false;
       }
       if (msg.data.id) {
         // Send a message back to know when it is processed
-        sendAsyncMessage("debug:setup-in-child-response", {id: msg.data.id});
+        sendAsyncMessage("debug:setup-in-child-response", { id: msg.data.id });
       }
       return true;
     });
@@ -112,8 +133,6 @@ try {
         // request doesn't match a connection known here, ignore it.
         return;
       }
-
-      Cu.unblockThreadedExecution();
 
       removeMessageListener("debug:disconnect", onDisconnect);
       // Call DebuggerServerConnection.close to destroy all child actors. It should end up
@@ -133,6 +152,24 @@ try {
       }
       connections.clear();
     });
+
+    // Destroy the server once its last connection closes. Note that multiple frame
+    // scripts may be running in parallel and reuse the same server.
+    function destroyServer() {
+      // Only destroy the server if there is no more connections to it. It may be used
+      // to debug another tab running in the same process.
+      if (DebuggerServer.hasConnection() || DebuggerServer.keepAlive) {
+        return;
+      }
+      DebuggerServer.off("connectionchange", destroyServer);
+      DebuggerServer.destroy();
+
+      // When debugging chrome pages, we initialized a dedicated loader, also destroy it
+      if (customLoader) {
+        loader.destroy();
+      }
+    }
+    DebuggerServer.on("connectionchange", destroyServer);
   })();
 } catch (e) {
   dump(`Exception in DevTools frame startup: ${e}\n`);

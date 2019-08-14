@@ -10,7 +10,7 @@
  */
 
 const ACTORS_URL = EXAMPLE_URL + "testactors.js";
-const TAB_URL = EXAMPLE_URL + "doc_empty-tab-01.html";
+const TAB_URL = TEST_URI_ROOT + "doc_empty-tab-01.html";
 
 add_task(async function() {
   const tab = await addTab(TAB_URL);
@@ -24,8 +24,7 @@ add_task(async function() {
   const target = await TargetFactory.forTab(tab);
   await target.attach();
   const { client } = target;
-  const targetFront = target.activeTab;
-  const form = targetFront.targetForm;
+  const form = target.targetForm;
 
   await testTargetScopedActor(client, form);
   await closeTab(client, form);
@@ -33,21 +32,30 @@ add_task(async function() {
 });
 
 async function testTargetScopedActor(client, form) {
-  ok(form.testOneActor,
-    "Found the test target-scoped actor.");
-  ok(form.testOneActor.includes("testOne"),
-    "testOneActor's actorPrefix should be used.");
+  ok(form.testOneActor, "Found the test target-scoped actor.");
+  ok(
+    form.testOneActor.includes("testOne"),
+    "testOneActor's actorPrefix should be used."
+  );
 
-  const response = await client.request({ to: form.testOneActor, type: "ping" });
-  is(response.pong, "pong",
-     "Actor should respond to requests.");
+  const response = await client.request({
+    to: form.testOneActor,
+    type: "ping",
+  });
+  is(response.pong, "pong", "Actor should respond to requests.");
 }
 
 async function closeTab(client, form) {
-  await removeTab(gBrowser.selectedTab);
-  await Assert.rejects(
+  // We need to start listening for the rejection before removing the tab
+  /* eslint-disable-next-line mozilla/rejects-requires-await*/
+  const onReject = Assert.rejects(
     client.request({ to: form.testOneActor, type: "ping" }),
-    err => err.message === `'ping' active request packet to '${form.testOneActor}' ` +
-                           `can't be sent as the connection just closed.`,
-    "testOneActor went away.");
+    err =>
+      err.message ===
+      `'ping' active request packet to '${form.testOneActor}' ` +
+        `can't be sent as the connection just closed.`,
+    "testOneActor went away."
+  );
+  await removeTab(gBrowser.selectedTab);
+  await onReject;
 }

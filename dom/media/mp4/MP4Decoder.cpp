@@ -55,7 +55,8 @@ static bool IsTypeValid(const MediaContainerType& aType) {
          aType.Type() == MEDIAMIMETYPE("video/x-m4v");
 }
 
-/* statis */ nsTArray<UniquePtr<TrackInfo>> MP4Decoder::GetTracksInfo(
+/* statis */
+nsTArray<UniquePtr<TrackInfo>> MP4Decoder::GetTracksInfo(
     const MediaContainerType& aType, MediaResult& aError) {
   nsTArray<UniquePtr<TrackInfo>> tracks;
 
@@ -191,9 +192,10 @@ bool MP4Decoder::IsAAC(const nsACString& aMimeType) {
 }
 
 /* static */
-bool MP4Decoder::IsEnabled() { return StaticPrefs::MediaMp4Enabled(); }
+bool MP4Decoder::IsEnabled() { return StaticPrefs::media_mp4_enabled(); }
 
-/* static */ nsTArray<UniquePtr<TrackInfo>> MP4Decoder::GetTracksInfo(
+/* static */
+nsTArray<UniquePtr<TrackInfo>> MP4Decoder::GetTracksInfo(
     const MediaContainerType& aType) {
   MediaResult rv = NS_OK;
   return GetTracksInfo(aType, rv);

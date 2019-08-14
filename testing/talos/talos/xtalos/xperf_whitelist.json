@@ -74,6 +74,18 @@
   "c:\\windows\\prefetch\\{prefetch}.pf": {
     "ignore": true
   },
+  "c:\\windows\\system32\\inputhost.dll": {
+    "mincount": 0,
+    "maxcount": 2,
+    "minbytes": 0,
+    "maxbytes": 32768
+  },
+  "c:\\windows\\system32\\advapi32.dll": {
+    "mincount": 0,
+    "maxcount": 2,
+    "minbytes": 0,
+    "maxbytes": 24576
+  },
   "c:\\windows\\system32\\apphelp.dll": {
     "mincount": 0,
     "maxcount": 2,
@@ -115,6 +127,12 @@
     "maxcount": 4,
     "minbytes": 16384,
     "maxbytes": 90112
+  },
+  "c:\\windows\\system32\\dxgi.dll": {
+    "mincount": 2,
+    "maxcount": 2,
+    "minbytes": 32768,
+    "maxbytes": 32768
   },
   "c:\\windows\\system32\\gdi32.dll": {
     "mincount": 0,
@@ -184,6 +202,12 @@
     "maxcount": 2,
     "minbytes": 0,
     "maxbytes": 8192
+  },
+  "{firefox}\\browser\\features\\formautofill@mozilla.org.xpi": {
+    "mincount": 0,
+    "maxcount": 6,
+    "minbytes": 0,
+    "maxbytes": 393216
   },
   "{firefox}\\browser\\features\\flyweb@mozilla.org.xpi": {
     "mincount": 0,
@@ -440,6 +464,12 @@
     "minbytes": 4424,
     "maxbytes": 4424
   },
+  "{profile}\\permissions.sqlite-journal": {
+    "mincount": 0,
+    "maxcount": 18,
+    "minbytes": 0,
+    "maxbytes": 7208
+  },
   "{profile}\\pkcs11.txt": {
     "mincount": 0,
     "maxcount": 4,
@@ -547,6 +577,12 @@
     "maxcount": 0,
     "minbytes": 0,
     "maxbytes": 702
+  },
+  "{profile}\\xulstore\\data.mdb": {
+    "mincount": 0,
+    "maxcount": 4,
+    "minbytes": 0,
+    "maxbytes": 608
   },
   "{talos}\\talos\\tests\\{tp5n_files}": {
     "mincount": 0,

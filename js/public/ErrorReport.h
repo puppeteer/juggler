@@ -93,6 +93,9 @@ class JSErrorBase {
   // Source file name, URL, etc., or null.
   const char* filename;
 
+  // Unique identifier for the script source.
+  unsigned sourceId;
+
   // Source line number.
   unsigned lineno;
 
@@ -108,6 +111,7 @@ class JSErrorBase {
  public:
   JSErrorBase()
       : filename(nullptr),
+        sourceId(0),
         lineno(0),
         column(0),
         errorNumber(0),
@@ -149,27 +153,35 @@ class JSErrorNotes {
   ~JSErrorNotes();
 
   // Add an note to the given position.
-  bool addNoteASCII(JSContext* cx, const char* filename, unsigned lineno,
-                    unsigned column, JSErrorCallback errorCallback,
-                    void* userRef, const unsigned errorNumber, ...);
-  bool addNoteLatin1(JSContext* cx, const char* filename, unsigned lineno,
-                     unsigned column, JSErrorCallback errorCallback,
-                     void* userRef, const unsigned errorNumber, ...);
-  bool addNoteUTF8(JSContext* cx, const char* filename, unsigned lineno,
-                   unsigned column, JSErrorCallback errorCallback,
-                   void* userRef, const unsigned errorNumber, ...);
+  bool addNoteASCII(JSContext* cx, const char* filename, unsigned sourceId,
+                    unsigned lineno, unsigned column,
+                    JSErrorCallback errorCallback, void* userRef,
+                    const unsigned errorNumber, ...);
+  bool addNoteLatin1(JSContext* cx, const char* filename, unsigned sourceId,
+                     unsigned lineno, unsigned column,
+                     JSErrorCallback errorCallback, void* userRef,
+                     const unsigned errorNumber, ...);
+  bool addNoteUTF8(JSContext* cx, const char* filename, unsigned sourceId,
+                   unsigned lineno, unsigned column,
+                   JSErrorCallback errorCallback, void* userRef,
+                   const unsigned errorNumber, ...);
 
   JS_PUBLIC_API size_t length();
 
   // Create a deep copy of notes.
   js::UniquePtr<JSErrorNotes> copy(JSContext* cx);
 
-  class iterator final
-      : public std::iterator<std::input_iterator_tag, js::UniquePtr<Note>> {
+  class iterator final {
    private:
     js::UniquePtr<Note>* note_;
 
    public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = js::UniquePtr<Note>;
+    using difference_type = ptrdiff_t;
+    using pointer = value_type*;
+    using reference = value_type&;
+
     explicit iterator(js::UniquePtr<Note>* note = nullptr) : note_(note) {}
 
     bool operator==(iterator other) const { return note_ == other.note_; }
@@ -249,7 +261,7 @@ class JSErrorReport : public JSErrorBase {
  * JSErrorReport flag values.  These may be freely composed.
  */
 #define JSREPORT_ERROR 0x0     /* pseudo-flag for default case */
-#define JSREPORT_WARNING 0x1   /* reported via JS_ReportWarning */
+#define JSREPORT_WARNING 0x1   /* reported via JS::Warn* */
 #define JSREPORT_EXCEPTION 0x2 /* exception was thrown */
 #define JSREPORT_STRICT 0x4    /* error or warning due to strict option */
 

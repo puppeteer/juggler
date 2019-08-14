@@ -3,7 +3,7 @@
 
 load(libdir + "asserts.js");
 
-let g = newGlobal();
+let g = newGlobal({newCompartment: true});
 g.eval(`
     async function f() { await 1; }
     var err = new TypeError("object too hairy");
@@ -14,11 +14,10 @@ let gw = dbg.addDebuggee(g);
 let errw = gw.makeDebuggeeValue(g.err);
 
 // Repeat the test for each onEnterFrame event.
-// It fires up to three times:
+// It fires up to two times:
 // - when the async function g.f is called;
-// - when we enter it to run to `await 1`;
 // - when we resume after the await to run to the end.
-for (let when = 0; when < 3; when++) {
+for (let when = 0; when < 2; when++) {
     let hits = 0;
     dbg.onEnterFrame = frame => {
         return hits++ < when ? undefined : {throw: errw};

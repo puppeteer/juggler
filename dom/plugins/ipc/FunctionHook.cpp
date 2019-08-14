@@ -4,14 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/TextUtils.h"
+
 #include "FunctionHook.h"
 #include "FunctionBroker.h"
 #include "nsClassHashtable.h"
 #include "mozilla/ClearOnShutdown.h"
 
 #if defined(XP_WIN)
-#include <shlobj.h>
-#include "PluginModuleChild.h"
+#  include <shlobj.h>
+#  include "PluginModuleChild.h"
 #endif
 
 namespace mozilla {
@@ -65,7 +67,7 @@ WindowsDllInterceptor* FunctionHook::GetDllInterceptorFor(
     sDllInterceptorCache = new DllInterceptors();
   }
 
-  MOZ_ASSERT(NS_IsAscii(aModuleName),
+  MOZ_ASSERT(IsAsciiNullTerminated(aModuleName),
              "Non-ASCII module names are not supported");
   NS_ConvertASCIItoUTF16 moduleName(aModuleName);
 
@@ -295,7 +297,7 @@ void FunctionHook::HookProtectedMode() {
   sCreateFileAStub.Set(sKernel32Intercept, "CreateFileA", &CreateFileAHookFn);
 }
 
-#if defined(MOZ_SANDBOX)
+#  if defined(MOZ_SANDBOX)
 
 /* GetFileAttributesW */
 
@@ -330,7 +332,7 @@ DWORD WINAPI GetFileAttributesWHook(LPCWSTR aFilename) {
   return FILE_ATTRIBUTE_DIRECTORY;
 }
 
-#endif  // defined(MOZ_SANDBOX)
+#  endif  // defined(MOZ_SANDBOX)
 
 #endif  // defined(XP_WIN)
 
@@ -343,12 +345,12 @@ void FunctionHook::AddFunctionHooks(FunctionHookArray& aHooks) {
       "user32.dll", "GetWindowInfo", &GetWindowInfo, &GetWindowInfoHook));
   aHooks[ID_PrintDlgW] = FUN_HOOK(
       new PrintDlgWFH("comdlg32.dll", "PrintDlgW", &PrintDlgW, PrintDlgWHook));
-#if defined(MOZ_SANDBOX)
+#  if defined(MOZ_SANDBOX)
   aHooks[ID_GetFileAttributesW] = FUN_HOOK(
       new GetFileAttributesWFH("kernel32.dll", "GetFileAttributesW",
                                &GetFileAttributesW, &GetFileAttributesWHook));
-#endif  // defined(MOZ_SANDBOX)
-#endif  // defined(XP_WIN)
+#  endif  // defined(MOZ_SANDBOX)
+#endif    // defined(XP_WIN)
 }
 
 #undef FUN_HOOK

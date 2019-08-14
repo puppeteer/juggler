@@ -10,11 +10,15 @@
 #include "nsLeafFrame.h"
 #include "nsBox.h"
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 class nsLeafBoxFrame : public nsLeafFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsLeafBoxFrame)
 
-  friend nsIFrame* NS_NewLeafBoxFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewLeafBoxFrame(mozilla::PresShell* aPresShell,
                                       ComputedStyle* aStyle);
 
   virtual nsSize GetXULPrefSize(nsBoxLayoutState& aState) override;
@@ -37,7 +41,6 @@ class nsLeafBoxFrame : public nsLeafFrame {
 
   // nsIHTMLReflow overrides
 
-  virtual void MarkIntrinsicISizesDirty() override;
   virtual nscoord GetMinISize(gfxContext* aRenderingContext) override;
   virtual nscoord GetPrefISize(gfxContext* aRenderingContext) override;
 
@@ -71,8 +74,9 @@ class nsLeafBoxFrame : public nsLeafFrame {
 
   virtual nscoord GetIntrinsicISize() override;
 
-  explicit nsLeafBoxFrame(ComputedStyle* aStyle, ClassID aID = kClassID)
-      : nsLeafFrame(aStyle, aID) {}
+  explicit nsLeafBoxFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                          ClassID aID = kClassID)
+      : nsLeafFrame(aStyle, aPresContext, aID) {}
 
  private:
   void UpdateMouseThrough();

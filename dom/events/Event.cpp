@@ -7,8 +7,6 @@
 #include "AccessCheck.h"
 #include "base/basictypes.h"
 #include "ipc/IPCMessageUtils.h"
-#include "mozilla/dom/Event.h"
-#include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/ContentEvents.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -19,8 +17,13 @@
 #include "mozilla/MiscEvents.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
+#include "mozilla/dom/Event.h"
+#include "mozilla/dom/ShadowRoot.h"
 #include "nsContentUtils.h"
 #include "nsCOMPtr.h"
 #include "nsDeviceContext.h"
@@ -29,8 +32,6 @@
 #include "nsIFrame.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
-#include "nsIDocument.h"
-#include "nsIPresShell.h"
 #include "nsIScrollableFrame.h"
 #include "nsJSEnvironment.h"
 #include "nsLayoutUtils.h"
@@ -39,11 +40,6 @@
 
 namespace mozilla {
 namespace dom {
-
-static char* sPopupAllowedEvents;
-
-static bool sReturnHighResTimeStamp = false;
-static bool sReturnHighResTimeStampIsSet = false;
 
 Event::Event(EventTarget* aOwner, nsPresContext* aPresContext,
              WidgetEvent* aEvent) {
@@ -58,13 +54,6 @@ void Event::ConstructorInit(EventTarget* aOwner, nsPresContext* aPresContext,
                             WidgetEvent* aEvent) {
   SetOwner(aOwner);
   mIsMainThreadEvent = NS_IsMainThread();
-
-  if (mIsMainThreadEvent && !sReturnHighResTimeStampIsSet) {
-    Preferences::AddBoolVarCache(&sReturnHighResTimeStamp,
-                                 "dom.event.highrestimestamp.enabled",
-                                 sReturnHighResTimeStamp);
-    sReturnHighResTimeStampIsSet = true;
-  }
 
   mPrivateDataDuplicated = false;
   mWantsPopupControlCheck = false;
@@ -156,11 +145,18 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Event)
       case eClipboardEventClass:
         tmp->mEvent->AsClipboardEvent()->mClipboardData = nullptr;
         break;
+      case eEditorInputEventClass:
+        tmp->mEvent->AsEditorInputEvent()->mDataTransfer = nullptr;
+        break;
       case eMutationEventClass:
         tmp->mEvent->AsMutationEvent()->mRelatedNode = nullptr;
         break;
       default:
         break;
+    }
+
+    if (WidgetMouseEvent* mouseEvent = tmp->mEvent->AsMouseEvent()) {
+      mouseEvent->mClickTarget = nullptr;
     }
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mPresContext);
@@ -187,12 +183,21 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Event)
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mClipboardData");
         cb.NoteXPCOMChild(tmp->mEvent->AsClipboardEvent()->mClipboardData);
         break;
+      case eEditorInputEventClass:
+        NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mDataTransfer");
+        cb.NoteXPCOMChild(tmp->mEvent->AsEditorInputEvent()->mDataTransfer);
+        break;
       case eMutationEventClass:
         NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mRelatedNode");
         cb.NoteXPCOMChild(tmp->mEvent->AsMutationEvent()->mRelatedNode);
         break;
       default:
         break;
+    }
+
+    if (WidgetMouseEvent* mouseEvent = tmp->mEvent->AsMouseEvent()) {
+      NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mEvent->mClickTarget");
+      cb.NoteXPCOMChild(mouseEvent->mClickTarget);
     }
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPresContext)
@@ -215,7 +220,7 @@ void Event::GetType(nsAString& aType) const {
 
 EventTarget* Event::GetTarget() const { return mEvent->GetDOMEventTarget(); }
 
-already_AddRefed<nsIDocument> Event::GetDocument() const {
+already_AddRefed<Document> Event::GetDocument() const {
   nsCOMPtr<EventTarget> eventTarget = GetTarget();
 
   if (!eventTarget) {
@@ -229,7 +234,7 @@ already_AddRefed<nsIDocument> Event::GetDocument() const {
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocument> doc;
+  nsCOMPtr<Document> doc;
   doc = win->GetExtantDoc();
 
   return doc.forget();
@@ -294,7 +299,7 @@ bool Event::Init(mozilla::dom::EventTarget* aGlobal) {
   bool trusted = false;
   nsCOMPtr<nsPIDOMWindowInner> w = do_QueryInterface(aGlobal);
   if (w) {
-    nsCOMPtr<nsIDocument> d = w->GetExtantDoc();
+    nsCOMPtr<Document> d = w->GetExtantDoc();
     if (d) {
       trusted = nsContentUtils::IsChromeDoc(d);
       nsPresContext* presContext = d->GetPresContext();
@@ -377,12 +382,11 @@ void Event::PreventDefaultInternal(bool aCalledByDefaultHandler,
   if (mEvent->mFlags.mInPassiveListener) {
     nsCOMPtr<nsPIDOMWindowInner> win(do_QueryInterface(mOwner));
     if (win) {
-      if (nsIDocument* doc = win->GetExtantDoc()) {
-        nsString type;
-        GetType(type);
-        const char16_t* params[] = {type.get()};
-        doc->WarnOnceAbout(nsIDocument::ePreventDefaultFromPassiveListener,
-                           false, params, ArrayLength(params));
+      if (Document* doc = win->GetExtantDoc()) {
+        AutoTArray<nsString, 1> params;
+        GetType(*params.AppendElement());
+        doc->WarnOnceAbout(Document::ePreventDefaultFromPassiveListener, false,
+                           params);
       }
     }
     return;
@@ -499,272 +503,6 @@ bool Event::IsDispatchStopped() { return mEvent->PropagationStopped(); }
 
 WidgetEvent* Event::WidgetEventPtr() { return mEvent; }
 
-// return true if eventName is contained within events, delimited by
-// spaces
-static bool PopupAllowedForEvent(const char* eventName) {
-  if (!sPopupAllowedEvents) {
-    Event::PopupAllowedEventsChanged();
-
-    if (!sPopupAllowedEvents) {
-      return false;
-    }
-  }
-
-  nsDependentCString events(sPopupAllowedEvents);
-
-  nsCString::const_iterator start, end;
-  nsCString::const_iterator startiter(events.BeginReading(start));
-  events.EndReading(end);
-
-  while (startiter != end) {
-    nsCString::const_iterator enditer(end);
-
-    if (!FindInReadable(nsDependentCString(eventName), startiter, enditer))
-      return false;
-
-    // the match is surrounded by spaces, or at a string boundary
-    if ((startiter == start || *--startiter == ' ') &&
-        (enditer == end || *enditer == ' ')) {
-      return true;
-    }
-
-    // Move on and see if there are other matches. (The delimitation
-    // requirement makes it pointless to begin the next search before
-    // the end of the invalid match just found.)
-    startiter = enditer;
-  }
-
-  return false;
-}
-
-// static
-PopupControlState Event::GetEventPopupControlState(WidgetEvent* aEvent,
-                                                   Event* aDOMEvent) {
-  // generally if an event handler is running, new windows are disallowed.
-  // check for exceptions:
-  PopupControlState abuse = openAbused;
-
-  if (aDOMEvent && aDOMEvent->GetWantsPopupControlCheck()) {
-    nsAutoString type;
-    aDOMEvent->GetType(type);
-    if (PopupAllowedForEvent(NS_ConvertUTF16toUTF8(type).get())) {
-      return openAllowed;
-    }
-  }
-
-  switch (aEvent->mClass) {
-    case eBasicEventClass:
-      // For these following events only allow popups if they're
-      // triggered while handling user input. See
-      // nsPresShell::HandleEventInternal() for details.
-      if (EventStateManager::IsHandlingUserInput()) {
-        abuse = openBlocked;
-        switch (aEvent->mMessage) {
-          case eFormSelect:
-            if (PopupAllowedForEvent("select")) {
-              abuse = openControlled;
-            }
-            break;
-          case eFormChange:
-            if (PopupAllowedForEvent("change")) {
-              abuse = openControlled;
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    case eEditorInputEventClass:
-      // For this following event only allow popups if it's triggered
-      // while handling user input. See
-      // nsPresShell::HandleEventInternal() for details.
-      if (EventStateManager::IsHandlingUserInput()) {
-        abuse = openBlocked;
-        switch (aEvent->mMessage) {
-          case eEditorInput:
-            if (PopupAllowedForEvent("input")) {
-              abuse = openControlled;
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    case eInputEventClass:
-      // For this following event only allow popups if it's triggered
-      // while handling user input. See
-      // nsPresShell::HandleEventInternal() for details.
-      if (EventStateManager::IsHandlingUserInput()) {
-        abuse = openBlocked;
-        switch (aEvent->mMessage) {
-          case eFormChange:
-            if (PopupAllowedForEvent("change")) {
-              abuse = openControlled;
-            }
-            break;
-          case eXULCommand:
-            abuse = openControlled;
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    case eKeyboardEventClass:
-      if (aEvent->IsTrusted()) {
-        abuse = openBlocked;
-        uint32_t key = aEvent->AsKeyboardEvent()->mKeyCode;
-        switch (aEvent->mMessage) {
-          case eKeyPress:
-            // return key on focused button. see note at eMouseClick.
-            if (key == NS_VK_RETURN) {
-              abuse = openAllowed;
-            } else if (PopupAllowedForEvent("keypress")) {
-              abuse = openControlled;
-            }
-            break;
-          case eKeyUp:
-            // space key on focused button. see note at eMouseClick.
-            if (key == NS_VK_SPACE) {
-              abuse = openAllowed;
-            } else if (PopupAllowedForEvent("keyup")) {
-              abuse = openControlled;
-            }
-            break;
-          case eKeyDown:
-            if (PopupAllowedForEvent("keydown")) {
-              abuse = openControlled;
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    case eTouchEventClass:
-      if (aEvent->IsTrusted()) {
-        abuse = openBlocked;
-        switch (aEvent->mMessage) {
-          case eTouchStart:
-            if (PopupAllowedForEvent("touchstart")) {
-              abuse = openControlled;
-            }
-            break;
-          case eTouchEnd:
-            if (PopupAllowedForEvent("touchend")) {
-              abuse = openControlled;
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    case eMouseEventClass:
-      if (aEvent->IsTrusted() &&
-          aEvent->AsMouseEvent()->button == WidgetMouseEvent::eLeftButton) {
-        abuse = openBlocked;
-        switch (aEvent->mMessage) {
-          case eMouseUp:
-            if (PopupAllowedForEvent("mouseup")) {
-              abuse = openControlled;
-            }
-            break;
-          case eMouseDown:
-            if (PopupAllowedForEvent("mousedown")) {
-              abuse = openControlled;
-            }
-            break;
-          case eMouseClick:
-            /* Click events get special treatment because of their
-               historical status as a more legitimate event handler. If
-               click popups are enabled in the prefs, clear the popup
-               status completely. */
-            if (PopupAllowedForEvent("click")) {
-              abuse = openAllowed;
-            }
-            break;
-          case eMouseDoubleClick:
-            if (PopupAllowedForEvent("dblclick")) {
-              abuse = openControlled;
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    case ePointerEventClass:
-      if (aEvent->IsTrusted() &&
-          aEvent->AsPointerEvent()->button == WidgetMouseEvent::eLeftButton) {
-        switch (aEvent->mMessage) {
-          case ePointerUp:
-            if (PopupAllowedForEvent("pointerup")) {
-              abuse = openControlled;
-            }
-            break;
-          case ePointerDown:
-            if (PopupAllowedForEvent("pointerdown")) {
-              abuse = openControlled;
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    case eFormEventClass:
-      // For these following events only allow popups if they're
-      // triggered while handling user input. See
-      // nsPresShell::HandleEventInternal() for details.
-      if (EventStateManager::IsHandlingUserInput()) {
-        abuse = openBlocked;
-        switch (aEvent->mMessage) {
-          case eFormSubmit:
-            if (PopupAllowedForEvent("submit")) {
-              abuse = openControlled;
-            }
-            break;
-          case eFormReset:
-            if (PopupAllowedForEvent("reset")) {
-              abuse = openControlled;
-            }
-            break;
-          default:
-            break;
-        }
-      }
-      break;
-    default:
-      break;
-  }
-
-  return abuse;
-}
-
-// static
-void Event::PopupAllowedEventsChanged() {
-  if (sPopupAllowedEvents) {
-    free(sPopupAllowedEvents);
-  }
-
-  nsAutoCString str;
-  Preferences::GetCString("dom.popup_allowed_events", str);
-
-  // We'll want to do this even if str is empty to avoid looking up
-  // this pref all the time if it's not set.
-  sPopupAllowedEvents = ToNewCString(str);
-}
-
-// static
-void Event::Shutdown() {
-  if (sPopupAllowedEvents) {
-    free(sPopupAllowedEvents);
-  }
-}
-
 // static
 CSSIntPoint Event::GetScreenCoords(nsPresContext* aPresContext,
                                    WidgetEvent* aEvent,
@@ -790,16 +528,28 @@ CSSIntPoint Event::GetScreenCoords(nsPresContext* aPresContext,
     return CSSIntPoint(aPoint.x, aPoint.y);
   }
 
+  // (Potentially) transform the point from the coordinate space of an
+  // out-of-process iframe to the coordinate space of the native
+  // window. The transform can only be applied to a point whose components
+  // are floating-point values, so convert the integer point first, then
+  // transform, and then round the result back to an integer point.
+  LayoutDevicePoint floatPoint(aPoint);
+  LayoutDevicePoint topLevelPoint =
+      guiEvent->mWidget->WidgetToTopLevelWidgetTransform().TransformPoint(
+          floatPoint);
+  LayoutDeviceIntPoint rounded = RoundedToInt(topLevelPoint);
+
   nsPoint pt = LayoutDevicePixel::ToAppUnits(
-      aPoint,
+      rounded,
       aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
 
-  if (nsIPresShell* ps = aPresContext->GetPresShell()) {
-    pt = pt.RemoveResolution(nsLayoutUtils::GetCurrentAPZResolutionScale(ps));
+  if (PresShell* presShell = aPresContext->GetPresShell()) {
+    pt = pt.RemoveResolution(
+        nsLayoutUtils::GetCurrentAPZResolutionScale(presShell));
   }
 
   pt += LayoutDevicePixel::ToAppUnits(
-      guiEvent->mWidget->WidgetToScreenOffset(),
+      guiEvent->mWidget->TopLevelWidgetToScreenOffset(),
       aPresContext->DeviceContext()->AppUnitsPerDevPixelAtUnitFullZoom());
 
   return CSSPixel::FromAppUnitsRounded(pt);
@@ -815,8 +565,9 @@ CSSIntPoint Event::GetPageCoords(nsPresContext* aPresContext,
 
   // If there is some scrolling, add scroll info to client point.
   if (aPresContext && aPresContext->GetPresShell()) {
-    nsIPresShell* shell = aPresContext->GetPresShell();
-    nsIScrollableFrame* scrollframe = shell->GetRootScrollFrameAsScrollable();
+    PresShell* presShell = aPresContext->PresShell();
+    nsIScrollableFrame* scrollframe =
+        presShell->GetRootScrollFrameAsScrollable();
     if (scrollframe) {
       pagePoint +=
           CSSIntPoint::FromAppUnitsRounded(scrollframe->GetScrollPosition());
@@ -847,11 +598,11 @@ CSSIntPoint Event::GetClientCoords(nsPresContext* aPresContext,
     return aDefaultPoint;
   }
 
-  nsIPresShell* shell = aPresContext->GetPresShell();
-  if (!shell) {
+  PresShell* presShell = aPresContext->GetPresShell();
+  if (!presShell) {
     return CSSIntPoint(0, 0);
   }
-  nsIFrame* rootFrame = shell->GetRootFrame();
+  nsIFrame* rootFrame = presShell->GetRootFrame();
   if (!rootFrame) {
     return CSSIntPoint(0, 0);
   }
@@ -873,16 +624,16 @@ CSSIntPoint Event::GetOffsetCoords(nsPresContext* aPresContext,
   if (!content || !aPresContext) {
     return CSSIntPoint(0, 0);
   }
-  nsCOMPtr<nsIPresShell> shell = aPresContext->GetPresShell();
-  if (!shell) {
+  RefPtr<PresShell> presShell = aPresContext->GetPresShell();
+  if (!presShell) {
     return CSSIntPoint(0, 0);
   }
-  shell->FlushPendingNotifications(FlushType::Layout);
+  presShell->FlushPendingNotifications(FlushType::Layout);
   nsIFrame* frame = content->GetPrimaryFrame();
   if (!frame) {
     return CSSIntPoint(0, 0);
   }
-  nsIFrame* rootFrame = shell->GetRootFrame();
+  nsIFrame* rootFrame = presShell->GetRootFrame();
   if (!rootFrame) {
     return CSSIntPoint(0, 0);
   }
@@ -944,15 +695,6 @@ void Event::SetReturnValue(bool aReturnValue, CallerType aCallerType) {
 }
 
 double Event::TimeStamp() {
-  if (!sReturnHighResTimeStamp) {
-    // In the situation where you have set a very old, not-very-supported
-    // non-default preference, we will always reduce the precision,
-    // regardless of system principal or not.
-    // The timestamp is absolute, so we supply a zero context mix-in.
-    double ret = static_cast<double>(mEvent->mTime);
-    return nsRFPService::ReduceTimePrecisionAsMSecs(ret, 0);
-  }
-
   if (mEvent->mTimeStamp.IsNull()) {
     return 0.0;
   }

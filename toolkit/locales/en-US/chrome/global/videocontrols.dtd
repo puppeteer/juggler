@@ -14,6 +14,10 @@
      accessibility software to clarify what the slider is for. -->
 <!ENTITY volumeScrubber.label "Volume slider">
 
+<!-- LOCALIZATION NOTE (pictureInPicture.label): This string is used as part of
+the Picture-in-Picture video toggle button when the mouse is hovering it. -->
+<!ENTITY pictureInPicture.label "Picture-in-Picture">
+
 <!ENTITY stats.media "Media">
 <!ENTITY stats.size "Size">
 <!ENTITY stats.activity "Activity">
@@ -33,6 +37,8 @@
 <!ENTITY error.srcNotSupported "Video format or MIME type is not supported.">
 <!ENTITY error.noSource2 "No video with supported format and MIME type found.">
 <!ENTITY error.generic "Video playback aborted due to an unknown error.">
+
+<!ENTITY status.pictureInPicture "This video is playing in Picture-in-Picture mode.">
 
 <!-- LOCALIZATION NOTE (scrubberScale.nameFormat): the #1 string is the current
 media position, and the #2 string is the total duration. For example, when at

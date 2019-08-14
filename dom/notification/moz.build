@@ -7,13 +7,12 @@
 with Files("**"):
     BUG_COMPONENT = ("Toolkit", "Notifications and Alerts")
 
-EXTRA_COMPONENTS += [
-    'NotificationStorage.js',
-    'NotificationStorage.manifest',
+EXTRA_JS_MODULES += [
+    'NotificationStorage.jsm',
 ]
 
-EXTRA_JS_MODULES += [
-    'NotificationDB.jsm'
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 EXPORTS.mozilla.dom += [
@@ -42,3 +41,12 @@ MOCHITEST_CHROME_MANIFESTS += ['test/chrome/chrome.ini']
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']
+
+if CONFIG['MOZ_NEW_NOTIFICATION_STORE']:
+    EXTRA_JS_MODULES += [
+        'new/NotificationDB.jsm',
+    ]
+else:
+    EXTRA_JS_MODULES += [
+        'old/NotificationDB.jsm',
+    ]

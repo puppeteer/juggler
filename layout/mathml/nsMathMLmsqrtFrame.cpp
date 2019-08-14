@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsMathMLmsqrtFrame.h"
+
+#include "mozilla/PresShell.h"
 #include "mozilla/gfx/2D.h"
 
 //
@@ -13,15 +15,16 @@
 
 using namespace mozilla;
 
-nsIFrame* NS_NewMathMLmsqrtFrame(nsIPresShell* aPresShell,
-                                 ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmsqrtFrame(aStyle);
+nsIFrame* NS_NewMathMLmsqrtFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell)
+      nsMathMLmsqrtFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmsqrtFrame)
 
-nsMathMLmsqrtFrame::nsMathMLmsqrtFrame(ComputedStyle* aStyle)
-    : nsMathMLmencloseFrame(aStyle, kClassID) {}
+nsMathMLmsqrtFrame::nsMathMLmsqrtFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+    : nsMathMLmencloseFrame(aStyle, aPresContext, kClassID) {}
 
 nsMathMLmsqrtFrame::~nsMathMLmsqrtFrame() {}
 

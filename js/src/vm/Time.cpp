@@ -12,7 +12,7 @@
 #include "mozilla/MathAlgorithms.h"
 
 #ifdef SOLARIS
-#define _REENTRANT 1
+#  define _REENTRANT 1
 #endif
 #include <string.h>
 #include <time.h>
@@ -21,23 +21,20 @@
 #include "jsutil.h"
 
 #ifdef XP_WIN
-#include <windef.h>
-#include <winbase.h>
-#include <crtdbg.h>   /* for _CrtSetReportMode */
-#include <mmsystem.h> /* for timeBegin/EndPeriod */
-#include <stdlib.h>   /* for _set_invalid_parameter_handler */
-
-#include "prinit.h"
-
+#  include <windef.h>
+#  include <winbase.h>
+#  include <crtdbg.h>   /* for _CrtSetReportMode */
+#  include <mmsystem.h> /* for timeBegin/EndPeriod */
+#  include <stdlib.h>   /* for _set_invalid_parameter_handler */
 #endif
 
 #ifdef XP_UNIX
 
-#ifdef _SVID_GETTOD /* Defined only on Solaris, see Solaris <sys/types.h> */
+#  ifdef _SVID_GETTOD /* Defined only on Solaris, see Solaris <sys/types.h> */
 extern int gettimeofday(struct timeval* tv);
-#endif
+#  endif
 
-#include <sys/time.h>
+#  include <sys/time.h>
 
 #endif /* XP_UNIX */
 
@@ -51,23 +48,20 @@ int64_t PRMJ_Now() {
     return mozilla::TimeStamp::NowFuzzyTime();
   }
 
-  int64_t now = PRMJ_NowImpl();
   // We check the FuzzyFox clock in case it was recently disabled, to prevent
   // time from going backwards.
-  return mozilla::TimeStamp::NowFuzzyTime() > now
-             ? mozilla::TimeStamp::NowFuzzyTime()
-             : now;
+  return js::Max(PRMJ_NowImpl(), mozilla::TimeStamp::NowFuzzyTime());
 }
 
 #if defined(XP_UNIX)
 static int64_t PRMJ_NowImpl() {
   struct timeval tv;
 
-#ifdef _SVID_GETTOD /* Defined only on Solaris, see Solaris <sys/types.h> */
+#  ifdef _SVID_GETTOD /* Defined only on Solaris, see Solaris <sys/types.h> */
   gettimeofday(&tv);
-#else
+#  else
   gettimeofday(&tv, 0);
-#endif /* _SVID_GETTOD */
+#  endif /* _SVID_GETTOD */
 
   return int64_t(tv.tv_sec) * PRMJ_USEC_PER_SEC + int64_t(tv.tv_usec);
 }
@@ -150,9 +144,9 @@ void PRMJ_NowInit() {
 
 void PRMJ_NowShutdown() { DeleteCriticalSection(&calibration.data_lock); }
 
-#define MUTEX_LOCK(m) EnterCriticalSection(m)
-#define MUTEX_UNLOCK(m) LeaveCriticalSection(m)
-#define MUTEX_SETSPINCOUNT(m, c) SetCriticalSectionSpinCount((m), (c))
+#  define MUTEX_LOCK(m) EnterCriticalSection(m)
+#  define MUTEX_UNLOCK(m) LeaveCriticalSection(m)
+#  define MUTEX_SETSPINCOUNT(m, c) SetCriticalSectionSpinCount((m), (c))
 
 // Please see bug 363258 for why the win32 timing code is so complex.
 static int64_t PRMJ_NowImpl() {
@@ -160,12 +154,7 @@ static int64_t PRMJ_NowImpl() {
     // Windows 8 has a new API function that does all the work.
     FILETIME ft;
     pGetSystemTimePreciseAsFileTime(&ft);
-    int64_t now = int64_t(FileTimeToUnixMicroseconds(ft));
-    // We check the FuzzyFox clock in case it was recently disabled, to prevent
-    // time from going backwards.
-    return mozilla::TimeStamp::NowFuzzyTime() > now
-               ? mozilla::TimeStamp::NowFuzzyTime()
-               : now;
+    return int64_t(FileTimeToUnixMicroseconds(ft));
   }
 
   bool calibrated = false;
@@ -257,28 +246,29 @@ static int64_t PRMJ_NowImpl() {
 }
 #endif
 
-#ifdef XP_WIN
+#if !ENABLE_INTL_API || MOZ_SYSTEM_ICU
+#  ifdef XP_WIN
 static void PRMJ_InvalidParameterHandler(const wchar_t* expression,
                                          const wchar_t* function,
                                          const wchar_t* file, unsigned int line,
                                          uintptr_t pReserved) {
   /* empty */
 }
-#endif
+#  endif
 
 /* Format a time value into a buffer. Same semantics as strftime() */
 size_t PRMJ_FormatTime(char* buf, size_t buflen, const char* fmt,
                        const PRMJTime* prtm, int timeZoneYear,
                        int offsetInSeconds) {
   size_t result = 0;
-#if defined(XP_UNIX) || defined(XP_WIN)
+#  if defined(XP_UNIX) || defined(XP_WIN)
   struct tm a;
-#ifdef XP_WIN
+#    ifdef XP_WIN
   _invalid_parameter_handler oldHandler;
-#ifndef __MINGW32__
+#      ifndef __MINGW32__
   int oldReportMode;
-#endif  // __MINGW32__
-#endif  // XP_WIN
+#      endif  // __MINGW32__
+#    endif    // XP_WIN
 
   memset(&a, 0, sizeof(struct tm));
 
@@ -294,7 +284,7 @@ size_t PRMJ_FormatTime(char* buf, size_t buflen, const char* fmt,
    * must fill in those values, or else strftime will return wrong results
    * (e.g., bug 511726, bug 554338).
    */
-#if defined(HAVE_LOCALTIME_R) && defined(HAVE_TM_ZONE_TM_GMTOFF)
+#    if defined(HAVE_LOCALTIME_R) && defined(HAVE_TM_ZONE_TM_GMTOFF)
   char emptyTimeZoneId[] = "";
   {
     /*
@@ -329,7 +319,7 @@ size_t PRMJ_FormatTime(char* buf, size_t buflen, const char* fmt,
       a.tm_zone = emptyTimeZoneId;
     }
   }
-#endif
+#    endif
 
   /*
    * Years before 1900 and after 9999 cause strftime() to abort on Windows.
@@ -357,25 +347,25 @@ size_t PRMJ_FormatTime(char* buf, size_t buflen, const char* fmt,
    * changeover time.)
    */
 
-#ifdef XP_WIN
+#    ifdef XP_WIN
   oldHandler = _set_invalid_parameter_handler(PRMJ_InvalidParameterHandler);
-#ifndef __MINGW32__
+#      ifndef __MINGW32__
   /*
    * MinGW doesn't have _CrtSetReportMode and defines it to be a no-op.
    * We ifdef it off to avoid warnings about unused variables
    */
   oldReportMode = _CrtSetReportMode(_CRT_ASSERT, 0);
-#endif  // __MINGW32__
-#endif  // XP_WIN
+#      endif  // __MINGW32__
+#    endif    // XP_WIN
 
   result = strftime(buf, buflen, fmt, &a);
 
-#ifdef XP_WIN
+#    ifdef XP_WIN
   _set_invalid_parameter_handler(oldHandler);
-#ifndef __MINGW32__
+#      ifndef __MINGW32__
   _CrtSetReportMode(_CRT_ASSERT, oldReportMode);
-#endif  // __MINGW32__
-#endif  // XP_WIN
+#      endif  // __MINGW32__
+#    endif    // XP_WIN
 
   if (fake_tm_year && result) {
     char real_year[16];
@@ -401,6 +391,7 @@ size_t PRMJ_FormatTime(char* buf, size_t buflen, const char* fmt,
       *(buf + result) = '\0';
     }
   }
-#endif
+#  endif
   return result;
 }
+#endif /* !ENABLE_INTL_API || MOZ_SYSTEM_ICU */

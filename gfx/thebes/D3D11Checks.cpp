@@ -7,9 +7,9 @@
 #include "DXVA2Manager.h"
 #include "gfxConfig.h"
 #include "GfxDriverInfo.h"
-#include "gfxPrefs.h"
 #include "gfxWindowsPlatform.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/layers/TextureD3D11.h"
@@ -25,8 +25,8 @@ namespace gfx {
 using namespace mozilla::widget;
 using mozilla::layers::AutoTextureLock;
 
-/* static */ bool D3D11Checks::DoesRenderTargetViewNeedRecreating(
-    ID3D11Device* aDevice) {
+/* static */
+bool D3D11Checks::DoesRenderTargetViewNeedRecreating(ID3D11Device* aDevice) {
   bool result = false;
   // CreateTexture2D is known to crash on lower feature levels, see bugs
   // 1170211 and 1089413.
@@ -131,14 +131,15 @@ using mozilla::layers::AutoTextureLock;
   return result;
 }
 
-/* static */ bool D3D11Checks::DoesDeviceWork() {
+/* static */
+bool D3D11Checks::DoesDeviceWork() {
   static bool checked = false;
   static bool result = false;
 
   if (checked) return result;
   checked = true;
 
-  if (gfxPrefs::Direct2DForceEnabled() ||
+  if (StaticPrefs::gfx_direct2d_force_enabled() ||
       gfxConfig::IsForcedOnByUser(Feature::HW_COMPOSITING)) {
     result = true;
     return true;
@@ -199,7 +200,7 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
     return false;
   }
 
-  if (gfxPrefs::Direct2DForceEnabled() ||
+  if (StaticPrefs::gfx_direct2d_force_enabled() ||
       gfxConfig::IsForcedOnByUser(Feature::HW_COMPOSITING)) {
     return true;
   }
@@ -211,7 +212,7 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
       gfxInfo->GetAdapterVendorID(vendorID);
       gfxInfo->GetAdapterVendorID2(vendorID2);
       if (vendorID.EqualsLiteral("0x8086") && vendorID2.IsEmpty()) {
-        if (!gfxPrefs::LayersAMDSwitchableGfxEnabled()) {
+        if (!StaticPrefs::layers_amd_switchable_gfx_enabled()) {
           return false;
         }
         gfxCriticalError(CriticalLog::DefaultOptions(false))
@@ -361,20 +362,21 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
   return true;
 }
 
-/* static */ bool D3D11Checks::DoesTextureSharingWork(ID3D11Device* device) {
+/* static */
+bool D3D11Checks::DoesTextureSharingWork(ID3D11Device* device) {
   return DoesTextureSharingWorkInternal(
       device, DXGI_FORMAT_B8G8R8A8_UNORM,
       D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
 }
 
-/* static */ bool D3D11Checks::DoesAlphaTextureSharingWork(
-    ID3D11Device* device) {
+/* static */
+bool D3D11Checks::DoesAlphaTextureSharingWork(ID3D11Device* device) {
   return DoesTextureSharingWorkInternal(device, DXGI_FORMAT_R8_UNORM,
                                         D3D11_BIND_SHADER_RESOURCE);
 }
 
-/* static */ bool D3D11Checks::GetDxgiDesc(ID3D11Device* device,
-                                           DXGI_ADAPTER_DESC* out) {
+/* static */
+bool D3D11Checks::GetDxgiDesc(ID3D11Device* device, DXGI_ADAPTER_DESC* out) {
   RefPtr<IDXGIDevice> dxgiDevice;
   HRESULT hr =
       device->QueryInterface(__uuidof(IDXGIDevice), getter_AddRefs(dxgiDevice));
@@ -390,7 +392,8 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
   return SUCCEEDED(dxgiAdapter->GetDesc(out));
 }
 
-/* static */ void D3D11Checks::WarnOnAdapterMismatch(ID3D11Device* device) {
+/* static */
+void D3D11Checks::WarnOnAdapterMismatch(ID3D11Device* device) {
   DXGI_ADAPTER_DESC desc;
   PodZero(&desc);
   GetDxgiDesc(device, &desc);
@@ -406,7 +409,8 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
   }
 }
 
-/* static */ bool D3D11Checks::DoesRemotePresentWork(IDXGIAdapter* adapter) {
+/* static */
+bool D3D11Checks::DoesRemotePresentWork(IDXGIAdapter* adapter) {
   // Remote presentation was added in DXGI 1.2, for Windows 8 and the Platform
   // Update to Windows 7.
   RefPtr<IDXGIAdapter2> check;
@@ -444,7 +448,8 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
   };
 
   auto doesP010Work = [&]() {
-    if (gfxVars::DXP010Blocked() && !gfxPrefs::PDMWMFForceAllowP010Format()) {
+    if (gfxVars::DXP010Blocked() &&
+        !StaticPrefs::media_wmf_force_allow_p010_format()) {
       return false;
     }
     UINT formatSupport;
@@ -453,7 +458,8 @@ static bool DoesTextureSharingWorkInternal(ID3D11Device* device,
   };
 
   auto doesP016Work = [&]() {
-    if (gfxVars::DXP016Blocked() && !gfxPrefs::PDMWMFForceAllowP010Format()) {
+    if (gfxVars::DXP016Blocked() &&
+        !StaticPrefs::media_wmf_force_allow_p010_format()) {
       return false;
     }
     UINT formatSupport;

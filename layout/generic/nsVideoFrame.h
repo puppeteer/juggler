@@ -38,7 +38,7 @@ class nsVideoFrame final : public nsContainerFrame,
   typedef mozilla::layers::LayerManager LayerManager;
   typedef mozilla::ContainerLayerParameters ContainerLayerParameters;
 
-  explicit nsVideoFrame(ComputedStyle* aStyle);
+  explicit nsVideoFrame(ComputedStyle*, nsPresContext*);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsVideoFrame)
@@ -55,7 +55,7 @@ class nsVideoFrame final : public nsContainerFrame,
 
   /* get the size of the video's display */
   nsSize GetVideoIntrinsicSize(gfxContext* aRenderingContext);
-  nsSize GetIntrinsicRatio() override;
+  mozilla::AspectRatio GetIntrinsicRatio() override;
   mozilla::LogicalSize ComputeSize(
       gfxContext* aRenderingContext, mozilla::WritingMode aWritingMode,
       const mozilla::LogicalSize& aCBSize, nscoord aAvailableISize,
@@ -69,8 +69,6 @@ class nsVideoFrame final : public nsContainerFrame,
   void Reflow(nsPresContext* aPresContext, ReflowOutput& aDesiredSize,
               const ReflowInput& aReflowInput,
               nsReflowStatus& aStatus) override;
-
-  bool IsLeafDynamic() const override;
 
 #ifdef ACCESSIBILITY
   mozilla::a11y::AccType AccessibleType() override;
@@ -122,9 +120,6 @@ class nsVideoFrame final : public nsContainerFrame,
   void UpdateTextTrack();
 
   virtual ~nsVideoFrame();
-
-  // Anonymous child which is bound via XBL to the video controls.
-  RefPtr<mozilla::dom::Element> mVideoControls;
 
   // Anonymous child which is the image element of the poster frame.
   RefPtr<mozilla::dom::Element> mPosterImage;

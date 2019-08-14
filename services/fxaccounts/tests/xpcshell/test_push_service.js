@@ -8,15 +8,33 @@
 /* eslint-disable no-shadow */
 /* eslint-disable mozilla/use-chromeutils-generateqi */
 
-ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
+const {
+  FXA_PUSH_SCOPE_ACCOUNT_UPDATE,
+  ONLOGOUT_NOTIFICATION,
+  ON_ACCOUNT_DESTROYED_NOTIFICATION,
+  ON_DEVICE_CONNECTED_NOTIFICATION,
+  ON_DEVICE_DISCONNECTED_NOTIFICATION,
+  ON_PASSWORD_CHANGED_NOTIFICATION,
+  ON_PASSWORD_RESET_NOTIFICATION,
+  ON_PROFILE_CHANGE_NOTIFICATION,
+  ON_PROFILE_UPDATED_NOTIFICATION,
+  ON_VERIFY_LOGIN_NOTIFICATION,
+  log,
+} = ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
 
 let importScope = {};
-Services.scriptloader.loadSubScript("resource://gre/components/FxAccountsPush.js", importScope);
+Services.scriptloader.loadSubScript(
+  "resource://gre/modules/FxAccountsPush.jsm",
+  importScope
+);
 const FxAccountsPushService = importScope.FxAccountsPushService;
 
-XPCOMUtils.defineLazyServiceGetter(this, "pushService",
-  "@mozilla.org/push/Service;1", "nsIPushService");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "pushService",
+  "@mozilla.org/push/Service;1",
+  "nsIPushService"
+);
 
 initTestLogging("Trace");
 log.level = Log.Level.Trace;
@@ -48,7 +66,6 @@ let mockLog = {
   warn() {},
   error() {},
 };
-
 
 add_task(async function initialize() {
   let pushService = new FxAccountsPushService();
@@ -143,7 +160,11 @@ add_test(function observePushTopicVerify() {
     fxAccounts: customAccounts,
   });
 
-  pushService.observe(emptyMsg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    emptyMsg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });
 
 add_test(function observePushTopicDeviceConnected() {
@@ -171,7 +192,11 @@ add_test(function observePushTopicDeviceConnected() {
     fxAccounts: mockFxAccounts,
   });
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });
 
 add_task(async function observePushTopicDeviceDisconnected_current_device() {
@@ -191,12 +216,14 @@ add_task(async function observePushTopicDeviceDisconnected_current_device() {
   };
 
   let signoutCalled = false;
-  let { FxAccounts } = ChromeUtils.import("resource://gre/modules/FxAccounts.jsm", {});
+  let { FxAccounts } = ChromeUtils.import(
+    "resource://gre/modules/FxAccounts.jsm"
+  );
   const fxAccountsMock = new FxAccounts({
     newAccountState() {
       return {
         async getUserAccountData() {
-          return {device: {id: deviceId}};
+          return { device: { id: deviceId } };
         },
       };
     },
@@ -218,7 +245,11 @@ add_task(async function observePushTopicDeviceDisconnected_current_device() {
     fxAccounts: fxAccountsMock,
   });
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 
   await deviceDisconnectedNotificationObserved;
   ok(signoutCalled);
@@ -241,12 +272,14 @@ add_task(async function observePushTopicDeviceDisconnected_another_device() {
   };
 
   let signoutCalled = false;
-  let { FxAccounts } = ChromeUtils.import("resource://gre/modules/FxAccounts.jsm", {});
+  let { FxAccounts } = ChromeUtils.import(
+    "resource://gre/modules/FxAccounts.jsm"
+  );
   const fxAccountsMock = new FxAccounts({
     newAccountState() {
       return {
         async getUserAccountData() {
-          return {device: {id: "thelocaldevice"}};
+          return { device: { id: "thelocaldevice" } };
         },
       };
     },
@@ -268,7 +301,11 @@ add_task(async function observePushTopicDeviceDisconnected_another_device() {
     fxAccounts: fxAccountsMock,
   });
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 
   await deviceDisconnectedNotificationObserved;
   ok(!signoutCalled);
@@ -301,7 +338,11 @@ add_test(function observePushTopicAccountDestroyed() {
     fxAccounts: customAccounts,
   });
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });
 
 add_test(function observePushTopicVerifyLogin() {
@@ -335,7 +376,11 @@ add_test(function observePushTopicVerifyLogin() {
     fxAccounts: mockFxAccounts,
   });
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });
 
 add_test(function observePushTopicProfileUpdated() {
@@ -360,7 +405,11 @@ add_test(function observePushTopicProfileUpdated() {
     fxAccounts: mockFxAccounts,
   });
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });
 
 add_test(function observePushTopicPasswordChanged() {
@@ -383,7 +432,11 @@ add_test(function observePushTopicPasswordChanged() {
     run_next_test();
   };
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });
 
 add_test(function observePushTopicPasswordReset() {
@@ -406,7 +459,11 @@ add_test(function observePushTopicPasswordReset() {
     run_next_test();
   };
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });
 
 add_task(async function commandReceived() {
@@ -415,7 +472,8 @@ add_task(async function commandReceived() {
       json: () => ({
         command: "fxaccounts:command_received",
         data: {
-          url: "https://api.accounts.firefox.com/auth/v1/account/device/commands?index=42&limit=1",
+          url:
+            "https://api.accounts.firefox.com/auth/v1/account/device/commands?index=42&limit=1",
         },
       }),
     },
@@ -427,7 +485,7 @@ add_task(async function commandReceived() {
   let fxAccountsMock = {};
   const promiseConsumeRemoteMessagesCalled = new Promise(res => {
     fxAccountsMock.commands = {
-      consumeRemoteCommand() {
+      pollDeviceCommands() {
         res();
       },
     };
@@ -438,7 +496,11 @@ add_task(async function commandReceived() {
     fxAccounts: fxAccountsMock,
   });
 
-  pushService.observe(msg, mockPushService.pushTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    msg,
+    mockPushService.pushTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
   await promiseConsumeRemoteMessagesCalled;
 });
 
@@ -455,5 +517,9 @@ add_test(function observeSubscriptionChangeTopic() {
     fxAccounts: customAccounts,
   });
 
-  pushService.observe(null, mockPushService.subscriptionChangeTopic, FXA_PUSH_SCOPE_ACCOUNT_UPDATE);
+  pushService.observe(
+    null,
+    mockPushService.subscriptionChangeTopic,
+    FXA_PUSH_SCOPE_ACCOUNT_UPDATE
+  );
 });

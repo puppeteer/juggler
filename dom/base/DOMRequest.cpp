@@ -65,8 +65,9 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 NS_IMPL_ADDREF_INHERITED(DOMRequest, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(DOMRequest, DOMEventTargetHelper)
 
-/* virtual */ JSObject* DOMRequest::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* DOMRequest::WrapObject(JSContext* aCx,
+                                 JS::Handle<JSObject*> aGivenProto) {
   return DOMRequest_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -137,7 +138,7 @@ void DOMRequest::FireDetailedError(DOMException& aError) {
 
 void DOMRequest::FireEvent(const nsAString& aType, bool aBubble,
                            bool aCancelable) {
-  if (NS_FAILED(CheckInnerWindowCorrectness())) {
+  if (NS_FAILED(CheckCurrentGlobalCorrectness())) {
     return;
   }
 

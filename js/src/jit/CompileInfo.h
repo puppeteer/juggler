@@ -183,6 +183,7 @@ class CompileInfo {
         hadOverflowBailout_(script->hadOverflowBailout()),
         hadFrequentBailouts_(script->hadFrequentBailouts()),
         mayReadFrameArgsDirectly_(script->mayReadFrameArgsDirectly()),
+        trackRecordReplayProgress_(script->trackRecordReplayProgress()),
         inlineScriptTree_(inlineScriptTree) {
     MOZ_ASSERT_IF(osrPc, JSOp(*osrPc) == JSOP_LOOPENTRY);
 
@@ -243,6 +244,7 @@ class CompileInfo {
         hadOverflowBailout_(false),
         hadFrequentBailouts_(false),
         mayReadFrameArgsDirectly_(false),
+        trackRecordReplayProgress_(false),
         inlineScriptTree_(nullptr),
         needsBodyEnvironmentObject_(false),
         funNeedsSomeEnvironmentObject_(false) {
@@ -291,9 +293,7 @@ class CompileInfo {
 
   inline JSFunction* getFunction(jsbytecode* pc) const;
 
-  const Value& getConst(jsbytecode* pc) const {
-    return script_->getConst(GET_UINT32_INDEX(pc));
-  }
+  BigInt* getBigInt(jsbytecode* pc) const { return script_->getBigInt(pc); }
 
   jssrcnote* getNote(GSNCache& gsn, jsbytecode* pc) const {
     return GetSrcNote(gsn, script(), pc);
@@ -499,6 +499,7 @@ class CompileInfo {
   bool hadOverflowBailout() const { return hadOverflowBailout_; }
   bool hadFrequentBailouts() const { return hadFrequentBailouts_; }
   bool mayReadFrameArgsDirectly() const { return mayReadFrameArgsDirectly_; }
+  bool trackRecordReplayProgress() const { return trackRecordReplayProgress_; }
 
  private:
   unsigned nimplicit_;
@@ -523,6 +524,7 @@ class CompileInfo {
   bool hadFrequentBailouts_;
 
   bool mayReadFrameArgsDirectly_;
+  bool trackRecordReplayProgress_;
 
   InlineScriptTree* inlineScriptTree_;
 

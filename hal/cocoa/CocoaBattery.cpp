@@ -20,10 +20,10 @@
 #define IOKIT_FRAMEWORK_PATH "/System/Library/Frameworks/IOKit.framework/IOKit"
 
 #ifndef kIOPSTimeRemainingUnknown
-#define kIOPSTimeRemainingUnknown ((CFTimeInterval)-1.0)
+#  define kIOPSTimeRemainingUnknown ((CFTimeInterval)-1.0)
 #endif
 #ifndef kIOPSTimeRemainingUnlimited
-#define kIOPSTimeRemainingUnlimited ((CFTimeInterval)-2.0)
+#  define kIOPSTimeRemainingUnlimited ((CFTimeInterval)-2.0)
 #endif
 
 using namespace mozilla::dom::battery;
@@ -125,8 +125,8 @@ SingletonDestroyer::Observe(nsISupports*, const char* aTopic, const char16_t*) {
 }
 }  // namespace
 
-/* static */ MacPowerInformationService*
-MacPowerInformationService::GetInstance() {
+/* static */
+MacPowerInformationService* MacPowerInformationService::GetInstance() {
   if (sInstance) {
     return sInstance;
   }

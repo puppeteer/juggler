@@ -10,6 +10,11 @@
 #include "mozilla/webrender/WebRenderTypes.h"
 
 namespace mozilla {
+
+namespace wr {
+class TransactionBuilder;
+}
+
 namespace layers {
 
 class WebRenderTextureHost;
@@ -21,7 +26,8 @@ class WebRenderTextureHostWrapper {
  public:
   explicit WebRenderTextureHostWrapper(AsyncImagePipelineManager* aManager);
 
-  void UpdateWebRenderTextureHost(WebRenderTextureHost* aTextureHost);
+  void UpdateWebRenderTextureHost(wr::TransactionBuilder& aTxn,
+                                  WebRenderTextureHost* aTextureHost);
 
   wr::ExternalImageId GetExternalImageKey() { return mExternalImageId; }
 

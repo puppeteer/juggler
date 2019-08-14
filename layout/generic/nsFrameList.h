@@ -17,38 +17,38 @@
 #if defined(DEBUG) || defined(MOZ_DUMP_PAINTING)
 // DEBUG_FRAME_DUMP enables nsIFrame::List and related methods.
 // You can also define this in a non-DEBUG build if you need frame dumps.
-#define DEBUG_FRAME_DUMP 1
+#  define DEBUG_FRAME_DUMP 1
 #endif
 
 class nsContainerFrame;
 class nsIContent;
 class nsIFrame;
-class nsIPresShell;
 class nsPresContext;
 
 namespace mozilla {
+class PresShell;
 namespace layout {
 class FrameChildList;
 enum FrameChildListID {
   // The individual concrete child lists.
-  kPrincipalList = 0x1,
-  kPopupList = 0x2,
-  kCaptionList = 0x4,
-  kColGroupList = 0x8,
-  kSelectPopupList = 0x10,
-  kAbsoluteList = 0x20,
-  kFixedList = 0x40,
-  kOverflowList = 0x80,
-  kOverflowContainersList = 0x100,
-  kExcessOverflowContainersList = 0x200,
-  kOverflowOutOfFlowList = 0x400,
-  kFloatList = 0x800,
-  kBulletList = 0x1000,
-  kPushedFloatsList = 0x2000,
-  kBackdropList = 0x4000,
+  kPrincipalList,
+  kPopupList,
+  kCaptionList,
+  kColGroupList,
+  kSelectPopupList,
+  kAbsoluteList,
+  kFixedList,
+  kOverflowList,
+  kOverflowContainersList,
+  kExcessOverflowContainersList,
+  kOverflowOutOfFlowList,
+  kFloatList,
+  kBulletList,
+  kPushedFloatsList,
+  kBackdropList,
   // A special alias for kPrincipalList that suppress the reflow request that
   // is normally done when manipulating child lists.
-  kNoReflowPrincipalList = 0x8000
+  kNoReflowPrincipalList,
 };
 
 // A helper class for nsIFrame::Destroy[From].  It's defined here because
@@ -86,13 +86,13 @@ class nsFrameList {
   /**
    * Infallibly allocate a nsFrameList from the shell arena.
    */
-  void* operator new(size_t sz, nsIPresShell* aPresShell);
+  void* operator new(size_t sz, mozilla::PresShell* aPresShell);
 
   /**
    * Deallocate this list that was allocated from the shell arena.
    * The list is required to be empty.
    */
-  void Delete(nsIPresShell* aPresShell);
+  void Delete(mozilla::PresShell* aPresShell);
 
   /**
    * For each frame in this list: remove it from the list then call
@@ -271,12 +271,18 @@ class nsFrameList {
 
   bool NotEmpty() const { return nullptr != mFirstChild; }
 
+  /**
+   * Return true if aFrame is on this list.
+   * @note this method has O(n) time complexity over the length of the list
+   * XXXmats: ideally, we should make this function #ifdef DEBUG
+   */
   bool ContainsFrame(const nsIFrame* aFrame) const;
 
   /**
    * Get the number of frames in this list. Note that currently the
    * implementation has O(n) time complexity. Do not call it repeatedly in hot
    * code.
+   * XXXmats: ideally, we should make this function #ifdef DEBUG
    */
   int32_t GetLength() const;
 

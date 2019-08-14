@@ -6,11 +6,18 @@
 
 var EXPORTED_SYMBOLS = ["GeckoViewModule"];
 
-ChromeUtils.import("resource://gre/modules/GeckoViewUtils.jsm");
+const { GeckoViewUtils } = ChromeUtils.import(
+  "resource://gre/modules/GeckoViewUtils.jsm"
+);
 
-GeckoViewUtils.initLogging("Module", this);
+const { debug, warn } = GeckoViewUtils.initLogging("Module"); // eslint-disable-line no-unused-vars
 
 class GeckoViewModule {
+  static initLogging(aModuleName) {
+    const tag = aModuleName.replace("GeckoView", "");
+    return GeckoViewUtils.initLogging(tag);
+  }
+
   constructor(aModuleInfo) {
     this._info = aModuleInfo;
 
@@ -105,13 +112,13 @@ class EventProxy {
   }
 
   registerListener(aEventList) {
-    debug `registerListener ${aEventList}`;
+    debug`registerListener ${aEventList}`;
     this.eventDispatcher.registerListener(this, aEventList);
     this._registeredEvents = this._registeredEvents.concat(aEventList);
   }
 
   unregisterListener() {
-    debug `unregisterListener`;
+    debug`unregisterListener`;
     if (this._registeredEvents.length === 0) {
       return;
     }
@@ -121,7 +128,7 @@ class EventProxy {
 
   onEvent(aEvent, aData, aCallback) {
     if (this._enableQueuing) {
-      debug `queue ${aEvent}, data=${aData}`;
+      debug`queue ${aEvent}, data=${aData}`;
       this._eventQueue.unshift(arguments);
     } else {
       this._dispatch(...arguments);
@@ -129,12 +136,12 @@ class EventProxy {
   }
 
   enableQueuing(aEnable) {
-    debug `enableQueuing ${aEnable}`;
+    debug`enableQueuing ${aEnable}`;
     this._enableQueuing = aEnable;
   }
 
   _dispatch(aEvent, aData, aCallback) {
-    debug `dispatch ${aEvent}, data=${aData}`;
+    debug`dispatch ${aEvent}, data=${aData}`;
     if (this.listener.onEvent) {
       this.listener.onEvent(...arguments);
     } else {
@@ -143,7 +150,7 @@ class EventProxy {
   }
 
   dispatchQueuedEvents() {
-    debug `dispatchQueued`;
+    debug`dispatchQueued`;
     while (this._eventQueue.length) {
       const args = this._eventQueue.pop();
       this._dispatch(...args);

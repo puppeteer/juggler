@@ -30,17 +30,15 @@ add_task(async function() {
 });
 
 async function performTests() {
-  const {
-    jsterm,
-    ui,
-  } = await openNewTabAndConsole(TEST_URI);
+  const hud = await openNewTabAndConsole(TEST_URI);
+  const { jsterm, ui } = hud;
 
   const { autocompletePopup: popup } = jsterm;
 
   const onPopUpOpen = popup.once("popup-opened");
 
   info("wait for popup to show");
-  jsterm.setInputValue("window.testBu");
+  setInputValue(hud, "window.testBu");
   EventUtils.sendString("g");
 
   await onPopUpOpen;
@@ -55,14 +53,21 @@ async function performTests() {
   await onPopUpClose;
 
   ok(!popup.isOpen, "popup is not open after KEY_Enter");
-  is(jsterm.getInputValue(), "window.testBugA",
-    "input was completed with the first item of the popup");
-  ok(!getJsTermCompletionValue(jsterm), "completeNode is empty");
+  is(
+    getInputValue(hud),
+    "window.testBugA",
+    "input was completed with the first item of the popup"
+  );
+  ok(!getInputCompletionValue(hud), "completeNode is empty");
 
   EventUtils.synthesizeKey("KEY_Enter");
-  is(jsterm.getInputValue(), "", "input is empty after KEY_Enter");
+  is(getInputValue(hud), "", "input is empty after KEY_Enter");
 
-  const state = ui.consoleOutput.getStore().getState();
+  const state = ui.wrapper.getStore().getState();
   const entries = getHistoryEntries(state);
-  is(entries[entries.length - 1], "window.testBugA", "jsterm history is correct");
+  is(
+    entries[entries.length - 1],
+    "window.testBugA",
+    "jsterm history is correct"
+  );
 }

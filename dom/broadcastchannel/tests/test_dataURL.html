@@ -2,7 +2,7 @@
 <html>
 <head>
   <title>Test for BroadcastChannel in data: URL</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
 <body>
@@ -17,17 +17,18 @@ b.postMessage(42);
 
 SimpleTest.waitForExplicitFinish();
 
-onmessage= function(e) {
+onmessage = function(e) {
   is(e.data, 42, "BroadcastChannel works with data URLs");
   SimpleTest.finish();
-}
+};
 
+// eslint-disable-next-line no-useless-concat
 var url = "data:text/html,<script>" + document.getElementById("dataURL").textContent + "</" + "script>";
 
-var ifr = document.createElement('iframe');
+var ifr = document.createElement("iframe");
 document.body.appendChild(ifr);
 
-ifr.setAttribute('sandbox', 'allow-scripts');
+ifr.setAttribute("sandbox", "allow-scripts");
 ifr.src = url;
 </script>
 </body>

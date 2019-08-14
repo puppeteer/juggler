@@ -4,19 +4,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_ipc_TemporaryIPCBlobParent_h
-#define mozilla_dom_ipc_TemporaryIPCBlobParent_h
+#ifndef mozilla_dom_TemporaryIPCBlobParent_h
+#define mozilla_dom_TemporaryIPCBlobParent_h
 
-#include "mozilla/ipc/PTemporaryIPCBlob.h"
-#include "mozilla/ipc/PTemporaryIPCBlobParent.h"
+#include "mozilla/dom/PTemporaryIPCBlob.h"
+#include "mozilla/dom/PTemporaryIPCBlobParent.h"
 
 class nsIFile;
 
 namespace mozilla {
 namespace dom {
 
-class TemporaryIPCBlobParent final
-    : public mozilla::ipc::PTemporaryIPCBlobParent {
+class TemporaryIPCBlobParent final : public PTemporaryIPCBlobParent {
+  friend class PTemporaryIPCBlobParent;
+
  public:
   explicit TemporaryIPCBlobParent();
 
@@ -25,10 +26,10 @@ class TemporaryIPCBlobParent final
  private:
   ~TemporaryIPCBlobParent();
 
-  mozilla::ipc::IPCResult RecvOperationFailed() override;
+  mozilla::ipc::IPCResult RecvOperationFailed();
 
   mozilla::ipc::IPCResult RecvOperationDone(const nsCString& aContentType,
-                                            const FileDescriptor& aFD) override;
+                                            const FileDescriptor& aFD);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -41,4 +42,4 @@ class TemporaryIPCBlobParent final
 }  // namespace dom
 }  // namespace mozilla
 
-#endif  // mozilla_dom_ipc_TemporaryIPCBlobParent_h
+#endif  // mozilla_dom_TemporaryIPCBlobParent_h

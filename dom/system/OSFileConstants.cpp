@@ -11,39 +11,47 @@
 
 #include "prsystem.h"
 
+// Short macro to get the size of a member of a
+// given struct at compile time.
+// t is the type of struct, m the name of the
+// member:
+// DOM_SIZEOF_MEMBER(struct mystruct, myint)
+// will give you the size of the type of myint.
+#define DOM_SIZEOF_MEMBER(t, m) sizeof(((t*)0)->m)
+
 #if defined(XP_UNIX)
-#include "unistd.h"
-#include "dirent.h"
-#include "poll.h"
-#include "sys/stat.h"
-#if defined(XP_LINUX)
-#include <sys/vfs.h>
-#define statvfs statfs
-#define f_frsize f_bsize
-#else
-#include "sys/statvfs.h"
-#endif  // defined(XP_LINUX)
-#if !defined(ANDROID)
-#include "sys/wait.h"
-#include <spawn.h>
-#endif  // !defined(ANDROID)
-#endif  // defined(XP_UNIX)
+#  include "unistd.h"
+#  include "dirent.h"
+#  include "poll.h"
+#  include "sys/stat.h"
+#  if defined(XP_LINUX)
+#    include <sys/vfs.h>
+#    define statvfs statfs
+#    define f_frsize f_bsize
+#  else
+#    include "sys/statvfs.h"
+#  endif  // defined(XP_LINUX)
+#  if !defined(ANDROID)
+#    include "sys/wait.h"
+#    include <spawn.h>
+#  endif  // !defined(ANDROID)
+#endif    // defined(XP_UNIX)
 
 #if defined(XP_LINUX)
-#include <linux/fadvise.h>
+#  include <linux/fadvise.h>
 #endif  // defined(XP_LINUX)
 
 #if defined(XP_MACOSX)
-#include "copyfile.h"
+#  include "copyfile.h"
 #endif  // defined(XP_MACOSX)
 
 #if defined(XP_WIN)
-#include <windows.h>
-#include <accctrl.h>
+#  include <windows.h>
+#  include <accctrl.h>
 
-#ifndef PATH_MAX
-#define PATH_MAX MAX_PATH
-#endif
+#  ifndef PATH_MAX
+#    define PATH_MAX MAX_PATH
+#  endif
 
 #endif  // defined(XP_WIN)
 
@@ -78,7 +86,7 @@
 
 #if defined(__DragonFly__) || defined(__FreeBSD__) || defined(__NetBSD__) || \
     defined(__OpenBSD__)
-#define __dd_fd dd_fd
+#  define __dd_fd dd_fd
 #endif
 
 /**
@@ -119,7 +127,7 @@ struct OSFileConstantsService::Paths {
  * @param aOutPath The path to the special directory. In case of error,
  * the string is set to void.
  */
-nsresult GetPathToSpecialDir(const char *aKey, nsString &aOutPath) {
+nsresult GetPathToSpecialDir(const char* aKey, nsString& aOutPath) {
   nsCOMPtr<nsIFile> file;
   nsresult rv = NS_GetSpecialDirectory(aKey, getter_AddRefs(file));
   if (NS_FAILED(rv) || !file) {
@@ -140,8 +148,8 @@ nsresult GetPathToSpecialDir(const char *aKey, nsString &aOutPath) {
  * and |mPaths->localProfileDir| once the profile is setup.
  */
 NS_IMETHODIMP
-OSFileConstantsService::Observe(nsISupports *, const char *aTopic,
-                                const char16_t *) {
+OSFileConstantsService::Observe(nsISupports*, const char* aTopic,
+                                const char16_t*) {
   if (!mInitialized) {
     // Initialization has not taken place, something is wrong,
     // don't make things worse.
@@ -223,7 +231,7 @@ nsresult OSFileConstantsService::InitOSFileConstants() {
   // Get the umask from the system-info service.
   // The property will always be present, but it will be zero on
   // non-Unix systems.
-  // nsSystemInfo::gUserUmask is initialized by NS_InitXPCOM2 so we don't need
+  // nsSystemInfo::gUserUmask is initialized by NS_InitXPCOM so we don't need
   // to initialize the service.
   mUserUmask = nsSystemInfo::gUserUmask;
 
@@ -261,18 +269,18 @@ nsresult OSFileConstantsService::InitOSFileConstants() {
 
 // Define missing constants for Android
 #if !defined(S_IRGRP)
-#define S_IXOTH 0001
-#define S_IWOTH 0002
-#define S_IROTH 0004
-#define S_IRWXO 0007
-#define S_IXGRP 0010
-#define S_IWGRP 0020
-#define S_IRGRP 0040
-#define S_IRWXG 0070
-#define S_IXUSR 0100
-#define S_IWUSR 0200
-#define S_IRUSR 0400
-#define S_IRWXU 0700
+#  define S_IXOTH 0001
+#  define S_IWOTH 0002
+#  define S_IROTH 0004
+#  define S_IRWXO 0007
+#  define S_IXGRP 0010
+#  define S_IWGRP 0020
+#  define S_IRGRP 0040
+#  define S_IRWXG 0070
+#  define S_IXUSR 0100
+#  define S_IWUSR 0200
+#  define S_IRUSR 0400
+#  define S_IRWXU 0700
 #endif  // !defined(S_IRGRP)
 
 /**
@@ -380,9 +388,9 @@ static const dom::ConstantSpec gLibcProperties[] = {
     INT_CONSTANT(POLLOUT),
 
 // wait
-#if defined(WNOHANG)
+#  if defined(WNOHANG)
     INT_CONSTANT(WNOHANG),
-#endif  // defined(WNOHANG)
+#  endif  // defined(WNOHANG)
 
     // fcntl command values
     INT_CONSTANT(F_GETLK),
@@ -397,19 +405,19 @@ static const dom::ConstantSpec gLibcProperties[] = {
     INT_CONSTANT(F_UNLCK),
 
 // splice
-#if defined(SPLICE_F_MOVE)
+#  if defined(SPLICE_F_MOVE)
     INT_CONSTANT(SPLICE_F_MOVE),
-#endif  // defined(SPLICE_F_MOVE)
-#if defined(SPLICE_F_NONBLOCK)
+#  endif  // defined(SPLICE_F_MOVE)
+#  if defined(SPLICE_F_NONBLOCK)
     INT_CONSTANT(SPLICE_F_NONBLOCK),
-#endif  // defined(SPLICE_F_NONBLOCK)
-#if defined(SPLICE_F_MORE)
+#  endif  // defined(SPLICE_F_NONBLOCK)
+#  if defined(SPLICE_F_MORE)
     INT_CONSTANT(SPLICE_F_MORE),
-#endif  // defined(SPLICE_F_MORE)
-#if defined(SPLICE_F_GIFT)
+#  endif  // defined(SPLICE_F_MORE)
+#  if defined(SPLICE_F_GIFT)
     INT_CONSTANT(SPLICE_F_GIFT),
-#endif  // defined(SPLICE_F_GIFT)
-#endif  // defined(XP_UNIX)
+#  endif  // defined(SPLICE_F_GIFT)
+#endif    // defined(XP_UNIX)
 // copyfile
 #if defined(COPYFILE_DATA)
     INT_CONSTANT(COPYFILE_DATA),
@@ -508,18 +516,18 @@ static const dom::ConstantSpec gLibcProperties[] = {
     // The size of |fsblkcnt_t|.
     {"OSFILE_SIZEOF_FSBLKCNT_T", JS::Int32Value(sizeof(fsblkcnt_t))},
 
-#if !defined(ANDROID)
+#  if !defined(ANDROID)
     // The size of |posix_spawn_file_actions_t|.
     {"OSFILE_SIZEOF_POSIX_SPAWN_FILE_ACTIONS_T",
      JS::Int32Value(sizeof(posix_spawn_file_actions_t))},
-#endif  // !defined(ANDROID)
+#  endif  // !defined(ANDROID)
 
     // Defining |dirent|.
     // Size
     {"OSFILE_SIZEOF_DIRENT", JS::Int32Value(sizeof(dirent))},
 
 // Defining |flock|.
-#if defined(XP_UNIX)
+#  if defined(XP_UNIX)
     {"OSFILE_SIZEOF_FLOCK", JS::Int32Value(sizeof(struct flock))},
     {"OSFILE_OFFSETOF_FLOCK_L_START",
      JS::Int32Value(offsetof(struct flock, l_start))},
@@ -531,7 +539,7 @@ static const dom::ConstantSpec gLibcProperties[] = {
      JS::Int32Value(offsetof(struct flock, l_type))},
     {"OSFILE_OFFSETOF_FLOCK_L_WHENCE",
      JS::Int32Value(offsetof(struct flock, l_whence))},
-#endif  // defined(XP_UNIX)
+#  endif  // defined(XP_UNIX)
     // Offset of field |d_name|.
     {"OSFILE_OFFSETOF_DIRENT_D_NAME",
      JS::Int32Value(offsetof(struct dirent, d_name))},
@@ -547,21 +555,21 @@ static const dom::ConstantSpec gLibcProperties[] = {
     {"OSFILE_OFFSETOF_TIMEVAL_TV_USEC",
      JS::Int32Value(offsetof(struct timeval, tv_usec))},
 
-#if defined(DT_UNKNOWN)
+#  if defined(DT_UNKNOWN)
     // Position of field |d_type| in |dirent|
     // Not strictly posix, but seems defined on all platforms
     // except mingw32.
     {"OSFILE_OFFSETOF_DIRENT_D_TYPE",
      JS::Int32Value(offsetof(struct dirent, d_type))},
-#endif  // defined(DT_UNKNOWN)
+#  endif  // defined(DT_UNKNOWN)
 
 // Under MacOS X and BSDs, |dirfd| is a macro rather than a
 // function, so we need a little help to get it to work
-#if defined(dirfd)
+#  if defined(dirfd)
     {"OSFILE_SIZEOF_DIR", JS::Int32Value(sizeof(DIR))},
 
     {"OSFILE_OFFSETOF_DIR_DD_FD", JS::Int32Value(offsetof(DIR, __dd_fd))},
-#endif
+#  endif
 
     // Defining |stat|
 
@@ -576,32 +584,35 @@ static const dom::ConstantSpec gLibcProperties[] = {
     {"OSFILE_OFFSETOF_STAT_ST_SIZE",
      JS::Int32Value(offsetof(struct stat, st_size))},
 
-#if defined(HAVE_ST_ATIMESPEC)
+#  if defined(HAVE_ST_ATIMESPEC)
     {"OSFILE_OFFSETOF_STAT_ST_ATIME",
      JS::Int32Value(offsetof(struct stat, st_atimespec))},
     {"OSFILE_OFFSETOF_STAT_ST_MTIME",
      JS::Int32Value(offsetof(struct stat, st_mtimespec))},
     {"OSFILE_OFFSETOF_STAT_ST_CTIME",
      JS::Int32Value(offsetof(struct stat, st_ctimespec))},
-#else
+#  else
     {"OSFILE_OFFSETOF_STAT_ST_ATIME",
      JS::Int32Value(offsetof(struct stat, st_atime))},
     {"OSFILE_OFFSETOF_STAT_ST_MTIME",
      JS::Int32Value(offsetof(struct stat, st_mtime))},
     {"OSFILE_OFFSETOF_STAT_ST_CTIME",
      JS::Int32Value(offsetof(struct stat, st_ctime))},
-#endif  // defined(HAVE_ST_ATIME)
+#  endif  // defined(HAVE_ST_ATIME)
 
 // Several OSes have a birthtime field. For the moment, supporting only Darwin.
-#if defined(_DARWIN_FEATURE_64_BIT_INODE)
+#  if defined(_DARWIN_FEATURE_64_BIT_INODE)
     {"OSFILE_OFFSETOF_STAT_ST_BIRTHTIME",
      JS::Int32Value(offsetof(struct stat, st_birthtime))},
-#endif  // defined(_DARWIN_FEATURE_64_BIT_INODE)
+#  endif  // defined(_DARWIN_FEATURE_64_BIT_INODE)
 
     // Defining |statvfs|
 
     {"OSFILE_SIZEOF_STATVFS", JS::Int32Value(sizeof(struct statvfs))},
 
+    // We have no guarantee how big "f_frsize" is, so we have to calculate that.
+    {"OSFILE_SIZEOF_STATVFS_F_FRSIZE",
+     JS::Int32Value(DOM_SIZEOF_MEMBER(struct statvfs, f_frsize))},
     {"OSFILE_OFFSETOF_STATVFS_F_FRSIZE",
      JS::Int32Value(offsetof(struct statvfs, f_frsize))},
     {"OSFILE_OFFSETOF_STATVFS_F_BAVAIL",
@@ -725,9 +736,9 @@ static const dom::ConstantSpec gWinProperties[] = {
  * If the field does not exist, create it. If it exists but is not an
  * object, throw a JS error.
  */
-JSObject *GetOrCreateObjectProperty(JSContext *cx,
-                                    JS::Handle<JSObject *> aObject,
-                                    const char *aProperty) {
+JSObject* GetOrCreateObjectProperty(JSContext* cx,
+                                    JS::Handle<JSObject*> aObject,
+                                    const char* aProperty) {
   JS::Rooted<JS::Value> val(cx);
   if (!JS_GetProperty(cx, aObject, aProperty, &val)) {
     return nullptr;
@@ -750,12 +761,12 @@ JSObject *GetOrCreateObjectProperty(JSContext *cx,
  *
  * If the nsString is void (i.e. IsVoid is true), do nothing.
  */
-bool SetStringProperty(JSContext *cx, JS::Handle<JSObject *> aObject,
-                       const char *aProperty, const nsString aValue) {
+bool SetStringProperty(JSContext* cx, JS::Handle<JSObject*> aObject,
+                       const char* aProperty, const nsString aValue) {
   if (aValue.IsVoid()) {
     return true;
   }
-  JSString *strValue = JS_NewUCStringCopyZ(cx, aValue.get());
+  JSString* strValue = JS_NewUCStringCopyZ(cx, aValue.get());
   NS_ENSURE_TRUE(strValue, false);
   JS::Rooted<JS::Value> valValue(cx, JS::StringValue(strValue));
   return JS_SetProperty(cx, aObject, aProperty, valValue);
@@ -768,7 +779,7 @@ bool SetStringProperty(JSContext *cx, JS::Handle<JSObject *> aObject,
  * all its constants.
  */
 bool OSFileConstantsService::DefineOSFileConstants(
-    JSContext *aCx, JS::Handle<JSObject *> aGlobal) {
+    JSContext* aCx, JS::Handle<JSObject*> aGlobal) {
   if (!mInitialized) {
     JS_ReportErrorNumberASCII(aCx, js::GetErrorMessage, nullptr,
                               JSMSG_CANT_OPEN, "OSFileConstants",
@@ -776,18 +787,18 @@ bool OSFileConstantsService::DefineOSFileConstants(
     return false;
   }
 
-  JS::Rooted<JSObject *> objOS(aCx);
+  JS::Rooted<JSObject*> objOS(aCx);
   if (!(objOS = GetOrCreateObjectProperty(aCx, aGlobal, "OS"))) {
     return false;
   }
-  JS::Rooted<JSObject *> objConstants(aCx);
+  JS::Rooted<JSObject*> objConstants(aCx);
   if (!(objConstants = GetOrCreateObjectProperty(aCx, objOS, "Constants"))) {
     return false;
   }
 
   // Build OS.Constants.libc
 
-  JS::Rooted<JSObject *> objLibc(aCx);
+  JS::Rooted<JSObject*> objLibc(aCx);
   if (!(objLibc = GetOrCreateObjectProperty(aCx, objConstants, "libc"))) {
     return false;
   }
@@ -798,7 +809,7 @@ bool OSFileConstantsService::DefineOSFileConstants(
 #if defined(XP_WIN)
   // Build OS.Constants.Win
 
-  JS::Rooted<JSObject *> objWin(aCx);
+  JS::Rooted<JSObject*> objWin(aCx);
   if (!(objWin = GetOrCreateObjectProperty(aCx, objConstants, "Win"))) {
     return false;
   }
@@ -809,7 +820,7 @@ bool OSFileConstantsService::DefineOSFileConstants(
 
   // Build OS.Constants.Sys
 
-  JS::Rooted<JSObject *> objSys(aCx);
+  JS::Rooted<JSObject*> objSys(aCx);
   if (!(objSys = GetOrCreateObjectProperty(aCx, objConstants, "Sys"))) {
     return false;
   }
@@ -821,7 +832,7 @@ bool OSFileConstantsService::DefineOSFileConstants(
     DebugOnly<nsresult> rv = runtime->GetOS(os);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
 
-    JSString *strVersion = JS_NewStringCopyZ(aCx, os.get());
+    JSString* strVersion = JS_NewStringCopyZ(aCx, os.get());
     if (!strVersion) {
       return false;
     }
@@ -856,7 +867,7 @@ bool OSFileConstantsService::DefineOSFileConstants(
 
   // Build OS.Constants.Path
 
-  JS::Rooted<JSObject *> objPath(aCx);
+  JS::Rooted<JSObject*> objPath(aCx);
   if (!(objPath = GetOrCreateObjectProperty(aCx, objConstants, "Path"))) {
     return false;
   }
@@ -932,8 +943,8 @@ bool OSFileConstantsService::DefineOSFileConstants(
 NS_IMPL_ISUPPORTS(OSFileConstantsService, nsIOSFileConstantsService,
                   nsIObserver)
 
-/* static */ already_AddRefed<OSFileConstantsService>
-OSFileConstantsService::GetOrCreate() {
+/* static */
+already_AddRefed<OSFileConstantsService> OSFileConstantsService::GetOrCreate() {
   if (!gInstance) {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -961,7 +972,7 @@ OSFileConstantsService::~OSFileConstantsService() {
 }
 
 NS_IMETHODIMP
-OSFileConstantsService::Init(JSContext *aCx) {
+OSFileConstantsService::Init(JSContext* aCx) {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsresult rv = InitOSFileConstants();
@@ -969,8 +980,8 @@ OSFileConstantsService::Init(JSContext *aCx) {
     return rv;
   }
 
-  mozJSComponentLoader *loader = mozJSComponentLoader::Get();
-  JS::Rooted<JSObject *> targetObj(aCx);
+  mozJSComponentLoader* loader = mozJSComponentLoader::Get();
+  JS::Rooted<JSObject*> targetObj(aCx);
   loader->FindTargetObject(aCx, &targetObj);
 
   if (!DefineOSFileConstants(aCx, targetObj)) {

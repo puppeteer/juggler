@@ -24,22 +24,22 @@
 #include "nsISpeculativeConnect.h"
 #include "nsIURIFixup.h"
 #include "nsCategoryManagerUtils.h"
-#include "nsCDefaultURIFixup.h"
-#include "nsToolkitCompsCID.h"
 #include "nsGeoPosition.h"
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Components.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Hal.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/intl/OSPreferences.h"
 #include "mozilla/widget/ScreenManager.h"
 #include "prenv.h"
 
 #include "AndroidBridge.h"
 #include "AndroidBridgeUtilities.h"
+#include "AndroidSurfaceTexture.h"
 #include "GeneratedJNINatives.h"
 #include <android/log.h>
 #include <pthread.h>
@@ -47,13 +47,13 @@
 
 #include "GeckoProfiler.h"
 #ifdef MOZ_ANDROID_HISTORY
-#include "nsNetUtil.h"
-#include "nsIURI.h"
-#include "IHistory.h"
+#  include "nsNetUtil.h"
+#  include "nsIURI.h"
+#  include "IHistory.h"
 #endif
 
 #ifdef MOZ_LOGGING
-#include "mozilla/Logging.h"
+#  include "mozilla/Logging.h"
 #endif
 
 #include "AndroidAlerts.h"
@@ -73,11 +73,11 @@
 #include "WebExecutorSupport.h"
 
 #ifdef DEBUG_ANDROID_EVENTS
-#define EVLOG(args...) ALOG(args)
+#  define EVLOG(args...) ALOG(args)
 #else
-#define EVLOG(args...) \
-  do {                 \
-  } while (0)
+#  define EVLOG(args...) \
+    do {                 \
+    } while (0)
 #endif
 
 using namespace mozilla;
@@ -140,10 +140,10 @@ class GeckoThreadSupport final
     OriginAttributes attrs;
     nsCOMPtr<nsIPrincipal> principal =
         BasePrincipal::CreateCodebasePrincipal(uri, attrs);
-    specConn->SpeculativeConnect2(uri, principal, nullptr);
+    specConn->SpeculativeConnect(uri, principal, nullptr);
   }
 
-  static void WaitOnGecko() {
+  static bool WaitOnGecko(int64_t timeoutMillis) {
     struct NoOpRunnable : Runnable {
       NoOpRunnable() : Runnable("NoOpRunnable") {}
       NS_IMETHOD Run() override { return NS_OK; }
@@ -159,7 +159,8 @@ class GeckoThreadSupport final
                                 NS_DISPATCH_SYNC);
       }
     };
-    nsAppShell::SyncRunEvent(NoOpEvent());
+    return nsAppShell::SyncRunEvent(
+        NoOpEvent(), nullptr, TimeDuration::FromMilliseconds(timeoutMillis));
   }
 
   static void OnPause() {
@@ -234,8 +235,7 @@ class GeckoThreadSupport final
   static int64_t RunUiThreadCallback() { return RunAndroidUiTasks(); }
 
   static void ForceQuit() {
-    nsCOMPtr<nsIAppStartup> appStartup =
-        do_GetService(NS_APPSTARTUP_CONTRACTID);
+    nsCOMPtr<nsIAppStartup> appStartup = components::AppStartup::Service();
 
     if (appStartup) {
       appStartup->Quit(nsIAppStartup::eForceQuit);
@@ -411,6 +411,8 @@ nsAppShell::nsAppShell()
     mozilla::widget::Telemetry::Init();
     mozilla::widget::WebExecutorSupport::Init();
     nsWindow::InitNatives();
+    mozilla::gl::AndroidSurfaceTexture::Init();
+    mozilla::WebAuthnTokenManager::Init();
 
     if (jni::IsFennec()) {
       BrowserLocaleManagerSupport::Init();
@@ -565,8 +567,7 @@ nsAppShell::Observe(nsISupports* aSubject, const char* aTopic,
       // quit. Therefore, we should *not* exit Gecko when there is no
       // window or the last window is closed. nsIAppStartup::Quit will
       // still force Gecko to exit.
-      nsCOMPtr<nsIAppStartup> appStartup =
-          do_GetService(NS_APPSTARTUP_CONTRACTID);
+      nsCOMPtr<nsIAppStartup> appStartup = components::AppStartup::Service();
       if (appStartup) {
         appStartup->EnterLastWindowClosingSurvivalArea();
       }
@@ -576,7 +577,7 @@ nsAppShell::Observe(nsISupports* aSubject, const char* aTopic,
   } else if (!strcmp(aTopic, "chrome-document-loaded")) {
     // Set the global ready state and enable the window event dispatcher
     // for this particular GeckoView.
-    nsCOMPtr<nsIDocument> doc = do_QueryInterface(aSubject);
+    nsCOMPtr<dom::Document> doc = do_QueryInterface(aSubject);
     MOZ_ASSERT(doc);
     if (const RefPtr<nsWindow> window = nsWindow::From(doc->GetWindow())) {
       if (jni::IsAvailable()) {
@@ -603,8 +604,7 @@ nsAppShell::Observe(nsISupports* aSubject, const char* aTopic,
       // We are told explicitly to quit, perhaps due to
       // nsIAppStartup::Quit being called. We should release our hold on
       // nsIAppStartup and let it continue to quit.
-      nsCOMPtr<nsIAppStartup> appStartup =
-          do_GetService(NS_APPSTARTUP_CONTRACTID);
+      nsCOMPtr<nsIAppStartup> appStartup = components::AppStartup::Service();
       if (appStartup) {
         appStartup->ExitLastWindowClosingSurvivalArea();
       }
@@ -617,7 +617,7 @@ nsAppShell::Observe(nsISupports* aSubject, const char* aTopic,
     }
 
   } else if (!strcmp(aTopic, "content-document-global-created")) {
-    // Associate the PuppetWidget of the newly-created TabChild with a
+    // Associate the PuppetWidget of the newly-created BrowserChild with a
     // GeckoEditableChild instance.
     MOZ_ASSERT(!XRE_IsParentProcess());
 
@@ -627,14 +627,15 @@ nsAppShell::Observe(nsISupports* aSubject, const char* aTopic,
         nsPIDOMWindowOuter::From(domWindow));
     NS_ENSURE_TRUE(domWidget, NS_OK);
 
-    widget::GeckoEditableSupport::SetOnTabChild(domWidget->GetOwningTabChild());
+    widget::GeckoEditableSupport::SetOnBrowserChild(
+        domWidget->GetOwningBrowserChild());
 
   } else if (!strcmp(aTopic, "geckoview-content-global-transferred")) {
     // We're transferring to a new GeckoEditableParent, so notify the
     // existing GeckoEditableChild instance associated with the docshell.
     nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(aSubject);
-    widget::GeckoEditableSupport::SetOnTabChild(
-        dom::TabChild::GetFrom(docShell));
+    widget::GeckoEditableSupport::SetOnBrowserChild(
+        dom::BrowserChild::GetFrom(docShell));
   }
 
   if (removeObserver) {
@@ -684,8 +685,9 @@ bool nsAppShell::ProcessNextNativeEvent(bool mayWait) {
   return true;
 }
 
-void nsAppShell::SyncRunEvent(
-    Event&& event, UniquePtr<Event> (*eventFactory)(UniquePtr<Event>&&)) {
+bool nsAppShell::SyncRunEvent(
+    Event&& event, UniquePtr<Event> (*eventFactory)(UniquePtr<Event>&&),
+    const TimeDuration timeout) {
   // Perform the call on the Gecko thread in a separate lambda, and wait
   // on the monitor on the current thread.
   MOZ_ASSERT(!NS_IsMainThread());
@@ -697,19 +699,20 @@ void nsAppShell::SyncRunEvent(
 
   if (MOZ_UNLIKELY(!appShell)) {
     // Post-shutdown.
-    return;
+    return false;
   }
 
   bool finished = false;
   auto runAndNotify = [&event, &finished] {
     nsAppShell* const appShell = nsAppShell::Get();
     if (MOZ_UNLIKELY(!appShell || appShell->mSyncRunQuit)) {
-      return;
+      return false;
     }
     event.Run();
     finished = true;
     mozilla::MutexAutoLock shellLock(*sAppShellLock);
     appShell->mSyncRunFinished.NotifyAll();
+    return finished;
   };
 
   UniquePtr<Event> runAndNotifyEvent =
@@ -723,8 +726,10 @@ void nsAppShell::SyncRunEvent(
   appShell->mEventQueue.Post(std::move(runAndNotifyEvent));
 
   while (!finished && MOZ_LIKELY(sAppShell && !sAppShell->mSyncRunQuit)) {
-    appShell->mSyncRunFinished.Wait();
+    appShell->mSyncRunFinished.Wait(timeout);
   }
+
+  return finished;
 }
 
 already_AddRefed<nsIURI> nsAppShell::ResolveURI(const nsCString& aUriStr) {
@@ -736,7 +741,7 @@ already_AddRefed<nsIURI> nsAppShell::ResolveURI(const nsCString& aUriStr) {
     return uri.forget();
   }
 
-  nsCOMPtr<nsIURIFixup> fixup = do_GetService(NS_URIFIXUP_CONTRACTID);
+  nsCOMPtr<nsIURIFixup> fixup = components::URIFixup::Service();
   if (fixup && NS_SUCCEEDED(fixup->CreateFixupURI(aUriStr, 0, nullptr,
                                                   getter_AddRefs(uri)))) {
     return uri.forget();

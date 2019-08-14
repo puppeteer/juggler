@@ -17,34 +17,34 @@
 #include "updatedefines.h"
 
 #ifdef XP_WIN
-#include <accctrl.h>
-#include <aclapi.h>
-#include <cstdarg>
-#include <errno.h>
-#include <objbase.h>
-#include <shellapi.h>
-#include <shlobj.h>
-#include <strsafe.h>
-#include <winerror.h>
-#include "nsWindowsHelpers.h"
-#include "win_dirent.h"
+#  include <accctrl.h>
+#  include <aclapi.h>
+#  include <cstdarg>
+#  include <errno.h>
+#  include <objbase.h>
+#  include <shellapi.h>
+#  include <shlobj.h>
+#  include <strsafe.h>
+#  include <winerror.h>
+#  include "nsWindowsHelpers.h"
+#  include "win_dirent.h"
 #endif
 
 #ifdef XP_WIN
 // This is the name of the directory to be put in the application data directory
 // if no vendor or application name is specified.
 // (i.e. C:\ProgramData\<FALLBACK_VENDOR_NAME>)
-#define FALLBACK_VENDOR_NAME "Mozilla"
+#  define FALLBACK_VENDOR_NAME "Mozilla"
 // This describes the directory between the "Mozilla" directory and the install
 // path hash (i.e. C:\ProgramData\Mozilla\<UPDATE_PATH_MID_DIR_NAME>\<hash>)
-#define UPDATE_PATH_MID_DIR_NAME "updates"
+#  define UPDATE_PATH_MID_DIR_NAME "updates"
 // This describes the directory between the update directory and the patch
 // directory.
 // (i.e. C:\ProgramData\Mozilla\updates\<hash>\<UPDATE_SUBDIRECTORY>\0)
-#define UPDATE_SUBDIRECTORY "updates"
+#  define UPDATE_SUBDIRECTORY "updates"
 // This defines the leaf update directory, where the MAR file is downloaded to
 // (i.e. C:\ProgramData\Mozilla\updates\<hash>\updates\<PATCH_DIRECTORY>)
-#define PATCH_DIRECTORY "0"
+#  define PATCH_DIRECTORY "0"
 
 enum class WhichUpdateDir {
   CommonAppData,
@@ -395,26 +395,6 @@ nsresult GetInstallHash(const char16_t* installPath, const char* vendor,
   MOZ_ASSERT(installPath != nullptr,
              "Install path must not be null in GetInstallHash");
 
-#ifdef XP_WIN
-  // The Windows installer caches this hash value in the registry
-  SimpleAutoString regPath;
-  regPath.AutoAllocAndAssignSprintf(L"SOFTWARE\\%S\\%S\\TaskBarIDs",
-                                    vendor ? vendor : "Mozilla",
-                                    MOZ_APP_BASENAME);
-  if (regPath.Length() != 0) {
-    bool gotCachedHash =
-        GetCachedHash(installPath, HKEY_LOCAL_MACHINE, regPath, result);
-    if (gotCachedHash) {
-      return NS_OK;
-    }
-    gotCachedHash =
-        GetCachedHash(installPath, HKEY_CURRENT_USER, regPath, result);
-    if (gotCachedHash) {
-      return NS_OK;
-    }
-  }
-#endif
-
   // Unable to get the cached hash, so compute it.
   size_t pathSize =
       std::char_traits<char16_t>::length(installPath) * sizeof(*installPath);
@@ -597,9 +577,27 @@ static HRESULT GetUpdateDirectory(const wchar_t* installPath,
   SimpleAutoString updatePath;
   if (installPath) {
     mozilla::UniquePtr<NS_tchar[]> hash;
-    bool useCompatibilityMode = (whichDir == WhichUpdateDir::UserAppData);
-    nsresult rv = GetInstallHash(reinterpret_cast<const char16_t*>(installPath),
-                                 vendor, hash, useCompatibilityMode);
+
+    // The Windows installer caches this hash value in the registry
+    bool gotHash = false;
+    SimpleAutoString regPath;
+    regPath.AutoAllocAndAssignSprintf(L"SOFTWARE\\%S\\%S\\TaskBarIDs",
+                                      vendor ? vendor : "Mozilla",
+                                      MOZ_APP_BASENAME);
+    if (regPath.Length() != 0) {
+      gotHash = GetCachedHash(reinterpret_cast<const char16_t*>(installPath),
+                              HKEY_LOCAL_MACHINE, regPath, hash);
+      if (!gotHash) {
+        gotHash = GetCachedHash(reinterpret_cast<const char16_t*>(installPath),
+                                HKEY_CURRENT_USER, regPath, hash);
+      }
+    }
+    nsresult rv = NS_OK;
+    if (!gotHash) {
+      bool useCompatibilityMode = (whichDir == WhichUpdateDir::UserAppData);
+      rv = GetInstallHash(reinterpret_cast<const char16_t*>(installPath),
+                          vendor, hash, useCompatibilityMode);
+    }
     if (NS_SUCCEEDED(rv)) {
       const wchar_t midPathDirName[] = NS_T(UPDATE_PATH_MID_DIR_NAME);
       size_t updatePathLen = basePath.Length() + 1 /* path separator */ +

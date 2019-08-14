@@ -34,7 +34,6 @@ EXPORTS.mozilla.dom += [
     'IDBObjectStore.h',
     'IDBRequest.h',
     'IDBTransaction.h',
-    'IDBWrapperCache.h',
     'IndexedDatabase.h',
     'IndexedDatabaseManager.h',
 ]
@@ -44,6 +43,7 @@ EXPORTS.mozilla.dom.indexedDB += [
     'FileSnapshot.h',
     'Key.h',
     'KeyPath.h',
+    'PermissionRequestBase.h',
     'SerializationHelpers.h',
 ]
 
@@ -63,7 +63,6 @@ UNIFIED_SOURCES += [
     'IDBObjectStore.cpp',
     'IDBRequest.cpp',
     'IDBTransaction.cpp',
-    'IDBWrapperCache.cpp',
     'IndexedDatabaseManager.cpp',
     'KeyPath.cpp',
     'PermissionRequestBase.cpp',
@@ -88,7 +87,6 @@ IPDL_SOURCES += [
     'PBackgroundIDBTransaction.ipdl',
     'PBackgroundIDBVersionChangeTransaction.ipdl',
     'PBackgroundIndexedDBUtils.ipdl',
-    'PIndexedDBPermissionRequest.ipdl',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
@@ -102,10 +100,10 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']
 
 LOCAL_INCLUDES += [
-    '/db/sqlite3/src',
     '/dom/base',
     '/dom/storage',
     '/ipc/glue',
+    '/third_party/sqlite3/src',
     '/xpcom/build',
 ]
 
@@ -114,7 +112,3 @@ XPIDL_SOURCES += [
 ]
 
 XPIDL_MODULE = 'dom_indexeddb'
-
-if (not CONFIG['HAVE_64BIT_BUILD'] and
-    CONFIG['ENABLE_CLANG_PLUGIN'] and CONFIG['CC_TYPE'] == 'clang-cl'):
-    AllowCompilerWarnings()  # workaround for bug 1090497

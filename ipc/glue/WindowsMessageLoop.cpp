@@ -76,12 +76,8 @@ using namespace mozilla::ipc::windows;
 extern const wchar_t* kPropNameTabContent;
 #endif
 
-// widget related message id constants we need to defer
-namespace mozilla {
-namespace widget {
+// widget related message id constants we need to defer, see nsAppShell.
 extern UINT sAppShellGeckoMsgId;
-}
-}  // namespace mozilla
 
 namespace {
 
@@ -90,9 +86,6 @@ const wchar_t k3rdPartyWindowProp[] = L"Mozilla3rdPartyWindow";
 
 // This isn't defined before Windows XP.
 enum { WM_XP_THEMECHANGED = 0x031A };
-
-char16_t gAppMessageWindowName[256] = {0};
-int32_t gAppMessageWindowNameLength = 0;
 
 nsTArray<HWND>* gNeuteredWindows = nullptr;
 
@@ -155,7 +148,9 @@ void CALLBACK WinEventHook(HWINEVENTHOOK aWinEventHook, DWORD aEvent,
       }
       break;
     }
-    default: { return; }
+    default: {
+      return;
+    }
   }
 }
 
@@ -393,7 +388,7 @@ ProcessOrDeferMessage(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     default: {
       // Unknown messages only are logged in debug builds and sent to
       // DefWindowProc.
-      if (uMsg && uMsg == mozilla::widget::sAppShellGeckoMsgId) {
+      if (uMsg && uMsg == sAppShellGeckoMsgId) {
         // Widget's registered native event callback
         deferred = new DeferredSendMessage(hwnd, uMsg, wParam, lParam);
       }
@@ -471,34 +466,6 @@ static bool WindowIsDeferredWindow(HWND hWnd) {
   // 'ShockwaveFlashFullScreen' - flash fullscreen window
   if (className.EqualsLiteral("ShockwaveFlashFullScreen")) {
     SetPropW(hWnd, k3rdPartyWindowProp, (HANDLE)1);
-    return true;
-  }
-
-  // nsNativeAppSupport makes a window like "FirefoxMessageWindow" based on the
-  // toolkit app's name. It's pretty expensive to calculate this so we only try
-  // once.
-  if (gAppMessageWindowNameLength == 0) {
-    nsCOMPtr<nsIXULAppInfo> appInfo =
-        do_GetService("@mozilla.org/xre/app-info;1");
-    if (appInfo) {
-      nsAutoCString appName;
-      if (NS_SUCCEEDED(appInfo->GetName(appName))) {
-        appName.AppendLiteral("MessageWindow");
-        nsDependentString windowName(gAppMessageWindowName);
-        CopyUTF8toUTF16(appName, windowName);
-        gAppMessageWindowNameLength = windowName.Length();
-      }
-    }
-
-    // Don't try again if that failed.
-    if (gAppMessageWindowNameLength == 0) {
-      gAppMessageWindowNameLength = -1;
-    }
-  }
-
-  if (gAppMessageWindowNameLength != -1 &&
-      className.Equals(nsDependentString(gAppMessageWindowName,
-                                         gAppMessageWindowNameLength))) {
     return true;
   }
 
@@ -634,16 +601,10 @@ namespace mozilla {
 namespace ipc {
 namespace windows {
 
-static bool ProcessTypeRequiresWinEventHook() {
-  switch (XRE_GetProcessType()) {
-    case GeckoProcessType_GMPlugin:
-      return false;
-    default:
-      return true;
-  }
-}
-
 void InitUIThread() {
+  if (!XRE_UseNativeEventProcessing()) {
+    return;
+  }
   // If we aren't setup before a call to NotifyWorkerThread, we'll hang
   // on startup.
   if (!gUIThreadId) {
@@ -654,7 +615,7 @@ void InitUIThread() {
   MOZ_ASSERT(gUIThreadId == GetCurrentThreadId(),
              "Called InitUIThread multiple times on different threads!");
 
-  if (!gWinEventHook && ProcessTypeRequiresWinEventHook()) {
+  if (!gWinEventHook && XRE_Win32kCallsAllowed()) {
     gWinEventHook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY,
                                     NULL, &WinEventHook, GetCurrentProcessId(),
                                     gUIThreadId, WINEVENT_OUTOFCONTEXT);
@@ -807,6 +768,9 @@ void MessageChannel::SpinInternalEventLoop() {
 static HHOOK gWindowHook;
 
 static inline void StartNeutering() {
+  if (!gUIThreadId) {
+    mozilla::ipc::windows::InitUIThread();
+  }
   MOZ_ASSERT(gUIThreadId);
   MOZ_ASSERT(!gWindowHook);
   NS_ASSERTION(!MessageChannel::IsPumpingMessages(),
@@ -832,7 +796,8 @@ static void StopNeutering() {
 
 NeuteredWindowRegion::NeuteredWindowRegion(
     bool aDoNeuter MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
-    : mNeuteredByThis(!gWindowHook && aDoNeuter) {
+    : mNeuteredByThis(!gWindowHook && aDoNeuter &&
+                      XRE_UseNativeEventProcessing()) {
   MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   if (mNeuteredByThis) {
     StartNeutering();
@@ -956,7 +921,9 @@ bool MessageChannel::WaitForSyncNotifyWithA11yReentry() {
 bool MessageChannel::WaitForSyncNotify(bool aHandleWindowsMessages) {
   mMonitor->AssertCurrentThreadOwns();
 
-  MOZ_ASSERT(gUIThreadId, "InitUIThread was not called!");
+  if (!gUIThreadId) {
+    mozilla::ipc::windows::InitUIThread();
+  }
 
 #if defined(ACCESSIBILITY)
   if (mFlags & REQUIRE_A11Y_REENTRY) {
@@ -1099,7 +1066,9 @@ bool MessageChannel::WaitForSyncNotify(bool aHandleWindowsMessages) {
 bool MessageChannel::WaitForInterruptNotify() {
   mMonitor->AssertCurrentThreadOwns();
 
-  MOZ_ASSERT(gUIThreadId, "InitUIThread was not called!");
+  if (!gUIThreadId) {
+    mozilla::ipc::windows::InitUIThread();
+  }
 
   // Re-use sync notification wait code if this channel does not require
   // Windows message deferral behavior.

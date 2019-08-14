@@ -102,7 +102,8 @@ bool D3D11YCbCrImage::SetData(KnowsCompositor* aAllocator,
 
 IntSize D3D11YCbCrImage::GetSize() const { return mPictureRect.Size(); }
 
-TextureClient* D3D11YCbCrImage::GetTextureClient(KnowsCompositor* aForwarder) {
+TextureClient* D3D11YCbCrImage::GetTextureClient(
+    KnowsCompositor* aKnowsCompositor) {
   return mTextureClient;
 }
 
@@ -142,6 +143,11 @@ already_AddRefed<SourceSurface> D3D11YCbCrImage::GetAsSourceSurface() {
 
   RefPtr<ID3D11Device> dev;
   texY->GetDevice(getter_AddRefs(dev));
+
+  if (!dev || dev != gfx::DeviceManagerDx::Get()->GetImageDevice()) {
+    gfxCriticalError() << "D3D11Device is obsoleted";
+    return nullptr;
+  }
 
   RefPtr<ID3D10Multithread> mt;
   hr = dev->QueryInterface((ID3D10Multithread**)getter_AddRefs(mt));
@@ -265,7 +271,7 @@ already_AddRefed<SourceSurface> D3D11YCbCrImage::GetAsSourceSurface() {
   return surface.forget();
 }
 
-class AutoCheckLockD3D11Texture {
+class AutoCheckLockD3D11Texture final {
  public:
   explicit AutoCheckLockD3D11Texture(ID3D11Texture2D* aTexture)
       : mIsLocked(false) {

@@ -11,27 +11,43 @@ ExtensionTestUtils.mockAppInfo();
 
 add_task(async function test_contentscript_runAt() {
   function background() {
-    browser.runtime.onMessage.addListener(([msg, expectedStates, readyState], sender) => {
-      if (msg == "chrome-namespace-ok") {
-        browser.test.sendMessage(msg);
-        return;
-      }
+    browser.runtime.onMessage.addListener(
+      ([msg, expectedStates, readyState], sender) => {
+        if (msg == "chrome-namespace-ok") {
+          browser.test.sendMessage(msg);
+          return;
+        }
 
-      browser.test.assertEq("script-run", msg, "message type is correct");
-      browser.test.assertTrue(expectedStates.includes(readyState),
-                              `readyState "${readyState}" is one of [${expectedStates}]`);
-      browser.test.sendMessage("script-run-" + expectedStates[0]);
-    });
+        browser.test.assertEq("script-run", msg, "message type is correct");
+        browser.test.assertTrue(
+          expectedStates.includes(readyState),
+          `readyState "${readyState}" is one of [${expectedStates}]`
+        );
+        browser.test.sendMessage("script-run-" + expectedStates[0]);
+      }
+    );
   }
 
   function contentScriptStart() {
-    browser.runtime.sendMessage(["script-run", ["loading"], document.readyState]);
+    browser.runtime.sendMessage([
+      "script-run",
+      ["loading"],
+      document.readyState,
+    ]);
   }
   function contentScriptEnd() {
-    browser.runtime.sendMessage(["script-run", ["interactive", "complete"], document.readyState]);
+    browser.runtime.sendMessage([
+      "script-run",
+      ["interactive", "complete"],
+      document.readyState,
+    ]);
   }
   function contentScriptIdle() {
-    browser.runtime.sendMessage(["script-run", ["complete"], document.readyState]);
+    browser.runtime.sendMessage([
+      "script-run",
+      ["complete"],
+      document.readyState,
+    ]);
   }
 
   function contentScript() {
@@ -42,32 +58,32 @@ add_task(async function test_contentscript_runAt() {
 
   let extensionData = {
     manifest: {
-      applications: {gecko: {id: "contentscript@tests.mozilla.org"}},
+      applications: { gecko: { id: "contentscript@tests.mozilla.org" } },
       content_scripts: [
         {
-          "matches": ["http://*/*/file_sample.html"],
-          "js": ["content_script_start.js"],
-          "run_at": "document_start",
+          matches: ["http://*/*/file_sample.html"],
+          js: ["content_script_start.js"],
+          run_at: "document_start",
         },
         {
-          "matches": ["http://*/*/file_sample.html"],
-          "js": ["content_script_end.js"],
-          "run_at": "document_end",
+          matches: ["http://*/*/file_sample.html"],
+          js: ["content_script_end.js"],
+          run_at: "document_end",
         },
         {
-          "matches": ["http://*/*/file_sample.html"],
-          "js": ["content_script_idle.js"],
-          "run_at": "document_idle",
+          matches: ["http://*/*/file_sample.html"],
+          js: ["content_script_idle.js"],
+          run_at: "document_idle",
         },
         {
-          "matches": ["http://*/*/file_sample.html"],
-          "js": ["content_script_idle.js"],
+          matches: ["http://*/*/file_sample.html"],
+          js: ["content_script_idle.js"],
           // Test default `run_at`.
         },
         {
-          "matches": ["http://*/*/file_sample.html"],
-          "js": ["content_script.js"],
-          "run_at": "document_idle",
+          matches: ["http://*/*/file_sample.html"],
+          js: ["content_script.js"],
+          run_at: "document_idle",
         },
       ],
     },
@@ -86,8 +102,12 @@ add_task(async function test_contentscript_runAt() {
   let loadingCount = 0;
   let interactiveCount = 0;
   let completeCount = 0;
-  extension.onMessage("script-run-loading", () => { loadingCount++; });
-  extension.onMessage("script-run-interactive", () => { interactiveCount++; });
+  extension.onMessage("script-run-loading", () => {
+    loadingCount++;
+  });
+  extension.onMessage("script-run-interactive", () => {
+    interactiveCount++;
+  });
 
   let completePromise = new Promise(resolve => {
     extension.onMessage("script-run-complete", () => {
@@ -102,7 +122,9 @@ add_task(async function test_contentscript_runAt() {
 
   await extension.startup();
 
-  let contentPage = await ExtensionTestUtils.loadContentPage(`${BASE_URL}/file_sample.html`);
+  let contentPage = await ExtensionTestUtils.loadContentPage(
+    `${BASE_URL}/file_sample.html`
+  );
 
   await Promise.all([completePromise, chromeNamespacePromise]);
 
@@ -125,7 +147,14 @@ add_task(async function test_contentscript_window_open() {
     browser.test.assertEq(1, x, "Should only run once");
 
     if (top !== window) {
-      await new Promise(resolve => setTimeout(resolve, 0));
+      // Wait for our parent page to load, then set a timeout to wait for the
+      // document.open call, so we make sure to not tear down the extension
+      // until after we've done the document.open.
+      await new Promise(resolve => {
+        top.addEventListener("load", () => setTimeout(resolve, 0), {
+          once: true,
+        });
+      });
     }
 
     browser.test.sendMessage("content-script", [location.href, top === window]);
@@ -133,14 +162,14 @@ add_task(async function test_contentscript_window_open() {
 
   let extension = ExtensionTestUtils.loadExtension({
     manifest: {
-      applications: {gecko: {id: "contentscript@tests.mozilla.org"}},
+      applications: { gecko: { id: "contentscript@tests.mozilla.org" } },
       content_scripts: [
         {
-          "matches": ["<all_urls>"],
-          "js": ["content_script.js"],
-          "run_at": "document_start",
-          "match_about_blank": true,
-          "all_frames": true,
+          matches: ["<all_urls>"],
+          js: ["content_script.js"],
+          run_at: "document_start",
+          match_about_blank: true,
+          all_frames: true,
         },
       ],
     },
@@ -171,13 +200,6 @@ add_task(async function test_contentscript_window_open() {
   Assert.deepEqual([pageURL, pageIsTop], [url, true]);
 
   let [frameURL, isTop] = await extension.awaitMessage("content-script");
-  // Sometimes we get a content script load for the initial about:blank
-  // iframe here, sometimes we don't.
-  if (frameURL === "about:blank") {
-    equal(isTop, false);
-    [frameURL, isTop] = await extension.awaitMessage("content-script");
-  }
-
   Assert.deepEqual([frameURL, isTop], [url, false]);
 
   await contentPage.close();
@@ -188,13 +210,13 @@ add_task(async function test_contentscript_window_open() {
 // while it is still loading (when we do not block the document parsing as
 // we do for a non cached script).
 add_task(async function test_cached_contentscript_on_document_start() {
-  let extension =  ExtensionTestUtils.loadExtension({
+  let extension = ExtensionTestUtils.loadExtension({
     manifest: {
       content_scripts: [
         {
-          "matches": ["http://localhost/*/file_document_open.html"],
-          "js": ["content_script.js"],
-          "run_at": "document_start",
+          matches: ["http://localhost/*/file_document_open.html"],
+          js: ["content_script.js"],
+          run_at: "document_start",
         },
       ],
     },
@@ -215,20 +237,28 @@ add_task(async function test_cached_contentscript_on_document_start() {
   let contentPage = await ExtensionTestUtils.loadContentPage(url);
 
   let msg = await extension.awaitMessage("content-script-loaded");
-  Assert.deepEqual(msg, {
-    url,
-    documentReadyState: "loading",
-  }, "Got the expected url and document.readyState from a non cached script");
+  Assert.deepEqual(
+    msg,
+    {
+      url,
+      documentReadyState: "loading",
+    },
+    "Got the expected url and document.readyState from a non cached script"
+  );
 
   // Reload the page and check that the cached content script is still able to
   // run on document_start.
   await contentPage.loadURL(url);
 
   let msgFromCached = await extension.awaitMessage("content-script-loaded");
-  Assert.deepEqual(msgFromCached, {
-    url,
-    documentReadyState: "loading",
-  }, "Got the expected url and document.readyState from a cached script");
+  Assert.deepEqual(
+    msgFromCached,
+    {
+      url,
+      documentReadyState: "loading",
+    },
+    "Got the expected url and document.readyState from a cached script"
+  );
 
   await extension.unload();
 

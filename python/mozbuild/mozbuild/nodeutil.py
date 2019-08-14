@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import os
 import subprocess
@@ -25,7 +25,7 @@ def find_node_paths():
     """
     # Also add in the location to which `mach bootstrap` or
     # `mach artifact toolchain` installs clang.
-    mozbuild_state_dir, _ = get_state_dir()
+    mozbuild_state_dir = get_state_dir()
 
     if platform.system() == "Windows":
         mozbuild_node_path = os.path.join(mozbuild_state_dir, 'node')

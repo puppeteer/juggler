@@ -8,7 +8,9 @@
  * (Reps rendering JSON responses should use `noGrip=true`).
  */
 add_task(async function() {
-  const { tab, monitor } = await initNetMonitor(JSON_BASIC_URL + "?name=nogrip");
+  const { tab, monitor } = await initNetMonitor(
+    JSON_BASIC_URL + "?name=nogrip"
+  );
   info("Starting test... ");
 
   const { document, store, windowRequire } = monitor.panelWin;
@@ -18,21 +20,27 @@ add_task(async function() {
 
   await performRequests(monitor, tab, 1);
 
-  const onResponsePanelReady = waitForDOM(document, "#response-panel .CodeMirror-code");
+  const onResponsePanelReady = waitForDOM(
+    document,
+    "#response-panel .CodeMirror-code"
+  );
   store.dispatch(Actions.toggleNetworkDetails());
-  EventUtils.sendMouseEvent({ type: "click" },
-    document.querySelector("#response-tab"));
+  EventUtils.sendMouseEvent(
+    { type: "click" },
+    document.querySelector("#response-tab")
+  );
   await onResponsePanelReady;
 
   const tabpanel = document.querySelector("#response-panel");
-  const labels = tabpanel
-    .querySelectorAll("tr:not(.tree-section) .treeLabelCell .treeLabel");
-  const values = tabpanel
-    .querySelectorAll("tr:not(.tree-section) .treeValueCell .objectBox");
+  const labels = tabpanel.querySelectorAll(
+    "tr:not(.tree-section) .treeLabelCell .treeLabel"
+  );
+  const values = tabpanel.querySelectorAll(
+    "tr:not(.tree-section) .treeValueCell .objectBox"
+  );
 
-  // Verify that an object is rendered: `obj: {…}`
   is(labels[0].textContent, "obj", "The first json property name is correct.");
-  is(values[0].textContent, "{\u2026}", "The first json property value is correct.");
+  is(values[0].textContent, "{…}", "The first json property value is correct.");
 
   await teardown(monitor);
 });

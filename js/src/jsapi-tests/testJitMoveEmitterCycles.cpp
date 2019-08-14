@@ -7,16 +7,16 @@
 
 #if defined(JS_SIMULATOR_ARM)
 
-#include "jit/arm/Assembler-arm.h"
-#include "jit/arm/MoveEmitter-arm.h"
-#include "jit/arm/Simulator-arm.h"
-#include "jit/Linker.h"
-#include "jit/MacroAssembler.h"
-#include "jit/MoveResolver.h"
+#  include "jit/arm/Assembler-arm.h"
+#  include "jit/arm/MoveEmitter-arm.h"
+#  include "jit/arm/Simulator-arm.h"
+#  include "jit/Linker.h"
+#  include "jit/MacroAssembler.h"
+#  include "jit/MoveResolver.h"
 
-#include "jsapi-tests/tests.h"
+#  include "jsapi-tests/tests.h"
 
-#include "vm/Runtime.h"
+#  include "vm/Runtime.h"
 
 static const int LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 4 * 1024;
 
@@ -57,13 +57,12 @@ static js::jit::JitCode* linkAndAllocate(JSContext* cx,
                                          js::jit::MacroAssembler* masm) {
   using namespace js;
   using namespace js::jit;
-  AutoFlushICache afc("test");
-  Linker l(*masm);
+  Linker l(*masm, "test");
   return l.newCode(cx, CodeKind::Ion);
 }
 
-#define TRY(x) \
-  if (!(x)) return false;
+#  define TRY(x) \
+    if (!(x)) return false;
 
 BEGIN_TEST(testJitMoveEmitterCycles_simple) {
   using namespace js;
@@ -71,7 +70,6 @@ BEGIN_TEST(testJitMoveEmitterCycles_simple) {
   LifoAlloc lifo(LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
   TempAllocator alloc(&lifo);
   JitContext jc(cx, &alloc);
-  cx->runtime()->getJitRuntime(cx);
   StackMacroAssembler masm;
   MoveEmitter mover(masm);
   MoveResolver mr;
@@ -119,7 +117,6 @@ BEGIN_TEST(testJitMoveEmitterCycles_autogen) {
   LifoAlloc lifo(LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
   TempAllocator alloc(&lifo);
   JitContext jc(cx, &alloc);
-  cx->runtime()->getJitRuntime(cx);
   StackMacroAssembler masm;
   MoveEmitter mover(masm);
   MoveResolver mr;
@@ -245,7 +242,6 @@ BEGIN_TEST(testJitMoveEmitterCycles_autogen2) {
   LifoAlloc lifo(LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
   TempAllocator alloc(&lifo);
   JitContext jc(cx, &alloc);
-  cx->runtime()->getJitRuntime(cx);
   StackMacroAssembler masm;
   MoveEmitter mover(masm);
   MoveResolver mr;
@@ -388,7 +384,6 @@ BEGIN_TEST(testJitMoveEmitterCycles_autogen3) {
   LifoAlloc lifo(LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
   TempAllocator alloc(&lifo);
   JitContext jc(cx, &alloc);
-  cx->runtime()->getJitRuntime(cx);
   StackMacroAssembler masm;
   MoveEmitter mover(masm);
   MoveResolver mr;
@@ -530,7 +525,6 @@ BEGIN_TEST(testJitMoveEmitterCycles_bug1299147_1) {
   LifoAlloc lifo(LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
   TempAllocator alloc(&lifo);
   JitContext jc(cx, &alloc);
-  cx->runtime()->getJitRuntime(cx);
   StackMacroAssembler masm;
   MoveEmitter mover(masm);
   MoveResolver mr;
@@ -581,7 +575,6 @@ BEGIN_TEST(testJitMoveEmitterCycles_bug1299147) {
   LifoAlloc lifo(LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
   TempAllocator alloc(&lifo);
   JitContext jc(cx, &alloc);
-  cx->runtime()->getJitRuntime(cx);
   StackMacroAssembler masm;
   MoveEmitter mover(masm);
   MoveResolver mr;

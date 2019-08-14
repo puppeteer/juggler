@@ -25,8 +25,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DAV1D_SRC_CDEF_H__
-#define __DAV1D_SRC_CDEF_H__
+#ifndef DAV1D_SRC_CDEF_H
+#define DAV1D_SRC_CDEF_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -34,10 +34,10 @@
 #include "common/bitdepth.h"
 
 enum CdefEdgeFlags {
-    HAVE_LEFT = 1 << 0,
-    HAVE_RIGHT = 1 << 1,
-    HAVE_TOP = 1 << 2,
-    HAVE_BOTTOM = 1 << 3,
+    CDEF_HAVE_LEFT = 1 << 0,
+    CDEF_HAVE_RIGHT = 1 << 1,
+    CDEF_HAVE_TOP = 1 << 2,
+    CDEF_HAVE_BOTTOM = 1 << 3,
 };
 
 #ifdef BITDEPTH
@@ -53,11 +53,11 @@ typedef const void *const_left_pixel_row_2px;
 #define decl_cdef_fn(name) \
 void (name)(pixel *dst, ptrdiff_t stride, const_left_pixel_row_2px left, \
             /*const*/ pixel *const top[2], int pri_strength, int sec_strength, \
-            int dir, int damping, enum CdefEdgeFlags edges)
+            int dir, int damping, enum CdefEdgeFlags edges HIGHBD_DECL_SUFFIX)
 typedef decl_cdef_fn(*cdef_fn);
 
 #define decl_cdef_dir_fn(name) \
-int (name)(const pixel *dst, ptrdiff_t dst_stride, unsigned *var)
+int (name)(const pixel *dst, ptrdiff_t dst_stride, unsigned *var HIGHBD_DECL_SUFFIX)
 typedef decl_cdef_dir_fn(*cdef_dir_fn);
 
 typedef struct Dav1dCdefDSPContext {
@@ -65,10 +65,8 @@ typedef struct Dav1dCdefDSPContext {
     cdef_fn fb[3 /* 444/luma, 422, 420 */];
 } Dav1dCdefDSPContext;
 
-void dav1d_cdef_dsp_init_8bpc(Dav1dCdefDSPContext *c);
-void dav1d_cdef_dsp_init_10bpc(Dav1dCdefDSPContext *c);
+bitfn_decls(void dav1d_cdef_dsp_init, Dav1dCdefDSPContext *c);
+bitfn_decls(void dav1d_cdef_dsp_init_arm, Dav1dCdefDSPContext *c);
+bitfn_decls(void dav1d_cdef_dsp_init_x86, Dav1dCdefDSPContext *c);
 
-void dav1d_cdef_dsp_init_x86_8bpc(Dav1dCdefDSPContext *c);
-void dav1d_cdef_dsp_init_x86_10bpc(Dav1dCdefDSPContext *c);
-
-#endif /* __DAV1D_SRC_CDEF_H__ */
+#endif /* DAV1D_SRC_CDEF_H */

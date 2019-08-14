@@ -23,14 +23,14 @@ from mozversioncontrol import get_repository_object
 
 from ..cli import BaseTryParser
 from ..tasks import generate_tasks, filter_tasks_by_paths, resolve_tests_by_suite
-from ..push import push_to_try
+from ..push import push_to_try, generate_try_task_config
 
 here = os.path.abspath(os.path.dirname(__file__))
 build = MozbuildObject.from_environment(cwd=here)
 vcs = get_repository_object(build.topsrcdir)
 
 root_hash = hashlib.sha256(os.path.abspath(build.topsrcdir)).hexdigest()
-cache_dir = os.path.join(get_state_dir()[0], 'cache', root_hash, 'chunk_mapping')
+cache_dir = os.path.join(get_state_dir(), 'cache', root_hash, 'chunk_mapping')
 if not os.path.isdir(cache_dir):
     os.makedirs(cache_dir)
 CHUNK_MAPPING_FILE = os.path.join(cache_dir, 'chunk_mapping.sqlite')
@@ -57,7 +57,7 @@ class CoverageParser(BaseTryParser):
     name = 'coverage'
     arguments = []
     common_groups = ['push', 'task']
-    templates = ['artifact', 'env', 'rebuild', 'chemspill-prio']
+    templates = ['artifact', 'env', 'rebuild', 'chemspill-prio', 'disable-pgo']
 
 
 def read_test_manifests():
@@ -343,9 +343,7 @@ def is_opt_task(task):
     return any(platform in task for platform in OPT_TASK_PATTERNS)
 
 
-def run_coverage_try(templates={}, full=False, parameters=None,
-                     push=True, message='{msg}', **kwargs):
-
+def run(try_config={}, full=False, parameters=None, push=True, message='{msg}', closed_tree=False):
     download_coverage_mapping(vcs.base_ref)
 
     changed_sources = vcs.get_outgoing_files()
@@ -354,7 +352,7 @@ def run_coverage_try(templates={}, full=False, parameters=None,
         print('ERROR Could not find any tests or chunks to run.')
         return 1
 
-    tg = generate_tasks(parameters, full, root=build.topsrcdir)
+    tg = generate_tasks(parameters, full)
     all_tasks = tg.tasks.keys()
 
     tasks_by_chunks = filter_tasks_by_chunks(all_tasks, test_chunks)
@@ -376,9 +374,10 @@ def run_coverage_try(templates={}, full=False, parameters=None,
 
     # Set the test paths to be run by setting MOZHARNESS_TEST_PATHS.
     path_env = {'MOZHARNESS_TEST_PATHS': json.dumps(resolve_tests_by_suite(test_files))}
-    templates.setdefault('env', {}).update(path_env)
+    try_config.setdefault('templates', {}).setdefault('env', {}).update(path_env)
 
     # Build commit message.
     msg = 'try coverage - ' + test_count_message
-    return push_to_try('coverage', message.format(msg=msg), tasks, templates, push=push,
-                       closed_tree=kwargs['closed_tree'])
+    return push_to_try('coverage', message.format(msg=msg),
+                       try_task_config=generate_try_task_config('coverage', tasks, try_config),
+                       push=push, closed_tree=closed_tree)

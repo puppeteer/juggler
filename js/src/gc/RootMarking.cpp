@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifdef MOZ_VALGRIND
-#include <valgrind/memcheck.h>
+#  include <valgrind/memcheck.h>
 #endif
 
 #include "jstypes.h"
@@ -73,7 +73,7 @@ static inline void TraceExactStackRootList(JSTracer* trc,
 
 static inline void TraceStackRoots(JSTracer* trc,
                                    JS::RootedListHeads& stackRoots) {
-#define TRACE_ROOTS(name, type, _)                                    \
+#define TRACE_ROOTS(name, type, _, _1)                                \
   TraceExactStackRootList<type*>(trc, stackRoots[JS::RootKind::name], \
                                  "exact-" #name);
   JS_FOR_EACH_TRACEKIND(TRACE_ROOTS)
@@ -108,7 +108,7 @@ static inline void TracePersistentRootedList(
 }
 
 void JSRuntime::tracePersistentRoots(JSTracer* trc) {
-#define TRACE_ROOTS(name, type, _)                                           \
+#define TRACE_ROOTS(name, type, _, _1)                                       \
   TracePersistentRootedList<type*>(trc, heapRoots.ref()[JS::RootKind::name], \
                                    "persistent-" #name);
   JS_FOR_EACH_TRACEKIND(TRACE_ROOTS)
@@ -140,7 +140,7 @@ static void FinishPersistentRootedChain(
 }
 
 void JSRuntime::finishPersistentRoots() {
-#define FINISH_ROOT_LIST(name, type, _) \
+#define FINISH_ROOT_LIST(name, type, _, _1) \
   FinishPersistentRootedChain<type*>(heapRoots.ref()[JS::RootKind::name]);
   JS_FOR_EACH_TRACEKIND(FINISH_ROOT_LIST)
 #undef FINISH_ROOT_LIST
@@ -159,8 +159,8 @@ inline void AutoGCRooter::trace(JSTracer* trc) {
       return;
 
 #if defined(JS_BUILD_BINAST)
-    case Tag::BinParser:
-      frontend::TraceBinParser(trc, this);
+    case Tag::BinASTParser:
+      frontend::TraceBinASTParser(trc, this);
       return;
 #endif  // defined(JS_BUILD_BINAST)
 
@@ -217,13 +217,15 @@ inline void AutoGCRooter::trace(JSTracer* trc) {
   MOZ_CRASH("Bad AutoGCRooter::Tag");
 }
 
-/* static */ void AutoGCRooter::traceAll(JSContext* cx, JSTracer* trc) {
+/* static */
+void AutoGCRooter::traceAll(JSContext* cx, JSTracer* trc) {
   for (AutoGCRooter* gcr = cx->autoGCRooters_; gcr; gcr = gcr->down) {
     gcr->trace(trc);
   }
 }
 
-/* static */ void AutoGCRooter::traceAllWrappers(JSContext* cx, JSTracer* trc) {
+/* static */
+void AutoGCRooter::traceAllWrappers(JSContext* cx, JSTracer* trc) {
   for (AutoGCRooter* gcr = cx->autoGCRooters_; gcr; gcr = gcr->down) {
     if (gcr->tag_ == Tag::WrapperVector || gcr->tag_ == Tag::Wrapper) {
       gcr->trace(trc);
@@ -413,7 +415,7 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
 }
 
 #ifdef DEBUG
-class AssertNoRootsTracer : public JS::CallbackTracer {
+class AssertNoRootsTracer final : public JS::CallbackTracer {
   void onChild(const JS::GCCellPtr& thing) override {
     MOZ_CRASH("There should not be any roots after finishRoots");
   }
@@ -466,9 +468,7 @@ class BufferGrayRootsTracer final : public JS::CallbackTracer {
   void onStringEdge(JSString** stringp) override { bufferRoot(*stringp); }
   void onScriptEdge(JSScript** scriptp) override { bufferRoot(*scriptp); }
   void onSymbolEdge(JS::Symbol** symbolp) override { bufferRoot(*symbolp); }
-#ifdef ENABLE_BIGINT
   void onBigIntEdge(JS::BigInt** bip) override { bufferRoot(*bip); }
-#endif
 
   void onChild(const JS::GCCellPtr& thing) override {
     MOZ_CRASH("Unexpected gray root kind");
@@ -491,22 +491,12 @@ class BufferGrayRootsTracer final : public JS::CallbackTracer {
 #endif
 };
 
-#ifdef DEBUG
-// Return true if this trace is happening on behalf of gray buffering during
-// the marking phase of incremental GC.
-bool js::IsBufferGrayRootsTracer(JSTracer* trc) {
-  return trc->isCallbackTracer() &&
-         trc->asCallbackTracer()->getTracerKind() ==
-             JS::CallbackTracer::TracerKind::GrayBuffering;
-}
-#endif
-
 void js::gc::GCRuntime::bufferGrayRoots() {
   // Precondition: the state has been reset to "unused" after the last GC
   //               and the zone's buffers have been cleared.
   MOZ_ASSERT(grayBufferState == GrayBufferState::Unused);
   for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
-    MOZ_ASSERT(zone->gcGrayRoots().empty());
+    MOZ_ASSERT(zone->gcGrayRoots().IsEmpty());
   }
 
   BufferGrayRootsTracer grayBufferer(rt);
@@ -542,7 +532,7 @@ inline void BufferGrayRootsTracer::bufferRoot(T* thing) {
     // incremental GCs (when we do gray root buffering).
     SetMaybeAliveFlag(thing);
 
-    if (!zone->gcGrayRoots().append(tenured)) {
+    if (!zone->gcGrayRoots().Append(tenured)) {
       bufferingGrayRootsFailed = true;
     }
   }
@@ -550,24 +540,23 @@ inline void BufferGrayRootsTracer::bufferRoot(T* thing) {
 
 void GCRuntime::markBufferedGrayRoots(JS::Zone* zone) {
   MOZ_ASSERT(grayBufferState == GrayBufferState::Okay);
-  MOZ_ASSERT(zone->isGCMarkingGray() || zone->isGCCompacting());
+  MOZ_ASSERT(zone->isGCMarkingBlackAndGray() || zone->isGCCompacting());
 
   auto& roots = zone->gcGrayRoots();
-  if (roots.empty()) {
+  if (roots.IsEmpty()) {
     return;
   }
 
-  for (size_t i = 0; i < roots.length(); i++) {
-    Cell* cell = roots[i];
+  for (auto iter = roots.Iter(); !iter.Done(); iter.Next()) {
+    Cell* cell = iter.Get();
 
     // Bug 1203273: Check for bad pointers on OSX and output diagnostics.
 #if defined(XP_DARWIN) && defined(MOZ_DIAGNOSTIC_ASSERT_ENABLED)
     auto addr = uintptr_t(cell);
     if (addr < ChunkSize || addr % CellAlignBytes != 0) {
       MOZ_CRASH_UNSAFE_PRINTF(
-          "Bad GC thing pointer in gray root buffer: %p at index %zu of %zu, "
-          "address %p",
-          cell, i, roots.length(), &roots[i]);
+          "Bad GC thing pointer in gray root buffer: %p at address %p", cell,
+          &iter.Get());
     }
 #else
     MOZ_ASSERT(IsCellPointerValid(cell));
@@ -583,7 +572,7 @@ void GCRuntime::resetBufferedGrayRoots() const {
       grayBufferState != GrayBufferState::Okay,
       "Do not clear the gray buffers unless we are Failed or becoming Unused");
   for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
-    zone->gcGrayRoots().clearAndFree();
+    zone->gcGrayRoots().Clear();
   }
 }
 

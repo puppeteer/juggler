@@ -1,10 +1,10 @@
 //! The `CFGPrinter` utility.
 
-use std::fmt::{Display, Formatter, Result, Write};
+use core::fmt::{Display, Formatter, Result, Write};
 
-use flowgraph::{BasicBlock, ControlFlowGraph};
-use ir::instructions::BranchInfo;
-use ir::Function;
+use crate::flowgraph::{BasicBlock, ControlFlowGraph};
+use crate::ir::instructions::BranchInfo;
+use crate::ir::Function;
 
 /// A utility for pretty-printing the CFG of a `Function`.
 pub struct CFGPrinter<'a> {
@@ -23,14 +23,14 @@ impl<'a> CFGPrinter<'a> {
     }
 
     /// Write the CFG for this function to `w`.
-    pub fn write(&self, w: &mut Write) -> Result {
+    pub fn write(&self, w: &mut dyn Write) -> Result {
         self.header(w)?;
         self.ebb_nodes(w)?;
         self.cfg_connections(w)?;
         writeln!(w, "}}")
     }
 
-    fn header(&self, w: &mut Write) -> Result {
+    fn header(&self, w: &mut dyn Write) -> Result {
         writeln!(w, "digraph \"{}\" {{", self.func.name)?;
         if let Some(entry) = self.func.layout.entry_block() {
             writeln!(w, "    {{rank=min; {}}}", entry)?;
@@ -38,7 +38,7 @@ impl<'a> CFGPrinter<'a> {
         Ok(())
     }
 
-    fn ebb_nodes(&self, w: &mut Write) -> Result {
+    fn ebb_nodes(&self, w: &mut dyn Write) -> Result {
         for ebb in &self.func.layout {
             write!(w, "    {} [shape=record, label=\"{{{}", ebb, ebb)?;
             // Add all outgoing branch instructions to the label.
@@ -62,7 +62,7 @@ impl<'a> CFGPrinter<'a> {
         Ok(())
     }
 
-    fn cfg_connections(&self, w: &mut Write) -> Result {
+    fn cfg_connections(&self, w: &mut dyn Write) -> Result {
         for ebb in &self.func.layout {
             for BasicBlock { ebb: parent, inst } in self.cfg.pred_iter(ebb) {
                 writeln!(w, "    {}:{} -> {}", parent, inst, ebb)?;

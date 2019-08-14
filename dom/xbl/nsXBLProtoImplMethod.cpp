@@ -8,7 +8,7 @@
 #include "nsString.h"
 #include "jsapi.h"
 #include "nsIContent.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIGlobalObject.h"
 #include "nsUnicharUtils.h"
 #include "nsReadableUtils.h"
@@ -19,6 +19,7 @@
 #include "nsIXPConnect.h"
 #include "xpcpublic.h"
 #include "nsXBLPrototypeBinding.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
 
@@ -177,7 +178,7 @@ nsresult nsXBLProtoImplMethod::CompileMember(
   options.setFileAndLine(functionUri.get(),
                          uncompiledMethod->mBodyText.GetLineNumber());
   JS::Rooted<JSObject*> methodObject(cx);
-  JS::AutoObjectVector emptyVector(cx);
+  JS::RootedVector<JSObject*> emptyVector(cx);
   nsresult rv = nsJSUtils::CompileFunction(
       jsapi, emptyVector, options, cname, paramCount,
       const_cast<const char**>(args), body, methodObject.address());
@@ -248,7 +249,7 @@ nsresult nsXBLProtoImplAnonymousMethod::Execute(
 
   // Get the script context the same way
   // nsXBLProtoImpl::InstallImplementation does.
-  nsIDocument* document = aBoundElement->OwnerDoc();
+  Document* document = aBoundElement->OwnerDoc();
 
   nsCOMPtr<nsIGlobalObject> global =
       do_QueryInterface(document->GetInnerWindow());
@@ -276,9 +277,9 @@ nsresult nsXBLProtoImplAnonymousMethod::Execute(
   dom::AutoEntryScript aes(scopeObject,
                            "XBL <constructor>/<destructor> invocation", true);
   JSContext* cx = aes.cx();
-  JS::AutoObjectVector scopeChain(cx);
+  JS::RootedVector<JSObject*> scopeChain(cx);
   if (!nsJSUtils::GetScopeChainForXBL(cx, aBoundElement->AsElement(),
-                                      aProtoBinding, scopeChain)) {
+                                      aProtoBinding, &scopeChain)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   MOZ_ASSERT(scopeChain.length() != 0);

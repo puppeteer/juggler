@@ -7,10 +7,13 @@
 #ifndef MOZILLA_GFX_COMPOSITOROGL_H
 #define MOZILLA_GFX_COMPOSITOROGL_H
 
+#include <map>
+#include <unordered_set>
+
 #include "gfx2DGlue.h"
 #include "GLContextTypes.h"             // for GLContext, etc
 #include "GLDefs.h"                     // for GLuint, LOCAL_GL_TEXTURE_2D, etc
-#include "OGLShaderProgram.h"           // for ShaderProgramOGL, etc
+#include "OGLShaderConfig.h"            // for ShaderConfigOGL
 #include "Units.h"                      // for ScreenPoint
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
 #include "mozilla/Attributes.h"         // for override, final
@@ -43,6 +46,7 @@ class CompositingRenderTarget;
 class CompositingRenderTargetOGL;
 class DataTextureSource;
 class GLManagerCompositor;
+class ShaderProgramOGL;
 class TextureSource;
 class TextureSourceOGL;
 class BufferTextureHost;
@@ -61,7 +65,7 @@ class GLBlitTextureImageHelper;
  */
 class CompositorTexturePoolOGL {
  protected:
-  virtual ~CompositorTexturePoolOGL() {}
+  virtual ~CompositorTexturePoolOGL() = default;
 
  public:
   NS_INLINE_DECL_REFCOUNTING(CompositorTexturePoolOGL)
@@ -79,18 +83,14 @@ class CompositorTexturePoolOGL {
  */
 class PerUnitTexturePoolOGL : public CompositorTexturePoolOGL {
  public:
-  explicit PerUnitTexturePoolOGL(gl::GLContext* aGL)
-      : mTextureTarget(0)  // zero is never a valid texture target
-        ,
-        mGL(aGL) {}
+  explicit PerUnitTexturePoolOGL(gl::GLContext* aGL);
+  virtual ~PerUnitTexturePoolOGL();
 
-  virtual ~PerUnitTexturePoolOGL() { DestroyTextures(); }
+  void Clear() override { DestroyTextures(); }
 
-  virtual void Clear() override { DestroyTextures(); }
+  GLuint GetTexture(GLenum aTarget, GLenum aUnit) override;
 
-  virtual GLuint GetTexture(GLenum aTarget, GLenum aUnit) override;
-
-  virtual void EndFrame() override {}
+  void EndFrame() override {}
 
  protected:
   void DestroyTextures();
@@ -111,31 +111,30 @@ class CompositorOGL final : public Compositor {
   std::map<ShaderConfigOGL, ShaderProgramOGL*> mPrograms;
 
  public:
-  explicit CompositorOGL(CompositorBridgeParent* aParent,
-                         widget::CompositorWidget* aWidget,
-                         int aSurfaceWidth = -1, int aSurfaceHeight = -1,
-                         bool aUseExternalSurfaceSize = false);
+  CompositorOGL(CompositorBridgeParent* aParent,
+                widget::CompositorWidget* aWidget, int aSurfaceWidth = -1,
+                int aSurfaceHeight = -1, bool aUseExternalSurfaceSize = false);
 
  protected:
   virtual ~CompositorOGL();
 
  public:
-  virtual CompositorOGL* AsCompositorOGL() override { return this; }
+  CompositorOGL* AsCompositorOGL() override { return this; }
 
-  virtual already_AddRefed<DataTextureSource> CreateDataTextureSource(
+  already_AddRefed<DataTextureSource> CreateDataTextureSource(
       TextureFlags aFlags = TextureFlags::NO_FLAGS) override;
 
-  virtual already_AddRefed<DataTextureSource>
-  CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture) override;
+  already_AddRefed<DataTextureSource> CreateDataTextureSourceAroundYCbCr(
+      TextureHost* aTexture) override;
 
-  virtual already_AddRefed<DataTextureSource> CreateDataTextureSourceAround(
+  already_AddRefed<DataTextureSource> CreateDataTextureSourceAround(
       gfx::DataSourceSurface* aSurface) override;
 
-  virtual bool Initialize(nsCString* const out_failureReason) override;
+  bool Initialize(nsCString* const out_failureReason) override;
 
-  virtual void Destroy() override;
+  void Destroy() override;
 
-  virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() override {
+  TextureFactoryIdentifier GetTextureFactoryIdentifier() override {
     TextureFactoryIdentifier result = TextureFactoryIdentifier(
         LayersBackend::LAYERS_OPENGL, XRE_GetProcessType(), GetMaxTextureSize(),
         SupportsTextureDirectMapping(), false,
@@ -144,85 +143,83 @@ class CompositorOGL final : public Compositor {
     return result;
   }
 
-  virtual already_AddRefed<CompositingRenderTarget> CreateRenderTarget(
+  already_AddRefed<CompositingRenderTarget> CreateRenderTarget(
       const gfx::IntRect& aRect, SurfaceInitMode aInit) override;
 
-  virtual already_AddRefed<CompositingRenderTarget>
-  CreateRenderTargetFromSource(const gfx::IntRect& aRect,
-                               const CompositingRenderTarget* aSource,
-                               const gfx::IntPoint& aSourcePoint) override;
+  already_AddRefed<CompositingRenderTarget> CreateRenderTargetFromSource(
+      const gfx::IntRect& aRect, const CompositingRenderTarget* aSource,
+      const gfx::IntPoint& aSourcePoint) override;
 
-  virtual void SetRenderTarget(CompositingRenderTarget* aSurface) override;
-  virtual CompositingRenderTarget* GetCurrentRenderTarget() const override;
-  virtual CompositingRenderTarget* GetWindowRenderTarget() const override;
+  void SetRenderTarget(CompositingRenderTarget* aSurface) override;
+  already_AddRefed<CompositingRenderTarget> GetCurrentRenderTarget()
+      const override;
+  already_AddRefed<CompositingRenderTarget> GetWindowRenderTarget()
+      const override;
 
-  virtual bool ReadbackRenderTarget(CompositingRenderTarget* aSource,
-                                    AsyncReadbackBuffer* aDest) override;
+  bool ReadbackRenderTarget(CompositingRenderTarget* aSource,
+                            AsyncReadbackBuffer* aDest) override;
 
-  virtual already_AddRefed<AsyncReadbackBuffer> CreateAsyncReadbackBuffer(
+  already_AddRefed<AsyncReadbackBuffer> CreateAsyncReadbackBuffer(
       const gfx::IntSize& aSize) override;
 
-  virtual bool BlitRenderTarget(CompositingRenderTarget* aSource,
-                                const gfx::IntSize& aSourceSize,
-                                const gfx::IntSize& aDestSize) override;
+  bool BlitRenderTarget(CompositingRenderTarget* aSource,
+                        const gfx::IntSize& aSourceSize,
+                        const gfx::IntSize& aDestSize) override;
 
-  virtual void DrawQuad(const gfx::Rect& aRect, const gfx::IntRect& aClipRect,
-                        const EffectChain& aEffectChain, gfx::Float aOpacity,
-                        const gfx::Matrix4x4& aTransform,
-                        const gfx::Rect& aVisibleRect) override;
+  void DrawQuad(const gfx::Rect& aRect, const gfx::IntRect& aClipRect,
+                const EffectChain& aEffectChain, gfx::Float aOpacity,
+                const gfx::Matrix4x4& aTransform,
+                const gfx::Rect& aVisibleRect) override;
 
-  virtual void DrawTriangles(const nsTArray<gfx::TexturedTriangle>& aTriangles,
-                             const gfx::Rect& aRect,
-                             const gfx::IntRect& aClipRect,
-                             const EffectChain& aEffectChain,
-                             gfx::Float aOpacity,
-                             const gfx::Matrix4x4& aTransform,
-                             const gfx::Rect& aVisibleRect) override;
+  void DrawTriangles(const nsTArray<gfx::TexturedTriangle>& aTriangles,
+                     const gfx::Rect& aRect, const gfx::IntRect& aClipRect,
+                     const EffectChain& aEffectChain, gfx::Float aOpacity,
+                     const gfx::Matrix4x4& aTransform,
+                     const gfx::Rect& aVisibleRect) override;
 
-  virtual bool SupportsLayerGeometry() const override;
+  bool SupportsLayerGeometry() const override;
 
-  virtual void EndFrame() override;
+  void EndFrame() override;
 
-  virtual bool SupportsPartialTextureUpdate() override;
+  bool SupportsPartialTextureUpdate() override;
 
-  virtual bool CanUseCanvasLayerForSize(const gfx::IntSize& aSize) override {
+  bool CanUseCanvasLayerForSize(const gfx::IntSize& aSize) override {
     if (!mGLContext) return false;
     int32_t maxSize = GetMaxTextureSize();
     return aSize <= gfx::IntSize(maxSize, maxSize);
   }
 
-  virtual int32_t GetMaxTextureSize() const override;
+  int32_t GetMaxTextureSize() const override;
 
   /**
    * Set the size of the EGL surface we're rendering to, if we're rendering to
    * an EGL surface.
    */
-  virtual void SetDestinationSurfaceSize(const gfx::IntSize& aSize) override;
+  void SetDestinationSurfaceSize(const gfx::IntSize& aSize) override;
 
-  virtual void SetScreenRenderOffset(const ScreenPoint& aOffset) override {
+  void SetScreenRenderOffset(const ScreenPoint& aOffset) override {
     mRenderOffset = aOffset;
   }
 
-  virtual void MakeCurrent(MakeCurrentFlags aFlags = 0) override;
+  void MakeCurrent(MakeCurrentFlags aFlags = 0) override;
 
 #ifdef MOZ_DUMP_PAINTING
-  virtual const char* Name() const override { return "OGL"; }
+  const char* Name() const override { return "OGL"; }
 #endif  // MOZ_DUMP_PAINTING
 
-  virtual LayersBackend GetBackendType() const override {
+  LayersBackend GetBackendType() const override {
     return LayersBackend::LAYERS_OPENGL;
   }
 
-  virtual void Pause() override;
-  virtual bool Resume() override;
+  void Pause() override;
+  bool Resume() override;
 
   GLContext* gl() const { return mGLContext; }
   GLContext* GetGLContext() const override { return mGLContext; }
 
 #ifdef XP_DARWIN
-  virtual void MaybeUnlockBeforeNextComposition(
-      TextureHost* aTextureHost) override;
-  virtual void TryUnlockTextures() override;
+  void MaybeUnlockBeforeNextComposition(TextureHost* aTextureHost) override;
+  void TryUnlockTextures() override;
 #endif
 
   /**
@@ -261,6 +258,11 @@ class CompositorOGL final : public Compositor {
   void SetSurfaceOrigin(const ScreenIntPoint& aOrigin) {
     mSurfaceOrigin = aOrigin;
   }
+
+  // Register TextureSource which own device data that have to be deleted before
+  // destroying this CompositorOGL.
+  void RegisterTextureSource(TextureSource* aTextureSource);
+  void UnregisterTextureSource(TextureSource* aTextureSource);
 
  private:
   template <typename Geometry>
@@ -330,17 +332,17 @@ class CompositorOGL final : public Compositor {
   /*
    * Clear aRect on current render target.
    */
-  virtual void ClearRect(const gfx::Rect& aRect) override;
+  void ClearRect(const gfx::Rect& aRect) override;
 
   /* Start a new frame. If aClipRectIn is null and aClipRectOut is non-null,
    * sets *aClipRectOut to the screen dimensions.
    */
-  virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
-                          const gfx::IntRect* aClipRectIn,
-                          const gfx::IntRect& aRenderBounds,
-                          const nsIntRegion& aOpaqueRegion,
-                          gfx::IntRect* aClipRectOut = nullptr,
-                          gfx::IntRect* aRenderBoundsOut = nullptr) override;
+  void BeginFrame(const nsIntRegion& aInvalidRegion,
+                  const gfx::IntRect* aClipRectIn,
+                  const gfx::IntRect& aRenderBounds,
+                  const nsIntRegion& aOpaqueRegion,
+                  gfx::IntRect* aClipRectOut = nullptr,
+                  gfx::IntRect* aRenderBoundsOut = nullptr) override;
 
   ShaderConfigOGL GetShaderConfigFor(
       Effect* aEffect, TextureSourceOGL* aSourceMask = nullptr,
@@ -442,6 +444,12 @@ class CompositorOGL final : public Compositor {
   GLint FlipY(GLint y) const { return mViewportSize.height - y; }
 
   RefPtr<CompositorTexturePoolOGL> mTexturePool;
+
+#ifdef MOZ_WIDGET_GTK
+  // Hold TextureSources which own device data that have to be deleted before
+  // destroying this CompositorOGL.
+  std::unordered_set<TextureSource*> mRegisteredTextureSources;
+#endif
 
   bool mDestroyed;
 

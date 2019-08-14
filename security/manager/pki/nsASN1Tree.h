@@ -10,9 +10,26 @@
 #include "nsIASN1Object.h"
 #include "nsIASN1Sequence.h"
 #include "nsITreeView.h"
-#include "nsITreeBoxObject.h"
 #include "nsITreeSelection.h"
 #include "nsCOMPtr.h"
+
+/* Disable the "base class XXX should be explicitly initialized
+   in the copy constructor" warning. */
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wextra"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wextra"
+#endif  // __clang__ || __GNUC__
+
+#include "mozilla/dom/XULTreeElement.h"
+
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif  // __clang__ || __GNUC__
 
 // 4bfaa9f0-1dd2-11b2-afae-a82cbaa0b606
 #define NS_NSSASN1OUTINER_CID                        \
@@ -37,32 +54,32 @@ class nsNSSASN1Tree : public nsIASN1Tree {
    public:
     nsCOMPtr<nsIASN1Object> obj;
     nsCOMPtr<nsIASN1Sequence> seq;
-    myNode *child;
-    myNode *next;
-    myNode *parent;
+    myNode* child;
+    myNode* next;
+    myNode* parent;
 
     myNode() { child = next = parent = nullptr; }
   };
 
-  myNode *mTopNode;
+  myNode* mTopNode;
 
   nsCOMPtr<nsIASN1Object> mASN1Object;
   nsCOMPtr<nsITreeSelection> mSelection;
-  nsCOMPtr<nsITreeBoxObject> mTree;
+  RefPtr<mozilla::dom::XULTreeElement> mTree;
 
   void InitNodes();
-  void InitChildsRecursively(myNode *n);
+  void InitChildsRecursively(myNode* n);
 
   void ClearNodes();
-  void ClearNodesRecursively(myNode *n);
+  void ClearNodesRecursively(myNode* n);
 
-  int32_t CountVisibleNodes(myNode *n);
-  myNode *FindNodeFromIndex(myNode *n, int32_t wantedIndex,
-                            int32_t &index_counter, int32_t &level_counter,
-                            int32_t *optionalOutParentIndex,
-                            int32_t *optionalOutLevel);
-  myNode *FindNodeFromIndex(int32_t wantedIndex,
-                            int32_t *optionalOutParentIndex = nullptr,
-                            int32_t *optionalOutLevel = nullptr);
+  int32_t CountVisibleNodes(myNode* n);
+  myNode* FindNodeFromIndex(myNode* n, int32_t wantedIndex,
+                            int32_t& index_counter, int32_t& level_counter,
+                            int32_t* optionalOutParentIndex,
+                            int32_t* optionalOutLevel);
+  myNode* FindNodeFromIndex(int32_t wantedIndex,
+                            int32_t* optionalOutParentIndex = nullptr,
+                            int32_t* optionalOutLevel = nullptr);
 };
 #endif  //_NSSASNTREE_H_

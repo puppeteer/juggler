@@ -80,30 +80,27 @@ hardware (via AudioStream).
 
 */
 #if !defined(MediaDecoderStateMachine_h__)
-#define MediaDecoderStateMachine_h__
+#  define MediaDecoderStateMachine_h__
 
-#include "mozilla/Attributes.h"
-#include "mozilla/ReentrantMonitor.h"
-#include "mozilla/StateMirroring.h"
-
-#include "nsAutoPtr.h"
-#include "nsThreadUtils.h"
-#include "MediaDecoder.h"
-#include "MediaDecoderOwner.h"
-#include "MediaEventSource.h"
-#include "MediaFormatReader.h"
-#include "MediaMetadataManager.h"
-#include "MediaQueue.h"
-#include "MediaStatistics.h"
-#include "MediaTimer.h"
-#include "ImageContainer.h"
-#include "SeekJob.h"
+#  include "ImageContainer.h"
+#  include "MediaDecoder.h"
+#  include "MediaDecoderOwner.h"
+#  include "MediaEventSource.h"
+#  include "MediaFormatReader.h"
+#  include "MediaMetadataManager.h"
+#  include "MediaQueue.h"
+#  include "MediaSink.h"
+#  include "MediaStatistics.h"
+#  include "MediaTimer.h"
+#  include "SeekJob.h"
+#  include "mozilla/Attributes.h"
+#  include "mozilla/ReentrantMonitor.h"
+#  include "mozilla/StateMirroring.h"
+#  include "mozilla/dom/MediaDebugInfoBinding.h"
+#  include "nsAutoPtr.h"
+#  include "nsThreadUtils.h"
 
 namespace mozilla {
-
-namespace media {
-class MediaSink;
-}
 
 class AbstractThread;
 class AudioSegment;
@@ -186,15 +183,16 @@ class MediaDecoderStateMachine
   // Returns the state machine task queue.
   TaskQueue* OwnerThread() const { return mTaskQueue; }
 
-  RefPtr<MediaDecoder::DebugInfoPromise> RequestDebugInfo();
+  RefPtr<GenericPromise> RequestDebugInfo(
+      dom::MediaDecoderStateMachineDebugInfo& aInfo);
 
   void SetOutputStreamPrincipal(const nsCOMPtr<nsIPrincipal>& aPrincipal);
   void SetOutputStreamCORSMode(CORSMode aCORSMode);
-  // If an OutputStreamManager does not exist, one will be created and tracks
-  // matching aLoadedInfo will be created ahead of being created by the
-  // DecodedStream sink.
-  void EnsureOutputStreamManager(MediaStreamGraph* aGraph,
-                                 const Maybe<MediaInfo>& aLoadedInfo);
+  // If an OutputStreamManager does not exist, one will be created.
+  void EnsureOutputStreamManager(MediaStreamGraph* aGraph);
+  // If an OutputStreamManager exists, tracks matching aLoadedInfo will be
+  // created unless they already exist in the manager.
+  void EnsureOutputStreamManagerHasTracks(const MediaInfo& aLoadedInfo);
   // Add an output stream to the output stream manager. The manager must have
   // been created through EnsureOutputStreamManager() before this.
   void AddOutputStream(DOMMediaStream* aStream);
@@ -292,6 +290,9 @@ class MediaDecoderStateMachine
 
   RefPtr<GenericPromise> InvokeSetSink(RefPtr<AudioDeviceInfo> aSink);
 
+  void SetSecondaryVideoContainer(
+      const RefPtr<VideoFrameContainer>& aSecondary);
+
  private:
   class StateObject;
   class DecodeMetadataState;
@@ -311,7 +312,7 @@ class MediaDecoderStateMachine
   static const char* ToStateStr(State aState);
   const char* ToStateStr();
 
-  nsCString GetDebugInfo();
+  void GetDebugInfo(dom::MediaDecoderStateMachineDebugInfo& aInfo);
 
   // Functions used by assertions to ensure we're calling things
   // on the appropriate threads.
@@ -442,11 +443,11 @@ class MediaDecoderStateMachine
   // Called on the state machine thread.
   void UpdatePlaybackPositionPeriodically();
 
-  media::MediaSink* CreateAudioSink();
+  MediaSink* CreateAudioSink();
 
   // Always create mediasink which contains an AudioSink or StreamSink inside.
   // A manager must be passed in if aAudioCaptured is true.
-  already_AddRefed<media::MediaSink> CreateMediaSink(
+  already_AddRefed<MediaSink> CreateMediaSink(
       bool aAudioCaptured, OutputStreamManager* aManager = nullptr);
 
   // Stops the media sink and shut it down.
@@ -576,7 +577,7 @@ class MediaDecoderStateMachine
   media::TimeUnit mFragmentEndTime = media::TimeUnit::Invalid();
 
   // The media sink resource.  Used on the state machine thread.
-  RefPtr<media::MediaSink> mMediaSink;
+  RefPtr<MediaSink> mMediaSink;
 
   const RefPtr<ReaderProxy> mReader;
 
@@ -625,6 +626,8 @@ class MediaDecoderStateMachine
 
   void OnSuspendTimerResolved();
   void CancelSuspendTimer();
+
+  bool IsInSeamlessLooping() const;
 
   bool mCanPlayThrough = false;
 
@@ -694,8 +697,8 @@ class MediaDecoderStateMachine
   VideoDecodeMode mVideoDecodeMode;
 
   // Track the complete & error for audio/video separately
-  MozPromiseRequestHolder<GenericPromise> mMediaSinkAudioPromise;
-  MozPromiseRequestHolder<GenericPromise> mMediaSinkVideoPromise;
+  MozPromiseRequestHolder<MediaSink::EndedPromise> mMediaSinkAudioEndedPromise;
+  MozPromiseRequestHolder<MediaSink::EndedPromise> mMediaSinkVideoEndedPromise;
 
   MediaEventListener mAudioQueueListener;
   MediaEventListener mVideoQueueListener;

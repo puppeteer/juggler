@@ -15,7 +15,6 @@ const stubPreparedMessages = new Map();
 const stubPackets = new Map();
 stubPreparedMessages.set("GET request", new NetworkEventMessage({
   "id": "1",
-  "actor": "server1.conn0.child1/netEvent30",
   "level": "log",
   "isXHR": false,
   "request": {
@@ -26,7 +25,6 @@ stubPreparedMessages.set("GET request", new NetworkEventMessage({
   "source": "network",
   "type": "log",
   "groupId": null,
-  "timeStamp": 1487022056850,
   "indent": 0,
   "updates": [],
   "openedOnce": false,
@@ -39,7 +37,8 @@ stubPreparedMessages.set("GET request", new NetworkEventMessage({
     "host": "example.com",
     "scheme": "http",
     "unicodeUrl": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
-    "isLocal": null
+    "isLocal": null,
+    "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html"
   },
   "method": "GET",
   "cause": {
@@ -85,14 +84,14 @@ stubPreparedMessages.set("GET request update", new NetworkEventMessage({
     "host": "example.com",
     "scheme": "http",
     "unicodeUrl": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
-    "isLocal": null
+    "isLocal": null,
+    "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html"
   },
   "method": "GET"
 }));
 
 stubPreparedMessages.set("XHR GET request", new NetworkEventMessage({
   "id": "1",
-  "actor": "server1.conn1.child1/netEvent30",
   "level": "log",
   "isXHR": true,
   "request": {
@@ -103,7 +102,6 @@ stubPreparedMessages.set("XHR GET request", new NetworkEventMessage({
   "source": "network",
   "type": "log",
   "groupId": null,
-  "timeStamp": 1487022057746,
   "indent": 0,
   "updates": [],
   "openedOnce": false,
@@ -116,7 +114,8 @@ stubPreparedMessages.set("XHR GET request", new NetworkEventMessage({
     "host": "example.com",
     "scheme": "http",
     "unicodeUrl": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
-    "isLocal": null
+    "isLocal": null,
+    "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html"
   },
   "method": "GET",
   "cause": {
@@ -162,14 +161,14 @@ stubPreparedMessages.set("XHR GET request update", new NetworkEventMessage({
     "host": "example.com",
     "scheme": "http",
     "unicodeUrl": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
-    "isLocal": null
+    "isLocal": null,
+    "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html"
   },
   "method": "GET"
 }));
 
 stubPreparedMessages.set("XHR POST request", new NetworkEventMessage({
   "id": "1",
-  "actor": "server1.conn2.child1/netEvent30",
   "level": "log",
   "isXHR": true,
   "request": {
@@ -180,7 +179,6 @@ stubPreparedMessages.set("XHR POST request", new NetworkEventMessage({
   "source": "network",
   "type": "log",
   "groupId": null,
-  "timeStamp": 1487022058414,
   "indent": 0,
   "updates": [],
   "openedOnce": false,
@@ -193,7 +191,8 @@ stubPreparedMessages.set("XHR POST request", new NetworkEventMessage({
     "host": "example.com",
     "scheme": "http",
     "unicodeUrl": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
-    "isLocal": null
+    "isLocal": null,
+    "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html"
   },
   "method": "POST",
   "cause": {
@@ -239,19 +238,17 @@ stubPreparedMessages.set("XHR POST request update", new NetworkEventMessage({
     "host": "example.com",
     "scheme": "http",
     "unicodeUrl": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
-    "isLocal": null
+    "isLocal": null,
+    "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html"
   },
   "method": "POST"
 }));
 
 stubPackets.set(`GET request`, {
   "_type": "NetworkEvent",
-  "timeStamp": 1487022056850,
   "node": null,
-  "actor": "server1.conn0.child1/netEvent30",
   "discardRequestBody": true,
   "discardResponseBody": true,
-  "startedDateTime": "2017-02-13T21:40:56.850Z",
   "request": {
     "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
     "method": "GET"
@@ -268,6 +265,7 @@ stubPackets.set(`GET request`, {
   "private": false,
   "isThirdPartyTrackingResource": false,
   "referrerPolicy": "no-referrer-when-downgrade",
+  "channelId": 22673132355586,
   "from": "server1.conn0.child1/consoleActor2"
 });
 
@@ -299,12 +297,9 @@ stubPackets.set(`GET request update`, {
 
 stubPackets.set(`XHR GET request`, {
   "_type": "NetworkEvent",
-  "timeStamp": 1487022057746,
   "node": null,
-  "actor": "server1.conn1.child1/netEvent30",
   "discardRequestBody": true,
   "discardResponseBody": true,
-  "startedDateTime": "2017-02-13T21:40:57.746Z",
   "request": {
     "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
     "method": "GET"
@@ -321,6 +316,7 @@ stubPackets.set(`XHR GET request`, {
   "private": false,
   "isThirdPartyTrackingResource": false,
   "referrerPolicy": "no-referrer-when-downgrade",
+  "channelId": 22673132355587,
   "from": "server1.conn1.child1/consoleActor2"
 });
 
@@ -352,12 +348,9 @@ stubPackets.set(`XHR GET request update`, {
 
 stubPackets.set(`XHR POST request`, {
   "_type": "NetworkEvent",
-  "timeStamp": 1487022058414,
   "node": null,
-  "actor": "server1.conn2.child1/netEvent30",
   "discardRequestBody": true,
   "discardResponseBody": true,
-  "startedDateTime": "2017-02-13T21:40:58.414Z",
   "request": {
     "url": "http://example.com/browser/devtools/client/webconsole/test/fixtures/stub-generators/inexistent.html",
     "method": "POST"
@@ -374,6 +367,7 @@ stubPackets.set(`XHR POST request`, {
   "private": false,
   "isThirdPartyTrackingResource": false,
   "referrerPolicy": "no-referrer-when-downgrade",
+  "channelId": 22673132355588,
   "from": "server1.conn2.child1/consoleActor2"
 });
 

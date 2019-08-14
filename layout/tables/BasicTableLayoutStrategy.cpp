@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-// vim:cindent:ts=4:et:sw=4:
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+// vim:cindent:ts=2:et:sw=2:
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -28,7 +28,7 @@ namespace css = mozilla::css;
 
 #undef DEBUG_TABLE_STRATEGY
 
-BasicTableLayoutStrategy::BasicTableLayoutStrategy(nsTableFrame *aTableFrame)
+BasicTableLayoutStrategy::BasicTableLayoutStrategy(nsTableFrame* aTableFrame)
     : nsITableLayoutStrategy(nsITableLayoutStrategy::Auto),
       mTableFrame(aTableFrame) {
   MarkIntrinsicISizesDirty();
@@ -37,22 +37,23 @@ BasicTableLayoutStrategy::BasicTableLayoutStrategy(nsTableFrame *aTableFrame)
 /* virtual */
 BasicTableLayoutStrategy::~BasicTableLayoutStrategy() {}
 
-/* virtual */ nscoord BasicTableLayoutStrategy::GetMinISize(
-    gfxContext *aRenderingContext) {
+/* virtual */
+nscoord BasicTableLayoutStrategy::GetMinISize(gfxContext* aRenderingContext) {
   DISPLAY_MIN_INLINE_SIZE(mTableFrame, mMinISize);
-  if (mMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
+  if (mMinISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
     ComputeIntrinsicISizes(aRenderingContext);
   }
   return mMinISize;
 }
 
-/* virtual */ nscoord BasicTableLayoutStrategy::GetPrefISize(
-    gfxContext *aRenderingContext, bool aComputingSize) {
+/* virtual */
+nscoord BasicTableLayoutStrategy::GetPrefISize(gfxContext* aRenderingContext,
+                                               bool aComputingSize) {
   DISPLAY_PREF_INLINE_SIZE(mTableFrame, mPrefISize);
-  NS_ASSERTION((mPrefISize == NS_INTRINSIC_WIDTH_UNKNOWN) ==
-                   (mPrefISizePctExpand == NS_INTRINSIC_WIDTH_UNKNOWN),
+  NS_ASSERTION((mPrefISize == NS_INTRINSIC_ISIZE_UNKNOWN) ==
+                   (mPrefISizePctExpand == NS_INTRINSIC_ISIZE_UNKNOWN),
                "dirtyness out of sync");
-  if (mPrefISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
+  if (mPrefISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
     ComputeIntrinsicISizes(aRenderingContext);
   }
   return aComputingSize ? mPrefISizePctExpand : mPrefISize;
@@ -74,11 +75,11 @@ struct CellISizeInfo {
 
 // Used for both column and cell calculations.  The parts needed only
 // for cells are skipped when aIsCell is false.
-static CellISizeInfo GetISizeInfo(gfxContext *aRenderingContext,
-                                  nsIFrame *aFrame, WritingMode aWM,
+static CellISizeInfo GetISizeInfo(gfxContext* aRenderingContext,
+                                  nsIFrame* aFrame, WritingMode aWM,
                                   bool aIsCell) {
   nscoord minCoord, prefCoord;
-  const nsStylePosition *stylePos = aFrame->StylePosition();
+  const nsStylePosition* stylePos = aFrame->StylePosition();
   bool isQuirks =
       aFrame->PresContext()->CompatibilityMode() == eCompatibility_NavQuirks;
   nscoord boxSizingToBorderEdge = 0;
@@ -121,11 +122,10 @@ static CellISizeInfo GetISizeInfo(gfxContext *aRenderingContext,
   float prefPercent = 0.0f;
   bool hasSpecifiedISize = false;
 
-  const nsStyleCoord &iSize = stylePos->ISize(aWM);
-  nsStyleUnit unit = iSize.GetUnit();
-  // NOTE: We're ignoring calc() units with percentages here, for lack of a
-  // sensible idea for what to do with them.  This means calc() with
-  // percentages is basically handled like 'auto' for table cells and
+  const auto& iSize = stylePos->ISize(aWM);
+  // NOTE: We're ignoring calc() units with both lengths and percentages here,
+  // for lack of a sensible idea for what to do with them.  This means calc()
+  // with percentages is basically handled like 'auto' for table cells and
   // columns.
   if (iSize.ConvertsToLength()) {
     hasSpecifiedISize = true;
@@ -145,73 +145,70 @@ static CellISizeInfo GetISizeInfo(gfxContext *aRenderingContext,
       minCoord = c;
     }
     prefCoord = std::max(c, minCoord);
-  } else if (unit == eStyleUnit_Percent) {
-    prefPercent = iSize.GetPercentValue();
-  } else if (unit == eStyleUnit_Enumerated && aIsCell) {
-    switch (iSize.GetIntValue()) {
-      case NS_STYLE_WIDTH_MAX_CONTENT:
+  } else if (iSize.ConvertsToPercentage()) {
+    prefPercent = iSize.ToPercentage();
+  } else if (iSize.IsExtremumLength() && aIsCell) {
+    switch (iSize.AsExtremumLength()) {
+      case StyleExtremumLength::MaxContent:
         // 'inline-size' only affects pref isize, not min
         // isize, so don't change anything
         break;
-      case NS_STYLE_WIDTH_MIN_CONTENT:
+      case StyleExtremumLength::MinContent:
         prefCoord = minCoord;
         break;
-      case NS_STYLE_WIDTH_FIT_CONTENT:
-      case NS_STYLE_WIDTH_AVAILABLE:
-        // act just like 'inline-size: auto'
+      case StyleExtremumLength::MozFitContent:
+      case StyleExtremumLength::MozAvailable:
         break;
       default:
         MOZ_ASSERT_UNREACHABLE("unexpected enumerated value");
     }
   }
 
-  nsStyleCoord maxISize(stylePos->MaxISize(aWM));
-  if (maxISize.GetUnit() == eStyleUnit_Enumerated) {
-    if (!aIsCell || maxISize.GetIntValue() == NS_STYLE_WIDTH_AVAILABLE) {
-      maxISize.SetNoneValue();
-    } else if (maxISize.GetIntValue() == NS_STYLE_WIDTH_FIT_CONTENT) {
-      // for 'max-inline-size', '-moz-fit-content' is like
-      // '-moz-max-content'
-      maxISize.SetIntValue(NS_STYLE_WIDTH_MAX_CONTENT, eStyleUnit_Enumerated);
+  StyleMaxSize maxISize = stylePos->MaxISize(aWM);
+  if (maxISize.IsExtremumLength()) {
+    if (!aIsCell ||
+        maxISize.AsExtremumLength() == StyleExtremumLength::MozAvailable) {
+      maxISize = StyleMaxSize::None();
+    } else if (maxISize.AsExtremumLength() ==
+               StyleExtremumLength::MozFitContent) {
+      // for 'max-inline-size', '-moz-fit-content' is like 'max-content'
+      maxISize = StyleMaxSize::ExtremumLength(StyleExtremumLength::MaxContent);
     }
   }
-  unit = maxISize.GetUnit();
   // XXX To really implement 'max-inline-size' well, we'd need to store
   // it separately on the columns.
-  if (maxISize.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
+  if (maxISize.ConvertsToLength() || maxISize.IsExtremumLength()) {
     nscoord c = aFrame->ComputeISizeValue(aRenderingContext, 0, 0, 0, maxISize);
     minCoord = std::min(c, minCoord);
     prefCoord = std::min(c, prefCoord);
-  } else if (unit == eStyleUnit_Percent) {
-    float p = stylePos->MaxISize(aWM).GetPercentValue();
+  } else if (maxISize.ConvertsToPercentage()) {
+    float p = maxISize.ToPercentage();
     if (p < prefPercent) {
       prefPercent = p;
     }
   }
-  // treat calc() with percentages on max-inline-size just like 'none'.
 
-  nsStyleCoord minISize(stylePos->MinISize(aWM));
-  if (minISize.GetUnit() == eStyleUnit_Enumerated) {
-    if (!aIsCell || minISize.GetIntValue() == NS_STYLE_WIDTH_AVAILABLE) {
-      minISize.SetCoordValue(0);
-    } else if (minISize.GetIntValue() == NS_STYLE_WIDTH_FIT_CONTENT) {
-      // for 'min-inline-size', '-moz-fit-content' is like
-      // '-moz-min-content'
-      minISize.SetIntValue(NS_STYLE_WIDTH_MIN_CONTENT, eStyleUnit_Enumerated);
+  StyleSize minISize = stylePos->MinISize(aWM);
+  if (minISize.IsExtremumLength()) {
+    if (!aIsCell ||
+        minISize.AsExtremumLength() == StyleExtremumLength::MozAvailable) {
+      minISize = StyleSize::LengthPercentage(LengthPercentage::Zero());
+    } else if (minISize.AsExtremumLength() ==
+               StyleExtremumLength::MozFitContent) {
+      // for 'min-inline-size', '-moz-fit-content' is like 'min-content'
+      minISize = StyleSize::ExtremumLength(StyleExtremumLength::MinContent);
     }
   }
-  unit = minISize.GetUnit();
-  if (minISize.ConvertsToLength() || unit == eStyleUnit_Enumerated) {
+  if (minISize.ConvertsToLength() || minISize.IsExtremumLength()) {
     nscoord c = aFrame->ComputeISizeValue(aRenderingContext, 0, 0, 0, minISize);
     minCoord = std::max(c, minCoord);
     prefCoord = std::max(c, prefCoord);
-  } else if (unit == eStyleUnit_Percent) {
-    float p = stylePos->MinISize(aWM).GetPercentValue();
+  } else if (minISize.ConvertsToPercentage()) {
+    float p = minISize.ToPercentage();
     if (p > prefPercent) {
       prefPercent = p;
     }
   }
-  // treat calc() with percentages on min-inline-size just like '0'.
 
   // XXX Should col frame have border/padding considered?
   if (aIsCell) {
@@ -222,14 +219,14 @@ static CellISizeInfo GetISizeInfo(gfxContext *aRenderingContext,
   return CellISizeInfo(minCoord, prefCoord, prefPercent, hasSpecifiedISize);
 }
 
-static inline CellISizeInfo GetCellISizeInfo(gfxContext *aRenderingContext,
-                                             nsTableCellFrame *aCellFrame,
+static inline CellISizeInfo GetCellISizeInfo(gfxContext* aRenderingContext,
+                                             nsTableCellFrame* aCellFrame,
                                              WritingMode aWM) {
   return GetISizeInfo(aRenderingContext, aCellFrame, aWM, true);
 }
 
-static inline CellISizeInfo GetColISizeInfo(gfxContext *aRenderingContext,
-                                            nsIFrame *aFrame, WritingMode aWM) {
+static inline CellISizeInfo GetColISizeInfo(gfxContext* aRenderingContext,
+                                            nsIFrame* aFrame, WritingMode aWM) {
   return GetISizeInfo(aRenderingContext, aFrame, aWM, false);
 }
 
@@ -240,9 +237,9 @@ static inline CellISizeInfo GetColISizeInfo(gfxContext *aRenderingContext,
  * browsers are).
  */
 void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
-    gfxContext *aRenderingContext) {
-  nsTableFrame *tableFrame = mTableFrame;
-  nsTableCellMap *cellMap = tableFrame->GetCellMap();
+    gfxContext* aRenderingContext) {
+  nsTableFrame* tableFrame = mTableFrame;
+  nsTableCellMap* cellMap = tableFrame->GetCellMap();
   WritingMode wm = tableFrame->GetWritingMode();
 
   mozilla::AutoStackArena arena;
@@ -252,7 +249,7 @@ void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
   // a colspan.
   int32_t col, col_end;
   for (col = 0, col_end = cellMap->GetColCount(); col < col_end; ++col) {
-    nsTableColFrame *colFrame = tableFrame->GetColFrame(col);
+    nsTableColFrame* colFrame = tableFrame->GetColFrame(col);
     if (!colFrame) {
       NS_ERROR("column frames out of sync with cell map");
       continue;
@@ -285,7 +282,7 @@ void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
     // colspans.
     nsCellMapColumnIterator columnIter(cellMap, col);
     int32_t row, colSpan;
-    nsTableCellFrame *cellFrame;
+    nsTableCellFrame* cellFrame;
     while ((cellFrame = columnIter.GetNextFrame(&row, &colSpan))) {
       if (colSpan > 1) {
         spanningCells.AddCell(colSpan, row, col);
@@ -327,7 +324,7 @@ void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
   // Starting with smaller colspans makes it more likely that we
   // satisfy all the constraints given and don't distribute space to
   // columns where we don't need it.
-  SpanningCellSorter::Item *item;
+  SpanningCellSorter::Item* item;
   int32_t colSpan;
   while ((item = spanningCells.GetNext(&colSpan))) {
     NS_ASSERTION(colSpan > 1,
@@ -335,11 +332,11 @@ void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
     do {
       int32_t row = item->row;
       col = item->col;
-      CellData *cellData = cellMap->GetDataAt(row, col);
+      CellData* cellData = cellMap->GetDataAt(row, col);
       NS_ASSERTION(cellData && cellData->IsOrig(),
                    "bogus result from spanning cell sorter");
 
-      nsTableCellFrame *cellFrame = cellData->GetCellFrame();
+      nsTableCellFrame* cellFrame = cellData->GetCellFrame();
       NS_ASSERTION(cellFrame, "bogus result from spanning cell sorter");
 
       CellISizeInfo info = GetCellISizeInfo(aRenderingContext, cellFrame, wm);
@@ -357,7 +354,7 @@ void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
     // for each increment of colspan.
 
     for (col = 0, col_end = cellMap->GetColCount(); col < col_end; ++col) {
-      nsTableColFrame *colFrame = tableFrame->GetColFrame(col);
+      nsTableColFrame* colFrame = tableFrame->GetColFrame(col);
       if (!colFrame) {
         NS_ERROR("column frames out of sync with cell map");
         continue;
@@ -382,7 +379,7 @@ void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
   // 100%).  This means layout depends on the order of columns.
   float pct_used = 0.0f;
   for (col = 0, col_end = cellMap->GetColCount(); col < col_end; ++col) {
-    nsTableColFrame *colFrame = tableFrame->GetColFrame(col);
+    nsTableColFrame* colFrame = tableFrame->GetColFrame(col);
     if (!colFrame) {
       NS_ERROR("column frames out of sync with cell map");
       continue;
@@ -398,10 +395,10 @@ void BasicTableLayoutStrategy::ComputeColumnIntrinsicISizes(
 }
 
 void BasicTableLayoutStrategy::ComputeIntrinsicISizes(
-    gfxContext *aRenderingContext) {
+    gfxContext* aRenderingContext) {
   ComputeColumnIntrinsicISizes(aRenderingContext);
 
-  nsTableCellMap *cellMap = mTableFrame->GetCellMap();
+  nsTableCellMap* cellMap = mTableFrame->GetCellMap();
   nscoord min = 0, pref = 0, max_small_pct_pref = 0, nonpct_pref_total = 0;
   float pct_total = 0.0f;  // always from 0.0f - 1.0f
   int32_t colCount = cellMap->GetColCount();
@@ -410,7 +407,7 @@ void BasicTableLayoutStrategy::ComputeIntrinsicISizes(
   nscoord add = mTableFrame->GetColSpacing(colCount);
 
   for (int32_t col = 0; col < colCount; ++col) {
-    nsTableColFrame *colFrame = mTableFrame->GetColFrame(col);
+    nsTableColFrame* colFrame = mTableFrame->GetColFrame(col);
     if (!colFrame) {
       NS_ERROR("column frames out of sync with cell map");
       continue;
@@ -478,15 +475,17 @@ void BasicTableLayoutStrategy::ComputeIntrinsicISizes(
   mPrefISizePctExpand = pref_pct_expand;
 }
 
-/* virtual */ void BasicTableLayoutStrategy::MarkIntrinsicISizesDirty() {
-  mMinISize = NS_INTRINSIC_WIDTH_UNKNOWN;
-  mPrefISize = NS_INTRINSIC_WIDTH_UNKNOWN;
-  mPrefISizePctExpand = NS_INTRINSIC_WIDTH_UNKNOWN;
+/* virtual */
+void BasicTableLayoutStrategy::MarkIntrinsicISizesDirty() {
+  mMinISize = NS_INTRINSIC_ISIZE_UNKNOWN;
+  mPrefISize = NS_INTRINSIC_ISIZE_UNKNOWN;
+  mPrefISizePctExpand = NS_INTRINSIC_ISIZE_UNKNOWN;
   mLastCalcISize = nscoord_MIN;
 }
 
-/* virtual */ void BasicTableLayoutStrategy::ComputeColumnISizes(
-    const ReflowInput &aReflowInput) {
+/* virtual */
+void BasicTableLayoutStrategy::ComputeColumnISizes(
+    const ReflowInput& aReflowInput) {
   nscoord iSize = aReflowInput.ComputedISize();
 
   if (mLastCalcISize == iSize) {
@@ -494,18 +493,18 @@ void BasicTableLayoutStrategy::ComputeIntrinsicISizes(
   }
   mLastCalcISize = iSize;
 
-  NS_ASSERTION((mMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) ==
-                   (mPrefISize == NS_INTRINSIC_WIDTH_UNKNOWN),
+  NS_ASSERTION((mMinISize == NS_INTRINSIC_ISIZE_UNKNOWN) ==
+                   (mPrefISize == NS_INTRINSIC_ISIZE_UNKNOWN),
                "dirtyness out of sync");
-  NS_ASSERTION((mMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) ==
-                   (mPrefISizePctExpand == NS_INTRINSIC_WIDTH_UNKNOWN),
+  NS_ASSERTION((mMinISize == NS_INTRINSIC_ISIZE_UNKNOWN) ==
+                   (mPrefISizePctExpand == NS_INTRINSIC_ISIZE_UNKNOWN),
                "dirtyness out of sync");
   // XXX Is this needed?
-  if (mMinISize == NS_INTRINSIC_WIDTH_UNKNOWN) {
+  if (mMinISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
     ComputeIntrinsicISizes(aReflowInput.mRenderingContext);
   }
 
-  nsTableCellMap *cellMap = mTableFrame->GetCellMap();
+  nsTableCellMap* cellMap = mTableFrame->GetCellMap();
   int32_t colCount = cellMap->GetColCount();
   if (colCount <= 0) return;  // nothing to do
 
@@ -526,10 +525,10 @@ void BasicTableLayoutStrategy::DistributePctISizeToColumns(float aSpanPrefPct,
   // and to reduce aSpanPrefPct by columns that already have % isize
 
   int32_t scol, scol_end;
-  nsTableCellMap *cellMap = mTableFrame->GetCellMap();
+  nsTableCellMap* cellMap = mTableFrame->GetCellMap();
   for (scol = aFirstCol, scol_end = aFirstCol + aColCount; scol < scol_end;
        ++scol) {
-    nsTableColFrame *scolFrame = mTableFrame->GetColFrame(scol);
+    nsTableColFrame* scolFrame = mTableFrame->GetColFrame(scol);
     if (!scolFrame) {
       NS_ERROR("column frames out of sync with cell map");
       continue;
@@ -556,7 +555,7 @@ void BasicTableLayoutStrategy::DistributePctISizeToColumns(float aSpanPrefPct,
   const bool spanHasNonPctPref = nonPctTotalPrefISize > 0;  // Loop invariant
   for (scol = aFirstCol, scol_end = aFirstCol + aColCount; scol < scol_end;
        ++scol) {
-    nsTableColFrame *scolFrame = mTableFrame->GetColFrame(scol);
+    nsTableColFrame* scolFrame = mTableFrame->GetColFrame(scol);
     if (!scolFrame) {
       NS_ERROR("column frames out of sync with cell map");
       continue;
@@ -691,9 +690,9 @@ void BasicTableLayoutStrategy::DistributeISizeToColumns(
   int32_t numNonSpecZeroISizeCols = 0;
 
   int32_t col;
-  nsTableCellMap *cellMap = mTableFrame->GetCellMap();
+  nsTableCellMap* cellMap = mTableFrame->GetCellMap();
   for (col = aFirstCol; col < aFirstCol + aColCount; ++col) {
-    nsTableColFrame *colFrame = mTableFrame->GetColFrame(col);
+    nsTableColFrame* colFrame = mTableFrame->GetColFrame(col);
     if (!colFrame) {
       NS_ERROR("column frames out of sync with cell map");
       continue;
@@ -807,7 +806,7 @@ void BasicTableLayoutStrategy::DistributeISizeToColumns(
 #endif
 
   for (col = aFirstCol; col < aFirstCol + aColCount; ++col) {
-    nsTableColFrame *colFrame = mTableFrame->GetColFrame(col);
+    nsTableColFrame* colFrame = mTableFrame->GetColFrame(col);
     if (!colFrame) {
       NS_ERROR("column frames out of sync with cell map");
       continue;

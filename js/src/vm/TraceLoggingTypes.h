@@ -20,6 +20,7 @@
   _(GC)                                        \
   _(GCAllocation)                              \
   _(GCSweeping)                                \
+  _(GCFree)                                    \
   _(Interpreter)                               \
   _(InlinedScripts)                            \
   _(IonAnalysis)                               \
@@ -60,7 +61,6 @@
   _(AliasAnalysis)                             \
   _(GVN)                                       \
   _(LICM)                                      \
-  _(Sincos)                                    \
   _(RangeAnalysis)                             \
   _(LoopUnrolling)                             \
   _(Sink)                                      \
@@ -144,6 +144,12 @@ inline bool TLTextIdIsTogglable(uint32_t id) {
     return false;
   }
   return true;
+}
+
+inline bool TLTextIdIsEnumEvent(uint32_t id) { return id < TraceLogger_Last; }
+
+inline bool TLTextIdIsScriptEvent(uint32_t id) {
+  return !TLTextIdIsEnumEvent(id);
 }
 
 inline bool TLTextIdIsTreeEvent(uint32_t id) {

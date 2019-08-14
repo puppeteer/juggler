@@ -3,7 +3,7 @@
 
 <head>
   <title>Autoplay policy test</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
   <script type="text/javascript" src="manifest.js"></script>
   <script type="text/javascript" src="AutoplayTestUtils.js"></script>
@@ -16,10 +16,7 @@
         // Tests that origins with "autoplay-media" permission can autoplay.
 
         gTestPrefs.push(["media.autoplay.default", SpecialPowers.Ci.nsIAutoplay.BLOCKED],
-          ["media.autoplay.enabled.user-gestures-needed", true],
-          // Note: permission prompt disabled, as we want immediate
-          // notification in this test that an origin is blocked.
-          ["media.autoplay.ask-permission", false]);
+          ["media.autoplay.enabled.user-gestures-needed", true]);
 
         SpecialPowers.pushPrefEnv({ 'set': gTestPrefs }, () => {
           runTest();

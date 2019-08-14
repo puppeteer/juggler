@@ -19,6 +19,25 @@
 
 using namespace js;
 
+template <typename Category>
+void PICChain<Category>::addStub(JSObject* obj, CatStub* stub) {
+  MOZ_ASSERT(stub);
+  MOZ_ASSERT(!stub->next());
+
+  AddCellMemory(obj, sizeof(CatStub), MemoryUse::ForOfPICStub);
+
+  if (!stubs_) {
+    stubs_ = stub;
+    return;
+  }
+
+  CatStub* cur = stubs_;
+  while (cur->next()) {
+    cur = cur->next();
+  }
+  cur->append(stub);
+}
+
 bool js::ForOfPIC::Chain::initialize(JSContext* cx) {
   MOZ_ASSERT(!initialized_);
 
@@ -106,7 +125,7 @@ bool js::ForOfPIC::Chain::tryOptimizeArray(JSContext* cx,
 
   } else if (!disabled_ && !isArrayStateStillSane()) {
     // Otherwise, if array state is no longer sane, reinitialize.
-    reset();
+    reset(cx);
 
     if (!initialize(cx)) {
       return false;
@@ -142,7 +161,7 @@ bool js::ForOfPIC::Chain::tryOptimizeArray(JSContext* cx,
   // existing cache before adding new stubs.  We shouldn't really have heavy
   // churn on these.
   if (numStubs() >= MAX_STUBS) {
-    eraseChain();
+    eraseChain(cx);
   }
 
   // Good to optimize now, create stub to add.
@@ -153,7 +172,40 @@ bool js::ForOfPIC::Chain::tryOptimizeArray(JSContext* cx,
   }
 
   // Add the stub.
-  addStub(stub);
+  addStub(picObject_, stub);
+
+  *optimized = true;
+  return true;
+}
+
+bool js::ForOfPIC::Chain::tryOptimizeArrayIteratorNext(JSContext* cx,
+                                                       bool* optimized) {
+  MOZ_ASSERT(optimized);
+
+  *optimized = false;
+
+  if (!initialized_) {
+    // If PIC is not initialized, initialize it.
+    if (!initialize(cx)) {
+      return false;
+    }
+  } else if (!disabled_ && !isArrayNextStillSane()) {
+    // Otherwise, if array iterator state is no longer sane, reinitialize.
+    reset(cx);
+
+    if (!initialize(cx)) {
+      return false;
+    }
+  }
+  MOZ_ASSERT(initialized_);
+
+  // If PIC is disabled, don't bother trying to optimize.
+  if (disabled_) {
+    return true;
+  }
+
+  // By the time we get here, we should have a sane iterator state to work with.
+  MOZ_ASSERT(isArrayNextStillSane());
 
   *optimized = true;
   return true;
@@ -189,12 +241,12 @@ bool js::ForOfPIC::Chain::isArrayStateStillSane() {
   return isArrayNextStillSane();
 }
 
-void js::ForOfPIC::Chain::reset() {
+void js::ForOfPIC::Chain::reset(JSContext* cx) {
   // Should never reset a disabled_ stub.
   MOZ_ASSERT(!disabled_);
 
   // Erase the chain.
-  eraseChain();
+  eraseChain(cx);
 
   arrayProto_ = nullptr;
   arrayIteratorProto_ = nullptr;
@@ -210,22 +262,16 @@ void js::ForOfPIC::Chain::reset() {
   initialized_ = false;
 }
 
-void js::ForOfPIC::Chain::eraseChain() {
+void js::ForOfPIC::Chain::eraseChain(JSContext* cx) {
   // Should never need to clear the chain of a disabled stub.
   MOZ_ASSERT(!disabled_);
-
-  // Free all stubs.
-  Stub* stub = stubs_;
-  while (stub) {
-    Stub* next = stub->next();
-    js_delete(stub);
-    stub = next;
-  }
-  stubs_ = nullptr;
+  freeAllStubs(cx->defaultFreeOp());
 }
 
 // Trace the pointers stored directly on the stub.
 void js::ForOfPIC::Chain::trace(JSTracer* trc) {
+  TraceEdge(trc, &picObject_, "ForOfPIC object");
+
   if (!initialized_ || disabled_) {
     return;
   }
@@ -241,28 +287,33 @@ void js::ForOfPIC::Chain::trace(JSTracer* trc) {
   TraceEdge(trc, &canonicalNextFunc_,
             "ForOfPIC ArrayIterator.prototype.next builtin.");
 
-  // Free all the stubs in the chain.
-  while (stubs_) {
-    removeStub(stubs_, nullptr);
+  if (trc->isMarkingTracer()) {
+    // Free all the stubs in the chain.
+    freeAllStubs(trc->runtime()->defaultFreeOp());
   }
-}
-
-void js::ForOfPIC::Chain::sweep(FreeOp* fop) {
-  // Free all the stubs in the chain.
-  while (stubs_) {
-    Stub* next = stubs_->next();
-    fop->delete_(stubs_);
-    stubs_ = next;
-  }
-  fop->delete_(this);
 }
 
 static void ForOfPIC_finalize(FreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->maybeOnHelperThread());
   if (ForOfPIC::Chain* chain =
           ForOfPIC::fromJSObject(&obj->as<NativeObject>())) {
-    chain->sweep(fop);
+    chain->finalize(fop, obj);
   }
+}
+
+void js::ForOfPIC::Chain::finalize(FreeOp* fop, JSObject* obj) {
+  freeAllStubs(fop);
+  fop->delete_(obj, this, MemoryUse::ForOfPIC);
+}
+
+void js::ForOfPIC::Chain::freeAllStubs(FreeOp* fop) {
+  Stub* stub = stubs_;
+  while (stub) {
+    Stub* next = stub->next();
+    fop->delete_(picObject_, stub, MemoryUse::ForOfPICStub);
+    stub = next;
+  }
+  stubs_ = nullptr;
 }
 
 static void ForOfPIC_traceObject(JSTracer* trc, JSObject* obj) {
@@ -288,18 +339,20 @@ const Class ForOfPIC::class_ = {
     "ForOfPIC", JSCLASS_HAS_PRIVATE | JSCLASS_BACKGROUND_FINALIZE,
     &ForOfPICClassOps};
 
-/* static */ NativeObject* js::ForOfPIC::createForOfPICObject(
-    JSContext* cx, Handle<GlobalObject*> global) {
+/* static */
+NativeObject* js::ForOfPIC::createForOfPICObject(JSContext* cx,
+                                                 Handle<GlobalObject*> global) {
   cx->check(global);
-  NativeObject* obj =
-      NewNativeObjectWithGivenProto(cx, &ForOfPIC::class_, nullptr);
+  NativeObject* obj = NewNativeObjectWithGivenProto(cx, &ForOfPIC::class_,
+                                                    nullptr, TenuredObject);
   if (!obj) {
     return nullptr;
   }
-  ForOfPIC::Chain* chain = cx->new_<ForOfPIC::Chain>();
+  ForOfPIC::Chain* chain = cx->new_<ForOfPIC::Chain>(obj);
   if (!chain) {
     return nullptr;
   }
+  InitObjectPrivate(obj, chain, MemoryUse::ForOfPIC);
   obj->setPrivate(chain);
   return obj;
 }

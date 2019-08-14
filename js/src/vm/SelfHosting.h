@@ -20,7 +20,31 @@ namespace js {
  */
 bool IsSelfHostedFunctionWithName(JSFunction* fun, JSAtom* name);
 
-JSAtom* GetSelfHostedFunctionName(JSFunction* fun);
+/*
+ * Returns the name of the cloned function's binding in the self-hosted global.
+ *
+ * This returns a non-null value only when this is a top level function
+ * declaration in the self-hosted global.
+ */
+JSAtom* GetClonedSelfHostedFunctionName(JSFunction* fun);
+
+/*
+ * Same as GetClonedSelfHostedFunctionName, but `fun` is guaranteed to be an
+ * extended function.
+ *
+ * This function is supposed to be used off-thread, especially the JIT
+ * compilation thread, that cannot access JSFunction.flags_, because of
+ * a race condition.
+ *
+ * See Also: WrappedFunction.isExtended_
+ */
+JSAtom* GetClonedSelfHostedFunctionNameOffMainThread(JSFunction* fun);
+
+/*
+ * Uncloned self-hosted functions with `$` prefix are allocated as
+ * extended function, to store the original name in `_SetCanonicalName`.
+ */
+bool IsExtendedUnclonedSelfHostedFunctionName(JSAtom* name);
 
 bool IsCallSelfHostedNonGenericMethod(NativeImpl impl);
 
@@ -52,6 +76,9 @@ bool intrinsic_StringSplitString(JSContext* cx, unsigned argc, JS::Value* vp);
 bool intrinsic_NewArrayIterator(JSContext* cx, unsigned argc, JS::Value* vp);
 
 bool intrinsic_NewStringIterator(JSContext* cx, unsigned argc, JS::Value* vp);
+
+bool intrinsic_NewRegExpStringIterator(JSContext* cx, unsigned argc,
+                                       JS::Value* vp);
 
 bool intrinsic_IsSuspendedGenerator(JSContext* cx, unsigned argc,
                                     JS::Value* vp);

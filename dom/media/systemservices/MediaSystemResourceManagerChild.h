@@ -4,10 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined(MediaSystemResourceManagerChild_h_)
-#define MediaSystemResourceManagerChild_h_
+#  define MediaSystemResourceManagerChild_h_
 
-#include "mozilla/media/PMediaSystemResourceManagerChild.h"
-#include "nsISupportsImpl.h"
+#  include "mozilla/media/PMediaSystemResourceManagerChild.h"
+#  include "nsISupportsImpl.h"
 
 namespace mozilla {
 
@@ -24,6 +24,8 @@ namespace media {
  */
 class MediaSystemResourceManagerChild final
     : public PMediaSystemResourceManagerChild {
+  friend class PMediaSystemResourceManagerChild;
+
  public:
   struct ResourceListener {
     /* The resource is reserved and can be granted.
@@ -46,7 +48,7 @@ class MediaSystemResourceManagerChild final
 
  protected:
   mozilla::ipc::IPCResult RecvResponse(const uint32_t& aId,
-                                       const bool& aSuccess) override;
+                                       const bool& aSuccess);
 
  private:
   void ActorDestroy(ActorDestroyReason aActorDestroyReason) override;

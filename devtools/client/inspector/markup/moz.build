@@ -5,10 +5,13 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += [
+    'components',
+    'utils',
     'views',
 ]
 
 DevToolsModules(
+    'markup-context-menu.js',
     'markup.js',
     'utils.js',
 )

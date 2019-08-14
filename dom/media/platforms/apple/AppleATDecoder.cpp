@@ -300,12 +300,12 @@ MediaResult AppleATDecoder::DecodeSample(MediaRawData* aSample) {
     data = mAudioConverter->Process(std::move(data));
   }
 
-  RefPtr<AudioData> audio =
-      new AudioData(aSample->mOffset, aSample->mTime, duration, numFrames,
-                    data.Forget(), channels, rate,
-                    mChannelLayout && mChannelLayout->IsValid()
-                        ? mChannelLayout->Map()
-                        : AudioConfig::ChannelLayout::UNKNOWN_MAP);
+  RefPtr<AudioData> audio = new AudioData(
+      aSample->mOffset, aSample->mTime, data.Forget(), channels, rate,
+      mChannelLayout && mChannelLayout->IsValid()
+          ? mChannelLayout->Map()
+          : AudioConfig::ChannelLayout::UNKNOWN_MAP);
+  MOZ_DIAGNOSTIC_ASSERT(duration == audio->mDuration, "must be equal");
   mDecodedSamples.AppendElement(std::move(audio));
   return NS_OK;
 }
@@ -534,7 +534,7 @@ MediaResult AppleATDecoder::SetupDecoder(MediaRawData* aSample) {
   mOutputFormat.mBitsPerChannel = 16;
   mOutputFormat.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | 0;
 #else
-#error Unknown audio sample type
+#  error Unknown audio sample type
 #endif
   // Set up the decoder so it gives us one sample per frame
   mOutputFormat.mFramesPerPacket = 1;

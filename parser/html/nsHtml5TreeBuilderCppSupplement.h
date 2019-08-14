@@ -5,9 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsError.h"
-#include "nsIPresShell.h"
 #include "nsNodeUtils.h"
-#include "nsIFrame.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Likely.h"
 #include "mozilla/UniquePtr.h"
@@ -30,7 +28,6 @@ nsHtml5TreeBuilder::nsHtml5TreeBuilder(nsHtml5OplessBuilder* aBuilder)
       listPtr(0),
       formPointer(nullptr),
       headPointer(nullptr),
-      deepTreeSurrogateParent(nullptr),
       charBufferLen(0),
       quirks(false),
       isSrcdocDocument(false),
@@ -70,7 +67,6 @@ nsHtml5TreeBuilder::nsHtml5TreeBuilder(nsAHtml5TreeOpSink* aOpSink,
       listPtr(0),
       formPointer(nullptr),
       headPointer(nullptr),
-      deepTreeSurrogateParent(nullptr),
       charBufferLen(0),
       quirks(false),
       isSrcdocDocument(false),
@@ -528,9 +524,6 @@ void nsHtml5TreeBuilder::appendElement(nsIContentHandle* aChild,
                                        nsIContentHandle* aParent) {
   MOZ_ASSERT(aChild, "Null child");
   MOZ_ASSERT(aParent, "Null parent");
-  if (deepTreeSurrogateParent) {
-    return;
-  }
 
   if (mBuilder) {
     nsresult rv = nsHtml5TreeOperation::Append(
@@ -648,10 +641,7 @@ void nsHtml5TreeBuilder::appendCharacters(nsIContentHandle* aParent,
   if (mBuilder) {
     nsresult rv = nsHtml5TreeOperation::AppendText(
         aBuffer,  // XXX aStart always ignored???
-        aLength,
-        static_cast<nsIContent*>(
-            deepTreeSurrogateParent ? deepTreeSurrogateParent : aParent),
-        mBuilder);
+        aLength, static_cast<nsIContent*>(aParent), mBuilder);
     if (NS_FAILED(rv)) {
       MarkAsBrokenAndRequestSuspensionWithBuilder(rv);
     }
@@ -674,8 +664,7 @@ void nsHtml5TreeBuilder::appendCharacters(nsIContentHandle* aParent,
     MarkAsBrokenAndRequestSuspensionWithoutBuilder(NS_ERROR_OUT_OF_MEMORY);
     return;
   }
-  treeOp->Init(eTreeOpAppendText, bufferCopy.release(), aLength,
-               deepTreeSurrogateParent ? deepTreeSurrogateParent : aParent);
+  treeOp->Init(eTreeOpAppendText, bufferCopy.release(), aLength, aParent);
 }
 
 void nsHtml5TreeBuilder::appendComment(nsIContentHandle* aParent,
@@ -684,10 +673,6 @@ void nsHtml5TreeBuilder::appendComment(nsIContentHandle* aParent,
   MOZ_ASSERT(aBuffer, "Null buffer");
   MOZ_ASSERT(aParent, "Null parent");
   MOZ_ASSERT(!aStart, "aStart must always be zero.");
-
-  if (deepTreeSurrogateParent) {
-    return;
-  }
 
   if (mBuilder) {
     nsresult rv = nsHtml5TreeOperation::AppendComment(
@@ -802,7 +787,6 @@ void nsHtml5TreeBuilder::markMalformedIfScript(nsIContentHandle* aElement) {
 
 void nsHtml5TreeBuilder::start(bool fragment) {
   mCurrentHtmlScriptIsAsyncOrDefer = false;
-  deepTreeSurrogateParent = nullptr;
 #ifdef DEBUG
   mActive = true;
 #endif
@@ -869,13 +853,6 @@ void nsHtml5TreeBuilder::elementPushed(int32_t aNamespace, nsAtom* aName,
    * table elements shouldn't be used as surrogate parents for user experience
    * reasons.
    */
-  if (!deepTreeSurrogateParent && currentPtr >= MAX_REFLOW_DEPTH &&
-      !(aName == nsGkAtoms::script || aName == nsGkAtoms::table ||
-        aName == nsGkAtoms::thead || aName == nsGkAtoms::tfoot ||
-        aName == nsGkAtoms::tbody || aName == nsGkAtoms::tr ||
-        aName == nsGkAtoms::colgroup || aName == nsGkAtoms::style)) {
-    deepTreeSurrogateParent = aElement;
-  }
   if (aNamespace != kNameSpaceID_XHTML) {
     return;
   }
@@ -928,9 +905,6 @@ void nsHtml5TreeBuilder::elementPopped(int32_t aNamespace, nsAtom* aName,
                "Element isn't HTML, SVG or MathML!");
   NS_ASSERTION(aName, "Element doesn't have local name!");
   NS_ASSERTION(aElement, "No element!");
-  if (deepTreeSurrogateParent && currentPtr <= MAX_REFLOW_DEPTH) {
-    deepTreeSurrogateParent = nullptr;
-  }
   if (aNamespace == kNameSpaceID_MathML) {
     return;
   }
@@ -1302,6 +1276,9 @@ void nsHtml5TreeBuilder::StartPlainText() {
   startTag(nsHtml5ElementName::ELT_LINK,
            nsHtml5PlainTextUtils::NewLinkAttributes(), false);
 
+  startTag(nsHtml5ElementName::ELT_BODY,
+           nsHtml5PlainTextUtils::NewBodyAttributes(), false);
+
   StartPlainTextBody();
 }
 
@@ -1383,6 +1360,16 @@ nsIContentHandle* nsHtml5TreeBuilder::getFormPointerForContext(
 void nsHtml5TreeBuilder::EnableViewSource(nsHtml5Highlighter* aHighlighter) {
   MOZ_ASSERT(!mBuilder, "Must not view source with builder.");
   mViewSource = aHighlighter;
+}
+
+void nsHtml5TreeBuilder::errDeepTree() {
+  if (MOZ_UNLIKELY(mViewSource)) {
+    mViewSource->AddErrorToCurrentRun("errDeepTree");
+  } else if (!mBuilder) {
+    nsHtml5TreeOperation* treeOp = mOpQueue.AppendElement();
+    MOZ_ASSERT(treeOp, "Tree op allocation failed.");
+    treeOp->InitDeepTree(tokenizer->getLineNumber());
+  }
 }
 
 void nsHtml5TreeBuilder::errStrayStartTag(nsAtom* aName) {

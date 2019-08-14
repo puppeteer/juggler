@@ -8,7 +8,7 @@
 #include "mozilla/ipc/ProcessChild.h"
 
 #if defined(XP_WIN)
-#include "mozilla/mscom/MainThreadRuntime.h"
+#  include "mozilla/mscom/ProcessRuntime.h"
 #endif
 
 #include "RDDParent.h"
@@ -32,7 +32,7 @@ class RDDProcessImpl final : public ipc::ProcessChild {
 
 #if defined(XP_WIN)
   // This object initializes and configures COM.
-  mozilla::mscom::MainThreadRuntime mCOMRuntime;
+  mozilla::mscom::ProcessRuntime mCOMRuntime;
 #endif
 };
 

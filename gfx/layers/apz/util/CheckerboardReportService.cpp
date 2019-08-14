@@ -6,7 +6,6 @@
 
 #include "CheckerboardReportService.h"
 
-#include "gfxPrefs.h"                 // for gfxPrefs
 #include "jsapi.h"                    // for JS_Now
 #include "MainThreadUtils.h"          // for NS_IsMainThread
 #include "mozilla/Assertions.h"       // for MOZ_ASSERT
@@ -21,10 +20,11 @@
 namespace mozilla {
 namespace layers {
 
-/*static*/ StaticRefPtr<CheckerboardEventStorage>
-    CheckerboardEventStorage::sInstance;
+/*static*/
+StaticRefPtr<CheckerboardEventStorage> CheckerboardEventStorage::sInstance;
 
-/*static*/ already_AddRefed<CheckerboardEventStorage>
+/*static*/
+already_AddRefed<CheckerboardEventStorage>
 CheckerboardEventStorage::GetInstance() {
   // The instance in the parent process does all the work, so if this is getting
   // called in the child process something is likely wrong.
@@ -152,8 +152,8 @@ NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CheckerboardReportService, mParent)
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(CheckerboardReportService, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(CheckerboardReportService, Release)
 
-/*static*/ bool CheckerboardReportService::IsEnabled(JSContext* aCtx,
-                                                     JSObject* aGlobal) {
+/*static*/
+bool CheckerboardReportService::IsEnabled(JSContext* aCtx, JSObject* aGlobal) {
   // Only allow this in the parent process
   if (!XRE_IsParentProcess()) {
     return false;
@@ -163,7 +163,8 @@ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(CheckerboardReportService, Release)
          nsContentUtils::IsSpecificAboutPage(aGlobal, "about:checkerboard");
 }
 
-/*static*/ already_AddRefed<CheckerboardReportService>
+/*static*/
+already_AddRefed<CheckerboardReportService>
 CheckerboardReportService::Constructor(const dom::GlobalObject& aGlobal,
                                        ErrorResult& aRv) {
   RefPtr<CheckerboardReportService> ces =
@@ -190,11 +191,11 @@ void CheckerboardReportService::GetReports(
 }
 
 bool CheckerboardReportService::IsRecordingEnabled() const {
-  return gfxPrefs::APZRecordCheckerboarding();
+  return StaticPrefs::apz_record_checkerboarding();
 }
 
 void CheckerboardReportService::SetRecordingEnabled(bool aEnabled) {
-  gfxPrefs::SetAPZRecordCheckerboarding(aEnabled);
+  Preferences::SetBool("apz.record_checkerboarding", aEnabled);
 }
 
 void CheckerboardReportService::FlushActiveReports() {

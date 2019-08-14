@@ -13,7 +13,7 @@
 
 class nsIFrame;
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Switch)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Switch)
 
 namespace mozilla {
 namespace dom {
@@ -42,8 +42,6 @@ SVGSwitchElement::SVGSwitchElement(
     already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
     : SVGSwitchElementBase(std::move(aNodeInfo)) {}
 
-SVGSwitchElement::~SVGSwitchElement() {}
-
 void SVGSwitchElement::MaybeInvalidate() {
   // We must not change mActiveChild until after
   // InvalidateAndScheduleBoundsUpdate has been called, otherwise
@@ -57,7 +55,7 @@ void SVGSwitchElement::MaybeInvalidate() {
 
   nsIFrame* frame = GetPrimaryFrame();
   if (frame) {
-    nsLayoutUtils::PostRestyleEvent(this, nsRestyleHint(0),
+    nsLayoutUtils::PostRestyleEvent(this, RestyleHint{0},
                                     nsChangeHint_InvalidateRenderingObservers);
     nsSVGUtils::ScheduleReflowSVG(frame);
   }

@@ -4,12 +4,18 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createFactory,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
+const Actions = require("../actions/index");
 const FluentReact = require("devtools/client/shared/vendor/fluent-react");
 const Localized = createFactory(FluentReact.Localized);
+
+const { RUNTIMES } = require("../constants");
 
 /**
  * This component displays runtime information.
@@ -17,41 +23,63 @@ const Localized = createFactory(FluentReact.Localized);
 class RuntimeInfo extends PureComponent {
   static get propTypes() {
     return {
+      dispatch: PropTypes.func.isRequired,
       icon: PropTypes.string.isRequired,
       deviceName: PropTypes.string,
       name: PropTypes.string.isRequired,
       version: PropTypes.string.isRequired,
+      runtimeId: PropTypes.string.isRequired,
     };
   }
-
   render() {
-    const { icon, deviceName, name, version } = this.props;
+    const { icon, deviceName, name, version, runtimeId, dispatch } = this.props;
 
     return dom.h1(
       {
-        className: "main-heading",
+        className: "main-heading runtime-info",
       },
-      dom.img(
-        {
-          className: "main-heading__icon",
-          src: icon,
-        }
-      ),
+      dom.img({
+        className: "main-heading__icon runtime-info__icon qa-runtime-icon",
+        src: icon,
+      }),
       Localized(
         {
-          id: deviceName ? "about-debugging-runtime-info-with-model"
-                          : "about-debugging-runtime-info",
+          id: "about-debugging-runtime-name",
           $name: name,
-          $deviceName: deviceName,
           $version: version,
         },
         dom.label(
           {
-            className: "js-runtime-info",
+            className: "qa-runtime-name runtime-info__title",
           },
-          `${ name } on ${ deviceName } (${ version })`
+          `${name} (${version})`
         )
-      )
+      ),
+      deviceName
+        ? dom.label(
+            {
+              className: "main-heading-subtitle runtime-info__subtitle",
+            },
+            deviceName
+          )
+        : null,
+      runtimeId !== RUNTIMES.THIS_FIREFOX
+        ? Localized(
+            {
+              id: "about-debugging-runtime-disconnect-button",
+            },
+            dom.button(
+              {
+                className:
+                  "default-button runtime-info__action qa-runtime-info__action",
+                onClick() {
+                  dispatch(Actions.disconnectRuntime(runtimeId, true));
+                },
+              },
+              "Disconnect"
+            )
+          )
+        : null
     );
   }
 }

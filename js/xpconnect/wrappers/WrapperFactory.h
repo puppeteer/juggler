@@ -11,6 +11,39 @@
 
 namespace xpc {
 
+/**
+ * A wrapper that's only used for cross-origin objects. This should be
+ * just like a CrossCompartmentWrapper but (as an implementation
+ * detail) doesn't actually do any compartment-entering and (as an
+ * implementation detail) delegates all the security decisions and
+ * compartment-entering to the target object, which is always a
+ * proxy.
+ *
+ * We could also inherit from CrossCompartmentWrapper but then we
+ * would need to override all the proxy hooks to avoid the
+ * compartment-entering bits.
+ */
+class CrossOriginObjectWrapper : public js::Wrapper {
+ public:
+  // We want to claim to have a security policy, so code doesn't just
+  // CheckedUnwrap us willy-nilly.  But we're OK with the BaseProxyHandler
+  // implementation of enter(), which allows entering.  Our target is what
+  // really does the security checks.
+  //
+  // We don't want to inherit from CrossCompartmentWrapper, because we don't
+  // want the compartment-entering behavior it has.  But we do want to set the
+  // CROSS_COMPARTMENT flag on js::Wrapper so that we test true for
+  // is<js::CrossCompartmentWrapperObject> and so forth.
+  constexpr explicit CrossOriginObjectWrapper()
+      : js::Wrapper(CROSS_COMPARTMENT, /* aHasPrototype = */ false,
+                    /* aHasSecurityPolicy = */ true) {}
+
+  bool dynamicCheckedUnwrapAllowed(JS::HandleObject obj,
+                                   JSContext* cx) const override;
+
+  static const CrossOriginObjectWrapper singleton;
+};
+
 class WrapperFactory {
  public:
   enum {
@@ -29,6 +62,11 @@ class WrapperFactory {
     return HasWrapperFlag(wrapper, IS_XRAY_WRAPPER_FLAG);
   }
 
+  static bool IsCrossOriginWrapper(JSObject* obj) {
+    return (js::IsProxy(obj) &&
+            js::GetProxyHandler(obj) == &CrossOriginObjectWrapper::singleton);
+  }
+
   static bool HasWaiveXrayFlag(JSObject* wrapper) {
     return HasWrapperFlag(wrapper, WAIVE_XRAY_WRAPPER_FLAG);
   }
@@ -36,7 +74,10 @@ class WrapperFactory {
   static bool IsCOW(JSObject* wrapper);
 
   static JSObject* GetXrayWaiver(JS::HandleObject obj);
-  static JSObject* CreateXrayWaiver(JSContext* cx, JS::HandleObject obj);
+  // If allowExisting is true, there is an existing waiver for obj in
+  // its scope, but we want to replace it with the new one.
+  static JSObject* CreateXrayWaiver(JSContext* cx, JS::HandleObject obj,
+                                    bool allowExisting = false);
   static JSObject* WaiveXray(JSContext* cx, JSObject* obj);
 
   // Computes whether we should allow the creation of an Xray waiver from
@@ -60,8 +101,6 @@ class WrapperFactory {
   static bool WaiveXrayAndWrap(JSContext* cx, JS::MutableHandleValue vp);
   static bool WaiveXrayAndWrap(JSContext* cx, JS::MutableHandleObject object);
 };
-
-extern const js::Wrapper XrayWaiver;
 
 }  // namespace xpc
 

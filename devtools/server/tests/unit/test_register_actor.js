@@ -32,24 +32,32 @@ function test_lazy_api() {
     type: { global: true, target: true },
   });
   // The actor is immediatly registered, but not loaded
-  Assert.ok(ActorRegistry.targetScopedActorFactories.hasOwnProperty("lazyActor"));
+  Assert.ok(
+    ActorRegistry.targetScopedActorFactories.hasOwnProperty("lazyActor")
+  );
   Assert.ok(ActorRegistry.globalActorFactories.hasOwnProperty("lazyActor"));
   Assert.ok(!isActorLoaded);
   Assert.ok(!isActorInstantiated);
 
   const client = new DebuggerClient(DebuggerServer.connectPipe());
   client.connect().then(function onConnect() {
-    client.listTabs().then(onListTabs);
+    client.mainRoot.rootForm.then(onRootForm);
   });
-  function onListTabs(response) {
-    // On listTabs, the actor is still not loaded,
+  function onRootForm(response) {
+    // On rootForm, the actor is still not loaded,
     // but we can see its name in the list of available actors
     Assert.ok(!isActorLoaded);
     Assert.ok(!isActorInstantiated);
     Assert.ok("lazyActor" in response);
 
-    const {LazyFront} = require("xpcshell-test/registertestactors-lazy");
-    const front = LazyFront(client, response);
+    const { LazyFront } = require("xpcshell-test/registertestactors-lazy");
+    const front = new LazyFront(client);
+    // As this Front isn't instantiated by protocol.js, we have to manually
+    // set its actor ID and manage it:
+    front.actorID = response.lazyActor;
+    client.addActorPool(front);
+    front.manage(front);
+
     front.hello().then(onRequest);
   }
   function onRequest(response) {
@@ -76,9 +84,10 @@ function cleanup() {
   DebuggerServer.destroy();
 
   // Check that all actors are unregistered on server destruction
-  Assert.ok(!ActorRegistry.targetScopedActorFactories.hasOwnProperty("lazyActor"));
+  Assert.ok(
+    !ActorRegistry.targetScopedActorFactories.hasOwnProperty("lazyActor")
+  );
   Assert.ok(!ActorRegistry.globalActorFactories.hasOwnProperty("lazyActor"));
 
   run_next_test();
 }
-

@@ -47,9 +47,7 @@ struct GCVariantImplementation<T> {
   template <typename ConcreteVariant>
   static void trace(JSTracer* trc, ConcreteVariant* v, const char* name) {
     T& thing = v->template as<T>();
-    if (!mozilla::IsPointer<T>::value || thing) {
-      GCPolicy<T>::trace(trc, &thing, name);
-    }
+    GCPolicy<T>::trace(trc, &thing, name);
   }
 
   template <typename Matcher, typename ConcreteVariant>
@@ -76,9 +74,7 @@ struct GCVariantImplementation<T, Ts...> {
   static void trace(JSTracer* trc, ConcreteVariant* v, const char* name) {
     if (v->template is<T>()) {
       T& thing = v->template as<T>();
-      if (!mozilla::IsPointer<T>::value || thing) {
-        GCPolicy<T>::trace(trc, &thing, name);
-      }
+      GCPolicy<T>::trace(trc, &thing, name);
     } else {
       Next::trace(trc, v, name);
     }
@@ -117,16 +113,11 @@ struct GCPolicy<mozilla::Variant<Ts...>> {
   }
 
   static bool isValid(const mozilla::Variant<Ts...>& v) {
-    return v.match(IsValidMatcher());
+    return v.match([](auto& v) {
+      return GCPolicy<
+          typename mozilla::RemoveReference<decltype(v)>::Type>::isValid(v);
+    });
   }
-
- private:
-  struct IsValidMatcher {
-    template <typename T>
-    bool match(T& v) {
-      return GCPolicy<T>::isValid(v);
-    };
-  };
 };
 
 }  // namespace JS

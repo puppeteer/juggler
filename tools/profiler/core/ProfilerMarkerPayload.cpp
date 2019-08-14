@@ -3,16 +3,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include <inttypes.h>
+#include "ProfilerMarkerPayload.h"
 
 #include "GeckoProfiler.h"
+#include "ProfileBufferEntry.h"
+#include "ProfileJSONWriter.h"
 #include "ProfilerBacktrace.h"
-#include "ProfilerMarkerPayload.h"
+
 #include "gfxASurface.h"
 #include "Layers.h"
-#include "mozilla/Sprintf.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/net/HttpBaseChannel.h"
+#include "mozilla/Sprintf.h"
+
+#include <inttypes.h>
 
 using namespace mozilla;
 
@@ -66,10 +70,11 @@ void TracingMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
   }
 }
 
-void IOMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
-                                    const TimeStamp& aProcessStartTime,
-                                    UniqueStacks& aUniqueStacks) {
-  StreamCommonProps("io", aWriter, aProcessStartTime, aUniqueStacks);
+void FileIOMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
+                                        const TimeStamp& aProcessStartTime,
+                                        UniqueStacks& aUniqueStacks) {
+  StreamCommonProps("FileIO", aWriter, aProcessStartTime, aUniqueStacks);
+  aWriter.StringProperty("operation", mOperation.get());
   aWriter.StringProperty("source", mSource);
   if (mFilename) {
     aWriter.StringProperty("filename", mFilename.get());
@@ -95,6 +100,21 @@ void UserTimingMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
   } else {
     aWriter.NullProperty("endMark");
   }
+}
+
+void TextMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
+                                      const TimeStamp& aProcessStartTime,
+                                      UniqueStacks& aUniqueStacks) {
+  StreamCommonProps("Text", aWriter, aProcessStartTime, aUniqueStacks);
+  aWriter.StringProperty("name", mText.get());
+}
+
+void LogMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
+                                     const TimeStamp& aProcessStartTime,
+                                     UniqueStacks& aUniqueStacks) {
+  StreamCommonProps("Log", aWriter, aProcessStartTime, aUniqueStacks);
+  aWriter.StringProperty("name", mText.get());
+  aWriter.StringProperty("module", mModule.get());
 }
 
 void DOMEventMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
@@ -155,7 +175,6 @@ static const char* GetCacheState(
     default:
       return nullptr;
   }
-  return nullptr;
 }
 
 void NetworkMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
@@ -276,4 +295,29 @@ void LongTaskMarkerPayload::StreamPayload(SpliceableJSONWriter& aWriter,
   StreamCommonProps("MainThreadLongTask", aWriter, aProcessStartTime,
                     aUniqueStacks);
   aWriter.StringProperty("category", "LongTask");
+}
+
+void JsAllocationMarkerPayload::StreamPayload(
+    SpliceableJSONWriter& aWriter, const TimeStamp& aProcessStartTime,
+    UniqueStacks& aUniqueStacks) {
+  StreamCommonProps("JS allocation", aWriter, aProcessStartTime, aUniqueStacks);
+
+  if (mClassName) {
+    aWriter.StringProperty("className", mClassName.get());
+  }
+  if (mScriptFilename) {
+    aWriter.StringProperty("scriptFilename", mScriptFilename.get());
+  }
+  if (mTypeName) {
+    aWriter.StringProperty("typeName",
+                           NS_ConvertUTF16toUTF8(mTypeName.get()).get());
+  }
+  if (mDescriptiveTypeName) {
+    aWriter.StringProperty(
+        "descriptiveTypeName",
+        NS_ConvertUTF16toUTF8(mDescriptiveTypeName.get()).get());
+  }
+  aWriter.StringProperty("coarseType", mCoarseType);
+  aWriter.IntProperty("size", mSize);
+  aWriter.BoolProperty("inNursery", mInNursery);
 }

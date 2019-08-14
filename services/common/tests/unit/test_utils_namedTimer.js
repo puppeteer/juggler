@@ -1,8 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://services-common/utils.js");
-
 add_test(function test_required_args() {
   try {
     CommonUtils.namedTimer(function callback() {
@@ -20,15 +18,20 @@ add_test(function test_simple() {
   const delay = 200;
   let that = {};
   let t0 = Date.now();
-  CommonUtils.namedTimer(function callback(timer) {
-    Assert.equal(this, that);
-    Assert.equal(this._zetimer, null);
-    Assert.ok(timer instanceof Ci.nsITimer);
-    // Difference should be ~delay, but hard to predict on all platforms,
-    // particularly Windows XP.
-    Assert.ok(Date.now() > t0);
-    run_next_test();
-  }, delay, that, "_zetimer");
+  CommonUtils.namedTimer(
+    function callback(timer) {
+      Assert.equal(this, that);
+      Assert.equal(this._zetimer, null);
+      Assert.ok(timer instanceof Ci.nsITimer);
+      // Difference should be ~delay, but hard to predict on all platforms,
+      // particularly Windows XP.
+      Assert.ok(Date.now() > t0);
+      run_next_test();
+    },
+    delay,
+    that,
+    "_zetimer"
+  );
 });
 
 add_test(function test_delay() {
@@ -40,7 +43,7 @@ add_test(function test_delay() {
   function callback(timer) {
     // Difference should be ~2*delay, but hard to predict on all platforms,
     // particularly Windows XP.
-    Assert.ok((Date.now() - t0) > delay);
+    Assert.ok(Date.now() - t0 > delay);
     run_next_test();
   }
   CommonUtils.namedTimer(callback, delay, that, "_zetimer");
@@ -53,9 +56,14 @@ add_test(function test_clear() {
 
   const delay = 0;
   let that = {};
-  CommonUtils.namedTimer(function callback(timer) {
-    do_throw("Shouldn't fire!");
-  }, delay, that, "_zetimer");
+  CommonUtils.namedTimer(
+    function callback(timer) {
+      do_throw("Shouldn't fire!");
+    },
+    delay,
+    that,
+    "_zetimer"
+  );
 
   that._zetimer.clear();
   Assert.equal(that._zetimer, null);

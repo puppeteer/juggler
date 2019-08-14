@@ -27,67 +27,68 @@
 // following macros, which encapsulate the most common operations and thus
 // avoid the need for many #ifdefs.
 
-#define AUTO_PROFILER_INIT
+#  define AUTO_PROFILER_INIT
 
-#define PROFILER_REGISTER_THREAD(name)
-#define PROFILER_UNREGISTER_THREAD()
-#define AUTO_PROFILER_REGISTER_THREAD(name)
+#  define PROFILER_REGISTER_THREAD(name)
+#  define PROFILER_UNREGISTER_THREAD()
+#  define AUTO_PROFILER_REGISTER_THREAD(name)
 
-#define AUTO_PROFILER_THREAD_SLEEP
-#define AUTO_PROFILER_THREAD_WAKE
+#  define AUTO_PROFILER_THREAD_SLEEP
+#  define AUTO_PROFILER_THREAD_WAKE
 
-#define PROFILER_JS_INTERRUPT_CALLBACK()
+#  define PROFILER_JS_INTERRUPT_CALLBACK()
 
-#define PROFILER_SET_JS_CONTEXT(cx)
-#define PROFILER_CLEAR_JS_CONTEXT()
+#  define PROFILER_SET_JS_CONTEXT(cx)
+#  define PROFILER_CLEAR_JS_CONTEXT()
 
-#define AUTO_PROFILER_LABEL(label, category)
-#define AUTO_PROFILER_LABEL_DYNAMIC_CSTR(label, category, cStr)
-#define AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(label, category, nsCStr)
-#define AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING(label, category, nsStr)
-#define AUTO_PROFILER_LABEL_FAST(label, category, ctx)
-#define AUTO_PROFILER_LABEL_DYNAMIC_FAST(label, dynamicString, category, ctx, \
-                                         flags)
+#  define AUTO_PROFILER_LABEL(label, categoryPair)
+#  define AUTO_PROFILER_LABEL_CATEGORY_PAIR(categoryPair)
+#  define AUTO_PROFILER_LABEL_DYNAMIC_CSTR(label, categoryPair, cStr)
+#  define AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(label, categoryPair, nsCStr)
+#  define AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING(label, categoryPair, nsStr)
+#  define AUTO_PROFILER_LABEL_FAST(label, categoryPair, ctx)
+#  define AUTO_PROFILER_LABEL_DYNAMIC_FAST(label, dynamicString, categoryPair, \
+                                           ctx, flags)
 
-#define PROFILER_ADD_MARKER(markerName)
-#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, \
-                                    count, cache, timings, redirect)
+#  define PROFILER_ADD_MARKER(markerName, categoryPair)
+#  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, \
+                                      count, cache, timings, redirect)
 
-#define DECLARE_DOCSHELL_AND_HISTORY_ID(docShell)
-#define PROFILER_TRACING(category, markerName, kind)
-#define PROFILER_TRACING_DOCSHELL(category, markerName, kind, docshell)
-#define AUTO_PROFILER_TRACING(category, markerName)
-#define AUTO_PROFILER_TRACING_DOCSHELL(category, markerName, docShell)
+#  define DECLARE_DOCSHELL_AND_HISTORY_ID(docShell)
+#  define PROFILER_TRACING(categoryString, markerName, categoryPair, kind)
+#  define PROFILER_TRACING_DOCSHELL(categoryString, markerName, categoryPair, \
+                                    kind, docshell)
+#  define AUTO_PROFILER_TRACING(categoryString, markerName, categoryPair)
+#  define AUTO_PROFILER_TRACING_DOCSHELL(categoryString, markerName, \
+                                         categoryPair, docShell)
+#  define AUTO_PROFILER_TEXT_MARKER_CAUSE(markerName, text, categoryPair, cause)
+#  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL(markerName, text, categoryPair, \
+                                             docShell)
+#  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE( \
+      markerName, text, categoryPair, docShell, cause)
 
 #else  // !MOZ_GECKO_PROFILER
 
-#include <functional>
-#include <signal.h>
-#include <stdarg.h>
-#include <stdint.h>
-#include <stdlib.h>
+#  include "js/AllocationRecording.h"
+#  include "js/ProfilingFrameIterator.h"
+#  include "js/ProfilingStack.h"
+#  include "js/RootingAPI.h"
+#  include "js/TypeDecls.h"
+#  include "mozilla/Assertions.h"
+#  include "mozilla/Atomics.h"
+#  include "mozilla/Attributes.h"
+#  include "mozilla/GuardObjects.h"
+#  include "mozilla/Maybe.h"
+#  include "mozilla/PowerOfTwo.h"
+#  include "mozilla/Sprintf.h"
+#  include "mozilla/ThreadLocal.h"
+#  include "mozilla/TimeStamp.h"
+#  include "mozilla/UniquePtr.h"
+#  include "nscore.h"
+#  include "nsID.h"
+#  include "nsString.h"
 
-#include "mozilla/Assertions.h"
-#include "mozilla/Attributes.h"
-#include "mozilla/Atomics.h"
-#include "mozilla/GuardObjects.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/Sprintf.h"
-#include "mozilla/ThreadLocal.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/UniquePtr.h"
-#include "js/ProfilingStack.h"
-#include "js/RootingAPI.h"
-#include "js/TypeDecls.h"
-#include "nscore.h"
-#include "nsID.h"
-#include "nsString.h"
-
-// Make sure that we can use std::min here without the Windows headers messing
-// with us.
-#ifdef min
-#undef min
-#endif
+#  include <stdint.h>
 
 class ProfilerBacktrace;
 class ProfilerMarkerPayload;
@@ -104,13 +105,12 @@ namespace mozilla {
 class MallocAllocPolicy;
 template <class T, size_t MinInlineCapacity, class AllocPolicy>
 class Vector;
-class TimeStamp;
 }  // namespace mozilla
 
 // Macros used by the AUTO_PROFILER_* macros below.
-#define PROFILER_RAII_PASTE(id, line) id##line
-#define PROFILER_RAII_EXPAND(id, line) PROFILER_RAII_PASTE(id, line)
-#define PROFILER_RAII PROFILER_RAII_EXPAND(raiiObject, __LINE__)
+#  define PROFILER_RAII_PASTE(id, line) id##line
+#  define PROFILER_RAII_EXPAND(id, line) PROFILER_RAII_PASTE(id, line)
+#  define PROFILER_RAII PROFILER_RAII_EXPAND(raiiObject, __LINE__)
 
 //---------------------------------------------------------------------------
 // Profiler features
@@ -120,62 +120,66 @@ class TimeStamp;
 // |MACRO| appropriately to extract the relevant parts. Note that the number
 // values are used internally only and so can be changed without consequence.
 // Any changes to this list should also be applied to the feature list in
-// browser/components/extensions/schemas/geckoProfiler.json.
-#define PROFILER_FOR_EACH_FEATURE(MACRO)                         \
-  /* Profile Java code (Android only). */                        \
-  MACRO(0, "java", Java)                                         \
-                                                                 \
-  /* Get the JS engine to expose the JS stack to the profiler */ \
-  MACRO(1, "js", JS)                                             \
-                                                                 \
-  /* Include the C++ leaf node if not stackwalking. */           \
-  /* The DevTools profiler doesn't want the native addresses. */ \
-  MACRO(2, "leaf", Leaf)                                         \
-                                                                 \
-  /* Add main thread I/O to the profile. */                      \
-  MACRO(3, "mainthreadio", MainThreadIO)                         \
-                                                                 \
-  /* Add memory measurements (e.g. RSS). */                      \
-  MACRO(4, "memory", Memory)                                     \
-                                                                 \
-  /* Do not include user-identifiable information. */            \
-  MACRO(5, "privacy", Privacy)                                   \
-                                                                 \
-  /* Collect thread responsiveness information. */               \
-  MACRO(6, "responsiveness", Responsiveness)                     \
-                                                                 \
-  /* Take a snapshot of the window on every composition. */      \
-  MACRO(7, "screenshots", Screenshots)                           \
-                                                                 \
-  /* Disable parallel traversal in styling. */                   \
-  MACRO(8, "seqstyle", SequentialStyle)                          \
-                                                                 \
-  /* Walk the C++ stack. Not available on all platforms. */      \
-  MACRO(9, "stackwalk", StackWalk)                               \
-                                                                 \
-  /* Start profiling with feature TaskTracer. */                 \
-  MACRO(10, "tasktracer", TaskTracer)                            \
-                                                                 \
-  /* Profile the registered secondary threads. */                \
-  MACRO(11, "threads", Threads)                                  \
-                                                                 \
-  /* Have the JavaScript engine track JIT optimizations. */      \
-  MACRO(12, "trackopts", TrackOptimizations)                     \
-                                                                 \
-  /* Enable tracing of the JavaScript engine. */                 \
-  MACRO(13, "jstracer", JSTracer)
+// toolkit/components/extensions/schemas/geckoProfiler.json.
+#  define PROFILER_FOR_EACH_FEATURE(MACRO)                                     \
+    MACRO(0, "java", Java, "Profile Java code, Android only")                  \
+                                                                               \
+    MACRO(1, "js", JS,                                                         \
+          "Get the JS engine to expose the JS stack to the profiler")          \
+                                                                               \
+    /* The DevTools profiler doesn't want the native addresses. */             \
+    MACRO(2, "leaf", Leaf, "Include the C++ leaf node if not stackwalking")    \
+                                                                               \
+    MACRO(3, "mainthreadio", MainThreadIO,                                     \
+          "Add main thread I/O to the profile")                                \
+                                                                               \
+    MACRO(4, "memory", Memory, "Add memory measurements")                      \
+                                                                               \
+    MACRO(5, "privacy", Privacy,                                               \
+          "Do not include user-identifiable information")                      \
+                                                                               \
+    MACRO(6, "responsiveness", Responsiveness,                                 \
+          "Collect thread responsiveness information")                         \
+                                                                               \
+    MACRO(7, "screenshots", Screenshots,                                       \
+          "Take a snapshot of the window on every composition")                \
+                                                                               \
+    MACRO(8, "seqstyle", SequentialStyle,                                      \
+          "Disable parallel traversal in styling")                             \
+                                                                               \
+    MACRO(9, "stackwalk", StackWalk,                                           \
+          "Walk the C++ stack, not available on all platforms")                \
+                                                                               \
+    MACRO(10, "tasktracer", TaskTracer,                                        \
+          "Start profiling with feature TaskTracer")                           \
+                                                                               \
+    MACRO(11, "threads", Threads, "Profile the registered secondary threads")  \
+                                                                               \
+    MACRO(12, "trackopts", TrackOptimizations,                                 \
+          "Have the JavaScript engine track JIT optimizations")                \
+                                                                               \
+    MACRO(13, "jstracer", JSTracer, "Enable tracing of the JavaScript engine") \
+                                                                               \
+    MACRO(14, "jsallocations", JSAllocations,                                  \
+          "Have the JavaScript engine track allocations")
 
 struct ProfilerFeature {
-#define DECLARE(n_, str_, Name_)                                           \
-  static const uint32_t Name_ = (1u << n_);                                \
-  static bool Has##Name_(uint32_t aFeatures) { return aFeatures & Name_; } \
-  static void Set##Name_(uint32_t& aFeatures) { aFeatures |= Name_; }      \
-  static void Clear##Name_(uint32_t& aFeatures) { aFeatures &= ~Name_; }
+#  define DECLARE(n_, str_, Name_, desc_)                     \
+    static constexpr uint32_t Name_ = (1u << n_);             \
+    static constexpr bool Has##Name_(uint32_t aFeatures) {    \
+      return aFeatures & Name_;                               \
+    }                                                         \
+    static constexpr void Set##Name_(uint32_t& aFeatures) {   \
+      aFeatures |= Name_;                                     \
+    }                                                         \
+    static constexpr void Clear##Name_(uint32_t& aFeatures) { \
+      aFeatures &= ~Name_;                                    \
+    }
 
   // Define a bitfield constant, a getter, and two setters for each feature.
   PROFILER_FOR_EACH_FEATURE(DECLARE)
 
-#undef DECLARE
+#  undef DECLARE
 };
 
 namespace mozilla {
@@ -214,12 +218,12 @@ class RacyFeatures {
   static const uint32_t Active = 1u << 31;
 
 // Ensure Active doesn't overlap with any of the feature bits.
-#define NO_OVERLAP(n_, str_, Name_) \
-  static_assert(ProfilerFeature::Name_ != Active, "bad Active value");
+#  define NO_OVERLAP(n_, str_, Name_, desc_) \
+    static_assert(ProfilerFeature::Name_ != Active, "bad Active value");
 
   PROFILER_FOR_EACH_FEATURE(NO_OVERLAP);
 
-#undef NO_OVERLAP
+#  undef NO_OVERLAP
 
   // We combine the active bit with the feature bits so they can be read or
   // written in a single atomic operation. Accesses to this atomic are not
@@ -239,14 +243,24 @@ bool IsThreadBeingProfiled();
 // Start and stop the profiler
 //---------------------------------------------------------------------------
 
-#if !defined(ARCH_ARMV6)
-#define PROFILER_DEFAULT_ENTRIES 1000000
-#else
-#define PROFILER_DEFAULT_ENTRIES 100000
-#endif
+static constexpr mozilla::PowerOfTwo32 PROFILER_DEFAULT_ENTRIES =
+#  if !defined(ARCH_ARMV6)
+    mozilla::MakePowerOfTwo32<1u << 20>();  // 1'048'576
+#  else
+    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072
+#  endif
 
-#define PROFILER_DEFAULT_DURATION 20
-#define PROFILER_DEFAULT_INTERVAL 1
+// Startup profiling usually need to capture more data, especially on slow
+// systems.
+static constexpr mozilla::PowerOfTwo32 PROFILER_DEFAULT_STARTUP_ENTRIES =
+#  if !defined(ARCH_ARMV6)
+    mozilla::MakePowerOfTwo32<1u << 22>();  // 4'194'304
+#  else
+    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072
+#  endif
+
+#  define PROFILER_DEFAULT_DURATION 20
+#  define PROFILER_DEFAULT_INTERVAL 1
 
 // Initialize the profiler. If MOZ_PROFILER_STARTUP is set the profiler will
 // also be started. This call must happen before any other profiler calls
@@ -254,7 +268,7 @@ bool IsThreadBeingProfiled();
 // already run).
 void profiler_init(void* stackTop);
 
-#define AUTO_PROFILER_INIT mozilla::AutoProfilerInit PROFILER_RAII
+#  define AUTO_PROFILER_INIT mozilla::AutoProfilerInit PROFILER_RAII
 
 // Clean up the profiler module, stopping it if required. This function may
 // also save a shutdown profile if requested. No profiler calls should happen
@@ -278,7 +292,7 @@ void profiler_shutdown();
 //                  id of the process that the thread is running in.
 //   "aDuration" is the duration of entries in the profiler's circular buffer.
 void profiler_start(
-    uint32_t aCapacity, double aInterval, uint32_t aFeatures,
+    mozilla::PowerOfTwo32 aCapacity, double aInterval, uint32_t aFeatures,
     const char** aFilters, uint32_t aFilterCount,
     const mozilla::Maybe<double>& aDuration = mozilla::Nothing());
 
@@ -292,7 +306,7 @@ void profiler_stop();
 // The only difference to profiler_start is that the current buffer contents are
 // not discarded if the profiler is already running with the requested settings.
 void profiler_ensure_started(
-    uint32_t aCapacity, double aInterval, uint32_t aFeatures,
+    mozilla::PowerOfTwo32 aCapacity, double aInterval, uint32_t aFeatures,
     const char** aFilters, uint32_t aFilterCount,
     const mozilla::Maybe<double>& aDuration = mozilla::Nothing());
 
@@ -302,12 +316,12 @@ void profiler_ensure_started(
 
 // Register/unregister threads with the profiler. Both functions operate the
 // same whether the profiler is active or inactive.
-#define PROFILER_REGISTER_THREAD(name)         \
-  do {                                         \
-    char stackTop;                             \
-    profiler_register_thread(name, &stackTop); \
-  } while (0)
-#define PROFILER_UNREGISTER_THREAD() profiler_unregister_thread()
+#  define PROFILER_REGISTER_THREAD(name)         \
+    do {                                         \
+      char stackTop;                             \
+      profiler_register_thread(name, &stackTop); \
+    } while (0)
+#  define PROFILER_UNREGISTER_THREAD() profiler_unregister_thread()
 ProfilingStack* profiler_register_thread(const char* name, void* guessStackTop);
 void profiler_unregister_thread();
 
@@ -336,13 +350,16 @@ void profiler_register_page(const nsID& aDocShellId, uint32_t aHistoryId,
 // Take a docShellId and unregister all the page entries that have the given ID.
 void profiler_unregister_pages(const nsID& aRegisteredDocShellId);
 
+// Remove all registered and unregistered pages in the profiler.
+void profiler_clear_all_pages();
+
 class BaseProfilerCount;
 void profiler_add_sampled_counter(BaseProfilerCount* aCounter);
 void profiler_remove_sampled_counter(BaseProfilerCount* aCounter);
 
 // Register and unregister a thread within a scope.
-#define AUTO_PROFILER_REGISTER_THREAD(name) \
-  mozilla::AutoProfilerRegisterThread PROFILER_RAII(name)
+#  define AUTO_PROFILER_REGISTER_THREAD(name) \
+    mozilla::AutoProfilerRegisterThread PROFILER_RAII(name)
 
 // Pause and resume the profiler. No-ops if the profiler is inactive. While
 // paused the profile will not take any samples and will not record any data
@@ -361,19 +378,20 @@ void profiler_thread_sleep();
 void profiler_thread_wake();
 
 // Mark a thread as asleep/awake within a scope.
-#define AUTO_PROFILER_THREAD_SLEEP \
-  mozilla::AutoProfilerThreadSleep PROFILER_RAII
-#define AUTO_PROFILER_THREAD_WAKE mozilla::AutoProfilerThreadWake PROFILER_RAII
+#  define AUTO_PROFILER_THREAD_SLEEP \
+    mozilla::AutoProfilerThreadSleep PROFILER_RAII
+#  define AUTO_PROFILER_THREAD_WAKE \
+    mozilla::AutoProfilerThreadWake PROFILER_RAII
 
 // Called by the JSRuntime's operation callback. This is used to start profiling
 // on auxiliary threads. Operates the same whether the profiler is active or
 // not.
-#define PROFILER_JS_INTERRUPT_CALLBACK() profiler_js_interrupt_callback()
+#  define PROFILER_JS_INTERRUPT_CALLBACK() profiler_js_interrupt_callback()
 void profiler_js_interrupt_callback();
 
 // Set and clear the current thread's JSContext.
-#define PROFILER_SET_JS_CONTEXT(cx) profiler_set_js_context(cx)
-#define PROFILER_CLEAR_JS_CONTEXT() profiler_clear_js_context()
+#  define PROFILER_SET_JS_CONTEXT(cx) profiler_set_js_context(cx)
+#  define PROFILER_CLEAR_JS_CONTEXT() profiler_clear_js_context()
 void profiler_set_js_context(JSContext* aCx);
 void profiler_clear_js_context();
 
@@ -437,6 +455,9 @@ void profiler_get_start_params(
 // The number of milliseconds since the process started. Operates the same
 // whether the profiler is active or inactive.
 double profiler_time();
+
+// Get the current process's ID.
+int profiler_current_process_id();
 
 // Get the current thread's ID.
 int profiler_current_thread_id();
@@ -521,9 +542,19 @@ mozilla::Maybe<ProfilerBufferInfo> profiler_get_buffer_info();
 //
 // Use AUTO_PROFILER_LABEL_DYNAMIC_* if you want to add additional / dynamic
 // information to the label stack frame.
-#define AUTO_PROFILER_LABEL(label, category) \
-  mozilla::AutoProfilerLabel PROFILER_RAII(  \
-      label, nullptr, js::ProfilingStackFrame::Category::category)
+#  define AUTO_PROFILER_LABEL(label, categoryPair) \
+    mozilla::AutoProfilerLabel PROFILER_RAII(      \
+        label, nullptr, JS::ProfilingCategoryPair::categoryPair)
+
+// Similar to AUTO_PROFILER_LABEL, but with only one argument: the category
+// pair. The label string is taken from the category pair. This is convenient
+// for labels like AUTO_PROFILER_LABEL_CATEGORY_PAIR(GRAPHICS_LayerBuilding)
+// which would otherwise just repeat the string.
+#  define AUTO_PROFILER_LABEL_CATEGORY_PAIR(categoryPair)     \
+    mozilla::AutoProfilerLabel PROFILER_RAII(                 \
+        "", nullptr, JS::ProfilingCategoryPair::categoryPair, \
+        uint32_t(js::ProfilingStackFrame::Flags::             \
+                     LABEL_DETERMINED_BY_CATEGORY_PAIR))
 
 // Similar to AUTO_PROFILER_LABEL, but with an additional string. The inserted
 // RAII object stores the cStr pointer in a field; it does not copy the string.
@@ -544,9 +575,9 @@ mozilla::Maybe<ProfilerBufferInfo> profiler_get_buffer_info();
 // profile buffer can just store the raw pointers to the literal strings.
 // Consequently, AUTO_PROFILER_LABEL frames take up considerably less space in
 // the profile buffer than AUTO_PROFILER_LABEL_DYNAMIC_* frames.
-#define AUTO_PROFILER_LABEL_DYNAMIC_CSTR(label, category, cStr) \
-  mozilla::AutoProfilerLabel PROFILER_RAII(                     \
-      label, cStr, js::ProfilingStackFrame::Category::category)
+#  define AUTO_PROFILER_LABEL_DYNAMIC_CSTR(label, categoryPair, cStr) \
+    mozilla::AutoProfilerLabel PROFILER_RAII(                         \
+        label, cStr, JS::ProfilingCategoryPair::categoryPair)
 
 // Similar to AUTO_PROFILER_LABEL_DYNAMIC_CSTR, but takes an nsACString.
 //
@@ -555,14 +586,14 @@ mozilla::Maybe<ProfilerBufferInfo> profiler_get_buffer_info();
 // cost of the string assignment unless the profiler is active. Therefore,
 // unlike AUTO_PROFILER_LABEL and AUTO_PROFILER_LABEL_DYNAMIC_CSTR, this macro
 // doesn't push/pop a label when the profiler is inactive.
-#define AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(label, category, nsCStr)        \
-  mozilla::Maybe<nsAutoCString> autoCStr;                                     \
-  mozilla::Maybe<AutoProfilerLabel> raiiObjectNsCString;                      \
-  if (profiler_is_active()) {                                                 \
-    autoCStr.emplace(nsCStr);                                                 \
-    raiiObjectNsCString.emplace(label, autoCStr->get(),                       \
-                                js::ProfilingStackFrame::Category::category); \
-  }
+#  define AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(label, categoryPair, nsCStr) \
+    mozilla::Maybe<nsAutoCString> autoCStr;                                  \
+    mozilla::Maybe<mozilla::AutoProfilerLabel> raiiObjectNsCString;          \
+    if (profiler_is_active()) {                                              \
+      autoCStr.emplace(nsCStr);                                              \
+      raiiObjectNsCString.emplace(label, autoCStr->get(),                    \
+                                  JS::ProfilingCategoryPair::categoryPair);  \
+    }
 
 // Similar to AUTO_PROFILER_LABEL_DYNAMIC_CSTR, but takes an nsString that is
 // is lossily converted to an ASCII string.
@@ -572,14 +603,15 @@ mozilla::Maybe<ProfilerBufferInfo> profiler_get_buffer_info();
 // the runtime cost of the string conversion unless the profiler is active.
 // Therefore, unlike AUTO_PROFILER_LABEL and AUTO_PROFILER_LABEL_DYNAMIC_CSTR,
 // this macro doesn't push/pop a label when the profiler is inactive.
-#define AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING(label, category, nsStr)    \
-  mozilla::Maybe<NS_LossyConvertUTF16toASCII> asciiStr;                       \
-  mozilla::Maybe<AutoProfilerLabel> raiiObjectLossyNsString;                  \
-  if (profiler_is_active()) {                                                 \
-    asciiStr.emplace(nsStr);                                                  \
-    raiiObjectLossyNsString.emplace(                                          \
-        label, asciiStr->get(), js::ProfilingStackFrame::Category::category); \
-  }
+#  define AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING(label, categoryPair,   \
+                                                     nsStr)                 \
+    mozilla::Maybe<NS_LossyConvertUTF16toASCII> asciiStr;                   \
+    mozilla::Maybe<mozilla::AutoProfilerLabel> raiiObjectLossyNsString;     \
+    if (profiler_is_active()) {                                             \
+      asciiStr.emplace(nsStr);                                              \
+      raiiObjectLossyNsString.emplace(                                      \
+          label, asciiStr->get(), JS::ProfilingCategoryPair::categoryPair); \
+    }
 
 // Similar to AUTO_PROFILER_LABEL, but accepting a JSContext* parameter, and a
 // no-op if the profiler is disabled.
@@ -587,18 +619,18 @@ mozilla::Maybe<ProfilerBufferInfo> profiler_get_buffer_info();
 // noticeable. It avoids overhead from the TLS lookup because it can get the
 // ProfilingStack from the JS context, and avoids almost all overhead in the
 // case where the profiler is disabled.
-#define AUTO_PROFILER_LABEL_FAST(label, category, ctx) \
-  mozilla::AutoProfilerLabel PROFILER_RAII(            \
-      ctx, label, nullptr, js::ProfilingStackFrame::Category::category)
+#  define AUTO_PROFILER_LABEL_FAST(label, categoryPair, ctx) \
+    mozilla::AutoProfilerLabel PROFILER_RAII(                \
+        ctx, label, nullptr, JS::ProfilingCategoryPair::categoryPair)
 
 // Similar to AUTO_PROFILER_LABEL_FAST, but also takes an extra string and an
 // additional set of flags. The flags parameter should carry values from the
 // js::ProfilingStackFrame::Flags enum.
-#define AUTO_PROFILER_LABEL_DYNAMIC_FAST(label, dynamicString, category, ctx, \
-                                         flags)                               \
-  mozilla::AutoProfilerLabel PROFILER_RAII(                                   \
-      ctx, label, dynamicString, js::ProfilingStackFrame::Category::category, \
-      flags)
+#  define AUTO_PROFILER_LABEL_DYNAMIC_FAST(label, dynamicString, categoryPair, \
+                                           ctx, flags)                         \
+    mozilla::AutoProfilerLabel PROFILER_RAII(                                  \
+        ctx, label, dynamicString, JS::ProfilingCategoryPair::categoryPair,    \
+        flags)
 
 // Insert a marker in the profile timeline. This is useful to delimit something
 // important happening such as the first paint. Unlike labels, which are only
@@ -607,22 +639,30 @@ mozilla::Maybe<ProfilerBufferInfo> profiler_get_buffer_info();
 // aMarkerName is copied, so the caller does not need to ensure it lives for a
 // certain length of time. A no-op if the profiler is inactive or in privacy
 // mode.
-#define PROFILER_ADD_MARKER(markerName) profiler_add_marker(markerName)
-void profiler_add_marker(const char* aMarkerName);
+
+#  define PROFILER_ADD_MARKER(markerName, categoryPair) \
+    profiler_add_marker(markerName, JS::ProfilingCategoryPair::categoryPair)
+
 void profiler_add_marker(const char* aMarkerName,
+                         JS::ProfilingCategoryPair aCategoryPair);
+void profiler_add_marker(const char* aMarkerName,
+                         JS::ProfilingCategoryPair aCategoryPair,
                          mozilla::UniquePtr<ProfilerMarkerPayload> aPayload);
+void profiler_add_js_marker(const char* aMarkerName);
+void profiler_add_js_allocation_marker(JS::RecordAllocationInfo&& info);
 
 // Insert a marker in the profile timeline for a specified thread.
 void profiler_add_marker_for_thread(
-    int aThreadId, const char* aMarkerName,
+    int aThreadId, JS::ProfilingCategoryPair aCategoryPair,
+    const char* aMarkerName,
     mozilla::UniquePtr<ProfilerMarkerPayload> aPayload);
 
 enum class NetworkLoadType { LOAD_START, LOAD_STOP, LOAD_REDIRECT };
 
-#define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end,  \
-                                    count, cache, timings, redirect)      \
-  profiler_add_network_marker(uri, pri, channel, type, start, end, count, \
-                              cache, timings, redirect)
+#  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end,  \
+                                      count, cache, timings, redirect)      \
+    profiler_add_network_marker(uri, pri, channel, type, start, end, count, \
+                                cache, timings, redirect)
 
 void profiler_add_network_marker(
     nsIURI* aURI, int32_t aPriority, uint64_t aChannelId, NetworkLoadType aType,
@@ -638,52 +678,135 @@ enum TracingKind {
 };
 
 // Helper macro to retrieve DocShellId and DocShellHistoryId from docShell
-#define DECLARE_DOCSHELL_AND_HISTORY_ID(docShell) \
-  mozilla::Maybe<nsID> docShellId;                \
-  mozilla::Maybe<uint32_t> docShellHistoryId;     \
-  if (docShell) {                                 \
-    docShellId = Some(docShell->HistoryID());     \
-    uint32_t id;                                  \
-    nsresult rv = docShell->GetOSHEId(&id);       \
-    if (NS_SUCCEEDED(rv)) {                       \
-      docShellHistoryId = Some(id);               \
-    } else {                                      \
-      docShellHistoryId = Nothing();              \
-    }                                             \
-  } else {                                        \
-    docShellId = Nothing();                       \
-    docShellHistoryId = Nothing();                \
-  }
+#  define DECLARE_DOCSHELL_AND_HISTORY_ID(docShell)      \
+    mozilla::Maybe<nsID> docShellId;                     \
+    mozilla::Maybe<uint32_t> docShellHistoryId;          \
+    if (docShell) {                                      \
+      docShellId = mozilla::Some(docShell->HistoryID()); \
+      uint32_t id;                                       \
+      nsresult rv = docShell->GetOSHEId(&id);            \
+      if (NS_SUCCEEDED(rv)) {                            \
+        docShellHistoryId = mozilla::Some(id);           \
+      } else {                                           \
+        docShellHistoryId = mozilla::Nothing();          \
+      }                                                  \
+    } else {                                             \
+      docShellId = mozilla::Nothing();                   \
+      docShellHistoryId = mozilla::Nothing();            \
+    }
 
 // Adds a tracing marker to the profile. A no-op if the profiler is inactive or
 // in privacy mode.
-#define PROFILER_TRACING(category, markerName, kind) \
-  profiler_tracing(category, markerName, kind)
-#define PROFILER_TRACING_DOCSHELL(category, markerName, kind, docShell) \
-  DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);                            \
-  profiler_tracing(category, markerName, kind, docShellId, docShellHistoryId)
+
+#  define PROFILER_TRACING(categoryString, markerName, categoryPair, kind) \
+    profiler_tracing(categoryString, markerName,                           \
+                     JS::ProfilingCategoryPair::categoryPair, kind)
+#  define PROFILER_TRACING_DOCSHELL(categoryString, markerName, categoryPair, \
+                                    kind, docShell)                           \
+    DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);                                \
+    profiler_tracing(categoryString, markerName,                              \
+                     JS::ProfilingCategoryPair::categoryPair, kind,           \
+                     docShellId, docShellHistoryId)
+
 void profiler_tracing(
-    const char* aCategory, const char* aMarkerName, TracingKind aKind,
+    const char* aCategoryString, const char* aMarkerName,
+    JS::ProfilingCategoryPair aCategoryPair, TracingKind aKind,
     const mozilla::Maybe<nsID>& aDocShellId = mozilla::Nothing(),
     const mozilla::Maybe<uint32_t>& aDocShellHistoryId = mozilla::Nothing());
 void profiler_tracing(
-    const char* aCategory, const char* aMarkerName, TracingKind aKind,
+    const char* aCategoryString, const char* aMarkerName,
+    JS::ProfilingCategoryPair aCategoryPair, TracingKind aKind,
     UniqueProfilerBacktrace aCause,
     const mozilla::Maybe<nsID>& aDocShellId = mozilla::Nothing(),
     const mozilla::Maybe<uint32_t>& aDocShellHistoryId = mozilla::Nothing());
 
 // Adds a START/END pair of tracing markers.
-#define AUTO_PROFILER_TRACING(category, markerName) \
-  mozilla::AutoProfilerTracing PROFILER_RAII(       \
-      category, markerName, mozilla::Nothing(), mozilla::Nothing())
-#define AUTO_PROFILER_TRACING_DOCSHELL(category, markerName, docShell)         \
-  DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);                                   \
-  mozilla::AutoProfilerTracing PROFILER_RAII(category, markerName, docShellId, \
-                                             docShellHistoryId)
+#  define AUTO_PROFILER_TRACING(categoryString, markerName, categoryPair)    \
+    mozilla::AutoProfilerTracing PROFILER_RAII(                              \
+        categoryString, markerName, JS::ProfilingCategoryPair::categoryPair, \
+        mozilla::Nothing(), mozilla::Nothing())
+#  define AUTO_PROFILER_TRACING_DOCSHELL(categoryString, markerName,         \
+                                         categoryPair, docShell)             \
+    DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);                               \
+    mozilla::AutoProfilerTracing PROFILER_RAII(                              \
+        categoryString, markerName, JS::ProfilingCategoryPair::categoryPair, \
+        docShellId, docShellHistoryId)
+
+// Add a text marker. Text markers are similar to tracing markers, with the
+// difference that text markers have their "text" separate from the marker name;
+// multiple text markers with the same name can have different text, and these
+// markers will still be displayed in the same "row" in the UI.
+// Another difference is that text markers combine the start and end markers
+// into one marker.
+void profiler_add_text_marker(
+    const char* aMarkerName, const nsACString& aText,
+    JS::ProfilingCategoryPair aCategoryPair,
+    const mozilla::TimeStamp& aStartTime, const mozilla::TimeStamp& aEndTime,
+    const mozilla::Maybe<nsID>& aDocShellId = mozilla::Nothing(),
+    const mozilla::Maybe<uint32_t>& aDocShellHistoryId = mozilla::Nothing(),
+    UniqueProfilerBacktrace aCause = nullptr);
+
+class MOZ_RAII AutoProfilerTextMarker {
+ public:
+  AutoProfilerTextMarker(const char* aMarkerName, const nsACString& aText,
+                         JS::ProfilingCategoryPair aCategoryPair,
+                         const mozilla::Maybe<nsID>& aDocShellId,
+                         const mozilla::Maybe<uint32_t>& aDocShellHistoryId,
+                         UniqueProfilerBacktrace&& aCause =
+                             nullptr MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : mMarkerName(aMarkerName),
+        mText(aText),
+        mCategoryPair(aCategoryPair),
+        mStartTime(mozilla::TimeStamp::NowUnfuzzed()),
+        mCause(std::move(aCause)),
+        mDocShellId(aDocShellId),
+        mDocShellHistoryId(aDocShellHistoryId) {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+  }
+
+  ~AutoProfilerTextMarker() {
+    profiler_add_text_marker(mMarkerName, mText, mCategoryPair, mStartTime,
+                             mozilla::TimeStamp::NowUnfuzzed(), mDocShellId,
+                             mDocShellHistoryId, std::move(mCause));
+  }
+
+ protected:
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+  const char* mMarkerName;
+  nsCString mText;
+  const JS::ProfilingCategoryPair mCategoryPair;
+  mozilla::TimeStamp mStartTime;
+  UniqueProfilerBacktrace mCause;
+  const mozilla::Maybe<nsID> mDocShellId;
+  const mozilla::Maybe<uint32_t> mDocShellHistoryId;
+};
+
+#  define AUTO_PROFILER_TEXT_MARKER_CAUSE(markerName, text, categoryPair, \
+                                          cause)                          \
+    AutoProfilerTextMarker PROFILER_RAII(                                 \
+        markerName, text, JS::ProfilingCategoryPair::categoryPair,        \
+        mozilla::Nothing(), mozilla::Nothing(), cause)
+
+#  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL(markerName, text, categoryPair,   \
+                                             docShell)                         \
+    DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);                                 \
+    AutoProfilerTextMarker PROFILER_RAII(                                      \
+        markerName, text, JS::ProfilingCategoryPair::categoryPair, docShellId, \
+        docShellHistoryId)
+
+#  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE(                            \
+      markerName, text, categoryPair, docShell, cause)                         \
+    DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);                                 \
+    AutoProfilerTextMarker PROFILER_RAII(                                      \
+        markerName, text, JS::ProfilingCategoryPair::categoryPair, docShellId, \
+        docShellHistoryId, cause)
 
 //---------------------------------------------------------------------------
 // Output profiles
 //---------------------------------------------------------------------------
+
+// Set a user-friendly process name, used in JSON stream.
+void profiler_set_process_name(const nsACString& aProcessName);
 
 // Get the profile encoded as a JSON string. A no-op (returning nullptr) if the
 // profiler is inactive.
@@ -791,12 +914,12 @@ class MOZ_RAII AutoProfilerLabel {
  public:
   // This is the AUTO_PROFILER_LABEL and AUTO_PROFILER_LABEL_DYNAMIC variant.
   AutoProfilerLabel(const char* aLabel, const char* aDynamicString,
-                    js::ProfilingStackFrame::Category aCategory,
+                    JS::ProfilingCategoryPair aCategoryPair,
                     uint32_t aFlags = 0 MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 
     // Get the ProfilingStack from TLS.
-    Push(sProfilingStack.get(), aLabel, aDynamicString, aCategory, aFlags);
+    Push(sProfilingStack.get(), aLabel, aDynamicString, aCategoryPair, aFlags);
   }
 
   // This is the AUTO_PROFILER_LABEL_FAST variant. It retrieves the
@@ -804,22 +927,22 @@ class MOZ_RAII AutoProfilerLabel {
   // inactive.
   AutoProfilerLabel(JSContext* aJSContext, const char* aLabel,
                     const char* aDynamicString,
-                    js::ProfilingStackFrame::Category aCategory,
+                    JS::ProfilingCategoryPair aCategoryPair,
                     uint32_t aFlags MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     Push(js::GetContextProfilingStackIfEnabled(aJSContext), aLabel,
-         aDynamicString, aCategory, aFlags);
+         aDynamicString, aCategoryPair, aFlags);
   }
 
   void Push(ProfilingStack* aProfilingStack, const char* aLabel,
-            const char* aDynamicString,
-            js::ProfilingStackFrame::Category aCategory, uint32_t aFlags = 0) {
+            const char* aDynamicString, JS::ProfilingCategoryPair aCategoryPair,
+            uint32_t aFlags = 0) {
     // This function runs both on and off the main thread.
 
     mProfilingStack = aProfilingStack;
     if (mProfilingStack) {
-      mProfilingStack->pushLabelFrame(aLabel, aDynamicString, this, aCategory,
-                                      aFlags);
+      mProfilingStack->pushLabelFrame(aLabel, aDynamicString, this,
+                                      aCategoryPair, aFlags);
     }
   }
 
@@ -845,62 +968,59 @@ class MOZ_RAII AutoProfilerLabel {
 
 class MOZ_RAII AutoProfilerTracing {
  public:
-  AutoProfilerTracing(const char* aCategory, const char* aMarkerName,
+  AutoProfilerTracing(const char* aCategoryString, const char* aMarkerName,
+                      JS::ProfilingCategoryPair aCategoryPair,
                       const mozilla::Maybe<nsID>& aDocShellId,
                       const mozilla::Maybe<uint32_t>& aDocShellHistoryId
                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : mCategory(aCategory),
+      : mCategoryString(aCategoryString),
         mMarkerName(aMarkerName),
+        mCategoryPair(aCategoryPair),
         mDocShellId(aDocShellId),
         mDocShellHistoryId(aDocShellHistoryId) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    profiler_tracing(mCategory, mMarkerName, TRACING_INTERVAL_START,
-                     mDocShellId, mDocShellHistoryId);
+    profiler_tracing(mCategoryString, mMarkerName, aCategoryPair,
+                     TRACING_INTERVAL_START, mDocShellId, mDocShellHistoryId);
   }
 
-  AutoProfilerTracing(const char* aCategory, const char* aMarkerName,
+  AutoProfilerTracing(const char* aCategoryString, const char* aMarkerName,
+                      JS::ProfilingCategoryPair aCategoryPair,
                       UniqueProfilerBacktrace aBacktrace,
                       const mozilla::Maybe<nsID>& aDocShellId,
                       const mozilla::Maybe<uint32_t>& aDocShellHistoryId
                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : mCategory(aCategory),
+      : mCategoryString(aCategoryString),
         mMarkerName(aMarkerName),
+        mCategoryPair(aCategoryPair),
         mDocShellId(aDocShellId),
         mDocShellHistoryId(aDocShellHistoryId) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    profiler_tracing(mCategory, mMarkerName, TRACING_INTERVAL_START,
-                     std::move(aBacktrace), mDocShellId, mDocShellHistoryId);
+    profiler_tracing(mCategoryString, mMarkerName, aCategoryPair,
+                     TRACING_INTERVAL_START, std::move(aBacktrace), mDocShellId,
+                     mDocShellHistoryId);
   }
 
   ~AutoProfilerTracing() {
-    profiler_tracing(mCategory, mMarkerName, TRACING_INTERVAL_END, mDocShellId,
-                     mDocShellHistoryId);
+    profiler_tracing(mCategoryString, mMarkerName, mCategoryPair,
+                     TRACING_INTERVAL_END, mDocShellId, mDocShellHistoryId);
   }
 
  protected:
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-  const char* mCategory;
+  const char* mCategoryString;
   const char* mMarkerName;
+  const JS::ProfilingCategoryPair mCategoryPair;
   const mozilla::Maybe<nsID> mDocShellId;
   const mozilla::Maybe<uint32_t> mDocShellHistoryId;
 };
 
-// Set MOZ_PROFILER_STARTUP* environment variables that will be inherited into
-// a child process that is about to be launched, in order to make that child
-// process start with the same profiler settings as in the current process.
-class MOZ_RAII AutoSetProfilerEnvVarsForChildProcess {
- public:
-  explicit AutoSetProfilerEnvVarsForChildProcess(
-      MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
-  ~AutoSetProfilerEnvVarsForChildProcess();
-
- private:
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-  char mSetCapacity[64];
-  char mSetInterval[64];
-  char mSetFeaturesBitfield[64];
-  char mSetFilters[1024];
-};
+// Get the MOZ_PROFILER_STARTUP* environment variables that should be
+// supplied to a child process that is about to be launched, in order
+// to make that child process start with the same profiler settings as
+// in the current process.  The given function is invoked once for
+// each variable to be set.
+void GetProfilerEnvVarsForChildProcess(
+    std::function<void(const char* key, const char* value)>&& aSetEnv);
 
 }  // namespace mozilla
 

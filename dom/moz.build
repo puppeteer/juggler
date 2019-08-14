@@ -6,7 +6,7 @@
 
 # interfaces/*/ are annotated per directory, this is for new files
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 with Files("plugins/**"):
     BUG_COMPONENT = ("Core", "Plug-ins")
@@ -44,6 +44,7 @@ DIRS += [
     'commandhandler',
     'credentialmanagement',
     'crypto',
+    'debugger',
     'encoding',
     'events',
     'fetch',
@@ -56,7 +57,6 @@ DIRS += [
     'grid',
     'html',
     'jsurl',
-    'asmjscache',
     'mathml',
     'media',
     'midi',
@@ -73,6 +73,7 @@ DIRS += [
     'permission',
     'plugins/base',
     'plugins/ipc',
+    'prototype',
     'indexedDB',
     'system',
     'ipc',
@@ -104,10 +105,9 @@ DIRS += [
     'simpledb',
     'reporting',
     'localstorage',
+    'prio',
+    'l10n',
 ]
-
-if CONFIG['MOZ_LIBPRIO']:
-    DIRS += ['prio']
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     DIRS += ['plugins/ipc/hangui']
@@ -122,3 +122,4 @@ TEST_DIRS += [
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk3', 'cocoa', 'windows'):
     TEST_DIRS += ['plugins/test']
 
+SPHINX_TREES['dom'] = 'docs'

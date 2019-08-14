@@ -394,56 +394,8 @@ bool wasm::EncodeLocalEntries(Encoder& e, const ValTypeVector& locals) {
   return true;
 }
 
-static bool DecodeValType(Decoder& d, ModuleKind kind, uint32_t numTypes,
-                          HasGcTypes gcTypesEnabled, ValType* type) {
-  uint8_t uncheckedCode;
-  uint32_t uncheckedRefTypeIndex;
-  if (!d.readValType(&uncheckedCode, &uncheckedRefTypeIndex)) {
-    return false;
-  }
-
-  switch (uncheckedCode) {
-    case uint8_t(ValType::I32):
-    case uint8_t(ValType::F32):
-    case uint8_t(ValType::F64):
-    case uint8_t(ValType::I64):
-      *type = ValType(ValType::Code(uncheckedCode));
-      return true;
-    case uint8_t(ValType::AnyRef):
-      if (gcTypesEnabled == HasGcTypes::False) {
-        return d.fail("reference types not enabled");
-      }
-      *type = ValType(ValType::Code(uncheckedCode));
-      return true;
-    case uint8_t(ValType::Ref): {
-      if (gcTypesEnabled == HasGcTypes::False) {
-        return d.fail("reference types not enabled");
-      }
-      if (uncheckedRefTypeIndex >= numTypes) {
-        return d.fail("ref index out of range");
-      }
-      // We further validate ref types in the caller.
-      *type = ValType(ValType::Code(uncheckedCode), uncheckedRefTypeIndex);
-      return true;
-    }
-    default:
-      break;
-  }
-  return d.fail("bad type");
-}
-
-static bool ValidateRefType(Decoder& d, const TypeDefVector& types,
-                            ValType type) {
-  if (type.isRef() && !types[type.refTypeIndex()].isStructType()) {
-    return d.fail("ref does not reference a struct type");
-  }
-  return true;
-}
-
-bool wasm::DecodeLocalEntries(Decoder& d, ModuleKind kind,
-                              const TypeDefVector& types,
-                              HasGcTypes gcTypesEnabled,
-                              ValTypeVector* locals) {
+bool wasm::DecodeLocalEntries(Decoder& d, const TypeDefVector& types,
+                              bool gcTypesEnabled, ValTypeVector* locals) {
   uint32_t numLocalEntries;
   if (!d.readVarU32(&numLocalEntries)) {
     return d.fail("failed to read number of local entries");
@@ -460,10 +412,7 @@ bool wasm::DecodeLocalEntries(Decoder& d, ModuleKind kind,
     }
 
     ValType type;
-    if (!DecodeValType(d, kind, types.length(), gcTypesEnabled, &type)) {
-      return false;
-    }
-    if (!ValidateRefType(d, types, type)) {
+    if (!d.readValType(types, gcTypesEnabled, &type)) {
       return false;
     }
 
@@ -480,16 +429,9 @@ bool wasm::DecodeValidatedLocalEntries(Decoder& d, ValTypeVector* locals) {
   MOZ_ALWAYS_TRUE(d.readVarU32(&numLocalEntries));
 
   for (uint32_t i = 0; i < numLocalEntries; i++) {
-    uint32_t count;
-    MOZ_ALWAYS_TRUE(d.readVarU32(&count));
+    uint32_t count = d.uncheckedReadVarU32();
     MOZ_ASSERT(MaxLocals - locals->length() >= count);
-
-    uint8_t uncheckedCode;
-    uint32_t uncheckedRefTypeIndex;
-    MOZ_ALWAYS_TRUE(d.readValType(&uncheckedCode, &uncheckedRefTypeIndex));
-
-    ValType type = ValType(ValType::Code(uncheckedCode), uncheckedRefTypeIndex);
-    if (!locals->appendN(type, count)) {
+    if (!locals->appendN(d.uncheckedReadValType(), count)) {
       return false;
     }
   }
@@ -509,9 +451,8 @@ typedef OpIter<ValidatingPolicy> ValidatingOpIter;
 static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
                                     const FuncType& funcType,
                                     const ValTypeVector& locals,
-                                    ExclusiveDeferredValidationState& dvs,
                                     const uint8_t* bodyEnd, Decoder* d) {
-  ValidatingOpIter iter(env, *d, dvs);
+  ValidatingOpIter iter(env, *d);
 
   if (!iter.readFunctionStart(funcType.ret())) {
     return false;
@@ -593,6 +534,16 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
         uint32_t unused;
         CHECK(iter.readSetGlobal(&unused, &nothing));
       }
+#ifdef ENABLE_WASM_REFTYPES
+      case uint16_t(Op::TableGet): {
+        uint32_t unusedTableIndex;
+        CHECK(iter.readTableGet(&unusedTableIndex, &nothing));
+      }
+      case uint16_t(Op::TableSet): {
+        uint32_t unusedTableIndex;
+        CHECK(iter.readTableSet(&unusedTableIndex, &nothing, &nothing));
+      }
+#endif
       case uint16_t(Op::Select): {
         StackType unused;
         CHECK(iter.readSelect(&unused, &nothing, &nothing, &nothing));
@@ -839,10 +790,10 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
         LinearMemoryAddress<Nothing> addr;
         CHECK(iter.readStore(ValType::F64, 8, &addr, &nothing));
       }
-      case uint16_t(Op::GrowMemory):
-        CHECK(iter.readGrowMemory(&nothing));
-      case uint16_t(Op::CurrentMemory):
-        CHECK(iter.readCurrentMemory());
+      case uint16_t(Op::MemoryGrow):
+        CHECK(iter.readMemoryGrow(&nothing));
+      case uint16_t(Op::MemorySize):
+        CHECK(iter.readMemorySize());
       case uint16_t(Op::Br): {
         uint32_t unusedDepth;
         ExprType unusedType;
@@ -866,102 +817,139 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
         CHECK(iter.readUnreachable());
       case uint16_t(Op::MiscPrefix): {
         switch (op.b1) {
-          case uint16_t(MiscOp::I32TruncSSatF32):
-          case uint16_t(MiscOp::I32TruncUSatF32):
+          case uint32_t(MiscOp::I32TruncSSatF32):
+          case uint32_t(MiscOp::I32TruncUSatF32):
             CHECK(iter.readConversion(ValType::F32, ValType::I32, &nothing));
-          case uint16_t(MiscOp::I32TruncSSatF64):
-          case uint16_t(MiscOp::I32TruncUSatF64):
+          case uint32_t(MiscOp::I32TruncSSatF64):
+          case uint32_t(MiscOp::I32TruncUSatF64):
             CHECK(iter.readConversion(ValType::F64, ValType::I32, &nothing));
-          case uint16_t(MiscOp::I64TruncSSatF32):
-          case uint16_t(MiscOp::I64TruncUSatF32):
+          case uint32_t(MiscOp::I64TruncSSatF32):
+          case uint32_t(MiscOp::I64TruncUSatF32):
             CHECK(iter.readConversion(ValType::F32, ValType::I64, &nothing));
-          case uint16_t(MiscOp::I64TruncSSatF64):
-          case uint16_t(MiscOp::I64TruncUSatF64):
+          case uint32_t(MiscOp::I64TruncSSatF64):
+          case uint32_t(MiscOp::I64TruncUSatF64):
             CHECK(iter.readConversion(ValType::F64, ValType::I64, &nothing));
-#ifdef ENABLE_WASM_BULKMEM_OPS
-          case uint16_t(MiscOp::MemCopy): {
+          case uint32_t(MiscOp::MemCopy): {
+#ifndef ENABLE_WASM_BULKMEM_OPS
+            // Bulk memory must be available if shared memory is enabled.
+            if (env.sharedMemoryEnabled == Shareable::False) {
+              return iter.fail("bulk memory ops disabled");
+            }
+#endif
             uint32_t unusedDestMemIndex;
             uint32_t unusedSrcMemIndex;
             CHECK(iter.readMemOrTableCopy(/*isMem=*/true, &unusedDestMemIndex,
                                           &nothing, &unusedSrcMemIndex,
                                           &nothing, &nothing));
           }
-          case uint16_t(MiscOp::MemDrop): {
+          case uint32_t(MiscOp::DataDrop): {
+#ifndef ENABLE_WASM_BULKMEM_OPS
+            // Bulk memory must be available if shared memory is enabled.
+            if (env.sharedMemoryEnabled == Shareable::False) {
+              return iter.fail("bulk memory ops disabled");
+            }
+#endif
             uint32_t unusedSegIndex;
-            CHECK(iter.readMemOrTableDrop(/*isMem=*/true, &unusedSegIndex));
+            CHECK(iter.readDataOrElemDrop(/*isData=*/true, &unusedSegIndex));
           }
-          case uint16_t(MiscOp::MemFill):
+          case uint32_t(MiscOp::MemFill):
+#ifndef ENABLE_WASM_BULKMEM_OPS
+            // Bulk memory must be available if shared memory is enabled.
+            if (env.sharedMemoryEnabled == Shareable::False) {
+              return iter.fail("bulk memory ops disabled");
+            }
+#endif
             CHECK(iter.readMemFill(&nothing, &nothing, &nothing));
-          case uint16_t(MiscOp::MemInit): {
+          case uint32_t(MiscOp::MemInit): {
+#ifndef ENABLE_WASM_BULKMEM_OPS
+            // Bulk memory must be available if shared memory is enabled.
+            if (env.sharedMemoryEnabled == Shareable::False) {
+              return iter.fail("bulk memory ops disabled");
+            }
+#endif
             uint32_t unusedSegIndex;
             uint32_t unusedTableIndex;
             CHECK(iter.readMemOrTableInit(/*isMem=*/true, &unusedSegIndex,
                                           &unusedTableIndex, &nothing, &nothing,
                                           &nothing));
           }
-          case uint16_t(MiscOp::TableCopy): {
+          case uint32_t(MiscOp::TableCopy): {
+#ifndef ENABLE_WASM_BULKMEM_OPS
+            // Bulk memory must be available if shared memory is enabled.
+            if (env.sharedMemoryEnabled == Shareable::False) {
+              return iter.fail("bulk memory ops disabled");
+            }
+#endif
             uint32_t unusedDestTableIndex;
             uint32_t unusedSrcTableIndex;
             CHECK(iter.readMemOrTableCopy(
                 /*isMem=*/false, &unusedDestTableIndex, &nothing,
                 &unusedSrcTableIndex, &nothing, &nothing));
           }
-          case uint16_t(MiscOp::TableDrop): {
+          case uint32_t(MiscOp::ElemDrop): {
+#ifndef ENABLE_WASM_BULKMEM_OPS
+            // Bulk memory must be available if shared memory is enabled.
+            if (env.sharedMemoryEnabled == Shareable::False) {
+              return iter.fail("bulk memory ops disabled");
+            }
+#endif
             uint32_t unusedSegIndex;
-            CHECK(iter.readMemOrTableDrop(/*isMem=*/false, &unusedSegIndex));
+            CHECK(iter.readDataOrElemDrop(/*isData=*/false, &unusedSegIndex));
           }
-          case uint16_t(MiscOp::TableInit): {
+          case uint32_t(MiscOp::TableInit): {
+#ifndef ENABLE_WASM_BULKMEM_OPS
+            // Bulk memory must be available if shared memory is enabled.
+            if (env.sharedMemoryEnabled == Shareable::False) {
+              return iter.fail("bulk memory ops disabled");
+            }
+#endif
             uint32_t unusedSegIndex;
             uint32_t unusedTableIndex;
             CHECK(iter.readMemOrTableInit(/*isMem=*/false, &unusedSegIndex,
                                           &unusedTableIndex, &nothing, &nothing,
                                           &nothing));
           }
-#endif
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
-          case uint16_t(MiscOp::TableGet): {
+#ifdef ENABLE_WASM_REFTYPES
+          case uint32_t(MiscOp::TableFill): {
             uint32_t unusedTableIndex;
-            CHECK(iter.readTableGet(&unusedTableIndex, &nothing));
+            CHECK(iter.readTableFill(&unusedTableIndex, &nothing, &nothing,
+                                     &nothing));
           }
-          case uint16_t(MiscOp::TableGrow): {
+          case uint32_t(MiscOp::TableGrow): {
             uint32_t unusedTableIndex;
             CHECK(iter.readTableGrow(&unusedTableIndex, &nothing, &nothing));
           }
-          case uint16_t(MiscOp::TableSet): {
-            uint32_t unusedTableIndex;
-            CHECK(iter.readTableSet(&unusedTableIndex, &nothing, &nothing));
-          }
-          case uint16_t(MiscOp::TableSize): {
+          case uint32_t(MiscOp::TableSize): {
             uint32_t unusedTableIndex;
             CHECK(iter.readTableSize(&unusedTableIndex));
           }
 #endif
 #ifdef ENABLE_WASM_GC
-          case uint16_t(MiscOp::StructNew): {
-            if (env.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructNew): {
+            if (!env.gcTypesEnabled()) {
               return iter.unrecognizedOpcode(&op);
             }
             uint32_t unusedUint;
             ValidatingOpIter::ValueVector unusedArgs;
             CHECK(iter.readStructNew(&unusedUint, &unusedArgs));
           }
-          case uint16_t(MiscOp::StructGet): {
-            if (env.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructGet): {
+            if (!env.gcTypesEnabled()) {
               return iter.unrecognizedOpcode(&op);
             }
             uint32_t unusedUint1, unusedUint2;
             CHECK(iter.readStructGet(&unusedUint1, &unusedUint2, &nothing));
           }
-          case uint16_t(MiscOp::StructSet): {
-            if (env.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructSet): {
+            if (!env.gcTypesEnabled()) {
               return iter.unrecognizedOpcode(&op);
             }
             uint32_t unusedUint1, unusedUint2;
             CHECK(iter.readStructSet(&unusedUint1, &unusedUint2, &nothing,
                                      &nothing));
           }
-          case uint16_t(MiscOp::StructNarrow): {
-            if (env.gcTypesEnabled() == HasGcTypes::False) {
+          case uint32_t(MiscOp::StructNarrow): {
+            if (!env.gcTypesEnabled()) {
               return iter.unrecognizedOpcode(&op);
             }
             ValType unusedTy, unusedTy2;
@@ -975,191 +963,187 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
       }
 #ifdef ENABLE_WASM_GC
       case uint16_t(Op::RefEq): {
-        if (env.gcTypesEnabled() == HasGcTypes::False) {
+        if (!env.gcTypesEnabled()) {
           return iter.unrecognizedOpcode(&op);
         }
         CHECK(iter.readComparison(ValType::AnyRef, &nothing, &nothing));
         break;
       }
+#endif
+#ifdef ENABLE_WASM_REFTYPES
       case uint16_t(Op::RefNull): {
-        if (env.gcTypesEnabled() == HasGcTypes::False) {
-          return iter.unrecognizedOpcode(&op);
-        }
         CHECK(iter.readRefNull());
         break;
       }
       case uint16_t(Op::RefIsNull): {
-        if (env.gcTypesEnabled() == HasGcTypes::False) {
-          return iter.unrecognizedOpcode(&op);
-        }
         CHECK(iter.readConversion(ValType::AnyRef, ValType::I32, &nothing));
         break;
       }
 #endif
       case uint16_t(Op::ThreadPrefix): {
         switch (op.b1) {
-          case uint16_t(ThreadOp::Wake): {
+          case uint32_t(ThreadOp::Wake): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readWake(&addr, &nothing));
           }
-          case uint16_t(ThreadOp::I32Wait): {
+          case uint32_t(ThreadOp::I32Wait): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readWait(&addr, ValType::I32, 4, &nothing, &nothing));
           }
-          case uint16_t(ThreadOp::I64Wait): {
+          case uint32_t(ThreadOp::I64Wait): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readWait(&addr, ValType::I64, 8, &nothing, &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicLoad): {
+          case uint32_t(ThreadOp::I32AtomicLoad): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicLoad(&addr, ValType::I32, 4));
           }
-          case uint16_t(ThreadOp::I64AtomicLoad): {
+          case uint32_t(ThreadOp::I64AtomicLoad): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicLoad(&addr, ValType::I64, 8));
           }
-          case uint16_t(ThreadOp::I32AtomicLoad8U): {
+          case uint32_t(ThreadOp::I32AtomicLoad8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicLoad(&addr, ValType::I32, 1));
           }
-          case uint16_t(ThreadOp::I32AtomicLoad16U): {
+          case uint32_t(ThreadOp::I32AtomicLoad16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicLoad(&addr, ValType::I32, 2));
           }
-          case uint16_t(ThreadOp::I64AtomicLoad8U): {
+          case uint32_t(ThreadOp::I64AtomicLoad8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicLoad(&addr, ValType::I64, 1));
           }
-          case uint16_t(ThreadOp::I64AtomicLoad16U): {
+          case uint32_t(ThreadOp::I64AtomicLoad16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicLoad(&addr, ValType::I64, 2));
           }
-          case uint16_t(ThreadOp::I64AtomicLoad32U): {
+          case uint32_t(ThreadOp::I64AtomicLoad32U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicLoad(&addr, ValType::I64, 4));
           }
-          case uint16_t(ThreadOp::I32AtomicStore): {
+          case uint32_t(ThreadOp::I32AtomicStore): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicStore(&addr, ValType::I32, 4, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicStore): {
+          case uint32_t(ThreadOp::I64AtomicStore): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicStore(&addr, ValType::I64, 8, &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicStore8U): {
+          case uint32_t(ThreadOp::I32AtomicStore8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicStore(&addr, ValType::I32, 1, &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicStore16U): {
+          case uint32_t(ThreadOp::I32AtomicStore16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicStore(&addr, ValType::I32, 2, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicStore8U): {
+          case uint32_t(ThreadOp::I64AtomicStore8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicStore(&addr, ValType::I64, 1, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicStore16U): {
+          case uint32_t(ThreadOp::I64AtomicStore16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicStore(&addr, ValType::I64, 2, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicStore32U): {
+          case uint32_t(ThreadOp::I64AtomicStore32U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicStore(&addr, ValType::I64, 4, &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicAdd):
-          case uint16_t(ThreadOp::I32AtomicSub):
-          case uint16_t(ThreadOp::I32AtomicAnd):
-          case uint16_t(ThreadOp::I32AtomicOr):
-          case uint16_t(ThreadOp::I32AtomicXor):
-          case uint16_t(ThreadOp::I32AtomicXchg): {
+          case uint32_t(ThreadOp::I32AtomicAdd):
+          case uint32_t(ThreadOp::I32AtomicSub):
+          case uint32_t(ThreadOp::I32AtomicAnd):
+          case uint32_t(ThreadOp::I32AtomicOr):
+          case uint32_t(ThreadOp::I32AtomicXor):
+          case uint32_t(ThreadOp::I32AtomicXchg): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicRMW(&addr, ValType::I32, 4, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicAdd):
-          case uint16_t(ThreadOp::I64AtomicSub):
-          case uint16_t(ThreadOp::I64AtomicAnd):
-          case uint16_t(ThreadOp::I64AtomicOr):
-          case uint16_t(ThreadOp::I64AtomicXor):
-          case uint16_t(ThreadOp::I64AtomicXchg): {
+          case uint32_t(ThreadOp::I64AtomicAdd):
+          case uint32_t(ThreadOp::I64AtomicSub):
+          case uint32_t(ThreadOp::I64AtomicAnd):
+          case uint32_t(ThreadOp::I64AtomicOr):
+          case uint32_t(ThreadOp::I64AtomicXor):
+          case uint32_t(ThreadOp::I64AtomicXchg): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicRMW(&addr, ValType::I64, 8, &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicAdd8U):
-          case uint16_t(ThreadOp::I32AtomicSub8U):
-          case uint16_t(ThreadOp::I32AtomicAnd8U):
-          case uint16_t(ThreadOp::I32AtomicOr8U):
-          case uint16_t(ThreadOp::I32AtomicXor8U):
-          case uint16_t(ThreadOp::I32AtomicXchg8U): {
+          case uint32_t(ThreadOp::I32AtomicAdd8U):
+          case uint32_t(ThreadOp::I32AtomicSub8U):
+          case uint32_t(ThreadOp::I32AtomicAnd8U):
+          case uint32_t(ThreadOp::I32AtomicOr8U):
+          case uint32_t(ThreadOp::I32AtomicXor8U):
+          case uint32_t(ThreadOp::I32AtomicXchg8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicRMW(&addr, ValType::I32, 1, &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicAdd16U):
-          case uint16_t(ThreadOp::I32AtomicSub16U):
-          case uint16_t(ThreadOp::I32AtomicAnd16U):
-          case uint16_t(ThreadOp::I32AtomicOr16U):
-          case uint16_t(ThreadOp::I32AtomicXor16U):
-          case uint16_t(ThreadOp::I32AtomicXchg16U): {
+          case uint32_t(ThreadOp::I32AtomicAdd16U):
+          case uint32_t(ThreadOp::I32AtomicSub16U):
+          case uint32_t(ThreadOp::I32AtomicAnd16U):
+          case uint32_t(ThreadOp::I32AtomicOr16U):
+          case uint32_t(ThreadOp::I32AtomicXor16U):
+          case uint32_t(ThreadOp::I32AtomicXchg16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicRMW(&addr, ValType::I32, 2, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicAdd8U):
-          case uint16_t(ThreadOp::I64AtomicSub8U):
-          case uint16_t(ThreadOp::I64AtomicAnd8U):
-          case uint16_t(ThreadOp::I64AtomicOr8U):
-          case uint16_t(ThreadOp::I64AtomicXor8U):
-          case uint16_t(ThreadOp::I64AtomicXchg8U): {
+          case uint32_t(ThreadOp::I64AtomicAdd8U):
+          case uint32_t(ThreadOp::I64AtomicSub8U):
+          case uint32_t(ThreadOp::I64AtomicAnd8U):
+          case uint32_t(ThreadOp::I64AtomicOr8U):
+          case uint32_t(ThreadOp::I64AtomicXor8U):
+          case uint32_t(ThreadOp::I64AtomicXchg8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicRMW(&addr, ValType::I64, 1, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicAdd16U):
-          case uint16_t(ThreadOp::I64AtomicSub16U):
-          case uint16_t(ThreadOp::I64AtomicAnd16U):
-          case uint16_t(ThreadOp::I64AtomicOr16U):
-          case uint16_t(ThreadOp::I64AtomicXor16U):
-          case uint16_t(ThreadOp::I64AtomicXchg16U): {
+          case uint32_t(ThreadOp::I64AtomicAdd16U):
+          case uint32_t(ThreadOp::I64AtomicSub16U):
+          case uint32_t(ThreadOp::I64AtomicAnd16U):
+          case uint32_t(ThreadOp::I64AtomicOr16U):
+          case uint32_t(ThreadOp::I64AtomicXor16U):
+          case uint32_t(ThreadOp::I64AtomicXchg16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicRMW(&addr, ValType::I64, 2, &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicAdd32U):
-          case uint16_t(ThreadOp::I64AtomicSub32U):
-          case uint16_t(ThreadOp::I64AtomicAnd32U):
-          case uint16_t(ThreadOp::I64AtomicOr32U):
-          case uint16_t(ThreadOp::I64AtomicXor32U):
-          case uint16_t(ThreadOp::I64AtomicXchg32U): {
+          case uint32_t(ThreadOp::I64AtomicAdd32U):
+          case uint32_t(ThreadOp::I64AtomicSub32U):
+          case uint32_t(ThreadOp::I64AtomicAnd32U):
+          case uint32_t(ThreadOp::I64AtomicOr32U):
+          case uint32_t(ThreadOp::I64AtomicXor32U):
+          case uint32_t(ThreadOp::I64AtomicXchg32U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicRMW(&addr, ValType::I64, 4, &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicCmpXchg): {
+          case uint32_t(ThreadOp::I32AtomicCmpXchg): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicCmpXchg(&addr, ValType::I32, 4, &nothing,
                                          &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicCmpXchg): {
+          case uint32_t(ThreadOp::I64AtomicCmpXchg): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicCmpXchg(&addr, ValType::I64, 8, &nothing,
                                          &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicCmpXchg8U): {
+          case uint32_t(ThreadOp::I32AtomicCmpXchg8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicCmpXchg(&addr, ValType::I32, 1, &nothing,
                                          &nothing));
           }
-          case uint16_t(ThreadOp::I32AtomicCmpXchg16U): {
+          case uint32_t(ThreadOp::I32AtomicCmpXchg16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicCmpXchg(&addr, ValType::I32, 2, &nothing,
                                          &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicCmpXchg8U): {
+          case uint32_t(ThreadOp::I64AtomicCmpXchg8U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicCmpXchg(&addr, ValType::I64, 1, &nothing,
                                          &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicCmpXchg16U): {
+          case uint32_t(ThreadOp::I64AtomicCmpXchg16U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicCmpXchg(&addr, ValType::I64, 2, &nothing,
                                          &nothing));
           }
-          case uint16_t(ThreadOp::I64AtomicCmpXchg32U): {
+          case uint32_t(ThreadOp::I64AtomicCmpXchg32U): {
             LinearMemoryAddress<Nothing> addr;
             CHECK(iter.readAtomicCmpXchg(&addr, ValType::I64, 4, &nothing,
                                          &nothing));
@@ -1183,8 +1167,7 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
 
 bool wasm::ValidateFunctionBody(const ModuleEnvironment& env,
                                 uint32_t funcIndex, uint32_t bodySize,
-                                Decoder& d,
-                                ExclusiveDeferredValidationState& dvs) {
+                                Decoder& d) {
   const FuncType& funcType = *env.funcTypes[funcIndex];
 
   ValTypeVector locals;
@@ -1194,12 +1177,11 @@ bool wasm::ValidateFunctionBody(const ModuleEnvironment& env,
 
   const uint8_t* bodyBegin = d.currentPosition();
 
-  if (!DecodeLocalEntries(d, ModuleKind::Wasm, env.types, env.gcTypesEnabled(),
-                          &locals)) {
+  if (!DecodeLocalEntries(d, env.types, env.gcTypesEnabled(), &locals)) {
     return false;
   }
 
-  if (!DecodeFunctionBodyExprs(env, funcType, locals, dvs, bodyBegin + bodySize,
+  if (!DecodeFunctionBodyExprs(env, funcType, locals, bodyBegin + bodySize,
                                &d)) {
     return false;
   }
@@ -1232,8 +1214,8 @@ enum class TypeState { None, Struct, ForwardStruct, Func };
 
 typedef Vector<TypeState, 0, SystemAllocPolicy> TypeStateVector;
 
-static bool ValidateRefType(Decoder& d, TypeStateVector* typeState,
-                            ValType type) {
+static bool ValidateTypeState(Decoder& d, TypeStateVector* typeState,
+                              ValType type) {
   if (!type.isRef()) {
     return true;
   }
@@ -1278,11 +1260,10 @@ static bool DecodeFuncType(Decoder& d, ModuleEnvironment* env,
   }
 
   for (uint32_t i = 0; i < numArgs; i++) {
-    if (!DecodeValType(d, ModuleKind::Wasm, env->types.length(),
-                       env->gcTypesEnabled(), &args[i])) {
+    if (!d.readValType(env->types.length(), env->gcTypesEnabled(), &args[i])) {
       return false;
     }
-    if (!ValidateRefType(d, typeState, args[i])) {
+    if (!ValidateTypeState(d, typeState, args[i])) {
       return false;
     }
   }
@@ -1300,11 +1281,10 @@ static bool DecodeFuncType(Decoder& d, ModuleEnvironment* env,
 
   if (numRets == 1) {
     ValType type;
-    if (!DecodeValType(d, ModuleKind::Wasm, env->types.length(),
-                       env->gcTypesEnabled(), &type)) {
+    if (!d.readValType(env->types.length(), env->gcTypesEnabled(), &type)) {
       return false;
     }
-    if (!ValidateRefType(d, typeState, type)) {
+    if (!ValidateTypeState(d, typeState, type)) {
       return false;
     }
 
@@ -1323,7 +1303,7 @@ static bool DecodeFuncType(Decoder& d, ModuleEnvironment* env,
 
 static bool DecodeStructType(Decoder& d, ModuleEnvironment* env,
                              TypeStateVector* typeState, uint32_t typeIndex) {
-  if (env->gcTypesEnabled() == HasGcTypes::False) {
+  if (!env->gcTypesEnabled()) {
     return d.fail("Structure types not enabled");
   }
 
@@ -1351,11 +1331,11 @@ static bool DecodeStructType(Decoder& d, ModuleEnvironment* env,
       return d.fail("garbage flag bits");
     }
     fields[i].isMutable = flags & uint8_t(FieldFlags::Mutable);
-    if (!DecodeValType(d, ModuleKind::Wasm, env->types.length(),
-                       env->gcTypesEnabled(), &fields[i].type)) {
+    if (!d.readValType(env->types.length(), env->gcTypesEnabled(),
+                       &fields[i].type)) {
       return false;
     }
-    if (!ValidateRefType(d, typeState, fields[i].type)) {
+    if (!ValidateTypeState(d, typeState, fields[i].type)) {
       return false;
     }
 
@@ -1374,8 +1354,11 @@ static bool DecodeStructType(Decoder& d, ModuleEnvironment* env,
         offset = layout.addScalar(Scalar::Float64);
         break;
       case ValType::Ref:
-      case ValType::AnyRef:
         offset = layout.addReference(ReferenceType::TYPE_OBJECT);
+        break;
+      case ValType::FuncRef:
+      case ValType::AnyRef:
+        offset = layout.addReference(ReferenceType::TYPE_WASM_ANYREF);
         break;
       default:
         MOZ_CRASH("Unknown type");
@@ -1415,7 +1398,8 @@ static bool DecodeStructType(Decoder& d, ModuleEnvironment* env,
 #ifdef ENABLE_WASM_GC
 static bool DecodeGCFeatureOptInSection(Decoder& d, ModuleEnvironment* env) {
   MaybeSectionRange range;
-  if (!d.startSection(SectionId::GcFeatureOptIn, env, &range, "type")) {
+  if (!d.startSection(SectionId::GcFeatureOptIn, env, &range,
+                      "gcfeatureoptin")) {
     return false;
   }
   if (!range) {
@@ -1430,24 +1414,32 @@ static bool DecodeGCFeatureOptInSection(Decoder& d, ModuleEnvironment* env) {
   // For documentation of what's in the various versions, see
   // https://github.com/lars-t-hansen/moz-gc-experiments
   //
-  // Version 1 is complete.
-  // Version 2 is in progress.
+  // Version 1 is complete and obsolete.
+  // Version 2 is incomplete but obsolete.
+  // Version 3 is in progress.
 
   switch (version) {
     case 1:
-      return d.fail(
-          "Wasm GC feature version 1 is no longer supported by this engine.\n"
-          "The current version is 2, which is not backward-compatible:\n"
-          " - The old encoding of ref.null is no longer accepted.");
     case 2:
+      return d.fail(
+          "Wasm GC feature versions 1 and 2 are no longer supported by this "
+          "engine.\n"
+          "The current version is 3, which is not backward-compatible with "
+          "earlier\n"
+          "versions:\n"
+          " - The v1 encoding of ref.null is no longer accepted.\n"
+          " - The v2 encodings of ref.eq, table.get, table.set, and "
+          "table.size\n"
+          "   are no longer accepted.\n");
+    case 3:
       break;
     default:
       return d.fail(
           "The specified Wasm GC feature version is unknown.\n"
-          "The current version is 2.");
+          "The current version is 3.");
   }
 
-  env->gcFeatureOptIn = HasGcTypes::True;
+  env->gcFeatureOptIn = true;
   return d.finishSection(*range, "gcfeatureoptin");
 }
 #endif
@@ -1603,7 +1595,7 @@ static bool DecodeLimits(Decoder& d, Limits* limits,
   return true;
 }
 
-static bool DecodeTableTypeAndLimits(Decoder& d, HasGcTypes gcTypesEnabled,
+static bool DecodeTableTypeAndLimits(Decoder& d, bool gcTypesEnabled,
                                      TableDescVector* tables) {
   uint8_t elementType;
   if (!d.readFixedU8(&elementType)) {
@@ -1611,20 +1603,17 @@ static bool DecodeTableTypeAndLimits(Decoder& d, HasGcTypes gcTypesEnabled,
   }
 
   TableKind tableKind;
-  if (elementType == uint8_t(TypeCode::AnyFunc)) {
-    tableKind = TableKind::AnyFunction;
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
+  if (elementType == uint8_t(TypeCode::FuncRef)) {
+    tableKind = TableKind::FuncRef;
+#ifdef ENABLE_WASM_REFTYPES
   } else if (elementType == uint8_t(TypeCode::AnyRef)) {
-    if (gcTypesEnabled == HasGcTypes::False) {
-      return d.fail("reference types not enabled");
-    }
     tableKind = TableKind::AnyRef;
 #endif
   } else {
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
-    return d.fail("expected 'anyfunc' or 'anyref' element type");
+#ifdef ENABLE_WASM_REFTYPES
+    return d.fail("expected 'funcref' or 'anyref' element type");
 #else
-    return d.fail("expected 'anyfunc' element type");
+    return d.fail("expected 'funcref' element type");
 #endif
   }
 
@@ -1637,9 +1626,9 @@ static bool DecodeTableTypeAndLimits(Decoder& d, HasGcTypes gcTypesEnabled,
   // initial > maximum is carried out by the DecodeLimits call above, so
   // we don't repeat it here.
   if (limits.initial > MaxTableInitialLength ||
-      ((limits.maximum.isSome() &&
-        limits.maximum.value() > MaxTableMaximumLength)))
+      ((limits.maximum.isSome() && limits.maximum.value() > MaxTableLength))) {
     return d.fail("too many table elements");
+  }
 
   if (tables->length() >= MaxTables) {
     return d.fail("too many tables");
@@ -1654,6 +1643,7 @@ static bool GlobalIsJSCompatible(Decoder& d, ValType type, bool isMutable) {
     case ValType::F32:
     case ValType::F64:
     case ValType::I64:
+    case ValType::FuncRef:
     case ValType::AnyRef:
       break;
 #ifdef WASM_PRIVATE_REFTYPES
@@ -1668,13 +1658,9 @@ static bool GlobalIsJSCompatible(Decoder& d, ValType type, bool isMutable) {
 }
 
 static bool DecodeGlobalType(Decoder& d, const TypeDefVector& types,
-                             HasGcTypes gcTypesEnabled, ValType* type,
+                             bool gcTypesEnabled, ValType* type,
                              bool* isMutable) {
-  if (!DecodeValType(d, ModuleKind::Wasm, types.length(), gcTypesEnabled,
-                     type)) {
-    return false;
-  }
-  if (!ValidateRefType(d, types, *type)) {
+  if (!d.readValType(types, gcTypesEnabled, type)) {
     return false;
   }
 
@@ -1989,14 +1975,12 @@ static bool DecodeInitializerExpression(Decoder& d, ModuleEnvironment* env,
       break;
     }
     case uint16_t(Op::RefNull): {
-      if (env->gcTypesEnabled() == HasGcTypes::False) {
-        return d.fail("unexpected initializer expression");
-      }
       if (!expected.isReference()) {
         return d.fail(
             "type mismatch: initializer type and expected type don't match");
       }
-      *init = InitExpr(LitVal(expected, nullptr));
+      MOZ_ASSERT_IF(expected.isRef(), env->gcTypesEnabled());
+      *init = InitExpr(LitVal(expected, AnyRef::null()));
       break;
     }
     case uint16_t(Op::GetGlobal): {
@@ -2004,7 +1988,7 @@ static bool DecodeInitializerExpression(Decoder& d, ModuleEnvironment* env,
       const GlobalDescVector& globals = env->globals;
       if (!d.readVarU32(&i)) {
         return d.fail(
-            "failed to read get_global index in initializer expression");
+            "failed to read global.get index in initializer expression");
       }
       if (i >= globals.length()) {
         return d.fail("global index out of range in initializer expression");
@@ -2014,9 +1998,15 @@ static bool DecodeInitializerExpression(Decoder& d, ModuleEnvironment* env,
             "initializer expression must reference a global immutable import");
       }
       if (expected.isReference()) {
-        if (!(env->gcTypesEnabled() == HasGcTypes::True &&
-              globals[i].type().isReference() &&
-              env->isRefSubtypeOf(globals[i].type(), expected))) {
+        bool fail = false;
+        if ((expected.isRef() || globals[i].type().isRef()) &&
+            !env->gcTypesEnabled()) {
+          fail = true;
+        } else if (!(globals[i].type().isReference() &&
+                     env->isRefSubtypeOf(globals[i].type(), expected))) {
+          fail = true;
+        }
+        if (fail) {
           return d.fail(
               "type mismatch: initializer type and expected type don't match");
         }
@@ -2026,7 +2016,9 @@ static bool DecodeInitializerExpression(Decoder& d, ModuleEnvironment* env,
       }
       break;
     }
-    default: { return d.fail("unexpected initializer expression"); }
+    default: {
+      return d.fail("unexpected initializer expression");
+    }
   }
 
   if (expected != init->type()) {
@@ -2290,8 +2282,9 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
 
     InitializerKind initializerKind = InitializerKind(initializerKindVal);
 
-    if (env->tables.length() == 0) {
-      return d.fail("elem segment requires a table section");
+    if (initializerKind != InitializerKind::Passive &&
+        env->tables.length() == 0) {
+      return d.fail("active elem segment requires a table section");
     }
 
     MutableElemSegment seg = js_new<ElemSegment>();
@@ -2305,7 +2298,8 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
         return d.fail("expected table index");
       }
     }
-    if (tableIndex >= env->tables.length()) {
+    if (initializerKind != InitializerKind::Passive &&
+        tableIndex >= env->tables.length()) {
       return d.fail("table index out of range for element segment");
     }
     if (initializerKind == InitializerKind::Passive) {
@@ -2313,19 +2307,33 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
       // segments, there really is no segment index, and we should never
       // touch the field.
       tableIndex = (uint32_t)-1;
-    } else if (env->tables[tableIndex].kind != TableKind::AnyFunction) {
-      return d.fail("only tables of 'anyfunc' may have element segments");
+    } else if (env->tables[tableIndex].kind != TableKind::FuncRef) {
+      return d.fail("only tables of 'funcref' may have element segments");
     }
 
     seg->tableIndex = tableIndex;
 
-    if (initializerKind == InitializerKind::Active ||
-        initializerKind == InitializerKind::ActiveWithIndex) {
-      InitExpr offset;
-      if (!DecodeInitializerExpression(d, env, ValType::I32, &offset)) {
-        return false;
+    switch (initializerKind) {
+      case InitializerKind::Active:
+      case InitializerKind::ActiveWithIndex: {
+        InitExpr offset;
+        if (!DecodeInitializerExpression(d, env, ValType::I32, &offset)) {
+          return false;
+        }
+        seg->offsetIfActive.emplace(offset);
+        break;
       }
-      seg->offsetIfActive.emplace(offset);
+      case InitializerKind::Passive: {
+        uint8_t form;
+        if (!d.readFixedU8(&form)) {
+          return d.fail("expected type form");
+        }
+        if (form != uint8_t(TypeCode::FuncRef)) {
+          return d.fail(
+              "passive segments can only contain function references");
+        }
+        break;
+      }
     }
 
     uint32_t numElems;
@@ -2350,22 +2358,51 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
                          env->tables[tableIndex].importedOrExported;
 #endif
 
+    // For passive segments we should use DecodeInitializerExpression() but we
+    // don't really want to generalize that function yet, so instead read the
+    // required Ref.Func and End here.
+
     for (uint32_t i = 0; i < numElems; i++) {
-      uint32_t funcIndex;
-      if (!d.readVarU32(&funcIndex)) {
-        return d.fail("failed to read element function index");
+      bool needIndex = true;
+
+      if (initializerKind == InitializerKind::Passive) {
+        OpBytes op;
+        if (!d.readOp(&op)) {
+          return d.fail("failed to read initializer operation");
+        }
+        switch (op.b0) {
+          case uint16_t(Op::RefFunc):
+            break;
+          case uint16_t(Op::RefNull):
+            needIndex = false;
+            break;
+          default:
+            return d.fail("failed to read initializer operation");
+        }
       }
 
-      if (funcIndex >= env->numFuncs()) {
-        return d.fail("table element out of range");
-      }
-
+      uint32_t funcIndex = NullFuncIndex;
+      if (needIndex) {
+        if (!d.readVarU32(&funcIndex)) {
+          return d.fail("failed to read element function index");
+        }
+        if (funcIndex >= env->numFuncs()) {
+          return d.fail("table element out of range");
+        }
 #ifdef WASM_PRIVATE_REFTYPES
-      if (exportedTable &&
-          !FuncTypeIsJSCompatible(d, *env->funcTypes[funcIndex])) {
-        return false;
-      }
+        if (exportedTable &&
+            !FuncTypeIsJSCompatible(d, *env->funcTypes[funcIndex])) {
+          return false;
+        }
 #endif
+      }
+
+      if (initializerKind == InitializerKind::Passive) {
+        OpBytes end;
+        if (!d.readOp(&end) || end.b0 != uint16_t(Op::End)) {
+          return d.fail("failed to read end of initializer expression");
+        }
+      }
 
       seg->elemFuncIndices.infallibleAppend(funcIndex);
     }
@@ -2374,6 +2411,32 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
   }
 
   return d.finishSection(*range, "elem");
+}
+
+static bool DecodeDataCountSection(Decoder& d, ModuleEnvironment* env) {
+  MaybeSectionRange range;
+  if (!d.startSection(SectionId::DataCount, env, &range, "datacount")) {
+    return false;
+  }
+  if (!range) {
+    return true;
+  }
+
+#ifndef ENABLE_WASM_BULKMEM_OPS
+  // Bulk memory must be available if shared memory is enabled.
+  if (env->sharedMemoryEnabled == Shareable::False) {
+    return d.fail("bulk memory ops disabled");
+  }
+#endif
+
+  uint32_t dataCount;
+  if (!d.readVarU32(&dataCount)) {
+    return d.fail("expected data segment count");
+  }
+
+  env->dataCount.emplace(dataCount);
+
+  return d.finishSection(*range, "datacount");
 }
 
 bool wasm::StartsCodeSection(const uint8_t* begin, const uint8_t* end,
@@ -2414,9 +2477,9 @@ bool wasm::DecodeModuleEnvironment(Decoder& d, ModuleEnvironment* env) {
   if (!DecodeGCFeatureOptInSection(d, env)) {
     return false;
   }
-  HasGcTypes gcFeatureOptIn = env->gcFeatureOptIn;
+  bool gcFeatureOptIn = env->gcFeatureOptIn;
 #else
-  HasGcTypes gcFeatureOptIn = HasGcTypes::False;
+  bool gcFeatureOptIn = false;
 #endif
 
   env->compilerEnv->computeParameters(d, gcFeatureOptIn);
@@ -2457,6 +2520,10 @@ bool wasm::DecodeModuleEnvironment(Decoder& d, ModuleEnvironment* env) {
     return false;
   }
 
+  if (!DecodeDataCountSection(d, env)) {
+    return false;
+  }
+
   if (!d.startSection(SectionId::Code, env, &env->codeSection, "code")) {
     return false;
   }
@@ -2469,7 +2536,6 @@ bool wasm::DecodeModuleEnvironment(Decoder& d, ModuleEnvironment* env) {
 }
 
 static bool DecodeFunctionBody(Decoder& d, const ModuleEnvironment& env,
-                               ExclusiveDeferredValidationState& dvs,
                                uint32_t funcIndex) {
   uint32_t bodySize;
   if (!d.readVarU32(&bodySize)) {
@@ -2484,15 +2550,14 @@ static bool DecodeFunctionBody(Decoder& d, const ModuleEnvironment& env,
     return d.fail("function body length too big");
   }
 
-  if (!ValidateFunctionBody(env, funcIndex, bodySize, d, dvs)) {
+  if (!ValidateFunctionBody(env, funcIndex, bodySize, d)) {
     return false;
   }
 
   return true;
 }
 
-static bool DecodeCodeSection(Decoder& d, ModuleEnvironment* env,
-                              ExclusiveDeferredValidationState& dvs) {
+static bool DecodeCodeSection(Decoder& d, ModuleEnvironment* env) {
   if (!env->codeSection) {
     if (env->numFuncDefs() != 0) {
       return d.fail("expected code section");
@@ -2511,8 +2576,7 @@ static bool DecodeCodeSection(Decoder& d, ModuleEnvironment* env,
   }
 
   for (uint32_t funcDefIndex = 0; funcDefIndex < numFuncDefs; funcDefIndex++) {
-    if (!DecodeFunctionBody(d, *env, dvs,
-                            env->numFuncImports() + funcDefIndex)) {
+    if (!DecodeFunctionBody(d, *env, env->numFuncImports() + funcDefIndex)) {
       return false;
     }
   }
@@ -2526,6 +2590,9 @@ static bool DecodeDataSection(Decoder& d, ModuleEnvironment* env) {
     return false;
   }
   if (!range) {
+    if (env->dataCount.isSome() && *env->dataCount > 0) {
+      return d.fail("number of data segments does not match declared count");
+    }
     return true;
   }
 
@@ -2536,6 +2603,10 @@ static bool DecodeDataSection(Decoder& d, ModuleEnvironment* env) {
 
   if (numSegments > MaxDataSegments) {
     return d.fail("too many data segments");
+  }
+
+  if (env->dataCount.isSome() && numSegments != *env->dataCount) {
+    return d.fail("number of data segments does not match declared count");
   }
 
   for (uint32_t i = 0; i < numSegments; i++) {
@@ -2555,8 +2626,8 @@ static bool DecodeDataSection(Decoder& d, ModuleEnvironment* env) {
 
     InitializerKind initializerKind = InitializerKind(initializerKindVal);
 
-    if (!env->usesMemory()) {
-      return d.fail("data segment requires a memory section");
+    if (initializerKind != InitializerKind::Passive && !env->usesMemory()) {
+      return d.fail("active data segment requires a memory section");
     }
 
     uint32_t memIndex = 0;
@@ -2727,36 +2798,7 @@ finish:
   return true;
 }
 
-void DeferredValidationState::notifyDataSegmentIndex(uint32_t segIndex,
-                                                     size_t offsetInModule) {
-  // If |segIndex| is larger than any previously observed use, or this is
-  // the first index use to be notified, make a note of it and the module
-  // offset it appeared at.  That way, if we have to report it later as an
-  // error, we can at least report a correct offset.
-  if (!haveHighestDataSegIndex || segIndex > highestDataSegIndex) {
-    highestDataSegIndex = segIndex;
-    highestDataSegIndexOffset = offsetInModule;
-  }
-
-  haveHighestDataSegIndex = true;
-}
-
-bool DeferredValidationState::performDeferredValidation(
-    const ModuleEnvironment& env, UniqueChars* error) {
-  if (haveHighestDataSegIndex &&
-      highestDataSegIndex >= env.dataSegments.length()) {
-    UniqueChars str(
-        JS_smprintf("at offset %zu: memory.{drop,init} index out of range",
-                    highestDataSegIndexOffset));
-    *error = std::move(str);
-    return false;
-  }
-
-  return true;
-}
-
-bool wasm::DecodeModuleTail(Decoder& d, ModuleEnvironment* env,
-                            ExclusiveDeferredValidationState& dvs) {
+bool wasm::DecodeModuleTail(Decoder& d, ModuleEnvironment* env) {
   if (!DecodeDataSection(d, env)) {
     return false;
   }
@@ -2775,7 +2817,7 @@ bool wasm::DecodeModuleTail(Decoder& d, ModuleEnvironment* env,
     }
   }
 
-  return dvs.lock()->performDeferredValidation(*env, d.error());
+  return true;
 }
 
 // Validate algorithm.
@@ -2785,10 +2827,9 @@ bool wasm::Validate(JSContext* cx, const ShareableBytes& bytecode,
   Decoder d(bytecode.bytes, 0, error);
 
 #ifdef ENABLE_WASM_GC
-  HasGcTypes gcTypesConfigured =
-      cx->options().wasmGc() ? HasGcTypes::True : HasGcTypes::False;
+  bool gcTypesConfigured = HasGcSupport(cx);
 #else
-  HasGcTypes gcTypesConfigured = HasGcTypes::False;
+  bool gcTypesConfigured = false;
 #endif
 
   CompilerEnvironment compilerEnv(CompileMode::Once, Tier::Optimized,
@@ -2803,13 +2844,11 @@ bool wasm::Validate(JSContext* cx, const ShareableBytes& bytecode,
     return false;
   }
 
-  ExclusiveDeferredValidationState dvs(mutexid::WasmDeferredValidation);
-
-  if (!DecodeCodeSection(d, &env, dvs)) {
+  if (!DecodeCodeSection(d, &env)) {
     return false;
   }
 
-  if (!DecodeModuleTail(d, &env, dvs)) {
+  if (!DecodeModuleTail(d, &env)) {
     return false;
   }
 

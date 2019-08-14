@@ -6,8 +6,7 @@
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         title="Tests: accessible XUL label/description events">
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
 
   <script type="application/javascript"
           src="../common.js" />
@@ -85,7 +84,7 @@
     function setCrop(aID, aCropValue, aRemovedText, aInsertedText)
     {
       this.labelNode = getNode(aID);
-      this.width = this.labelNode.boxObject.width;
+      this.width = this.labelNode.getBoundingClientRect().width;
       this.charWidth = this.width / this.labelNode.value.length;
 
       this.eventSeq = [

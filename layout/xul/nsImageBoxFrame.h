@@ -18,6 +18,10 @@ class nsImageBoxFrame;
 
 class nsDisplayXULImage;
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 class nsImageBoxListener final : public imgINotificationObserver {
  public:
   explicit nsImageBoxListener(nsImageBoxFrame* frame);
@@ -41,6 +45,7 @@ class nsImageBoxFrame final : public nsLeafBoxFrame {
 
   friend class nsDisplayXULImage;
   NS_DECL_FRAMEARENA_HELPERS(nsImageBoxFrame)
+  NS_DECL_QUERYFRAME
 
   virtual nsSize GetXULPrefSize(nsBoxLayoutState& aBoxLayoutState) override;
   virtual nsSize GetXULMinSize(nsBoxLayoutState& aBoxLayoutState) override;
@@ -49,7 +54,7 @@ class nsImageBoxFrame final : public nsLeafBoxFrame {
 
   nsresult Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aData);
 
-  friend nsIFrame* NS_NewImageBoxFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewImageBoxFrame(mozilla::PresShell* aPresShell,
                                        ComputedStyle* aStyle);
 
   virtual void Init(nsIContent* aContent, nsContainerFrame* aParent,
@@ -80,6 +85,9 @@ class nsImageBoxFrame final : public nsLeafBoxFrame {
    */
   void UpdateLoadFlags();
 
+  void RestartAnimation();
+  void StopAnimation();
+
   virtual void BuildDisplayList(nsDisplayListBuilder* aBuilder,
                                 const nsDisplayListSet& aLists) override;
 
@@ -97,7 +105,7 @@ class nsImageBoxFrame final : public nsLeafBoxFrame {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const mozilla::layers::StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager, nsDisplayItem* aItem,
+      mozilla::layers::RenderRootStateManager* aManager, nsDisplayItem* aItem,
       nsPoint aPt, uint32_t aFlags);
 
   bool CanOptimizeToImageLayer();
@@ -105,7 +113,7 @@ class nsImageBoxFrame final : public nsLeafBoxFrame {
   nsRect GetDestRect(const nsPoint& aOffset, Maybe<nsPoint>& aAnchorPoint);
 
  protected:
-  explicit nsImageBoxFrame(ComputedStyle* aStyle);
+  explicit nsImageBoxFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
 
   virtual void GetImageSize();
 
@@ -170,7 +178,7 @@ class nsDisplayXULImage final : public nsDisplayImageContainer {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
 
   NS_DISPLAY_DECL_NAME("XULImage", TYPE_XUL_IMAGE)

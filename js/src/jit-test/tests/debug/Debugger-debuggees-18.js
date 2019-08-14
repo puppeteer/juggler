@@ -14,8 +14,8 @@ function assertDebuggees(...expected) {
     assertEq(debuggees.indexOf(g) != -1, true);
 }
 
-var g1 = newGlobal(); g1.toSource = function () { return "[global g1]"; };
-var g2 = newGlobal(); g2.toSource = function () { return "[global g2]"; };
+var g1 = newGlobal({newCompartment: true}); g1.toSource = function () { return "[global g1]"; };
+var g2 = newGlobal({newCompartment: true}); g2.toSource = function () { return "[global g2]"; };
 
 assertDebuggees();
 
@@ -46,8 +46,8 @@ assertDebuggees(dg1, dg2);
 
 // "dwg1" means "Debugger.Object referring to CCW of g1".
 var dwg1 = dg2.makeDebuggeeValue(g1);
-assertEq(dwg1.unwrap(), dg1);
-dwg1.toSource = function() { return "[Debugger.Object for CCW of global g1]"; };
+assertEq(dwg1.unwrap(), dg1.makeDebuggeeValue(g1));
+dwg1.toSource = function() { return "[Debugger.Object for CCW of WindowProxy of g1]"; };
 
 assertDebuggees(dg1, dg2);
 assertEq(dbg.removeDebuggee(g1), undefined);

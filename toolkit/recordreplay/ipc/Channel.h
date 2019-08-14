@@ -11,6 +11,7 @@
 
 #include "mozilla/gfx/Types.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/UniquePtr.h"
 
 #include "File.h"
 #include "JSControl.h"
@@ -41,13 +42,6 @@ namespace recordreplay {
 // messages from being lost when they are sent from the middleman as the
 // replaying process rewinds itself. A few exceptions to this rule are noted
 // below.
-//
-// Some additional synchronization is needed between different child processes:
-// replaying processes can read from the same file which a recording process is
-// writing to. While it is ok for a replaying process to read from the file
-// while the recording process is appending new chunks to it (see File.cpp),
-// all replaying processes must be paused when the recording process is
-// flushing a new index to the file.
 
 #define ForEachMessageType(_Macro)                             \
   /* Messages sent from the middleman to the child process. */ \
@@ -63,56 +57,20 @@ namespace recordreplay {
   /* process to crash. */                                      \
   _Macro(Terminate)                                            \
                                                                \
-  /* Flush the current recording to disk. */                   \
-  _Macro(FlushRecording)                                       \
-                                                               \
   /* Poke a child that is recording to create an artificial checkpoint, rather than */ \
   /* (potentially) idling indefinitely. This has no effect on a replaying process. */ \
   _Macro(CreateCheckpoint)                                     \
                                                                \
-  /* Debugger JSON messages are initially sent from the parent. The child unpauses */ \
-  /* after receiving the message and will pause after it sends a DebuggerResponse. */ \
-  _Macro(DebuggerRequest)                                      \
-                                                               \
-  /* Add a breakpoint position to stop at. Because a single entry point is used for */ \
-  /* calling into the ReplayDebugger after pausing, the set of breakpoints is simply */ \
-  /* a set of positions at which the child process should pause and send a HitBreakpoint */ \
-  /* message. */                                               \
-  _Macro(AddBreakpoint)                                        \
-                                                               \
-  /* Clear all installed breakpoints. */                       \
-  _Macro(ClearBreakpoints)                                     \
-                                                               \
-  /* Unpause the child and play execution either to the next point when a */ \
-  /* breakpoint is hit, or to the next checkpoint. Resumption may be either */ \
-  /* forward or backward. */                                   \
-  _Macro(Resume)                                               \
-                                                               \
-  /* Rewind to a particular saved checkpoint in the past. */   \
-  _Macro(RestoreCheckpoint)                                    \
-                                                               \
-  /* Run forward to a particular execution point between the current checkpoint */ \
-  /* and the next one. */                                      \
-  _Macro(RunToPoint)                                           \
-                                                               \
-  /* Notify the child whether it is the active child and should send paint and similar */ \
-  /* messages to the middleman. */                             \
-  _Macro(SetIsActive)                                          \
-                                                               \
-  /* Set whether to perform intentional crashes, for testing. */ \
-  _Macro(SetAllowIntentionalCrashes)                           \
-                                                               \
-  /* Set whether to save a particular checkpoint. */           \
-  _Macro(SetSaveCheckpoint)                                    \
+  /* Unpause the child and perform a debugger-defined operation. */ \
+  _Macro(ManifestStart)                                             \
                                                                \
   /* Respond to a MiddlemanCallRequest message. */             \
   _Macro(MiddlemanCallResponse)                                \
                                                                \
   /* Messages sent from the child process to the middleman. */ \
                                                                \
-  /* Sent in response to a FlushRecording, telling the middleman that the flush */ \
-  /* has finished. */                                          \
-  _Macro(RecordingFlushed)                                     \
+  /* Pause after executing a manifest, specifying its response. */ \
+  _Macro(ManifestFinished)                                     \
                                                                \
   /* A critical error occurred and execution cannot continue. The child will */ \
   /* stop executing after sending this message and will wait to be terminated. */ \
@@ -126,23 +84,12 @@ namespace recordreplay {
   /* The child's graphics were repainted. */                   \
   _Macro(Paint)                                                \
                                                                \
-  /* Notify the middleman that a checkpoint or breakpoint was hit. */ \
-  /* The child will pause after sending these messages. */     \
-  _Macro(HitCheckpoint)                                        \
-  _Macro(HitBreakpoint)                                        \
-                                                               \
-  /* Send a response to a DebuggerRequest message. */          \
-  _Macro(DebuggerResponse)                                     \
-                                                               \
   /* Call a system function from the middleman process which the child has */ \
   /* encountered after diverging from the recording. */        \
   _Macro(MiddlemanCallRequest)                                 \
                                                                \
   /* Reset all information generated by previous MiddlemanCallRequest messages. */ \
-  _Macro(ResetMiddlemanCalls)                                  \
-                                                               \
-  /* Notify that the 'AlwaysMarkMajorCheckpoints' directive was invoked. */ \
-  _Macro(AlwaysMarkMajorCheckpoints)
+  _Macro(ResetMiddlemanCalls)
 
 enum class MessageType {
 #define DefineEnum(Kind) Kind,
@@ -153,19 +100,30 @@ enum class MessageType {
 struct Message {
   MessageType mType;
 
+  // When simulating message delays, the time this message should be received,
+  // relative to when the channel was opened.
+  uint32_t mReceiveTime;
+
   // Total message size, including the header.
   uint32_t mSize;
 
  protected:
-  Message(MessageType aType, uint32_t aSize) : mType(aType), mSize(aSize) {
+  Message(MessageType aType, uint32_t aSize)
+      : mType(aType), mReceiveTime(0), mSize(aSize) {
     MOZ_RELEASE_ASSERT(mSize >= sizeof(*this));
   }
 
  public:
-  Message* Clone() const {
-    char* res = (char*)malloc(mSize);
+  struct FreePolicy {
+    void operator()(Message* msg) { /*free(msg);*/
+    }
+  };
+  typedef UniquePtr<Message, FreePolicy> UniquePtr;
+
+  UniquePtr Clone() const {
+    Message* res = static_cast<Message*>(malloc(mSize));
     memcpy(res, this, mSize);
-    return (Message*)res;
+    return UniquePtr(res);
   }
 
   const char* TypeString() const {
@@ -185,7 +143,8 @@ struct Message {
     return mType == MessageType::CreateCheckpoint ||
            mType == MessageType::SetDebuggerRunsInMiddleman ||
            mType == MessageType::MiddlemanCallResponse ||
-           mType == MessageType::Terminate;
+           mType == MessageType::Terminate ||
+           mType == MessageType::Introduction;
   }
 
  protected:
@@ -265,7 +224,6 @@ typedef EmptyMessage<MessageType::SetDebuggerRunsInMiddleman>
     SetDebuggerRunsInMiddlemanMessage;
 typedef EmptyMessage<MessageType::Terminate> TerminateMessage;
 typedef EmptyMessage<MessageType::CreateCheckpoint> CreateCheckpointMessage;
-typedef EmptyMessage<MessageType::FlushRecording> FlushRecordingMessage;
 
 template <MessageType Type>
 struct JSONMessage : public Message {
@@ -283,75 +241,8 @@ struct JSONMessage : public Message {
   }
 };
 
-typedef JSONMessage<MessageType::DebuggerRequest> DebuggerRequestMessage;
-typedef JSONMessage<MessageType::DebuggerResponse> DebuggerResponseMessage;
-
-struct AddBreakpointMessage : public Message {
-  js::BreakpointPosition mPosition;
-
-  explicit AddBreakpointMessage(const js::BreakpointPosition& aPosition)
-      : Message(MessageType::AddBreakpoint, sizeof(*this)),
-        mPosition(aPosition) {}
-};
-
-typedef EmptyMessage<MessageType::ClearBreakpoints> ClearBreakpointsMessage;
-
-struct ResumeMessage : public Message {
-  // Whether to travel forwards or backwards.
-  bool mForward;
-
-  explicit ResumeMessage(bool aForward)
-      : Message(MessageType::Resume, sizeof(*this)), mForward(aForward) {}
-};
-
-struct RestoreCheckpointMessage : public Message {
-  // The checkpoint to restore.
-  size_t mCheckpoint;
-
-  explicit RestoreCheckpointMessage(size_t aCheckpoint)
-      : Message(MessageType::RestoreCheckpoint, sizeof(*this)),
-        mCheckpoint(aCheckpoint) {}
-};
-
-struct RunToPointMessage : public Message {
-  // The target execution point.
-  js::ExecutionPoint mTarget;
-
-  explicit RunToPointMessage(const js::ExecutionPoint& aTarget)
-      : Message(MessageType::RunToPoint, sizeof(*this)), mTarget(aTarget) {}
-};
-
-struct SetIsActiveMessage : public Message {
-  // Whether this is the active child process (see ParentIPC.cpp).
-  bool mActive;
-
-  explicit SetIsActiveMessage(bool aActive)
-      : Message(MessageType::SetIsActive, sizeof(*this)), mActive(aActive) {}
-};
-
-struct SetAllowIntentionalCrashesMessage : public Message {
-  // Whether to allow intentional crashes in the future or not.
-  bool mAllowed;
-
-  explicit SetAllowIntentionalCrashesMessage(bool aAllowed)
-      : Message(MessageType::SetAllowIntentionalCrashes, sizeof(*this)),
-        mAllowed(aAllowed) {}
-};
-
-struct SetSaveCheckpointMessage : public Message {
-  // The checkpoint in question.
-  size_t mCheckpoint;
-
-  // Whether to save this checkpoint whenever it is encountered.
-  bool mSave;
-
-  SetSaveCheckpointMessage(size_t aCheckpoint, bool aSave)
-      : Message(MessageType::SetSaveCheckpoint, sizeof(*this)),
-        mCheckpoint(aCheckpoint),
-        mSave(aSave) {}
-};
-
-typedef EmptyMessage<MessageType::RecordingFlushed> RecordingFlushedMessage;
+typedef JSONMessage<MessageType::ManifestStart> ManifestStartMessage;
+typedef JSONMessage<MessageType::ManifestFinished> ManifestFinishedMessage;
 
 struct FatalErrorMessage : public Message {
   explicit FatalErrorMessage(uint32_t aSize)
@@ -381,33 +272,6 @@ struct PaintMessage : public Message {
         mHeight(aHeight) {}
 };
 
-struct HitCheckpointMessage : public Message {
-  uint32_t mCheckpointId;
-  bool mRecordingEndpoint;
-
-  // When recording, the amount of non-idle time taken to get to this
-  // checkpoint from the previous one.
-  double mDurationMicroseconds;
-
-  HitCheckpointMessage(uint32_t aCheckpointId, bool aRecordingEndpoint,
-                       double aDurationMicroseconds)
-      : Message(MessageType::HitCheckpoint, sizeof(*this)),
-        mCheckpointId(aCheckpointId),
-        mRecordingEndpoint(aRecordingEndpoint),
-        mDurationMicroseconds(aDurationMicroseconds) {}
-};
-
-struct HitBreakpointMessage : public Message {
-  bool mRecordingEndpoint;
-
-  explicit HitBreakpointMessage(bool aRecordingEndpoint)
-      : Message(MessageType::HitBreakpoint, sizeof(*this)),
-        mRecordingEndpoint(aRecordingEndpoint) {}
-};
-
-typedef EmptyMessage<MessageType::AlwaysMarkMajorCheckpoints>
-    AlwaysMarkMajorCheckpointsMessage;
-
 template <MessageType Type>
 struct BinaryMessage : public Message {
   explicit BinaryMessage(uint32_t aSize) : Message(Type, aSize) {}
@@ -433,19 +297,11 @@ typedef BinaryMessage<MessageType::MiddlemanCallResponse>
 typedef EmptyMessage<MessageType::ResetMiddlemanCalls>
     ResetMiddlemanCallsMessage;
 
-static inline MiddlemanCallResponseMessage* ProcessMiddlemanCallMessage(
-    const MiddlemanCallRequestMessage& aMsg) {
-  InfallibleVector<char> outputData;
-  ProcessMiddlemanCall(aMsg.BinaryData(), aMsg.BinaryDataSize(), &outputData);
-  return MiddlemanCallResponseMessage::New(outputData.begin(),
-                                           outputData.length());
-}
-
 class Channel {
  public:
   // Note: the handler is responsible for freeing its input message. It will be
   // called on the channel's message thread.
-  typedef std::function<void(Message*)> MessageHandler;
+  typedef std::function<void(Message::UniquePtr)> MessageHandler;
 
  private:
   // ID for this channel, unique for the middleman.
@@ -474,12 +330,22 @@ class Channel {
   // The number of bytes of data already in the message buffer.
   size_t mMessageBytes;
 
+  // Whether this channel is subject to message delays during simulation.
+  bool mSimulateDelays;
+
+  // The time this channel was opened, for use in simulating message delays.
+  TimeStamp mStartTime;
+
+  // When simulating message delays, the time at which old messages will have
+  // finished sending and new messages may be sent.
+  TimeStamp mAvailableTime;
+
   // If spew is enabled, print a message and associated info to stderr.
   void PrintMessage(const char* aPrefix, const Message& aMsg);
 
   // Block until a complete message is received from the other side of the
   // channel.
-  Message* WaitForMessage();
+  Message::UniquePtr WaitForMessage();
 
   // Main routine for the channel's thread.
   static void ThreadMain(void* aChannel);
@@ -493,7 +359,7 @@ class Channel {
 
   // Send a message to the other side of the channel. This must be called on
   // the main thread, except for fatal error messages.
-  void SendMessage(const Message& aMsg);
+  void SendMessage(Message&& aMsg);
 };
 
 // Command line option used to specify the middleman pid for a child process.

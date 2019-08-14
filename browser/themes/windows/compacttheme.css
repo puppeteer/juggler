@@ -4,17 +4,6 @@
 
 %include ../shared/compacttheme.inc.css
 
-@media (-moz-windows-accent-color-in-titlebar) {
-  :root[tabsintitlebar]:not(:-moz-window-inactive) {
-    background-color: -moz-win-accentcolor;
-    color: -moz-win-accentcolortext;
-  }
-  :root[tabsintitlebar] #titlebar {
-    --lwt-toolbarbutton-icon-fill: currentColor;
-    --toolbarbutton-icon-fill-opacity: .7;
-  }
-}
-
 /* The window background is white due to no accentcolor in the lightweight
    theme. It can't be changed to transparent when there is no compositor
    (Win 7 in classic / basic theme), or else dragging and focus become
@@ -28,10 +17,10 @@
   /* Prevent accent color overriding the window background for
    * light and dark theme on Aero Basic. This is copied from browser-aero.css. */
   @media (-moz-windows-default-theme) {
-    #main-window {
+    :root {
       background-color: rgb(185,209,234) !important;
     }
-    #main-window:-moz-window-inactive {
+    :root:-moz-window-inactive {
       background-color: rgb(215,228,242) !important;
     }
   }
@@ -44,16 +33,10 @@
       color: hsl(240,9%,98%);
     }
 
-    /* Keep showing the correct color inside the tabs. */
-    .tabbrowser-tab {
-      color: var(--lwt-text-color) !important;
-    }
-
     /* Because we're forcing the tabs toolbar to be [brighttext] to
      * get white toolbar button icons, we need to manually set the
-     * correct color for the tab hover and multiselect state for the light theme. */
-    .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]):-moz-lwtheme-darktext,
-    .tabbrowser-tab[multiselected] > .tab-stack > .tab-background:not([selected=true]):-moz-lwtheme-darktext {
+     * correct color for the tab hover state for the light theme. */
+    .tabbrowser-tab:hover > .tab-stack > .tab-background:not([selected=true]):not([multiselected]):-moz-lwtheme-darktext {
       background-color: rgba(0,0,0,.1) !important;
     }
     .tabbrowser-tab:hover > .tab-stack > .tab-background > .tab-line:not([selected=true]):not([multiselected]):-moz-lwtheme-darktext {
@@ -83,7 +66,7 @@
 @media (-moz-os-version: windows-win7),
        (-moz-os-version: windows-win8) {
   @media (-moz-windows-compositor) {
-    #main-window {
+    :root {
       background: transparent !important;
     }
 
@@ -105,6 +88,7 @@
    * show the tabs toolbar background color inside tabs. */
   .tabbrowser-tab {
     background-color: var(--lwt-accent-color) !important;
+    color: var(--lwt-text-color) !important;
     border-top: 1px solid var(--tabs-border-color);
     background-clip: padding-box;
   }
@@ -136,7 +120,7 @@
       color: InactiveCaptionText;
     }
 
-    #main-window[tabsintitlebar] #main-menubar > menu {
+    :root[tabsintitlebar] #main-menubar > menu {
       color: inherit;
     }
   }

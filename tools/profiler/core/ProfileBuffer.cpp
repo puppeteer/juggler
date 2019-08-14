@@ -6,26 +6,20 @@
 
 #include "ProfileBuffer.h"
 
-#include "mozilla/MathAlgorithms.h"
-
 #include "ProfilerMarker.h"
+
 #include "jsfriendapi.h"
-#include "nsScriptSecurityManager.h"
+#include "mozilla/MathAlgorithms.h"
 #include "nsJSPrincipals.h"
+#include "nsScriptSecurityManager.h"
 
 using namespace mozilla;
 
-ProfileBuffer::ProfileBuffer(uint32_t aCapacity)
-    : mEntryIndexMask(0), mRangeStart(0), mRangeEnd(0), mCapacity(0) {
-  // Round aCapacity up to the nearest power of two, so that we can index
-  // mEntries with a simple mask and don't need to do a slow modulo operation.
-  const uint32_t UINT32_MAX_POWER_OF_TWO = 1 << 31;
-  MOZ_RELEASE_ASSERT(aCapacity <= UINT32_MAX_POWER_OF_TWO,
-                     "aCapacity is larger than what we support");
-  mCapacity = RoundUpPow2(aCapacity);
-  mEntryIndexMask = mCapacity - 1;
-  mEntries = MakeUnique<ProfileBufferEntry[]>(mCapacity);
-}
+ProfileBuffer::ProfileBuffer(PowerOfTwo32 aCapacity)
+    : mEntries(MakeUnique<ProfileBufferEntry[]>(aCapacity.Value())),
+      mEntryIndexMask(aCapacity.Mask()),
+      mRangeStart(0),
+      mRangeEnd(0) {}
 
 ProfileBuffer::~ProfileBuffer() {
   while (mStoredMarkers.peek()) {
@@ -38,8 +32,8 @@ void ProfileBuffer::AddEntry(const ProfileBufferEntry& aEntry) {
   GetEntry(mRangeEnd++) = aEntry;
 
   // The distance between mRangeStart and mRangeEnd must never exceed
-  // mCapacity, so advance mRangeStart if necessary.
-  if (mRangeEnd - mRangeStart > mCapacity) {
+  // capacity, so advance mRangeStart if necessary.
+  if (mRangeEnd - mRangeStart > mEntryIndexMask.MaskValue() + 1) {
     mRangeStart++;
   }
 }
@@ -58,7 +52,7 @@ void ProfileBuffer::AddStoredMarker(ProfilerMarker* aStoredMarker) {
 void ProfileBuffer::CollectCodeLocation(
     const char* aLabel, const char* aStr, uint32_t aFrameFlags,
     const Maybe<uint32_t>& aLineNumber, const Maybe<uint32_t>& aColumnNumber,
-    const Maybe<js::ProfilingStackFrame::Category>& aCategory) {
+    const Maybe<JS::ProfilingCategoryPair>& aCategoryPair) {
   AddEntry(ProfileBufferEntry::Label(aLabel));
   AddEntry(ProfileBufferEntry::FrameFlags(uint64_t(aFrameFlags)));
 
@@ -87,8 +81,8 @@ void ProfileBuffer::CollectCodeLocation(
     AddEntry(ProfileBufferEntry::ColumnNumber(*aColumnNumber));
   }
 
-  if (aCategory.isSome()) {
-    AddEntry(ProfileBufferEntry::Category(int(*aCategory)));
+  if (aCategoryPair.isSome()) {
+    AddEntry(ProfileBufferEntry::CategoryPair(int(*aCategoryPair)));
   }
 }
 
@@ -186,5 +180,5 @@ void ProfileBufferCollector::CollectProfilingStackFrame(
   }
 
   mBuf.CollectCodeLocation(label, dynamicString, aFrame.flags(), line, column,
-                           Some(aFrame.category()));
+                           Some(aFrame.categoryPair()));
 }

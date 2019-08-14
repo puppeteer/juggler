@@ -29,7 +29,6 @@
 // Boilerplate used to be able to import this module both from the main
 // thread and from worker threads.
 if (typeof Components != "undefined") {
-  Cu.importGlobalProperties(["URL"]);
   // Global definition of |exports|, to keep everybody happy.
   // In non-main thread, |exports| is provided by the module
   // loader.
@@ -63,8 +62,9 @@ var basename = function(path) {
     }
     return ""; // Degenerate case
   }
-  return path.slice(Math.max(path.lastIndexOf("\\"),
-                             path.lastIndexOf(":")) + 1);
+  return path.slice(
+    Math.max(path.lastIndexOf("\\"), path.lastIndexOf(":")) + 1
+  );
 };
 exports.basename = basename;
 
@@ -85,7 +85,7 @@ exports.basename = basename;
  *  - |winNoDrive| If |true|, also remove the letter from the path name.
  */
 var dirname = function(path, options) {
-  let noDrive = (options && options.winNoDrive);
+  let noDrive = options && options.winNoDrive;
 
   // Find the last occurrence of "\\"
   let index = path.lastIndexOf("\\");
@@ -105,7 +105,6 @@ var dirname = function(path, options) {
       return ".";
     }
     return path;
-
   }
 
   // Ignore any occurrence of "\\: immediately before that one
@@ -204,7 +203,9 @@ var winGetDrive = function(path) {
   }
   // Non-UNC path
   let index = path.indexOf(":");
-  if (index <= 0) return null;
+  if (index <= 0) {
+    return null;
+  }
   return path.slice(0, index + 1);
 };
 exports.winGetDrive = winGetDrive;
@@ -246,23 +247,24 @@ var normalize = function(path) {
   // popping whenever there is a ".."
   path.split("\\").forEach(function loop(v) {
     switch (v) {
-    case "": case ".": // Ignore
-      break;
-    case "..":
-      if (stack.length == 0) {
-        if (absolute) {
-          throw new Error("Path is ill-formed: attempting to go past root");
-        } else {
-         stack.push("..");
-        }
-      } else if (stack[stack.length - 1] == "..") {
+      case "":
+      case ".": // Ignore
+        break;
+      case "..":
+        if (stack.length == 0) {
+          if (absolute) {
+            throw new Error("Path is ill-formed: attempting to go past root");
+          } else {
+            stack.push("..");
+          }
+        } else if (stack[stack.length - 1] == "..") {
           stack.push("..");
         } else {
           stack.pop();
         }
-      break;
-    default:
-      stack.push(v);
+        break;
+      default:
+        stack.push(v);
     }
   });
 
@@ -303,14 +305,18 @@ exports.split = split;
  * Return the file:// URI file path of the given local file path.
  */
 // The case of %3b is designed to match Services.io, but fundamentally doesn't matter.
-var toFileURIExtraEncodings = {";": "%3b", "?": "%3F", "#": "%23"};
+var toFileURIExtraEncodings = { ";": "%3b", "?": "%3F", "#": "%23" };
 var toFileURI = function toFileURI(path) {
   // URI-escape forward slashes and convert backward slashes to forward
-  path = this.normalize(path).replace(/[\\\/]/g, m => (m == "\\") ? "/" : "%2F");
+  path = this.normalize(path).replace(/[\\\/]/g, m =>
+    m == "\\" ? "/" : "%2F"
+  );
   // Per https://url.spec.whatwg.org we should not encode [] in the path
-  let dontNeedEscaping = {"%5B": "[", "%5D": "]"};
-  let uri = encodeURI(path).replace(/%(5B|5D)/gi,
-    match => dontNeedEscaping[match]);
+  let dontNeedEscaping = { "%5B": "[", "%5D": "]" };
+  let uri = encodeURI(path).replace(
+    /%(5B|5D)/gi,
+    match => dontNeedEscaping[match]
+  );
 
   // add a prefix, and encodeURI doesn't escape a few characters that we do
   // want to escape, so fix that up
@@ -340,8 +346,7 @@ var fromFileURI = function fromFileURI(uri) {
 
   let path = decodeURI(uri);
   // decode a few characters where URL's parsing is overzealous
-  path = path.replace(/%(3b|3f|23)/gi,
-        match => decodeURIComponent(match));
+  path = path.replace(/%(3b|3f|23)/gi, match => decodeURIComponent(match));
   path = this.normalize(path);
 
   // this.normalize() does not remove the trailing slash if the path
@@ -354,9 +359,9 @@ var fromFileURI = function fromFileURI(uri) {
 exports.fromFileURI = fromFileURI;
 
 /**
-* Utility function: Remove any leading/trailing backslashes
-* from a string.
-*/
+ * Utility function: Remove any leading/trailing backslashes
+ * from a string.
+ */
 var trimBackslashes = function trimBackslashes(string) {
   return string.replace(/^\\+|\\+$/g, "");
 };

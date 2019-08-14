@@ -9,8 +9,10 @@
 #include "mozilla/gfx/2D.h"
 #include "SVGContentUtils.h"
 
-using namespace mozilla;
 using namespace mozilla::gfx;
+
+namespace mozilla {
+namespace dom {
 
 //----------------------------------------------------------------------
 // Implementation
@@ -18,8 +20,6 @@ using namespace mozilla::gfx;
 SVGPolyElement::SVGPolyElement(
     already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
     : SVGPolyElementBase(std::move(aNodeInfo)) {}
-
-SVGPolyElement::~SVGPolyElement() {}
 
 already_AddRefed<DOMSVGPointList> SVGPolyElement::Points() {
   void* key = mPoints.GetBaseValKey();
@@ -47,9 +47,10 @@ SVGPolyElement::IsAttributeMapped(const nsAtom* name) const {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-/* virtual */ bool SVGPolyElement::HasValidDimensions() const {
+/* virtual */
+bool SVGPolyElement::HasValidDimensions() const {
   return !mPoints.GetAnimValue().IsEmpty();
 }
 
@@ -57,24 +58,22 @@ SVGPolyElement::IsAttributeMapped(const nsAtom* name) const {
 // SVGGeometryElement methods
 
 bool SVGPolyElement::AttributeDefinesGeometry(const nsAtom* aName) {
-  if (aName == nsGkAtoms::points) return true;
-
-  return false;
+  return aName == nsGkAtoms::points;
 }
 
-void SVGPolyElement::GetMarkPoints(nsTArray<nsSVGMark>* aMarks) {
+void SVGPolyElement::GetMarkPoints(nsTArray<SVGMark>* aMarks) {
   const SVGPointList& points = mPoints.GetAnimValue();
 
   if (!points.Length()) return;
 
   float px = points[0].mX, py = points[0].mY, prevAngle = 0.0;
 
-  aMarks->AppendElement(nsSVGMark(px, py, 0, nsSVGMark::eStart));
+  aMarks->AppendElement(SVGMark(px, py, 0, SVGMark::eStart));
 
   for (uint32_t i = 1; i < points.Length(); ++i) {
     float x = points[i].mX;
     float y = points[i].mY;
-    float angle = atan2(y - py, x - px);
+    float angle = std::atan2(y - py, x - px);
 
     // Vertex marker.
     if (i == 1) {
@@ -84,7 +83,7 @@ void SVGPolyElement::GetMarkPoints(nsTArray<nsSVGMark>* aMarks) {
           SVGContentUtils::AngleBisect(prevAngle, angle);
     }
 
-    aMarks->AppendElement(nsSVGMark(x, y, 0, nsSVGMark::eMid));
+    aMarks->AppendElement(SVGMark(x, y, 0, SVGMark::eMid));
 
     prevAngle = angle;
     px = x;
@@ -92,7 +91,7 @@ void SVGPolyElement::GetMarkPoints(nsTArray<nsSVGMark>* aMarks) {
   }
 
   aMarks->LastElement().angle = prevAngle;
-  aMarks->LastElement().type = nsSVGMark::eEnd;
+  aMarks->LastElement().type = SVGMark::eEnd;
 }
 
 bool SVGPolyElement::GetGeometryBounds(Rect* aBounds,
@@ -128,3 +127,5 @@ bool SVGPolyElement::GetGeometryBounds(Rect* aBounds,
   }
   return true;
 }
+}  // namespace dom
+}  // namespace mozilla

@@ -16,9 +16,7 @@
 namespace js {
 
 static bool TryPreserveReflector(JSContext* cx, HandleObject obj) {
-  if (obj->getClass()->isWrappedNative() || obj->getClass()->isDOMClass() ||
-      (obj->is<ProxyObject>() && obj->as<ProxyObject>().handler()->family() ==
-                                     GetDOMProxyHandlerFamily())) {
+  if (obj->getClass()->isDOMClass()) {
     MOZ_ASSERT(cx->runtime()->preserveWrapperCallback);
     if (!cx->runtime()->preserveWrapperCallback(cx, obj)) {
       JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
@@ -39,7 +37,7 @@ static MOZ_ALWAYS_INLINE bool WeakCollectionPutEntryInternal(
       return false;
     }
     map = newMap.release();
-    obj->setPrivate(map);
+    InitObjectPrivate(obj, map, MemoryUse::WeakMapObject);
   }
 
   // Preserve wrapped native keys to prevent wrapper optimization.
@@ -47,11 +45,9 @@ static MOZ_ALWAYS_INLINE bool WeakCollectionPutEntryInternal(
     return false;
   }
 
-  if (JSWeakmapKeyDelegateOp op = key->getClass()->extWeakmapKeyDelegateOp()) {
-    RootedObject delegate(cx, op(key));
-    if (delegate && !TryPreserveReflector(cx, delegate)) {
-      return false;
-    }
+  RootedObject delegate(cx, UncheckedUnwrapWithoutExpose(key));
+  if (delegate && !TryPreserveReflector(cx, delegate)) {
+    return false;
   }
 
   MOZ_ASSERT(key->compartment() == obj->compartment());

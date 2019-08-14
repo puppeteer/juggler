@@ -50,7 +50,6 @@ BEGIN_TEST(testAssemblerBuffer_AssemblerBuffer) {
   CHECK_EQUAL(ab.size(), 0u);
   CHECK_EQUAL(ab.nextOffset().getOffset(), 0);
   CHECK(!ab.oom());
-  CHECK(!ab.bail());
 
   BufferOffset off1 = ab.putInt(1000017);
   CHECK_EQUAL(off1.getOffset(), 0);
@@ -317,7 +316,6 @@ BEGIN_TEST(testAssemblerBuffer_AssemblerBufferWithConstantPools) {
   CHECK_EQUAL(ab.size(), 0u);
   CHECK_EQUAL(ab.nextOffset().getOffset(), 0);
   CHECK(!ab.oom());
-  CHECK(!ab.bail());
 
   // Each slice holds 5 instructions. Trigger a constant pool inside the slice.
   uint32_t poolLoad[] = {0xc0cc0000};
@@ -518,7 +516,7 @@ END_TEST(testAssemblerBuffer_AssemblerBufferWithConstantPools_ShortBranch)
 // Test that everything is put together correctly in the ARM64 assembler.
 #if defined(JS_CODEGEN_ARM64)
 
-#include "jit/MacroAssembler-inl.h"
+#  include "jit/MacroAssembler-inl.h"
 
 BEGIN_TEST(testAssemblerBuffer_ARM64) {
   using namespace js::jit;
@@ -526,7 +524,6 @@ BEGIN_TEST(testAssemblerBuffer_ARM64) {
   js::LifoAlloc lifo(4096);
   TempAllocator alloc(&lifo);
   JitContext jc(cx, &alloc);
-  cx->runtime()->getJitRuntime(cx);
   StackMacroAssembler masm;
 
   // Branches to an unbound label.

@@ -30,7 +30,7 @@
 #include <math.h>
 
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracer.h"
+#  include "GeckoTaskTracer.h"
 using namespace mozilla::tasktracer;
 #endif
 
@@ -816,7 +816,7 @@ bool MessageChannel::Open(Transport* aTransport, MessageLoop* aIOLoop,
   mWorkerLoop = MessageLoop::current();
   mWorkerThread = GetCurrentVirtualThread();
   mWorkerLoop->AddDestructionObserver(this);
-  mListener->SetIsMainThreadProtocol();
+  mListener->OnIPCChannelOpened();
 
   ProcessLink* link = new ProcessLink(this);
   link->Open(aTransport, aIOLoop, aSide);  // :TODO: n.b.: sets mChild
@@ -897,7 +897,7 @@ void MessageChannel::CommonThreadOpenInit(MessageChannel* aTargetChan,
   mWorkerLoop = MessageLoop::current();
   mWorkerThread = GetCurrentVirtualThread();
   mWorkerLoop->AddDestructionObserver(this);
-  mListener->SetIsMainThreadProtocol();
+  mListener->OnIPCChannelOpened();
 
   mLink = new ThreadLink(this, aTargetChan);
   mSide = aSide;
@@ -1143,7 +1143,8 @@ bool MessageChannel::MaybeInterceptSpecialIOMessage(const Message& aMsg) {
   return false;
 }
 
-/* static */ bool MessageChannel::IsAlwaysDeferred(const Message& aMsg) {
+/* static */
+bool MessageChannel::IsAlwaysDeferred(const Message& aMsg) {
   // If a message is not NESTED_INSIDE_CPOW and not sync, then we always defer
   // it.
   return aMsg.nested_level() != IPC::Message::NESTED_INSIDE_CPOW &&
@@ -1782,7 +1783,9 @@ bool MessageChannel::Call(Message* aMsg, Message* aReply) {
       MonitorAutoUnlock unlock(*mMonitor);
 
       CxxStackFrame frame(*this, IN_MESSAGE, &recvd);
-      DispatchInterruptMessage(std::move(recvd), stackDepth);
+      RefPtr<ActorLifecycleProxy> listenerProxy =
+          mListener->GetLifecycleProxy();
+      DispatchInterruptMessage(listenerProxy, std::move(recvd), stackDepth);
     }
     if (!Connected()) {
       ReportConnectionError("MessageChannel::DispatchInterruptMessage");
@@ -1891,7 +1894,7 @@ void MessageChannel::RunMessage(MessageTask& aTask) {
 
   // Check that we're going to run the first message that's valid to run.
 #if 0
-#ifdef DEBUG
+#  ifdef DEBUG
     nsCOMPtr<nsIEventTarget> messageTarget =
         mListener->GetMessageEventTarget(msg);
 
@@ -1908,7 +1911,7 @@ void MessageChannel::RunMessage(MessageTask& aTask) {
                    aTask.Msg().priority() != task->Msg().priority());
 
     }
-#endif
+#  endif
 #endif
 
   if (!mDeferred.empty()) {
@@ -2042,19 +2045,11 @@ MessageChannel::MessageTask::GetPriority(uint32_t* aPriority) {
   return NS_OK;
 }
 
-bool MessageChannel::MessageTask::GetAffectedSchedulerGroups(
-    SchedulerGroupSet& aGroups) {
-  if (!mChannel) {
-    return false;
-  }
-
-  mChannel->AssertWorkerThread();
-  return mChannel->mListener->GetMessageSchedulerGroups(mMessage, aGroups);
-}
-
 void MessageChannel::DispatchMessage(Message&& aMsg) {
   AssertWorkerThread();
   mMonitor->AssertCurrentThreadOwns();
+
+  RefPtr<ActorLifecycleProxy> listenerProxy = mListener->GetLifecycleProxy();
 
   Maybe<AutoNoJSAPI> nojsapi;
   if (ScriptSettingsInitialized() && NS_IsMainThread()) nojsapi.emplace();
@@ -2079,12 +2074,13 @@ void MessageChannel::DispatchMessage(Message&& aMsg) {
 
       mListener->ArtificialSleep();
 
-      if (aMsg.is_sync())
-        DispatchSyncMessage(aMsg, *getter_Transfers(reply));
-      else if (aMsg.is_interrupt())
-        DispatchInterruptMessage(std::move(aMsg), 0);
-      else
-        DispatchAsyncMessage(aMsg);
+      if (aMsg.is_sync()) {
+        DispatchSyncMessage(listenerProxy, aMsg, *getter_Transfers(reply));
+      } else if (aMsg.is_interrupt()) {
+        DispatchInterruptMessage(listenerProxy, std::move(aMsg), 0);
+      } else {
+        DispatchAsyncMessage(listenerProxy, aMsg);
+      }
 
       mListener->ArtificialSleep();
     }
@@ -2104,7 +2100,8 @@ void MessageChannel::DispatchMessage(Message&& aMsg) {
   }
 }
 
-void MessageChannel::DispatchSyncMessage(const Message& aMsg,
+void MessageChannel::DispatchSyncMessage(ActorLifecycleProxy* aProxy,
+                                         const Message& aMsg,
                                          Message*& aReply) {
   AssertWorkerThread();
 
@@ -2127,7 +2124,7 @@ void MessageChannel::DispatchSyncMessage(const Message& aMsg,
   Result rv;
   {
     AutoSetValue<MessageChannel*> blocked(blockingVar, this);
-    rv = mListener->OnMessageReceived(aMsg, aReply);
+    rv = aProxy->Get()->OnMessageReceived(aMsg, aReply);
   }
 
   uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
@@ -2143,7 +2140,8 @@ void MessageChannel::DispatchSyncMessage(const Message& aMsg,
   aReply->set_transaction_id(aMsg.transaction_id());
 }
 
-void MessageChannel::DispatchAsyncMessage(const Message& aMsg) {
+void MessageChannel::DispatchAsyncMessage(ActorLifecycleProxy* aProxy,
+                                          const Message& aMsg) {
   AssertWorkerThread();
   MOZ_RELEASE_ASSERT(!aMsg.is_interrupt() && !aMsg.is_sync());
 
@@ -2157,12 +2155,13 @@ void MessageChannel::DispatchAsyncMessage(const Message& aMsg) {
     AutoSetValue<bool> async(mDispatchingAsyncMessage, true);
     AutoSetValue<int> nestedLevelSet(mDispatchingAsyncMessageNestedLevel,
                                      nestedLevel);
-    rv = mListener->OnMessageReceived(aMsg);
+    rv = aProxy->Get()->OnMessageReceived(aMsg);
   }
   MaybeHandleError(rv, aMsg, "DispatchAsyncMessage");
 }
 
-void MessageChannel::DispatchInterruptMessage(Message&& aMsg,
+void MessageChannel::DispatchInterruptMessage(ActorLifecycleProxy* aProxy,
+                                              Message&& aMsg,
                                               size_t stackDepth) {
   AssertWorkerThread();
   mMonitor->AssertNotCurrentThreadOwns();
@@ -2188,7 +2187,7 @@ void MessageChannel::DispatchInterruptMessage(Message&& aMsg,
   nsAutoPtr<Message> reply;
 
   ++mRemoteStackDepthGuess;
-  Result rv = mListener->OnCallReceived(aMsg, *getter_Transfers(reply));
+  Result rv = aProxy->Get()->OnCallReceived(aMsg, *getter_Transfers(reply));
   --mRemoteStackDepthGuess;
 
   if (!MaybeHandleError(rv, aMsg, "DispatchInterruptMessage")) {
@@ -2329,14 +2328,14 @@ bool MessageChannel::WaitResponse(bool aWaitTimedOut) {
 
 #ifndef OS_WIN
 bool MessageChannel::WaitForSyncNotify(bool /* aHandleWindowsMessages */) {
-#ifdef DEBUG
+#  ifdef DEBUG
   // WARNING: We don't release the lock here. We can't because the link thread
   // could signal at this time and we would miss it. Instead we require
   // ArtificialTimeout() to be extremely simple.
   if (mListener->ArtificialTimeout()) {
     return false;
   }
-#endif
+#  endif
 
   MOZ_RELEASE_ASSERT(!mIsSameThreadChannel,
                      "Wait on same-thread channel will deadlock!");
@@ -2697,9 +2696,8 @@ void MessageChannel::Close() {
     }
 
     if (ChannelClosed == mChannelState) {
-      // XXX be strict about this until there's a compelling reason
-      // to relax
-      MOZ_CRASH("Close() called on closed channel!");
+      // Slightly unexpected but harmless; ignore.  See bug 1554244.
+      return;
     }
 
     // Notify the other side that we're about to close our socket. If we've
@@ -2761,7 +2759,7 @@ void MessageChannel::DebugAbort(const char* file, int line, const char* cond,
     pending.popFirst();
   }
 
-  MOZ_CRASH_UNSAFE_OOL(why);
+  MOZ_CRASH_UNSAFE(why);
 }
 
 void MessageChannel::DumpInterruptStack(const char* const pfx) const {

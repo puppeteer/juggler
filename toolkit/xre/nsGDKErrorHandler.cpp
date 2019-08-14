@@ -24,12 +24,12 @@
  * so we have to utilize the Gdk error handler to avoid
  * false alarms in Gtk3.
  */
-static void GdkErrorHandler(const gchar *log_domain, GLogLevelFlags log_level,
-                            const gchar *message, gpointer user_data) {
+static void GdkErrorHandler(const gchar* log_domain, GLogLevelFlags log_level,
+                            const gchar* message, gpointer user_data) {
   if (strstr(message, "X Window System error")) {
     XErrorEvent event;
     nsDependentCString buffer(message);
-    char *endptr;
+    char* endptr;
 
     /* Parse Gdk X Window error message which has this format:
      * (Details: serial XXXX error_code XXXX request_code XXXX (XXXX) minor_code
@@ -37,41 +37,55 @@ static void GdkErrorHandler(const gchar *log_domain, GLogLevelFlags log_level,
      */
     NS_NAMED_LITERAL_CSTRING(serialString, "(Details: serial ");
     int32_t start = buffer.Find(serialString);
-    if (start == kNotFound) MOZ_CRASH_UNSAFE_OOL(message);
+    if (start == kNotFound) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     start += serialString.Length();
     errno = 0;
     event.serial = strtol(buffer.BeginReading() + start, &endptr, 10);
-    if (errno) MOZ_CRASH_UNSAFE_OOL(message);
+    if (errno) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     NS_NAMED_LITERAL_CSTRING(errorCodeString, " error_code ");
     if (!StringBeginsWith(Substring(endptr, buffer.EndReading()),
-                          errorCodeString))
-      MOZ_CRASH_UNSAFE_OOL(message);
+                          errorCodeString)) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     errno = 0;
     event.error_code = strtol(endptr + errorCodeString.Length(), &endptr, 10);
-    if (errno) MOZ_CRASH_UNSAFE_OOL(message);
+    if (errno) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     NS_NAMED_LITERAL_CSTRING(requestCodeString, " request_code ");
     if (!StringBeginsWith(Substring(endptr, buffer.EndReading()),
-                          requestCodeString))
-      MOZ_CRASH_UNSAFE_OOL(message);
+                          requestCodeString)) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     errno = 0;
     event.request_code =
         strtol(endptr + requestCodeString.Length(), &endptr, 10);
-    if (errno) MOZ_CRASH_UNSAFE_OOL(message);
+    if (errno) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     NS_NAMED_LITERAL_CSTRING(minorCodeString, " minor_code ");
     start = buffer.Find(minorCodeString, /* aIgnoreCase = */ false,
                         endptr - buffer.BeginReading());
-    if (!start) MOZ_CRASH_UNSAFE_OOL(message);
+    if (!start) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     errno = 0;
     event.minor_code = strtol(
         buffer.BeginReading() + start + minorCodeString.Length(), nullptr, 10);
-    if (errno) MOZ_CRASH_UNSAFE_OOL(message);
+    if (errno) {
+      MOZ_CRASH_UNSAFE(message);
+    }
 
     event.display = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
     // Gdk does not provide resource ID
@@ -80,7 +94,7 @@ static void GdkErrorHandler(const gchar *log_domain, GLogLevelFlags log_level,
     X11Error(event.display, &event);
   } else {
     g_log_default_handler(log_domain, log_level, message, user_data);
-    MOZ_CRASH_UNSAFE_OOL(message);
+    MOZ_CRASH_UNSAFE(message);
   }
 }
 
@@ -90,6 +104,6 @@ void InstallGdkErrorHandler() {
                                      G_LOG_FLAG_RECURSION),
                     GdkErrorHandler, nullptr);
   if (PR_GetEnv("MOZ_X_SYNC")) {
-    XSynchronize(GDK_DISPLAY_XDISPLAY(gdk_display_get_default()), True);
+    XSynchronize(GDK_DISPLAY_XDISPLAY(gdk_display_get_default()), X11True);
   }
 }

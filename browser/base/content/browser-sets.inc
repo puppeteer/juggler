@@ -32,14 +32,13 @@
     <command id="cmd_pageSetup" oncommand="PrintUtils.showPageSetup();"/>
     <command id="cmd_print" oncommand="PrintUtils.printWindow(window.gBrowser.selectedBrowser.outerWindowID, window.gBrowser.selectedBrowser);"/>
     <command id="cmd_printPreview" oncommand="PrintUtils.printPreview(PrintPreviewListener);"/>
+    <command id="cmd_importFromAnotherBrowser" oncommand="MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_FILE_MENU]);"/>
     <command id="cmd_close" oncommand="BrowserCloseTabOrWindow(event);"/>
     <command id="cmd_closeWindow" oncommand="BrowserTryToCloseWindow()"/>
     <command id="cmd_toggleMute" oncommand="gBrowser.toggleMuteAudioOnMultiSelectedTabs(gBrowser.selectedTab)"/>
     <command id="cmd_CustomizeToolbars" oncommand="gCustomizeMode.enter()"/>
     <command id="cmd_toggleOfflineStatus" oncommand="BrowserOffline.toggleOfflineStatus();"/>
     <command id="cmd_quitApplication" oncommand="goQuitApplication()"/>
-
-#include ../../../toolkit/content/editMenuCommands.inc.xul
 
     <command id="View:PageSource" oncommand="BrowserViewSource(window.gBrowser.selectedBrowser);"/>
     <command id="View:PageInfo" oncommand="BrowserPageInfo();"/>
@@ -85,8 +84,7 @@
     <command id="Browser:OpenLocation" oncommand="openLocation();"/>
     <command id="Browser:RestoreLastSession" oncommand="SessionStore.restoreLastSession();" disabled="true"/>
     <command id="Browser:NewUserContextTab" oncommand="openNewUserContextTab(event.sourceEvent);"/>
-    <command id="Browser:OpenAboutContainers" oncommand="openPreferences('paneContainers', {origin: 'ContainersCommand'});"/>
-
+    <command id="Browser:OpenAboutContainers" oncommand="openPreferences('paneContainers');"/>
     <command id="Tools:Search" oncommand="BrowserSearch.webSearch();"/>
     <command id="Tools:Downloads" oncommand="BrowserDownloadsUI();"/>
     <command id="Tools:Addons" oncommand="BrowserOpenAddonsMgr();"/>
@@ -97,7 +95,8 @@
     <command id="History:UndoCloseWindow" oncommand="undoCloseWindow();"/>
 
 #ifdef NIGHTLY_BUILD
-    <command id="wrCaptureCmd" oncommand="gWebRender.capture();"/>
+    <command id="wrCaptureCmd" oncommand="gGfxUtils.webrenderCapture();"/>
+    <command id="windowRecordingCmd" oncommand="gGfxUtils.toggleWindowRecording();"/>
 #endif
 #ifdef XP_MACOSX
     <command id="minimizeWindow"
@@ -182,8 +181,8 @@
     <key id="key_delete" keycode="VK_DELETE" command="cmd_delete"/>
     <key id="key_selectAll" key="&selectAllCmd.key;" modifiers="accel"/>
 
-    <key keycode="VK_BACK" command="cmd_handleBackspace"/>
-    <key keycode="VK_BACK" command="cmd_handleShiftBackspace" modifiers="shift"/>
+    <key keycode="VK_BACK" command="cmd_handleBackspace" reserved="false"/>
+    <key keycode="VK_BACK" command="cmd_handleShiftBackspace" modifiers="shift" reserved="false"/>
 #ifndef XP_MACOSX
     <key id="goBackKb"  keycode="VK_LEFT" command="Browser:Back" modifiers="alt"/>
     <key id="goForwardKb"  keycode="VK_RIGHT" command="Browser:Forward" modifiers="alt"/>
@@ -318,6 +317,13 @@
     key="#" modifiers="control"
 #endif
     command="wrCaptureCmd"/>
+    <key id="key_windowRecordingCmd"
+#ifdef XP_MACOSX
+    key="4" modifiers="control,shift"
+#else
+    key="$" modifiers="control"
+#endif
+    command="windowRecordingCmd"/>
 #endif
 #ifdef XP_MACOSX
     <key id="key_minimizeWindow"
@@ -331,6 +337,7 @@
     <!-- These are used to build the Application menu -->
     <key id="key_preferencesCmdMac"
          key="&preferencesCmdMac.commandkey;"
+         reserved="true"
          modifiers="accel"/>
     <key id="key_hideThisAppCmdMac"
          key="&hideThisAppCmdMac2.commandkey;"

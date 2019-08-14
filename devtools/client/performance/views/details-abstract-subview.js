@@ -1,31 +1,47 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* import-globals-from ../performance-controller.js */
-/* import-globals-from ../performance-view.js */
-/* exported DetailsSubview */
+/* globals $, $$, PerformanceController, OverviewView, DetailsView */
 "use strict";
+
+const {
+  setNamedTimeout,
+  clearNamedTimeout,
+} = require("devtools/client/shared/widgets/view-helpers");
+const EVENTS = require("../events");
 
 /**
  * A base class from which all detail views inherit.
  */
-var DetailsSubview = {
+const DetailsSubview = {
   /**
    * Sets up the view with event binding.
    */
   initialize: function() {
-    this._onRecordingStoppedOrSelected = this._onRecordingStoppedOrSelected.bind(this);
+    this._onRecordingStoppedOrSelected = this._onRecordingStoppedOrSelected.bind(
+      this
+    );
     this._onOverviewRangeChange = this._onOverviewRangeChange.bind(this);
     this._onDetailsViewSelected = this._onDetailsViewSelected.bind(this);
     this._onPrefChanged = this._onPrefChanged.bind(this);
 
-    PerformanceController.on(EVENTS.RECORDING_STATE_CHANGE,
-                             this._onRecordingStoppedOrSelected);
-    PerformanceController.on(EVENTS.RECORDING_SELECTED,
-                             this._onRecordingStoppedOrSelected);
+    PerformanceController.on(
+      EVENTS.RECORDING_STATE_CHANGE,
+      this._onRecordingStoppedOrSelected
+    );
+    PerformanceController.on(
+      EVENTS.RECORDING_SELECTED,
+      this._onRecordingStoppedOrSelected
+    );
     PerformanceController.on(EVENTS.PREF_CHANGED, this._onPrefChanged);
-    OverviewView.on(EVENTS.UI_OVERVIEW_RANGE_SELECTED, this._onOverviewRangeChange);
-    DetailsView.on(EVENTS.UI_DETAILS_VIEW_SELECTED, this._onDetailsViewSelected);
+    OverviewView.on(
+      EVENTS.UI_OVERVIEW_RANGE_SELECTED,
+      this._onOverviewRangeChange
+    );
+    DetailsView.on(
+      EVENTS.UI_DETAILS_VIEW_SELECTED,
+      this._onDetailsViewSelected
+    );
 
     const self = this;
     const originalRenderFn = this.render;
@@ -46,13 +62,23 @@ var DetailsSubview = {
   destroy: function() {
     clearNamedTimeout("range-change-debounce");
 
-    PerformanceController.off(EVENTS.RECORDING_STATE_CHANGE,
-                              this._onRecordingStoppedOrSelected);
-    PerformanceController.off(EVENTS.RECORDING_SELECTED,
-                              this._onRecordingStoppedOrSelected);
+    PerformanceController.off(
+      EVENTS.RECORDING_STATE_CHANGE,
+      this._onRecordingStoppedOrSelected
+    );
+    PerformanceController.off(
+      EVENTS.RECORDING_SELECTED,
+      this._onRecordingStoppedOrSelected
+    );
     PerformanceController.off(EVENTS.PREF_CHANGED, this._onPrefChanged);
-    OverviewView.off(EVENTS.UI_OVERVIEW_RANGE_SELECTED, this._onOverviewRangeChange);
-    DetailsView.off(EVENTS.UI_DETAILS_VIEW_SELECTED, this._onDetailsViewSelected);
+    OverviewView.off(
+      EVENTS.UI_OVERVIEW_RANGE_SELECTED,
+      this._onOverviewRangeChange
+    );
+    DetailsView.off(
+      EVENTS.UI_DETAILS_VIEW_SELECTED,
+      this._onDetailsViewSelected
+    );
   },
 
   /**
@@ -138,15 +164,25 @@ var DetailsSubview = {
     }
     if (DetailsView.isViewSelected(this)) {
       const debounced = () => {
-        if (!this.shouldUpdateWhileMouseIsActive && OverviewView.isMouseActive) {
+        if (
+          !this.shouldUpdateWhileMouseIsActive &&
+          OverviewView.isMouseActive
+        ) {
           // Don't render yet, while the selection is still being dragged.
-          setNamedTimeout("range-change-debounce", this.rangeChangeDebounceTime,
-                          debounced);
+          setNamedTimeout(
+            "range-change-debounce",
+            this.rangeChangeDebounceTime,
+            debounced
+          );
         } else {
           this.render(interval);
         }
       };
-      setNamedTimeout("range-change-debounce", this.rangeChangeDebounceTime, debounced);
+      setNamedTimeout(
+        "range-change-debounce",
+        this.rangeChangeDebounceTime,
+        debounced
+      );
     } else {
       this.shouldUpdateWhenShown = true;
     }
@@ -192,3 +228,5 @@ var DetailsSubview = {
     }
   },
 };
+
+exports.DetailsSubview = DetailsSubview;

@@ -1,9 +1,3 @@
-extern crate cranelift_codegen;
-extern crate cranelift_wasm;
-#[macro_use]
-extern crate target_lexicon;
-extern crate wabt;
-
 use cranelift_codegen::isa;
 use cranelift_codegen::print_errors::pretty_verifier_error;
 use cranelift_codegen::settings::{self, Flags};
@@ -15,11 +9,12 @@ use std::io;
 use std::io::prelude::*;
 use std::path::Path;
 use std::str::FromStr;
+use target_lexicon::triple;
 use wabt::wat2wasm;
 
 #[test]
 fn testsuite() {
-    let mut paths: Vec<_> = fs::read_dir("../../wasmtests")
+    let mut paths: Vec<_> = fs::read_dir("../wasmtests")
         .unwrap()
         .map(|r| r.unwrap())
         .filter(|p| {
@@ -30,7 +25,8 @@ fn testsuite() {
                 }
             }
             false
-        }).collect();
+        })
+        .collect();
     paths.sort_by_key(|dir| dir.path());
     let flags = Flags::new(settings::builder());
     for path in paths {
@@ -43,7 +39,7 @@ fn testsuite() {
 fn use_fallthrough_return() {
     let flags = Flags::new(settings::builder());
     handle_module(
-        Path::new("../../wasmtests/use_fallthrough_return.wat"),
+        Path::new("../wasmtests/use_fallthrough_return.wat"),
         &flags,
         ReturnMode::FallthroughReturn,
     );
@@ -77,7 +73,7 @@ fn handle_module(path: &Path, flags: &Flags, return_mode: ReturnMode) {
     };
     let triple = triple!("riscv64");
     let isa = isa::lookup(triple).unwrap().finish(flags.clone());
-    let mut dummy_environ = DummyEnvironment::new(isa.frontend_config(), return_mode);
+    let mut dummy_environ = DummyEnvironment::new(isa.frontend_config(), return_mode, false);
 
     translate_module(&data, &mut dummy_environ).unwrap();
 

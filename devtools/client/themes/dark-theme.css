@@ -22,11 +22,6 @@ body {
   color: var(--theme-body-color);
 }
 
-::-moz-selection {
-  background-color: var(--theme-selection-background);
-  color: var(--theme-selection-color);
-}
-
 .theme-selected,
 .CodeMirror-hint-active {
   background-color: var(--theme-selection-background);
@@ -76,7 +71,7 @@ body {
 .variable-or-property .token-number,
 .variable-or-property[return] > .title > .name,
 .variable-or-property[scope] > .title > .name {
-  color: #6B89FF;
+  color: #709AFF;
 }
 
 .CodeMirror-Tern-completion-number:before {
@@ -84,7 +79,6 @@ body {
 }
 
 .theme-fg-color1,
-.theme-fg-color2,
 .cm-s-mozilla .cm-attribute,
 .cm-s-mozilla .cm-builtin,
 .cm-s-mozilla .cm-keyword,
@@ -110,7 +104,6 @@ body {
 }
 
 .theme-fg-color3,
-.theme-fg-color5,
 .cm-s-mozilla .cm-tag,
 .cm-s-mozilla .cm-header,
 .cm-s-mozilla .cm-bracket,
@@ -123,7 +116,7 @@ body {
   background-color: var(--theme-highlight-bluegrey);
 }
 
-.theme-fg-color4 {
+.theme-fg-color2 {
   color: var(--theme-highlight-purple);
 }
 
@@ -131,7 +124,7 @@ body {
 .cm-s-mozilla .cm-string-2,
 .variable-or-property .token-string,
 .CodeMirror-Tern-farg {
-  color: #6B89FF;
+  color: #709AFF;
 }
 
 .CodeMirror-Tern-completion-string:before,
@@ -186,7 +179,7 @@ body {
 }
 
 .CodeMirror.cm-s-mozilla  pre {
-  color: var(--theme-content-color1);
+  color: var(--theme-text-color-strong);
 }
 
 .cm-s-mozilla .cm-operator {
@@ -195,7 +188,7 @@ body {
 
 .cm-s-mozilla .cm-variable-3,
 .cm-s-mozilla .cm-special {
-  color: var(--theme-content-color1);
+  color: var(--theme-text-color-strong);
 }
 
 .cm-s-mozilla .CodeMirror-lines .CodeMirror-cursor {
@@ -238,7 +231,7 @@ div.CodeMirror span.eval-text {
 }
 
 .cm-s-mozilla .CodeMirror-linenumber { /* line number text */
-  color: var(--theme-content-color3);
+  color: var(--grey-40);
 }
 
 .cm-s-mozilla .CodeMirror-gutters { /* vertical line next to line numbers */

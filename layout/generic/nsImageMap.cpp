@@ -27,7 +27,7 @@
 #include "ImageLayers.h"
 
 #ifdef ACCESSIBILITY
-#include "nsAccessibilityService.h"
+#  include "nsAccessibilityService.h"
 #endif
 
 using namespace mozilla;
@@ -73,12 +73,10 @@ inline bool is_space(char c) {
 
 static void logMessage(nsIContent* aContent, const nsAString& aCoordsSpec,
                        int32_t aFlags, const char* aMessageName) {
-  nsIDocument* doc = aContent->OwnerDoc();
-
   nsContentUtils::ReportToConsole(
-      aFlags, NS_LITERAL_CSTRING("Layout: ImageMap"), doc,
-      nsContentUtils::eLAYOUT_PROPERTIES, aMessageName, nullptr, /* params */
-      0, /* params length */
+      aFlags, NS_LITERAL_CSTRING("Layout: ImageMap"), aContent->OwnerDoc(),
+      nsContentUtils::eLAYOUT_PROPERTIES, aMessageName,
+      nsTArray<nsString>(), /* params */
       nullptr,
       PromiseFlatString(NS_LITERAL_STRING("coords=\"") + aCoordsSpec +
                         NS_LITERAL_STRING("\""))); /* source line */
@@ -627,10 +625,7 @@ nsresult nsImageMap::GetBoundsForAreaContent(nsIContent* aContent,
 }
 
 void nsImageMap::AreaRemoved(HTMLAreaElement* aArea) {
-  if (aArea->IsInUncomposedDoc()) {
-    NS_ASSERTION(aArea->GetPrimaryFrame() == mImageFrame,
-                 "Unexpected primary frame");
-
+  if (aArea->GetPrimaryFrame() == mImageFrame) {
     aArea->SetPrimaryFrame(nullptr);
   }
 
@@ -743,7 +738,7 @@ void nsImageMap::AddArea(HTMLAreaElement* aArea) {
   mAreas.AppendElement(std::move(area));
 }
 
-nsIContent* nsImageMap::GetArea(nscoord aX, nscoord aY) const {
+HTMLAreaElement* nsImageMap::GetArea(nscoord aX, nscoord aY) const {
   NS_ASSERTION(mMap, "Not initialized");
   for (const auto& area : mAreas) {
     if (area->IsInside(aX, aY)) {
@@ -754,7 +749,7 @@ nsIContent* nsImageMap::GetArea(nscoord aX, nscoord aY) const {
   return nullptr;
 }
 
-nsIContent* nsImageMap::GetAreaAt(uint32_t aIndex) const {
+HTMLAreaElement* nsImageMap::GetAreaAt(uint32_t aIndex) const {
   return mAreas.ElementAt(aIndex)->mArea;
 }
 

@@ -9,14 +9,13 @@ this.extension = class extends ExtensionAPI {
         },
 
         isAllowedIncognitoAccess() {
-          return Promise.resolve(true);
+          return context.privateBrowsingAllowed;
         },
 
         isAllowedFileSchemeAccess() {
-          return Promise.resolve(false);
+          return false;
         },
       },
     };
   }
 };
-

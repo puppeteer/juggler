@@ -64,11 +64,11 @@ class MediaEngineWebRTC : public MediaEngine {
 
   void EnumerateDevices(uint64_t aWindowId, dom::MediaSourceEnum, MediaSinkEnum,
                         nsTArray<RefPtr<MediaDevice>>*) override;
-  void ReleaseResourcesForWindow(uint64_t aWindowId) override;
 
  private:
   ~MediaEngineWebRTC() = default;
-  void EnumerateVideoDevices(uint64_t aWindowId, dom::MediaSourceEnum,
+  void EnumerateVideoDevices(uint64_t aWindowId,
+                             camera::CaptureEngine aCapEngine,
                              nsTArray<RefPtr<MediaDevice>>*);
   void EnumerateMicrophoneDevices(uint64_t aWindowId,
                                   nsTArray<RefPtr<MediaDevice>>*);
@@ -83,15 +83,6 @@ class MediaEngineWebRTC : public MediaEngine {
   // This also is set in the ctor and then never changed, but we can't make it
   // const because we pass it to a function that takes bool* in the ctor.
   bool mHasTabVideoSource;
-
-  // Maps WindowID to a map of device uuid to their MediaEngineSource,
-  // separately for audio and video.
-  nsClassHashtable<nsUint64HashKey,
-                   nsRefPtrHashtable<nsStringHashKey, MediaEngineSource>>
-      mVideoSources;
-  nsClassHashtable<nsUint64HashKey,
-                   nsRefPtrHashtable<nsStringHashKey, MediaEngineSource>>
-      mAudioSources;
 };
 
 }  // namespace mozilla

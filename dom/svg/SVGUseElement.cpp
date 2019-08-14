@@ -4,16 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/dom/SVGUseElement.h"
+
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/ErrorResult.h"
-
-#include "mozilla/dom/SVGUseElement.h"
 #include "mozilla/dom/SVGLengthBinding.h"
 #include "mozilla/dom/SVGUseElementBinding.h"
 #include "nsGkAtoms.h"
 #include "mozilla/dom/SVGSVGElement.h"
-#include "nsIDocument.h"
-#include "nsIPresShell.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 #include "nsContentUtils.h"
 #include "nsIURI.h"
@@ -22,7 +21,7 @@
 #include "nsSVGUseFrame.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Use)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Use)
 
 namespace mozilla {
 namespace dom {
@@ -35,7 +34,7 @@ JSObject* SVGUseElement::WrapNode(JSContext* aCx,
 ////////////////////////////////////////////////////////////////////////
 // implementation
 
-nsSVGElement::LengthInfo SVGUseElement::sLengthInfo[4] = {
+SVGElement::LengthInfo SVGUseElement::sLengthInfo[4] = {
     {nsGkAtoms::x, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER,
      SVGContentUtils::X},
     {nsGkAtoms::y, 0, SVGLength_Binding::SVG_LENGTHTYPE_NUMBER,
@@ -46,7 +45,7 @@ nsSVGElement::LengthInfo SVGUseElement::sLengthInfo[4] = {
      SVGContentUtils::Y},
 };
 
-nsSVGElement::StringInfo SVGUseElement::sStringInfo[2] = {
+SVGElement::StringInfo SVGUseElement::sStringInfo[2] = {
     {nsGkAtoms::href, kNameSpaceID_None, true},
     {nsGkAtoms::href, kNameSpaceID_XLink, true}};
 
@@ -150,22 +149,20 @@ nsresult SVGUseElement::Clone(dom::NodeInfo* aNodeInfo,
   return NS_FAILED(rv1) ? rv1 : rv2;
 }
 
-nsresult SVGUseElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                                   nsIContent* aBindingParent) {
-  nsresult rv =
-      SVGUseElementBase::BindToTree(aDocument, aParent, aBindingParent);
+nsresult SVGUseElement::BindToTree(BindContext& aContext, nsINode& aParent) {
+  nsresult rv = SVGUseElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   TriggerReclone();
   return NS_OK;
 }
 
-void SVGUseElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  SVGUseElementBase::UnbindFromTree(aDeep, aNullParent);
+void SVGUseElement::UnbindFromTree(bool aNullParent) {
+  SVGUseElementBase::UnbindFromTree(aNullParent);
   OwnerDoc()->UnscheduleSVGUseElementShadowTreeUpdate(*this);
 }
 
-already_AddRefed<SVGAnimatedString> SVGUseElement::Href() {
+already_AddRefed<DOMSVGAnimatedString> SVGUseElement::Href() {
   return mStringAttributes[HREF].IsExplicitlySet()
              ? mStringAttributes[HREF].ToDOMAnimatedString(this)
              : mStringAttributes[XLINK_HREF].ToDOMAnimatedString(this);
@@ -173,19 +170,19 @@ already_AddRefed<SVGAnimatedString> SVGUseElement::Href() {
 
 //----------------------------------------------------------------------
 
-already_AddRefed<SVGAnimatedLength> SVGUseElement::X() {
+already_AddRefed<DOMSVGAnimatedLength> SVGUseElement::X() {
   return mLengthAttributes[ATTR_X].ToDOMAnimatedLength(this);
 }
 
-already_AddRefed<SVGAnimatedLength> SVGUseElement::Y() {
+already_AddRefed<DOMSVGAnimatedLength> SVGUseElement::Y() {
   return mLengthAttributes[ATTR_Y].ToDOMAnimatedLength(this);
 }
 
-already_AddRefed<SVGAnimatedLength> SVGUseElement::Width() {
+already_AddRefed<DOMSVGAnimatedLength> SVGUseElement::Width() {
   return mLengthAttributes[ATTR_WIDTH].ToDOMAnimatedLength(this);
 }
 
-already_AddRefed<SVGAnimatedLength> SVGUseElement::Height() {
+already_AddRefed<DOMSVGAnimatedLength> SVGUseElement::Height() {
   return mLengthAttributes[ATTR_HEIGHT].ToDOMAnimatedLength(this);
 }
 
@@ -194,7 +191,8 @@ already_AddRefed<SVGAnimatedLength> SVGUseElement::Height() {
 
 void SVGUseElement::CharacterDataChanged(nsIContent* aContent,
                                          const CharacterDataChangeInfo&) {
-  if (nsContentUtils::IsInSameAnonymousTree(this, aContent)) {
+  if (nsContentUtils::IsInSameAnonymousTree(mReferencedElementTracker.get(),
+                                            aContent)) {
     TriggerReclone();
   }
 }
@@ -202,7 +200,8 @@ void SVGUseElement::CharacterDataChanged(nsIContent* aContent,
 void SVGUseElement::AttributeChanged(Element* aElement, int32_t aNamespaceID,
                                      nsAtom* aAttribute, int32_t aModType,
                                      const nsAttrValue* aOldValue) {
-  if (nsContentUtils::IsInSameAnonymousTree(this, aElement)) {
+  if (nsContentUtils::IsInSameAnonymousTree(mReferencedElementTracker.get(),
+                                            aElement)) {
     TriggerReclone();
   }
 }
@@ -210,7 +209,7 @@ void SVGUseElement::AttributeChanged(Element* aElement, int32_t aNamespaceID,
 void SVGUseElement::ContentAppended(nsIContent* aFirstNewContent) {
   // FIXME(emilio, bug 1442336): Why does this check the parent but
   // ContentInserted the child?
-  if (nsContentUtils::IsInSameAnonymousTree(this,
+  if (nsContentUtils::IsInSameAnonymousTree(mReferencedElementTracker.get(),
                                             aFirstNewContent->GetParent())) {
     TriggerReclone();
   }
@@ -219,14 +218,16 @@ void SVGUseElement::ContentAppended(nsIContent* aFirstNewContent) {
 void SVGUseElement::ContentInserted(nsIContent* aChild) {
   // FIXME(emilio, bug 1442336): Why does this check the child but
   // ContentAppended the parent?
-  if (nsContentUtils::IsInSameAnonymousTree(this, aChild)) {
+  if (nsContentUtils::IsInSameAnonymousTree(mReferencedElementTracker.get(),
+                                            aChild)) {
     TriggerReclone();
   }
 }
 
 void SVGUseElement::ContentRemoved(nsIContent* aChild,
                                    nsIContent* aPreviousSibling) {
-  if (nsContentUtils::IsInSameAnonymousTree(this, aChild)) {
+  if (nsContentUtils::IsInSameAnonymousTree(mReferencedElementTracker.get(),
+                                            aChild)) {
     TriggerReclone();
   }
 }
@@ -234,6 +235,27 @@ void SVGUseElement::ContentRemoved(nsIContent* aChild,
 void SVGUseElement::NodeWillBeDestroyed(const nsINode* aNode) {
   nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
   UnlinkSource();
+}
+
+bool SVGUseElement::IsCyclicReferenceTo(const Element& aTarget) const {
+  if (&aTarget == this) {
+    return true;
+  }
+  if (mOriginal && mOriginal->IsCyclicReferenceTo(aTarget)) {
+    return true;
+  }
+  for (nsINode* parent = GetParentOrHostNode(); parent;
+       parent = parent->GetParentOrHostNode()) {
+    if (parent == &aTarget) {
+      return true;
+    }
+    if (auto* use = SVGUseElement::FromNode(*parent)) {
+      if (mOriginal && use->mOriginal == mOriginal) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 //----------------------------------------------------------------------
@@ -281,21 +303,8 @@ void SVGUseElement::UpdateShadowTree() {
 
   // circular loop detection
 
-  // check 1 - check if we're a document descendent of the target
-  if (nsContentUtils::ContentIsShadowIncludingDescendantOf(this,
-                                                           targetElement)) {
+  if (IsCyclicReferenceTo(*targetElement)) {
     return;
-  }
-
-  // check 2 - check if we're a clone, and if we already exist in the hierarchy
-  if (mOriginal) {
-    for (nsINode* parent = GetParentOrHostNode(); parent;
-         parent = parent->GetParentOrHostNode()) {
-      SVGUseElement* use = SVGUseElement::FromNode(*parent);
-      if (use && use->mOriginal == mOriginal) {
-        return;
-      }
-    }
   }
 
   nsCOMPtr<nsIURI> baseURI = targetElement->GetBaseURI();
@@ -319,7 +328,7 @@ void SVGUseElement::UpdateShadowTree() {
   }
 
   if (newElement->IsAnyOfSVGElements(nsGkAtoms::svg, nsGkAtoms::symbol)) {
-    auto* newSVGElement = static_cast<nsSVGElement*>(newElement.get());
+    auto* newSVGElement = static_cast<SVGElement*>(newElement.get());
     if (mLengthAttributes[ATTR_WIDTH].IsExplicitlySet())
       newSVGElement->SetLength(nsGkAtoms::width, mLengthAttributes[ATTR_WIDTH]);
     if (mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet())
@@ -368,7 +377,7 @@ void SVGUseElement::SyncWidthOrHeight(nsAtom* aName) {
     return;
   }
 
-  auto* target = nsSVGElement::FromNode(GetClonedChild(*this));
+  auto* target = SVGElement::FromNode(GetClonedChild(*this));
   uint32_t index =
       sLengthInfo[ATTR_WIDTH].mName == aName ? ATTR_WIDTH : ATTR_HEIGHT;
 
@@ -385,7 +394,7 @@ void SVGUseElement::SyncWidthOrHeight(nsAtom* aName) {
   }
   // Our width/height attribute is now no longer explicitly set, so we
   // need to set the value to 100%
-  nsSVGLength2 length;
+  SVGAnimatedLength length;
   length.Init(SVGContentUtils::XY, 0xff, 100,
               SVGLength_Binding::SVG_LENGTHTYPE_PERCENTAGE);
   target->SetLength(aName, length);
@@ -420,7 +429,7 @@ void SVGUseElement::LookupHref() {
 }
 
 void SVGUseElement::TriggerReclone() {
-  if (nsIDocument* doc = GetComposedDoc()) {
+  if (Document* doc = GetComposedDoc()) {
     doc->ScheduleSVGUseElementShadowTreeUpdate(*this);
   }
 }
@@ -433,9 +442,10 @@ void SVGUseElement::UnlinkSource() {
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-/* virtual */ gfxMatrix SVGUseElement::PrependLocalTransformsTo(
+/* virtual */
+gfxMatrix SVGUseElement::PrependLocalTransformsTo(
     const gfxMatrix& aMatrix, SVGTransformTypes aWhich) const {
   // 'transform' attribute:
   gfxMatrix userToParent;
@@ -470,19 +480,20 @@ void SVGUseElement::UnlinkSource() {
   return childToUser * aMatrix;
 }
 
-/* virtual */ bool SVGUseElement::HasValidDimensions() const {
+/* virtual */
+bool SVGUseElement::HasValidDimensions() const {
   return (!mLengthAttributes[ATTR_WIDTH].IsExplicitlySet() ||
           mLengthAttributes[ATTR_WIDTH].GetAnimValInSpecifiedUnits() > 0) &&
          (!mLengthAttributes[ATTR_HEIGHT].IsExplicitlySet() ||
           mLengthAttributes[ATTR_HEIGHT].GetAnimValInSpecifiedUnits() > 0);
 }
 
-nsSVGElement::LengthAttributesInfo SVGUseElement::GetLengthInfo() {
+SVGElement::LengthAttributesInfo SVGUseElement::GetLengthInfo() {
   return LengthAttributesInfo(mLengthAttributes, sLengthInfo,
                               ArrayLength(sLengthInfo));
 }
 
-nsSVGElement::StringAttributesInfo SVGUseElement::GetStringInfo() {
+SVGElement::StringAttributesInfo SVGUseElement::GetStringInfo() {
   return StringAttributesInfo(mStringAttributes, sStringInfo,
                               ArrayLength(sStringInfo));
 }

@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 EXPORTS.mozilla.dom += [
     'Promise-inl.h',
@@ -23,6 +23,7 @@ UNIFIED_SOURCES += [
 LOCAL_INCLUDES += [
     '../base',
     '../ipc',
+    '/js/xpconnect/src',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

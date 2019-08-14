@@ -5,10 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined(PDMFactory_h_)
-#define PDMFactory_h_
+#  define PDMFactory_h_
 
-#include "PlatformDecoderModule.h"
-#include "mozilla/StaticMutex.h"
+#  include "PlatformDecoderModule.h"
+#  include "mozilla/StaticMutex.h"
 
 class CDMProxy;
 
@@ -72,7 +72,8 @@ class PDMFactory final {
   bool mFFmpegFailedToLoad = false;
   bool mGMPPDMFailedToStartup = false;
 
-  void EnsureInit() const;
+  friend class RemoteVideoDecoderParent;
+  static void EnsureInit();
   template <class T>
   friend class StaticAutoPtr;
   static StaticAutoPtr<PDMFactoryImpl> sInstance;

@@ -39,7 +39,8 @@ nsresult NS_NewStackLayout(nsCOMPtr<nsBoxLayout>& aNewLayout) {
   return NS_OK;
 }
 
-/*static*/ void nsStackLayout::Shutdown() { NS_IF_RELEASE(gInstance); }
+/*static*/
+void nsStackLayout::Shutdown() { NS_IF_RELEASE(gInstance); }
 
 nsStackLayout::nsStackLayout() {}
 
@@ -118,7 +119,7 @@ nsSize nsStackLayout::GetXULMinSize(nsIFrame* aBox, nsBoxLayoutState& aState) {
 }
 
 nsSize nsStackLayout::GetXULMaxSize(nsIFrame* aBox, nsBoxLayoutState& aState) {
-  nsSize maxSize(NS_INTRINSICSIZE, NS_INTRINSICSIZE);
+  nsSize maxSize(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
 
   nsIFrame* child = nsBox::GetChildXULBox(aBox);
   while (child) {

@@ -8,15 +8,15 @@ pub mod settings;
 
 use super::super::settings as shared_settings;
 #[cfg(feature = "testing_hooks")]
-use binemit::CodeSink;
-use binemit::{emit_function, MemoryCodeSink};
-use ir;
-use isa::enc_tables::{self as shared_enc_tables, lookup_enclist, Encodings};
-use isa::Builder as IsaBuilder;
-use isa::{EncInfo, RegClass, RegInfo, TargetIsa};
-use regalloc;
+use crate::binemit::CodeSink;
+use crate::binemit::{emit_function, MemoryCodeSink};
+use crate::ir;
+use crate::isa::enc_tables::{self as shared_enc_tables, lookup_enclist, Encodings};
+use crate::isa::Builder as IsaBuilder;
+use crate::isa::{EncInfo, RegClass, RegInfo, TargetIsa};
+use crate::regalloc;
+use core::fmt;
 use std::boxed::Box;
-use std::fmt;
 use target_lexicon::{PointerWidth, Triple};
 
 #[allow(dead_code)]
@@ -40,7 +40,7 @@ fn isa_constructor(
     triple: Triple,
     shared_flags: shared_settings::Flags,
     builder: shared_settings::Builder,
-) -> Box<TargetIsa> {
+) -> Box<dyn TargetIsa> {
     let level1 = match triple.pointer_width().unwrap() {
         PointerWidth::U16 => panic!("16-bit RISC-V unrecognized"),
         PointerWidth::U32 => &enc_tables::LEVEL1_RV32[..],
@@ -113,7 +113,7 @@ impl TargetIsa for Isa {
         func: &ir::Function,
         inst: ir::Inst,
         divert: &mut regalloc::RegDiversions,
-        sink: &mut CodeSink,
+        sink: &mut dyn CodeSink,
     ) {
         binemit::emit_inst(func, inst, divert, sink)
     }
@@ -125,15 +125,15 @@ impl TargetIsa for Isa {
 
 #[cfg(test)]
 mod tests {
-    use ir::{immediates, types};
-    use ir::{Function, InstructionData, Opcode};
-    use isa;
-    use settings::{self, Configurable};
-    use std::str::FromStr;
+    use crate::ir::{immediates, types};
+    use crate::ir::{Function, InstructionData, Opcode};
+    use crate::isa;
+    use crate::settings::{self, Configurable};
+    use core::str::FromStr;
     use std::string::{String, ToString};
-    use target_lexicon;
+    use target_lexicon::triple;
 
-    fn encstr(isa: &isa::TargetIsa, enc: Result<isa::Encoding, isa::Legalize>) -> String {
+    fn encstr(isa: &dyn isa::TargetIsa, enc: Result<isa::Encoding, isa::Legalize>) -> String {
         match enc {
             Ok(e) => isa.encoding_info().display(e).to_string(),
             Err(_) => "no encoding".to_string(),

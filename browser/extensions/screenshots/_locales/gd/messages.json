@@ -17,6 +17,9 @@
   "saveScreenshotSelectedArea": {
     "message": "Sàbhail"
   },
+  "uploadScreenshotSelectedArea": {
+    "message": "Luchdaich suas"
+  },
   "saveScreenshotVisibleArea": {
     "message": "Sàbhail na tha ri fhaicinn"
   },
@@ -28,6 +31,9 @@
   },
   "downloadScreenshot": {
     "message": "Luchdaich a-nuas"
+  },
+  "downloadScreenshotTitle": {
+    "message": "Luchdaich a-nuas an glacadh-sgrìn"
   },
   "downloadOnlyNotice": {
     "message": "Tha thu sa mhodh luchdaidh a-nuas a-mhàin."
@@ -64,6 +70,9 @@
   "copyScreenshot": {
     "message": "Dèan lethbhreac"
   },
+  "copyScreenshotTitle": {
+    "message": "Cuir lethbhreac dhen ghlacadh-sgrìn air an stòr-bhòrd"
+  },
   "notificationImageCopiedTitle": {
     "message": "Chaidh lethbhreac a dhèanamh dhen ghlacadh"
   },
@@ -75,8 +84,13 @@
       }
     }
   },
-  "imageCroppedWarning": {
-    "message": "Chaidh an dealbh a bhearradh is tha e {pixels}px a-nis."
+  "imageCropPopupWarning": {
+    "message": "Thèid an dealbh a shàbhail thu a bhearradh ach am bith e $PIXELS$px a dh’àirde.",
+    "placeholders": {
+      "pixels": {
+        "content": "$1"
+      }
+    }
   },
   "requestErrorTitle": {
     "message": "Tuibriste."
@@ -117,8 +131,8 @@
   "genericErrorDetails": {
     "message": "Chan eil sinn cinnteach dè thachair. A bheil thu airson feuchainn ris a-rithist no glacadh a thogail de dhuilleag eile?"
   },
-  "tourBodyIntro": {
-    "message": "Tog, sàbhail is co-roinn glacadh-sgrìn gun Firefix fhàgail."
+  "tourBodyIntroServerless": {
+    "message": "Tog glacaidhean-sgrìn, dèan lethbhreac dhiubh is luchdaich a-nuas iad gun Firefox fhàgail."
   },
   "tourHeaderPageAction": {
     "message": "Dòigh ùr airson sàbhaladh"
@@ -137,12 +151,6 @@
   },
   "tourBodyFullPage": {
     "message": "Tagh na putanan air an taobh deas gu h-àrd airson na tha ri fhaicinn san uinneag a ghlacadh no airson duilleag shlàn a ghlacadh."
-  },
-  "tourHeaderDownloadUpload": {
-    "message": "Do thoil fhèin"
-  },
-  "tourBodyDownloadUpload": {
-    "message": "Sàbhail na glacaidhean bearrte air an lìon ach am bi e furasta an co-roinneadh no luchdaich a-nuas iad dhan choimpiutair agad. ’S urrainn dhut briogadh air a’ phutan “Na glacaidhean agam” cuideachd is chì thu gach glacadh a thog thu."
   },
   "tourSkip": {
     "message": "LEUM SEACHAD"

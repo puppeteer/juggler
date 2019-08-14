@@ -41,13 +41,13 @@ public class GeckoScreenOrientation {
 
         public final short value;
 
-        private ScreenOrientation(int value) {
+        private ScreenOrientation(final int value) {
             this.value = (short)value;
         }
 
         private final static ScreenOrientation[] sValues = ScreenOrientation.values();
 
-        public static ScreenOrientation get(int value) {
+        public static ScreenOrientation get(final int value) {
             for (ScreenOrientation orient: sValues) {
                 if (orient.value == value) {
                     return orient;
@@ -61,8 +61,8 @@ public class GeckoScreenOrientation {
     private static GeckoScreenOrientation sInstance;
     // Default rotation, used when device rotation is unknown.
     private static final int DEFAULT_ROTATION = Surface.ROTATION_0;
-    // Last updated screen orientation.
-    private ScreenOrientation mScreenOrientation;
+    // Last updated screen orientation with Gecko value space.
+    private ScreenOrientation mScreenOrientation = ScreenOrientation.PORTRAIT_PRIMARY;
     // Whether the update should notify Gecko about screen orientation changes.
     private boolean mShouldNotify = true;
 
@@ -87,7 +87,7 @@ public class GeckoScreenOrientation {
     /**
      * Add a listener that will be notified when the screen orientation has changed.
      */
-    public void addListener(OrientationChangeListener aListener) {
+    public void addListener(final OrientationChangeListener aListener) {
         ThreadUtils.assertOnUiThread();
         mListeners.add(aListener);
     }
@@ -95,7 +95,7 @@ public class GeckoScreenOrientation {
     /**
      * Remove a OrientationChangeListener again.
      */
-    public void removeListener(OrientationChangeListener aListener) {
+    public void removeListener(final OrientationChangeListener aListener) {
         ThreadUtils.assertOnUiThread();
         mListeners.remove(aListener);
     }
@@ -139,7 +139,7 @@ public class GeckoScreenOrientation {
      *
      * @return Whether the screen orientation has changed.
      */
-    public boolean update(int aAndroidOrientation) {
+    public boolean update(final int aAndroidOrientation) {
         return update(getScreenOrientation(aAndroidOrientation, getRotation()));
     }
 
@@ -154,31 +154,37 @@ public class GeckoScreenOrientation {
      *
      * @return Whether the screen orientation has changed.
      */
-    public synchronized boolean update(ScreenOrientation aScreenOrientation) {
-        if (mScreenOrientation == aScreenOrientation) {
+    public synchronized boolean update(final ScreenOrientation aScreenOrientation) {
+        // Gecko expects a definite screen orientation, so we default to the
+        // primary orientations.
+        ScreenOrientation screenOrientation;
+        if ((aScreenOrientation.value & ScreenOrientation.PORTRAIT_PRIMARY.value) != 0) {
+            screenOrientation = ScreenOrientation.PORTRAIT_PRIMARY;
+        } else if ((aScreenOrientation.value & ScreenOrientation.PORTRAIT_SECONDARY.value) != 0) {
+            screenOrientation = ScreenOrientation.PORTRAIT_SECONDARY;
+        } else if ((aScreenOrientation.value & ScreenOrientation.LANDSCAPE_PRIMARY.value) != 0) {
+            screenOrientation = ScreenOrientation.LANDSCAPE_PRIMARY;
+        } else if ((aScreenOrientation.value & ScreenOrientation.LANDSCAPE_SECONDARY.value) != 0) {
+            screenOrientation = ScreenOrientation.LANDSCAPE_SECONDARY;
+        } else {
+            screenOrientation = ScreenOrientation.PORTRAIT_PRIMARY;
+        }
+        if (mScreenOrientation == screenOrientation) {
             return false;
         }
-        mScreenOrientation = aScreenOrientation;
+        mScreenOrientation = screenOrientation;
         Log.d(LOGTAG, "updating to new orientation " + mScreenOrientation);
         notifyListeners(mScreenOrientation);
         if (mShouldNotify) {
-            // Gecko expects a definite screen orientation, so we default to the
-            // primary orientations.
-            if (aScreenOrientation == ScreenOrientation.PORTRAIT) {
-                aScreenOrientation = ScreenOrientation.PORTRAIT_PRIMARY;
-            } else if (aScreenOrientation == ScreenOrientation.LANDSCAPE) {
-                aScreenOrientation = ScreenOrientation.LANDSCAPE_PRIMARY;
-            } else if (aScreenOrientation == ScreenOrientation.DEFAULT) {
-                aScreenOrientation = ScreenOrientation.PORTRAIT_PRIMARY;
-            } else if (aScreenOrientation == ScreenOrientation.NONE) {
+            if (aScreenOrientation == ScreenOrientation.NONE) {
                 return false;
             }
 
             if (GeckoThread.isRunning()) {
-                onOrientationChange(aScreenOrientation.value, getAngle());
+                onOrientationChange(screenOrientation.value, getAngle());
             } else {
                 GeckoThread.queueNativeCall(GeckoScreenOrientation.class, "onOrientationChange",
-                                            aScreenOrientation.value, getAngle());
+                                            screenOrientation.value, getAngle());
             }
         }
         ScreenManagerHelper.refreshScreenInfo();
@@ -223,7 +229,7 @@ public class GeckoScreenOrientation {
      * @param aGeckoOrientation
      *        The Gecko orientation provided.
      */
-    public void lock(int aGeckoOrientation) {
+    public void lock(final int aGeckoOrientation) {
         lock(ScreenOrientation.get(aGeckoOrientation));
     }
 
@@ -236,7 +242,7 @@ public class GeckoScreenOrientation {
      *
      * @return Whether the locking was successful.
      */
-    public boolean lock(ScreenOrientation aScreenOrientation) {
+    public boolean lock(final ScreenOrientation aScreenOrientation) {
         Log.d(LOGTAG, "locking to " + aScreenOrientation);
         final ScreenOrientationDelegate delegate = GeckoAppShell.getScreenOrientationDelegate();
         final int activityInfoOrientation = screenOrientationToActivityInfoOrientation(aScreenOrientation);
@@ -279,7 +285,8 @@ public class GeckoScreenOrientation {
      *
      * @return Gecko screen orientation.
      */
-    private ScreenOrientation getScreenOrientation(int aAndroidOrientation, int aRotation) {
+    private ScreenOrientation getScreenOrientation(final int aAndroidOrientation,
+                                                   final int aRotation) {
         boolean isPrimary = aRotation == Surface.ROTATION_0 || aRotation == Surface.ROTATION_90;
         if (aAndroidOrientation == Configuration.ORIENTATION_PORTRAIT) {
             if (isPrimary) {
@@ -340,7 +347,7 @@ public class GeckoScreenOrientation {
      *
      * @return First parsed Gecko screen orientation.
      */
-    public static ScreenOrientation screenOrientationFromArrayString(String aArray) {
+    public static ScreenOrientation screenOrientationFromArrayString(final String aArray) {
         List<String> orientations = Arrays.asList(aArray.split(","));
         if ("".equals(aArray) || orientations.size() == 0) {
             // If nothing is listed, return default.
@@ -361,7 +368,7 @@ public class GeckoScreenOrientation {
      * @return Gecko screen orientation if matched, DEFAULT_SCREEN_ORIENTATION
      *         otherwise.
      */
-    public static ScreenOrientation screenOrientationFromString(String aStr) {
+    public static ScreenOrientation screenOrientationFromString(final String aStr) {
         switch (aStr) {
             case "portrait":
                 return ScreenOrientation.PORTRAIT;
@@ -390,7 +397,8 @@ public class GeckoScreenOrientation {
      *         orientation does not differentiate between primary and secondary
      *         orientations.
      */
-    public static int screenOrientationToAndroidOrientation(ScreenOrientation aScreenOrientation) {
+    public static int screenOrientationToAndroidOrientation(
+            final ScreenOrientation aScreenOrientation) {
         switch (aScreenOrientation) {
             case PORTRAIT:
             case PORTRAIT_PRIMARY:
@@ -417,7 +425,8 @@ public class GeckoScreenOrientation {
      *        Gecko screen orientation.
      * @return Android ActivityInfo orientation.
      */
-    public static int screenOrientationToActivityInfoOrientation(ScreenOrientation aScreenOrientation) {
+    public static int screenOrientationToActivityInfoOrientation(
+            final ScreenOrientation aScreenOrientation) {
         switch (aScreenOrientation) {
             case PORTRAIT:
                 return ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT;

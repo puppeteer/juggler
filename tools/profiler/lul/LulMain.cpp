@@ -29,7 +29,7 @@
 
 #include "LulMainInt.h"
 
-#include "platform-linux-lul.h"  // for gettid()
+#include "GeckoProfiler.h"  // for profiler_current_thread_id()
 
 // Set this to 1 for verbose logging
 #define DEBUG_MAIN 0
@@ -97,7 +97,7 @@ static const char* NameOf_DW_REG(int16_t aReg) {
     case DW_REG_MIPS_PC:
       return "pc";
 #else
-#error "Unsupported arch"
+#  error "Unsupported arch"
 #endif
     default:
       return "???";
@@ -158,7 +158,7 @@ void RuleSet::Print(void (*aLog)(const char*)) const {
   res += mSPexpr.ShowRule(" SP");
   res += mFPexpr.ShowRule(" FP");
 #else
-#error "Unsupported arch"
+#  error "Unsupported arch"
 #endif
   aLog(res.c_str());
 }
@@ -202,7 +202,7 @@ LExpr* RuleSet::ExprForRegno(DW_REG_NUMBER aRegno) {
     case DW_REG_MIPS_PC:
       return &mPCexpr;
 #else
-#error "Unknown arch"
+#  error "Unknown arch"
 #endif
     default:
       return nullptr;
@@ -398,14 +398,14 @@ void SecMap::PrepareRuleSets(uintptr_t aStart, size_t aLen) {
   // Is now usable for binary search.
   mUsable = true;
 
-  if (0) {
-    mLog("\nRulesets after preening\n");
-    for (size_t i = 0; i < mRuleSets.size(); ++i) {
-      mRuleSets[i].Print(mLog);
-      mLog("\n");
-    }
+#if 0
+  mLog("\nRulesets after preening\n");
+  for (size_t i = 0; i < mRuleSets.size(); ++i) {
+    mRuleSets[i].Print(mLog);
     mLog("\n");
   }
+  mLog("\n");
+#endif
 }
 
 bool SecMap::IsEmpty() { return mRuleSets.empty(); }
@@ -684,19 +684,20 @@ class PriMap {
 // LUL                                                        //
 ////////////////////////////////////////////////////////////////
 
-#define LUL_LOG(_str)                                                  \
-  do {                                                                 \
-    char buf[200];                                                     \
-    SprintfLiteral(buf, "LUL: pid %d tid %d lul-obj %p: %s", getpid(), \
-                   gettid(), this, (_str));                            \
-    buf[sizeof(buf) - 1] = 0;                                          \
-    mLog(buf);                                                         \
+#define LUL_LOG(_str)                                           \
+  do {                                                          \
+    char buf[200];                                              \
+    SprintfLiteral(buf, "LUL: pid %d tid %d lul-obj %p: %s",    \
+                   profiler_current_process_id(),               \
+                   profiler_current_thread_id(), this, (_str)); \
+    buf[sizeof(buf) - 1] = 0;                                   \
+    mLog(buf);                                                  \
   } while (0)
 
 LUL::LUL(void (*aLog)(const char*))
     : mLog(aLog),
       mAdminMode(true),
-      mAdminThreadId(gettid()),
+      mAdminThreadId(profiler_current_thread_id()),
       mPriMap(new PriMap(aLog)),
       mSegArray(new SegArray()),
       mUSU(new UniqueStringUniverse()) {
@@ -749,7 +750,7 @@ void LUL::EnableUnwinding() {
   LUL_LOG("LUL::EnableUnwinding");
   // Don't assert for Admin mode here.  That is, tolerate a call here
   // if we are already in Unwinding mode.
-  MOZ_RELEASE_ASSERT(gettid() == mAdminThreadId);
+  MOZ_RELEASE_ASSERT(profiler_current_thread_id() == mAdminThreadId);
 
   mAdminMode = false;
 }
@@ -757,7 +758,7 @@ void LUL::EnableUnwinding() {
 void LUL::NotifyAfterMap(uintptr_t aRXavma, size_t aSize, const char* aFileName,
                          const void* aMappedImage) {
   MOZ_RELEASE_ASSERT(mAdminMode);
-  MOZ_RELEASE_ASSERT(gettid() == mAdminThreadId);
+  MOZ_RELEASE_ASSERT(profiler_current_thread_id() == mAdminThreadId);
 
   mLog(":\n");
   char buf[200];
@@ -802,7 +803,7 @@ void LUL::NotifyAfterMap(uintptr_t aRXavma, size_t aSize, const char* aFileName,
 
 void LUL::NotifyExecutableArea(uintptr_t aRXavma, size_t aSize) {
   MOZ_RELEASE_ASSERT(mAdminMode);
-  MOZ_RELEASE_ASSERT(gettid() == mAdminThreadId);
+  MOZ_RELEASE_ASSERT(profiler_current_thread_id() == mAdminThreadId);
 
   mLog(":\n");
   char buf[200];
@@ -822,7 +823,7 @@ void LUL::NotifyExecutableArea(uintptr_t aRXavma, size_t aSize) {
 
 void LUL::NotifyBeforeUnmap(uintptr_t aRXavmaMin, uintptr_t aRXavmaMax) {
   MOZ_RELEASE_ASSERT(mAdminMode);
-  MOZ_RELEASE_ASSERT(gettid() == mAdminThreadId);
+  MOZ_RELEASE_ASSERT(profiler_current_thread_id() == mAdminThreadId);
 
   mLog(":\n");
   char buf[100];
@@ -850,7 +851,7 @@ void LUL::NotifyBeforeUnmap(uintptr_t aRXavmaMin, uintptr_t aRXavmaMax) {
 
 size_t LUL::CountMappings() {
   MOZ_RELEASE_ASSERT(mAdminMode);
-  MOZ_RELEASE_ASSERT(gettid() == mAdminThreadId);
+  MOZ_RELEASE_ASSERT(profiler_current_thread_id() == mAdminThreadId);
 
   return mPriMap->CountSecMaps();
 }
@@ -930,7 +931,7 @@ static TaggedUWord EvaluateReg(int16_t aReg, const UnwindRegs* aOldRegs,
     case DW_REG_MIPS_PC:
       return aOldRegs->pc;
 #else
-#error "Unsupported arch"
+#  error "Unsupported arch"
 #endif
     default:
       MOZ_ASSERT(0);
@@ -1133,7 +1134,7 @@ static void UseRuleSet(/*MOD*/ UnwindRegs* aRegs, const StackImage* aStackImg,
   aRegs->fp = TaggedUWord();
   aRegs->pc = TaggedUWord();
 #else
-#error "Unsupported arch"
+#  error "Unsupported arch"
 #endif
 
   // This is generally useful.
@@ -1178,7 +1179,7 @@ static void UseRuleSet(/*MOD*/ UnwindRegs* aRegs, const StackImage* aStackImg,
   aRegs->fp = aRS->mFPexpr.EvaluateExpr(&old_regs, cfa, aStackImg, aPfxInstrs);
   aRegs->pc = aRS->mPCexpr.EvaluateExpr(&old_regs, cfa, aStackImg, aPfxInstrs);
 #else
-#error "Unsupported arch"
+#  error "Unsupported arch"
 #endif
 
   // We're done.  Any regs for which we didn't manage to compute a
@@ -1247,7 +1248,7 @@ void LUL::Unwind(/*OUT*/ uintptr_t* aFramePCs,
       buf[sizeof(buf) - 1] = 0;
       mLog(buf);
 #else
-#error "Unsupported arch"
+#  error "Unsupported arch"
 #endif
     }
 
@@ -1264,7 +1265,7 @@ void LUL::Unwind(/*OUT*/ uintptr_t* aFramePCs,
     TaggedUWord ia = regs.pc;
     TaggedUWord sp = regs.sp;
 #else
-#error "Unsupported arch"
+#  error "Unsupported arch"
 #endif
 
     if (*aFramesUsed >= aFramesAvail) {
@@ -1456,6 +1457,67 @@ void LUL::Unwind(/*OUT*/ uintptr_t* aFramePCs,
         }
       }
     }
+#elif defined(GP_ARCH_arm64)
+    // Here is an example of generated code for prologue and epilogue..
+    //
+    // stp     x29, x30, [sp, #-16]!
+    // mov     x29, sp
+    // ...
+    // ldp     x29, x30, [sp], #16
+    // ret
+    //
+    // Next is another example of generated code.
+    //
+    // stp     x20, x19, [sp, #-32]!
+    // stp     x29, x30, [sp, #16]
+    // add     x29, sp, #0x10
+    // ...
+    // ldp     x29, x30, [sp, #16]
+    // ldp     x20, x19, [sp], #32
+    // ret
+    //
+    // Previous x29 and x30 register are stored in the address of x29 register.
+    // But since sp register value depends on local variables, we cannot compute
+    // previous sp register from current sp/fp/lr register and there is no
+    // regular rule for sp register in prologue. But since return address is lr
+    // register, if x29 is valid, we will get return address without sp
+    // register.
+    //
+    // So we assume the following layout that if no rule set. x29 is frame
+    // pointer, so we will be able to compute x29 and x30 .
+    //
+    //   +----------+  <--- new_sp (cannot compute)
+    //   |   ....   |
+    //   +----------+
+    //   |  new_lr  |  (return address)
+    //   +----------+
+    //   |  new_fp  |  <--- old_fp
+    //   +----------+
+    //   |   ....   |
+    //   |   ....   |
+    //   +----------+  <---- old_sp (arbitrary, but unused)
+
+    TaggedUWord old_fp = regs.x29;
+    if (old_fp.Valid() && old_fp.IsAligned() && last_valid_sp.Valid() &&
+        last_valid_sp.Value() <= old_fp.Value()) {
+      TaggedUWord new_fp = DerefTUW(old_fp, aStackImg);
+      if (new_fp.Valid() && new_fp.IsAligned() &&
+          old_fp.Value() < new_fp.Value()) {
+        TaggedUWord old_fp_plus1 = old_fp + TaggedUWord(8);
+        TaggedUWord new_lr = DerefTUW(old_fp_plus1, aStackImg);
+        if (new_lr.Valid()) {
+          regs.x29 = new_fp;
+          regs.x30 = new_lr;
+          // When using frame pointer to walk stack, we cannot compute sp
+          // register since we cannot compute sp register from fp/lr/sp
+          // register, and there is no regular rule to compute previous sp
+          // register. So mark as invalid.
+          regs.sp = TaggedUWord();
+          (*aFramePointerFramesAcquired)++;
+          continue;
+        }
+      }
+    }
 #endif  // defined(GP_PLAT_amd64_linux) || defined(GP_PLAT_x86_linux)
 
     // We failed to recover a frame either using CFI or FP chasing, and we
@@ -1499,7 +1561,7 @@ static __attribute__((noinline)) bool GetAndCheckStackTrace(
   // Get hold of the current unwind-start registers.
   UnwindRegs startRegs;
   memset(&startRegs, 0, sizeof(startRegs));
-#if defined(GP_PLAT_amd64_linux)
+#if defined(GP_ARCH_amd64)
   volatile uintptr_t block[3];
   MOZ_ASSERT(sizeof(block) == 24);
   __asm__ __volatile__(
@@ -1605,7 +1667,7 @@ static __attribute__((noinline)) bool GetAndCheckStackTrace(
   const uintptr_t REDZONE_SIZE = 0;
   uintptr_t start = block[1] - REDZONE_SIZE;
 #else
-#error "Unsupported platform"
+#  error "Unsupported platform"
 #endif
 
   // Get hold of the innermost LUL_UNIT_TEST_STACK_SIZE bytes of the

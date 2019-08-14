@@ -7,8 +7,8 @@
 #ifndef mozilla_dom_SVGFEDisplacementMapElement_h
 #define mozilla_dom_SVGFEDisplacementMapElement_h
 
-#include "nsSVGEnum.h"
-#include "nsSVGFilters.h"
+#include "SVGAnimatedEnumeration.h"
+#include "SVGFilters.h"
 
 nsresult NS_NewSVGFEDisplacementMapElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -16,7 +16,7 @@ nsresult NS_NewSVGFEDisplacementMapElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFE SVGFEDisplacementMapElementBase;
+typedef SVGFE SVGFEDisplacementMapElementBase;
 
 class SVGFEDisplacementMapElement : public SVGFEDisplacementMapElementBase {
  protected:
@@ -36,20 +36,19 @@ class SVGFEDisplacementMapElement : public SVGFEDisplacementMapElementBase {
       nsTArray<RefPtr<SourceSurface>>& aInputImages) override;
   virtual bool AttributeAffectsRendering(int32_t aNameSpaceID,
                                          nsAtom* aAttribute) const override;
-  virtual nsSVGString& GetResultImageName() override {
+  virtual SVGAnimatedString& GetResultImageName() override {
     return mStringAttributes[RESULT];
   }
-  virtual void GetSourceImageNames(
-      nsTArray<nsSVGStringInfo>& aSources) override;
+  virtual void GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) override;
 
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedString> In1();
-  already_AddRefed<SVGAnimatedString> In2();
-  already_AddRefed<SVGAnimatedNumber> Scale();
-  already_AddRefed<SVGAnimatedEnumeration> XChannelSelector();
-  already_AddRefed<SVGAnimatedEnumeration> YChannelSelector();
+  already_AddRefed<DOMSVGAnimatedString> In1();
+  already_AddRefed<DOMSVGAnimatedString> In2();
+  already_AddRefed<DOMSVGAnimatedNumber> Scale();
+  already_AddRefed<DOMSVGAnimatedEnumeration> XChannelSelector();
+  already_AddRefed<DOMSVGAnimatedEnumeration> YChannelSelector();
 
  protected:
   virtual bool OperatesOnSRGB(int32_t aInputIndex,
@@ -71,16 +70,16 @@ class SVGFEDisplacementMapElement : public SVGFEDisplacementMapElementBase {
   virtual StringAttributesInfo GetStringInfo() override;
 
   enum { SCALE };
-  nsSVGNumber2 mNumberAttributes[1];
+  SVGAnimatedNumber mNumberAttributes[1];
   static NumberInfo sNumberInfo[1];
 
   enum { CHANNEL_X, CHANNEL_Y };
-  nsSVGEnum mEnumAttributes[2];
-  static nsSVGEnumMapping sChannelMap[];
+  SVGAnimatedEnumeration mEnumAttributes[2];
+  static SVGEnumMapping sChannelMap[];
   static EnumInfo sEnumInfo[2];
 
   enum { RESULT, IN1, IN2 };
-  nsSVGString mStringAttributes[3];
+  SVGAnimatedString mStringAttributes[3];
   static StringInfo sStringInfo[3];
 };
 

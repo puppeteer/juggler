@@ -7,7 +7,7 @@
 #include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/GeckoContentController.h"
 
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 
 #include "InputData.h"  // for InputData
@@ -25,6 +25,12 @@ APZChild::~APZChild() {
     mController->Destroy();
     mController = nullptr;
   }
+}
+
+mozilla::ipc::IPCResult APZChild::RecvLayerTransforms(
+    const nsTArray<MatrixMessage>& aTransforms) {
+  mController->NotifyLayerTransforms(aTransforms);
+  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult APZChild::RecvRequestContentRepaint(

@@ -20,43 +20,41 @@
 
 <page xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
       xmlns:html="http://www.w3.org/1999/xhtml"
+      role="document"
       data-l10n-id="pref-page"
       data-l10n-attrs="title">
 
   <linkset>
-    <link rel="localization" href="branding/brand.ftl"/>
-    <link rel="localization" href="browser/branding/sync-brand.ftl"/>
-    <link rel="localization" href="browser/preferences/preferences.ftl"/>
+    <html:link rel="localization" href="branding/brand.ftl"/>
+    <html:link rel="localization" href="browser/branding/brandings.ftl"/>
+    <html:link rel="localization" href="browser/branding/sync-brand.ftl"/>
+    <html:link rel="localization" href="browser/preferences/preferences.ftl"/>
     <!-- Used by fontbuilder.js -->
-    <link rel="localization" href="browser/preferences/fonts.ftl"/>
+    <html:link rel="localization" href="browser/preferences/fonts.ftl"/>
 
     <!-- Links below are only used for search-l10n-ids into subdialogs -->
-    <link rel="localization" href="browser/preferences/blocklists.ftl"/>
-    <link rel="localization" href="browser/preferences/clearSiteData.ftl"/>
-    <link rel="localization" href="browser/preferences/colors.ftl"/>
-    <link rel="localization" href="browser/preferences/connection.ftl"/>
-    <link rel="localization" href="browser/preferences/languages.ftl"/>
-    <link rel="localization" href="browser/preferences/permissions.ftl"/>
-    <link rel="localization" href="browser/preferences/selectBookmark.ftl"/>
-    <link rel="localization" href="browser/preferences/siteDataSettings.ftl"/>
-    <link rel="localization" href="browser/aboutDialog.ftl"/>
-    <link rel="localization" href="browser/sanitize.ftl"/>
-    <link rel="localization" href="toolkit/updates/history.ftl"/>
-    <link rel="localization" href="security/certificates/deviceManager.ftl"/>
-    <link rel="localization" href="security/certificates/certManager.ftl"/>
+    <html:link rel="localization" href="browser/preferences/blocklists.ftl"/>
+    <html:link rel="localization" href="browser/preferences/clearSiteData.ftl"/>
+    <html:link rel="localization" href="browser/preferences/colors.ftl"/>
+    <html:link rel="localization" href="browser/preferences/connection.ftl"/>
+    <html:link rel="localization" href="browser/preferences/languages.ftl"/>
+    <html:link rel="localization" href="browser/preferences/permissions.ftl"/>
+    <html:link rel="localization" href="browser/preferences/selectBookmark.ftl"/>
+    <html:link rel="localization" href="browser/preferences/siteDataSettings.ftl"/>
+    <html:link rel="localization" href="browser/aboutDialog.ftl"/>
+    <html:link rel="localization" href="browser/sanitize.ftl"/>
+    <html:link rel="localization" href="toolkit/updates/history.ftl"/>
+    <html:link rel="localization" href="security/certificates/deviceManager.ftl"/>
+    <html:link rel="localization" href="security/certificates/certManager.ftl"/>
   </linkset>
 
   <html:link rel="shortcut icon"
               href="chrome://browser/skin/settings.svg"/>
 
-  <script type="application/javascript"
-          src="chrome://browser/content/utilityOverlay.js"/>
-  <script type="application/javascript"
-          src="chrome://global/content/preferencesBindings.js"/>
-  <script type="application/javascript"
-          src="chrome://browser/content/preferences/in-content/preferences.js"/>
-  <script type="application/javascript"
-          src="chrome://browser/content/preferences/in-content/extensionControlled.js"/>
+  <script src="chrome://browser/content/utilityOverlay.js"/>
+  <script src="chrome://global/content/preferencesBindings.js"/>
+  <script src="chrome://browser/content/preferences/in-content/preferences.js"/>
+  <script src="chrome://browser/content/preferences/in-content/extensionControlled.js"/>
   <script src="chrome://browser/content/preferences/in-content/findInPage.js"/>
   <script src="chrome://browser/content/preferences/in-content/subdialogs.js"/>
 
@@ -131,18 +129,18 @@
                       hidden="true"
                       value="paneSync"
                       helpTopic="prefs-weave"
-                      data-l10n-id="category-sync"
+                      data-l10n-id="category-sync2"
                       data-l10n-attrs="tooltiptext"
                       align="center">
           <image class="category-icon"/>
-          <label class="category-name" flex="1" data-l10n-id="pane-sync-title"></label>
+          <label class="category-name" flex="1" data-l10n-id="pane-sync-title2"></label>
         </richlistitem>
       </richlistbox>
 
       <spacer flex="1"/>
 
       <hbox class="sidebar-footer-button" pack="center">
-        <label id="addonsButton" class="text-link">
+        <label id="addonsButton" is="text-link">
           <hbox align="center">
             <image class="sidebar-footer-icon addons-icon"/>
             <label class="sidebar-footer-label" flex="1" data-l10n-id="addons-button-label"></label>
@@ -151,7 +149,7 @@
       </hbox>
 
       <hbox class="sidebar-footer-button help-button" pack="center">
-        <label id="helpButton" class="text-link">
+        <label id="helpButton" is="text-link">
           <hbox align="center">
             <image class="sidebar-footer-icon help-icon"/>
             <label class="sidebar-footer-label" flex="1" data-l10n-id="help-button-label"></label>
@@ -172,11 +170,16 @@
               <image class="info-icon"></image>
             </hbox>
             <hbox align="center" flex="1">
-              <label class="policies-label" flex="1" data-l10n-id="policies-notice"></label>
+              <label class="policies-label"
+                     flex="1"
+                     href="about:policies"
+                     useoriginprincipal="true"
+                     is="text-link"
+                     data-l10n-id="managed-notice"/>
             </hbox>
           </hbox>
           <textbox
-            type="search" id="searchInput"
+            is="search-textbox" id="searchInput"
             data-l10n-id="search-input-box"
             data-l10n-attrs="style"
             hidden="true" clickSelectsAll="true"/>

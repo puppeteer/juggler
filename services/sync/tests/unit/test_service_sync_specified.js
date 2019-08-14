@@ -1,12 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://services-sync/constants.js");
-ChromeUtils.import("resource://services-sync/engines.js");
-ChromeUtils.import("resource://services-sync/engines/clients.js");
-ChromeUtils.import("resource://services-sync/record.js");
-ChromeUtils.import("resource://services-sync/service.js");
-ChromeUtils.import("resource://services-sync/util.js");
+const { Service } = ChromeUtils.import("resource://services-sync/service.js");
 
 let syncedEngines = [];
 
@@ -35,18 +30,15 @@ var collectionsHelper = track_collections_helper();
 var upd = collectionsHelper.with_updated_collection;
 
 function sync_httpd_setup(handlers) {
-
   handlers["/1.1/johndoe/info/collections"] = collectionsHelper.handler;
   delete collectionsHelper.collections.crypto;
   delete collectionsHelper.collections.meta;
 
   let cr = new ServerWBO("keys");
-  handlers["/1.1/johndoe/storage/crypto/keys"] =
-    upd("crypto", cr.handler());
+  handlers["/1.1/johndoe/storage/crypto/keys"] = upd("crypto", cr.handler());
 
   let cl = new ServerCollection();
-  handlers["/1.1/johndoe/storage/clients"] =
-    upd("clients", cl.handler());
+  handlers["/1.1/johndoe/storage/clients"] = upd("clients", cl.handler());
 
   return httpd_setup(handlers);
 }
@@ -84,9 +76,8 @@ add_task(async function test_noEngines() {
 
   try {
     _("Sync with no engines specified.");
-    await Service.sync({engines: []});
+    await Service.sync({ engines: [] });
     deepEqual(syncedEngines, [], "no engines were synced");
-
   } finally {
     await Service.startOver();
     await promiseStopServer(server);
@@ -100,11 +91,9 @@ add_task(async function test_oneEngine() {
   let server = await setUp();
 
   try {
-
     _("Sync with 1 engine specified.");
-    await Service.sync({engines: ["steam"]});
+    await Service.sync({ engines: ["steam"] });
     deepEqual(syncedEngines, ["steam"]);
-
   } finally {
     await Service.startOver();
     await promiseStopServer(server);
@@ -119,9 +108,8 @@ add_task(async function test_bothEnginesSpecified() {
 
   try {
     _("Sync with both engines specified.");
-    await Service.sync({engines: ["steam", "stirling"]});
+    await Service.sync({ engines: ["steam", "stirling"] });
     deepEqual(syncedEngines, ["steam", "stirling"]);
-
   } finally {
     await Service.startOver();
     await promiseStopServer(server);
@@ -136,9 +124,8 @@ add_task(async function test_bothEnginesSpecified() {
 
   try {
     _("Sync with both engines specified.");
-    await Service.sync({engines: ["stirling", "steam"]});
+    await Service.sync({ engines: ["stirling", "steam"] });
     deepEqual(syncedEngines, ["stirling", "steam"]);
-
   } finally {
     await Service.startOver();
     await promiseStopServer(server);
@@ -154,7 +141,6 @@ add_task(async function test_bothEnginesDefault() {
   try {
     await Service.sync();
     deepEqual(syncedEngines, ["steam", "stirling"]);
-
   } finally {
     await Service.startOver();
     await promiseStopServer(server);

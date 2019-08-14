@@ -4,11 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #if !defined(AudioCompactor_h)
-#define AudioCompactor_h
+#  define AudioCompactor_h
 
-#include "MediaQueue.h"
-#include "MediaData.h"
-#include "VideoUtils.h"
+#  include "MediaQueue.h"
+#  include "MediaData.h"
+#  include "VideoUtils.h"
 
 namespace mozilla {
 
@@ -66,8 +66,10 @@ class AudioCompactor {
         return false;
       }
 
-      mQueue.Push(new AudioData(aOffset, time, duration, framesCopied,
-                                std::move(buffer), aChannels, aSampleRate));
+      RefPtr<AudioData> data = new AudioData(aOffset, time, std::move(buffer),
+                                             aChannels, aSampleRate);
+      MOZ_DIAGNOSTIC_ASSERT(duration == data->mDuration, "must be equal");
+      mQueue.Push(data);
 
       // Remove the frames we just pushed into the queue and loop if there is
       // more to be done.

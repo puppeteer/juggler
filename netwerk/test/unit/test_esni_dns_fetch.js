@@ -1,17 +1,21 @@
-Cu.import("resource://gre/modules/NetUtil.jsm");
+ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
 
 var prefs;
 var h2Port;
 var listen;
 
 var dns = Cc["@mozilla.org/network/dns-service;1"].getService(Ci.nsIDNSService);
-var threadManager = Cc["@mozilla.org/thread-manager;1"].getService(Ci.nsIThreadManager);
+var threadManager = Cc["@mozilla.org/thread-manager;1"].getService(
+  Ci.nsIThreadManager
+);
 var mainThread = threadManager.currentThread;
 
 const defaultOriginAttributes = {};
 
 function run_test() {
-  var env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
+  var env = Cc["@mozilla.org/process/environment;1"].getService(
+    Ci.nsIEnvironment
+  );
   h2Port = env.get("MOZHTTP2_PORT");
   Assert.notEqual(h2Port, null);
   Assert.notEqual(h2Port, "");
@@ -35,11 +39,12 @@ function run_test() {
   // don't confirm that TRR is working, just go!
   prefs.setCharPref("network.trr.confirmationNS", "skip");
 
-  // The moz-http2 cert is for foo.example.com and is signed by CA.cert.der
+  // The moz-http2 cert is for foo.example.com and is signed by http2-ca.pem
   // so add that cert to the trust list as a signing cert.  // the foo.example.com domain name.
-  let certdb = Cc["@mozilla.org/security/x509certdb;1"]
-      .getService(Ci.nsIX509CertDB);
-  addCertFromFile(certdb, "CA.cert.der", "CTu,u,u");
+  let certdb = Cc["@mozilla.org/security/x509certdb;1"].getService(
+    Ci.nsIX509CertDB
+  );
+  addCertFromFile(certdb, "http2-ca.pem", "CTu,u,u");
   do_test_pending();
   run_dns_tests();
 }
@@ -60,30 +65,14 @@ registerCleanupFunction(() => {
   prefs.clearUserPref("network.trr.bootstrapAddress");
   prefs.clearUserPref("network.trr.blacklist-duration");
   prefs.clearUserPref("network.trr.request-timeout");
-
 });
 
-function readFile(file) {
-  let fstream = Cc["@mozilla.org/network/file-input-stream;1"]
-                  .createInstance(Ci.nsIFileInputStream);
-  fstream.init(file, -1, 0, 0);
-  let data = NetUtil.readInputStreamToString(fstream, fstream.available());
-  fstream.close();
-  return data;
-}
-
-function addCertFromFile(certdb, filename, trustString) {
-  let certFile = do_get_file(filename, false);
-  let der = readFile(certFile);
-  certdb.addCert(der, trustString);
-}
-
-var test_answer="bXkgdm9pY2UgaXMgbXkgcGFzc3dvcmQ=";
-var test_answer_addr="127.0.0.1";
+var test_answer = "bXkgdm9pY2UgaXMgbXkgcGFzc3dvcmQ=";
+var test_answer_addr = "127.0.0.1";
 
 // check that we do lookup by type fine
 var listenerEsni = {
-  onLookupByTypeComplete: function(inRequest, inRecord, inStatus) {
+  onLookupByTypeComplete(inRequest, inRecord, inStatus) {
     if (inRequest == listen) {
       Assert.ok(!inStatus);
       var answer = inRecord.getRecordsAsOneString();
@@ -92,18 +81,12 @@ var listenerEsni = {
       run_dns_tests();
     }
   },
-  QueryInterface: function(aIID) {
-    if (aIID.equals(Ci.nsIDNSListener) ||
-      aIID.equals(Ci.nsISupports)) {
-      return this;
-    }
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIDNSListener"]),
 };
 
 // check that we do lookup for A record is fine
 var listenerAddr = {
-  onLookupComplete: function(inRequest, inRecord, inStatus) {
+  onLookupComplete(inRequest, inRecord, inStatus) {
     if (inRequest == listen) {
       Assert.ok(!inStatus);
       var answer = inRecord.getNextAddrAsString();
@@ -112,58 +95,70 @@ var listenerAddr = {
       run_dns_tests();
     }
   },
-  QueryInterface: function(aIID) {
-    if (aIID.equals(Ci.nsIDNSListener) ||
-      aIID.equals(Ci.nsISupports)) {
-      return this;
-    }
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  }
+  QueryInterface: ChromeUtils.generateQI(["nsIDNSListener"]),
 };
 
-function testEsniRequest()
-{
+function testEsniRequest() {
   // use the h2 server as DOH provider
-  prefs.setCharPref("network.trr.uri", "https://foo.example.com:" + h2Port + "/esni-dns");
-  listen = dns.asyncResolveByType("_esni.example.com", dns.RESOLVE_TYPE_TXT, 0, listenerEsni, mainThread, defaultOriginAttributes);
+  prefs.setCharPref(
+    "network.trr.uri",
+    "https://foo.example.com:" + h2Port + "/esni-dns"
+  );
+  listen = dns.asyncResolveByType(
+    "_esni.example.com",
+    dns.RESOLVE_TYPE_TXT,
+    0,
+    listenerEsni,
+    mainThread,
+    defaultOriginAttributes
+  );
 }
 
 // verify esni record pushed on a A record request
-function testEsniPushPart1()
-{
-  prefs.setCharPref("network.trr.uri", "https://foo.example.com:" + h2Port + "/esni-dns-push");
-  listen = dns.asyncResolve("_esni_push.example.com", 0, listenerAddr, mainThread, defaultOriginAttributes);
+function testEsniPushPart1() {
+  prefs.setCharPref(
+    "network.trr.uri",
+    "https://foo.example.com:" + h2Port + "/esni-dns-push"
+  );
+  listen = dns.asyncResolve(
+    "_esni_push.example.com",
+    0,
+    listenerAddr,
+    mainThread,
+    defaultOriginAttributes
+  );
 }
 
 // verify the esni pushed record
-function testEsniPushPart2()
-{
+function testEsniPushPart2() {
   // At this point the second host name should've been pushed and we can resolve it using
   // cache only. Set back the URI to a path that fails.
-  prefs.setCharPref("network.trr.uri", "https://foo.example.com:" + h2Port + "/404");
-  listen = dns.asyncResolveByType("_esni_push.example.com", dns.RESOLVE_TYPE_TXT, 0, listenerEsni, mainThread, defaultOriginAttributes);
+  prefs.setCharPref(
+    "network.trr.uri",
+    "https://foo.example.com:" + h2Port + "/404"
+  );
+  listen = dns.asyncResolveByType(
+    "_esni_push.example.com",
+    dns.RESOLVE_TYPE_TXT,
+    0,
+    listenerEsni,
+    mainThread,
+    defaultOriginAttributes
+  );
 }
 
-function testsDone()
-{
+function testsDone() {
   do_test_finished();
   do_test_finished();
 }
 
-var tests = [testEsniRequest,
-             testEsniPushPart1,
-             testEsniPushPart2,
-             testsDone
-            ];
+var tests = [testEsniRequest, testEsniPushPart1, testEsniPushPart2, testsDone];
 var current_test = 0;
 
-function run_dns_tests()
-{
+function run_dns_tests() {
   if (current_test < tests.length) {
     dump("starting test " + current_test + "\n");
     do_test_pending();
     tests[current_test++]();
   }
 }
-
-

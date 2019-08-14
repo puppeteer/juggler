@@ -8,6 +8,8 @@
 #include "HttpLog.h"
 
 #include "HttpChannelParentListener.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/ContentProcessManager.h"
 #include "mozilla/dom/ServiceWorkerInterceptController.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/net/HttpChannelParent.h"
@@ -16,8 +18,7 @@
 #include "nsIAuthPrompt.h"
 #include "nsIAuthPrompt2.h"
 #include "nsIHttpHeaderVisitor.h"
-#include "nsIRedirectProcessChooser.h"
-#include "nsITabParent.h"
+#include "nsIRemoteTab.h"
 #include "nsIPromptFactory.h"
 #include "nsIWindowWatcher.h"
 #include "nsQueryObject.h"
@@ -72,20 +73,18 @@ NS_INTERFACE_MAP_END
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-HttpChannelParentListener::OnStartRequest(nsIRequest* aRequest,
-                                          nsISupports* aContext) {
+HttpChannelParentListener::OnStartRequest(nsIRequest* aRequest) {
   MOZ_RELEASE_ASSERT(!mSuspendedForDiversion,
                      "Cannot call OnStartRequest if suspended for diversion!");
 
   if (!mNextListener) return NS_ERROR_UNEXPECTED;
 
   LOG(("HttpChannelParentListener::OnStartRequest [this=%p]\n", this));
-  return mNextListener->OnStartRequest(aRequest, aContext);
+  return mNextListener->OnStartRequest(aRequest);
 }
 
 NS_IMETHODIMP
 HttpChannelParentListener::OnStopRequest(nsIRequest* aRequest,
-                                         nsISupports* aContext,
                                          nsresult aStatusCode) {
   MOZ_RELEASE_ASSERT(!mSuspendedForDiversion,
                      "Cannot call OnStopRequest if suspended for diversion!");
@@ -95,7 +94,7 @@ HttpChannelParentListener::OnStopRequest(nsIRequest* aRequest,
   LOG(("HttpChannelParentListener::OnStopRequest: [this=%p status=%" PRIu32
        "]\n",
        this, static_cast<uint32_t>(aStatusCode)));
-  nsresult rv = mNextListener->OnStopRequest(aRequest, aContext, aStatusCode);
+  nsresult rv = mNextListener->OnStopRequest(aRequest, aStatusCode);
 
   mNextListener = nullptr;
   return rv;
@@ -107,7 +106,6 @@ HttpChannelParentListener::OnStopRequest(nsIRequest* aRequest,
 
 NS_IMETHODIMP
 HttpChannelParentListener::OnDataAvailable(nsIRequest* aRequest,
-                                           nsISupports* aContext,
                                            nsIInputStream* aInputStream,
                                            uint64_t aOffset, uint32_t aCount) {
   MOZ_RELEASE_ASSERT(!mSuspendedForDiversion,
@@ -116,8 +114,8 @@ HttpChannelParentListener::OnDataAvailable(nsIRequest* aRequest,
   if (!mNextListener) return NS_ERROR_UNEXPECTED;
 
   LOG(("HttpChannelParentListener::OnDataAvailable [this=%p]\n", this));
-  return mNextListener->OnDataAvailable(aRequest, aContext, aInputStream,
-                                        aOffset, aCount);
+  return mNextListener->OnDataAvailable(aRequest, aInputStream, aOffset,
+                                        aCount);
 }
 
 //-----------------------------------------------------------------------------
@@ -158,17 +156,18 @@ nsresult HttpChannelParentListener::TriggerCrossProcessRedirect(
     nsIChannel* aChannel, nsILoadInfo* aLoadInfo, uint64_t aIdentifier) {
   RefPtr<HttpChannelParent> channelParent = do_QueryObject(mNextListener);
   MOZ_ASSERT(channelParent);
-  channelParent->SetCrossProcessRedirect();
+  channelParent->CancelChildCrossProcessRedirect();
 
   nsCOMPtr<nsIChannel> channel = aChannel;
   RefPtr<nsHttpChannel> httpChannel = do_QueryObject(channel);
-  RefPtr<nsHttpChannel::TabPromise> p = httpChannel->TakeRedirectTabPromise();
+  RefPtr<nsHttpChannel::ContentProcessIdPromise> p =
+      httpChannel->TakeRedirectContentProcessIdPromise();
   nsCOMPtr<nsILoadInfo> loadInfo = aLoadInfo;
 
   RefPtr<HttpChannelParentListener> self = this;
   p->Then(
       GetMainThreadSerialEventTarget(), __func__,
-      [=](nsCOMPtr<nsITabParent> tp) {
+      [=](uint64_t cpId) {
         nsresult rv;
 
         // Register the new channel and obtain id for it
@@ -181,7 +180,7 @@ nsresult HttpChannelParentListener::TriggerCrossProcessRedirect(
         LOG(("Registered %p channel under id=%d", channel.get(),
              self->mRedirectChannelId));
 
-        OptionalLoadInfoArgs loadInfoArgs;
+        Maybe<LoadInfoArgs> loadInfoArgs;
         MOZ_ALWAYS_SUCCEEDS(LoadInfoToLoadInfoArgs(loadInfo, &loadInfoArgs));
 
         uint32_t newLoadFlags = nsIRequest::LOAD_NORMAL;
@@ -196,19 +195,22 @@ nsresult HttpChannelParentListener::TriggerCrossProcessRedirect(
         uint64_t channelId;
         MOZ_ALWAYS_SUCCEEDS(httpChannel->GetChannelId(&channelId));
 
-        dom::TabParent* tabParent = dom::TabParent::GetFrom(tp);
-        ContentParent* cp = tabParent->Manager()->AsContentParent();
-        PNeckoParent* neckoParent =
-            SingleManagedOrNull(cp->ManagedPNeckoParent());
+        uint32_t redirectMode = nsIHttpChannelInternal::REDIRECT_MODE_FOLLOW;
+        nsCOMPtr<nsIHttpChannelInternal> internalChannel =
+            do_QueryInterface(channel);
+        if (internalChannel) {
+          MOZ_ALWAYS_SUCCEEDS(internalChannel->GetRedirectMode(&redirectMode));
+        }
 
-        RefPtr<HttpChannelParent> channelParent =
-            do_QueryObject(self->mNextListener);
-        MOZ_ASSERT(channelParent);
-        channelParent->SetCrossProcessRedirect();
-
-        auto result = neckoParent->SendCrossProcessRedirect(
+        dom::ContentParent* cp =
+            dom::ContentProcessManager::GetSingleton()->GetContentProcessById(
+                ContentParentId{cpId});
+        if (!cp) {
+          return NS_ERROR_UNEXPECTED;
+        }
+        auto result = cp->SendCrossProcessRedirect(
             self->mRedirectChannelId, uri, newLoadFlags, loadInfoArgs,
-            channelId, originalURI, aIdentifier);
+            channelId, originalURI, aIdentifier, redirectMode);
 
         MOZ_ASSERT(result, "SendCrossProcessRedirect failed");
 

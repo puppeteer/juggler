@@ -4,11 +4,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_ipc_TemporaryIPCBlobChild_h
-#define mozilla_dom_ipc_TemporaryIPCBlobChild_h
+#ifndef mozilla_dom_TemporaryIPCBlobChild_h
+#define mozilla_dom_TemporaryIPCBlobChild_h
 
-#include "mozilla/ipc/PTemporaryIPCBlob.h"
-#include "mozilla/ipc/PTemporaryIPCBlobChild.h"
+#include "mozilla/dom/PTemporaryIPCBlob.h"
+#include "mozilla/dom/PTemporaryIPCBlobChild.h"
 
 namespace mozilla {
 namespace dom {
@@ -23,8 +23,9 @@ class TemporaryIPCBlobChildCallback {
   virtual void OperationFailed(nsresult aRv) = 0;
 };
 
-class TemporaryIPCBlobChild final
-    : public mozilla::ipc::PTemporaryIPCBlobChild {
+class TemporaryIPCBlobChild final : public PTemporaryIPCBlobChild {
+  friend class PTemporaryIPCBlobChild;
+
  public:
   NS_INLINE_DECL_REFCOUNTING(TemporaryIPCBlobChild)
 
@@ -36,7 +37,7 @@ class TemporaryIPCBlobChild final
  private:
   ~TemporaryIPCBlobChild();
 
-  mozilla::ipc::IPCResult RecvFileDesc(const FileDescriptor& aFD) override;
+  mozilla::ipc::IPCResult RecvFileDesc(const FileDescriptor& aFD);
 
   mozilla::ipc::IPCResult Recv__delete__(
       const IPCBlobOrError& aBlobOrError) override;
@@ -51,4 +52,4 @@ class TemporaryIPCBlobChild final
 }  // namespace dom
 }  // namespace mozilla
 
-#endif  // mozilla_dom_ipc_TemporaryIPCBlobChild_h
+#endif  // mozilla_dom_TemporaryIPCBlobChild_h

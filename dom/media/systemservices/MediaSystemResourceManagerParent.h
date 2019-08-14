@@ -4,12 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined(MediaSystemResourceManagerParent_h_)
-#define MediaSystemResourceManagerParent_h_
+#  define MediaSystemResourceManagerParent_h_
 
-#include "MediaSystemResourceManager.h"
-#include "MediaSystemResourceService.h"
-#include "MediaSystemResourceTypes.h"
-#include "mozilla/media/PMediaSystemResourceManagerParent.h"
+#  include "MediaSystemResourceManager.h"
+#  include "MediaSystemResourceService.h"
+#  include "MediaSystemResourceTypes.h"
+#  include "mozilla/media/PMediaSystemResourceManagerParent.h"
 
 namespace mozilla {
 namespace media {
@@ -19,6 +19,8 @@ namespace media {
  */
 class MediaSystemResourceManagerParent final
     : public PMediaSystemResourceManagerParent {
+  friend class PMediaSystemResourceManagerParent;
+
  public:
   MediaSystemResourceManagerParent();
   virtual ~MediaSystemResourceManagerParent();
@@ -26,11 +28,11 @@ class MediaSystemResourceManagerParent final
  protected:
   mozilla::ipc::IPCResult RecvAcquire(
       const uint32_t& aId, const MediaSystemResourceType& aResourceType,
-      const bool& aWillWait) override;
+      const bool& aWillWait);
 
-  mozilla::ipc::IPCResult RecvRelease(const uint32_t& aId) override;
+  mozilla::ipc::IPCResult RecvRelease(const uint32_t& aId);
 
-  mozilla::ipc::IPCResult RecvRemoveResourceManager() override;
+  mozilla::ipc::IPCResult RecvRemoveResourceManager();
 
  private:
   void ActorDestroy(ActorDestroyReason aActorDestroyReason) override;

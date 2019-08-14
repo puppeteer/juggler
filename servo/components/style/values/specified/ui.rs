@@ -9,14 +9,9 @@ use crate::values::generics::ui as generics;
 use crate::values::specified::color::Color;
 use crate::values::specified::url::SpecifiedImageUrl;
 use crate::values::specified::Number;
-use crate::values::{Auto, Either};
 use cssparser::Parser;
 use std::fmt::{self, Write};
-use style_traits::cursor::CursorKind;
 use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
-
-/// auto | <color>
-pub type ColorOrAuto = Either<Color, Auto>;
 
 /// A specified value for the `cursor` property.
 pub type Cursor = generics::Cursor<CursorImage>;
@@ -40,20 +35,8 @@ impl Parse for Cursor {
         }
         Ok(Self {
             images: images.into_boxed_slice(),
-            keyword: CursorKind::parse(context, input)?,
+            keyword: CursorKind::parse(input)?,
         })
-    }
-}
-
-impl Parse for CursorKind {
-    fn parse<'i, 't>(
-        _context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<Self, ParseError<'i>> {
-        let location = input.current_source_location();
-        let ident = input.expect_ident()?;
-        CursorKind::from_css_keyword(&ident)
-            .map_err(|_| location.new_custom_error(StyleParseErrorKind::UnspecifiedError))
     }
 }
 
@@ -73,7 +56,17 @@ impl Parse for CursorImage {
 }
 
 /// Specified value of `-moz-force-broken-image-icon`
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToComputedValue)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToResolvedValue,
+    ToShmem,
+)]
 pub struct MozForceBrokenImageIcon(pub bool);
 
 impl MozForceBrokenImageIcon {
@@ -156,6 +149,8 @@ impl Parse for ScrollbarColor {
     SpecifiedValueInfo,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
 #[repr(u8)]
 pub enum UserSelect {
@@ -165,4 +160,67 @@ pub enum UserSelect {
     None,
     /// Force selection of all children.
     All,
+}
+
+/// The keywords allowed in the Cursor property.
+///
+/// https://drafts.csswg.org/css-ui-4/#propdef-cursor
+#[allow(missing_docs)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    FromPrimitive,
+    MallocSizeOf,
+    Parse,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
+#[repr(u8)]
+pub enum CursorKind {
+    None,
+    Default,
+    Pointer,
+    ContextMenu,
+    Help,
+    Progress,
+    Wait,
+    Cell,
+    Crosshair,
+    Text,
+    VerticalText,
+    Alias,
+    Copy,
+    Move,
+    NoDrop,
+    NotAllowed,
+    #[parse(aliases = "-moz-grab")]
+    Grab,
+    #[parse(aliases = "-moz-grabbing")]
+    Grabbing,
+    EResize,
+    NResize,
+    NeResize,
+    NwResize,
+    SResize,
+    SeResize,
+    SwResize,
+    WResize,
+    EwResize,
+    NsResize,
+    NeswResize,
+    NwseResize,
+    ColResize,
+    RowResize,
+    AllScroll,
+    #[parse(aliases = "-moz-zoom-in")]
+    ZoomIn,
+    #[parse(aliases = "-moz-zoom-out")]
+    ZoomOut,
+    Auto,
 }

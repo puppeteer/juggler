@@ -19,7 +19,6 @@ class VideoBridgeParent final : public PVideoBridgeParent,
                                 public HostIPCAllocator,
                                 public ShmemAllocator {
  public:
-  VideoBridgeParent();
   ~VideoBridgeParent();
 
   static VideoBridgeParent* GetSingleton();
@@ -31,8 +30,8 @@ class VideoBridgeParent final : public PVideoBridgeParent,
                                       const ReadLockDescriptor& aReadLock,
                                       const LayersBackend& aLayersBackend,
                                       const TextureFlags& aFlags,
-                                      const uint64_t& aSerial) override;
-  bool DeallocPTextureParent(PTextureParent* actor) override;
+                                      const uint64_t& aSerial);
+  bool DeallocPTextureParent(PTextureParent* actor);
 
   // HostIPCAllocator
   base::ProcessId GetChildProcessId() override { return OtherPid(); }
@@ -55,8 +54,12 @@ class VideoBridgeParent final : public PVideoBridgeParent,
 
   void DeallocShmem(ipc::Shmem& aShmem) override;
 
+  static void Open(Endpoint<PVideoBridgeParent>&& aEndpoint);
+
  private:
-  void DeallocPVideoBridgeParent() override;
+  VideoBridgeParent();
+
+  void ActorDealloc() override;
 
   // This keeps us alive until ActorDestroy(), at which point we do a
   // deferred destruction of ourselves.

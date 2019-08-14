@@ -11,8 +11,8 @@ const TEST_URI = `<style>body{background:red}</style>`;
 add_task(async function() {
   await addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
 
-  const {view, toolbox} = await openRuleView();
-  const pickerStopped = toolbox.once("picker-stopped");
+  const { view, toolbox } = await openRuleView();
+  const pickerStopped = toolbox.inspector.nodePicker.once("picker-stopped");
 
   await startPicker(toolbox);
 
@@ -29,4 +29,3 @@ add_task(async function() {
 
   ok(true, "picker-stopped event fired after eyedropper was clicked");
 });
-

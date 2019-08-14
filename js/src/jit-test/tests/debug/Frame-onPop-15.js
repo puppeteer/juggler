@@ -1,7 +1,7 @@
 // Each resumption of a generator gets the same Frame; its onPop handler
 // fires each time the generator yields.
 
-var g = newGlobal();
+var g = newGlobal({newCompartment: true});
 var dbg = new Debugger(g);
 var log;
 
@@ -28,4 +28,4 @@ dbg.onDebuggerStatement = function handleDebugger(frame) {
 g.eval("function* g() { for (var i = 0; i < 10; i++) { debugger; yield i; } }");
 log ='';
 assertEq(g.eval("var t = 0; for (j of g()) t += j; t;"), 45);
-assertEq(log, "d)0d)0d)0d)3d)3d)3d)6d)6d)6d)9");
+assertEq(log, "d)0d)0d)0d)3d)3d)3d)6d)6d)6d)9)9");

@@ -1,6 +1,7 @@
+// |jit-test| --enable-experimental-await-fix
 // async functions fire onEnterFrame each time they resume, like generators
 
-let g = newGlobal();
+let g = newGlobal({newCompartment: true});
 g.eval(`
     async function timeout(n) {
         for (let i = 0; i < n; i++) {
@@ -27,7 +28,6 @@ dbg.onEnterFrame = frame => {
 g.job();
 drainJobQueue();
 assertEq(log,
-         "(job)(job(t5)(t5)(t3)(t3))" +
-         "(t5)(t3)".repeat(3) + "(job)" +
-         "(t5)(t5)(job)");
-
+         "(job(t5)(t3))" +
+         "(t5)(t3)".repeat(3) +
+         "(t5)(job)(t5)(job)");

@@ -11,9 +11,9 @@
 #include "client/ClientLayerManager.h"  // for ClientLayerManager, etc
 #include "gfxContext.h"                 // for gfxContext
 #include "gfx2DGlue.h"
-#include "gfxEnv.h"              // for gfxEnv
-#include "gfxRect.h"             // for gfxRect
-#include "gfxPrefs.h"            // for gfxPrefs
+#include "gfxEnv.h"   // for gfxEnv
+#include "gfxRect.h"  // for gfxRect
+
 #include "mozilla/Assertions.h"  // for MOZ_ASSERT, etc
 #include "mozilla/gfx/2D.h"      // for DrawTarget
 #include "mozilla/gfx/DrawEventRecorder.h"
@@ -147,10 +147,20 @@ void ClientPaintedLayer::RenderLayerWithReadback(ReadbackProcessor* aReadback) {
     MOZ_ASSERT(ctx);  // already checked the target above
 
     if (!gfxEnv::SkipRasterization()) {
-      ClientManager()->GetPaintedLayerCallback()(
-          this, ctx, iter.mDrawRegion, iter.mDrawRegion, state.mClip,
-          state.mRegionToInvalidate,
-          ClientManager()->GetPaintedLayerCallbackData());
+      if (!target->IsCaptureDT()) {
+        target->ClearRect(Rect());
+        if (target->IsValid()) {
+          ClientManager()->GetPaintedLayerCallback()(
+              this, ctx, iter.mDrawRegion, iter.mDrawRegion, state.mClip,
+              state.mRegionToInvalidate,
+              ClientManager()->GetPaintedLayerCallbackData());
+        }
+      } else {
+        ClientManager()->GetPaintedLayerCallback()(
+            this, ctx, iter.mDrawRegion, iter.mDrawRegion, state.mClip,
+            state.mRegionToInvalidate,
+            ClientManager()->GetPaintedLayerCallbackData());
+      }
     }
 
     ctx = nullptr;

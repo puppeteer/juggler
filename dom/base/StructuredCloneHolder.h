@@ -17,7 +17,7 @@
 #include "nsTArray.h"
 
 #ifdef DEBUG
-#include "nsIThread.h"
+#  include "nsIThread.h"
 #endif
 
 class nsIInputStream;
@@ -258,6 +258,11 @@ class StructuredCloneHolder : public StructuredCloneHolderBase {
   static bool WriteFullySerializableObjects(JSContext* aCx,
                                             JSStructuredCloneWriter* aWriter,
                                             JS::Handle<JSObject*> aObj);
+
+  // Helper functions for reading and writing strings.
+  static bool ReadString(JSStructuredCloneReader* aReader, nsString& aString);
+  static bool WriteString(JSStructuredCloneWriter* aWriter,
+                          const nsString& aString);
 
   static const JSStructuredCloneCallbacks sCallbacks;
 

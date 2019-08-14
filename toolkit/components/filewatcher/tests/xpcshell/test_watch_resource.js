@@ -16,13 +16,14 @@ function run_test() {
  * Test watching non-existing path
  */
 add_task(async function test_watching_non_existing() {
-  let notExistingDir =
-    OS.Path.join(OS.Constants.Path.profileDir, "absolutelyNotExisting");
+  let notExistingDir = OS.Path.join(
+    OS.Constants.Path.profileDir,
+    "absolutelyNotExisting"
+  );
 
   // Instantiate the native watcher.
   let watcher = makeWatcher();
   let error = await new Promise((resolve, reject) => {
-
     // Try watch a path which doesn't exist.
     watcher.addPath(notExistingDir, reject, resolve);
 

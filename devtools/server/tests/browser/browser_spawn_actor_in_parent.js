@@ -8,7 +8,8 @@
 // This test instanciates a first test actor "InContentActor" that uses
 // spawnActorInParentProcess to instanciate the second test actor "InParentActor"
 
-const ACTOR_URL = "chrome://mochitests/content/browser/devtools/server/tests/browser/test-spawn-actor-in-parent.js";
+const ACTOR_URL =
+  "chrome://mochitests/content/browser/devtools/server/tests/browser/test-spawn-actor-in-parent.js";
 
 const { InContentFront, InParentFront } = require(ACTOR_URL);
 
@@ -25,27 +26,39 @@ add_task(async function() {
   const tab = gBrowser.getTabForBrowser(browser);
   const target = await TargetFactory.forTab(tab);
   await target.attach();
-  const targetFront = target.activeTab;
   const { client } = target;
-  const form = targetFront.targetForm;
+  const form = target.targetForm;
 
-  const inContentFront = InContentFront(client, form);
+  // As this Front isn't instantiated by protocol.js, we have to manually
+  // set its actor ID and manage it:
+  const inContentFront = new InContentFront(client);
+  inContentFront.actorID = form.inContentActor;
+  inContentFront.manage(inContentFront);
+
   const isInContent = await inContentFront.isInContent();
   ok(isInContent, "ContentActor really runs in the content process");
   const formSpawn = await inContentFront.spawnInParent(ACTOR_URL);
-  const inParentFront = InParentFront(client, formSpawn);
-  const {
-    args,
-    isInParent,
-    conn,
-    mm,
-  } = await inParentFront.test();
+
+  // As this Front isn't instantiated by protocol.js, we have to manually
+  // set its actor ID and manage it:
+  const inParentFront = new InParentFront(client, formSpawn);
+  inParentFront.actorID = formSpawn.inParentActor;
+  inParentFront.manage(inParentFront);
+
+  const { args, isInParent, conn, mm } = await inParentFront.test();
   is(args[0], 1, "first actor constructor arg is correct");
   is(args[1], 2, "first actor constructor arg is correct");
   is(args[2], 3, "first actor constructor arg is correct");
   ok(isInParent, "The ParentActor really runs in the parent process");
-  ok(conn, "`conn`, first contructor argument is a DebuggerServerConnection instance");
-  is(mm, "ChromeMessageSender", "`mm`, last constructor argument is a message manager");
+  ok(
+    conn,
+    "`conn`, first contructor argument is a DebuggerServerConnection instance"
+  );
+  is(
+    mm,
+    "ChromeMessageSender",
+    "`mm`, last constructor argument is a message manager"
+  );
 
   await target.destroy();
   gBrowser.removeCurrentTab();

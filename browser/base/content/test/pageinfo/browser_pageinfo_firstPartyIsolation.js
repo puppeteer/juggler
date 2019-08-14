@@ -1,11 +1,5 @@
 const Cm = Components.manager;
 
-function waitForEvent(elem, event) {
-  return new Promise(resolve => {
-    elem.addEventListener(event, resolve, {capture: true, once: true});
-  });
-}
-
 function testFirstPartyDomain(pageInfo) {
   return new Promise(resolve => {
     const EXPECTED_DOMAIN = "example.com";
@@ -21,7 +15,7 @@ function testFirstPartyDomain(pageInfo) {
       for (let i = 0; i < 3; i++) {
         info("imagetree select " + i);
         tree.view.selection.select(i);
-        tree.treeBoxObject.ensureRowIsVisible(i);
+        tree.ensureRowIsVisible(i);
         tree.focus();
 
         let preview = pageInfo.document.getElementById("thepreviewimage");
@@ -32,9 +26,9 @@ function testFirstPartyDomain(pageInfo) {
         // the triggeringprincipal attribute on the node, so we simply wait for
         // loadstart.
         if (i == 0) {
-          await waitForEvent(preview, "loadend");
+          await BrowserTestUtils.waitForEvent(preview, "loadend");
         } else {
-          await waitForEvent(preview, "loadstart");
+          await BrowserTestUtils.waitForEvent(preview, "loadstart");
         }
 
         info("preview load " + i);
@@ -43,19 +37,28 @@ function testFirstPartyDomain(pageInfo) {
         // it won't have origin attributes, now we've changed to loadingPrincipal
         // to the content in bug 1376971, it should have firstPartyDomain set.
         if (i == 0) {
-          let req = preview.getRequest(Ci.nsIImageLoadingContent.CURRENT_REQUEST);
-          Assert.equal(req.imagePrincipal.originAttributes.firstPartyDomain, EXPECTED_DOMAIN,
-                       "imagePrincipal should have firstPartyDomain set to " + EXPECTED_DOMAIN);
+          let req = preview.getRequest(
+            Ci.nsIImageLoadingContent.CURRENT_REQUEST
+          );
+          Assert.equal(
+            req.imagePrincipal.originAttributes.firstPartyDomain,
+            EXPECTED_DOMAIN,
+            "imagePrincipal should have firstPartyDomain set to " +
+              EXPECTED_DOMAIN
+          );
         }
 
         // Check the node has the attribute 'triggeringprincipal'.
-        let serial = Cc["@mozilla.org/network/serialization-helper;1"]
-                       .getService(Ci.nsISerializationHelper);
         let loadingPrincipalStr = preview.getAttribute("triggeringprincipal");
-        let loadingPrincipal = serial.deserializeObject(loadingPrincipalStr);
-        Assert.equal(loadingPrincipal.originAttributes.firstPartyDomain, EXPECTED_DOMAIN,
-                     "loadingPrincipal should have firstPartyDomain set to " + EXPECTED_DOMAIN);
-
+        let loadingPrincipal = E10SUtils.deserializePrincipal(
+          loadingPrincipalStr
+        );
+        Assert.equal(
+          loadingPrincipal.originAttributes.firstPartyDomain,
+          EXPECTED_DOMAIN,
+          "loadingPrincipal should have firstPartyDomain set to " +
+            EXPECTED_DOMAIN
+        );
       }
 
       resolve();
@@ -71,9 +74,14 @@ async function test() {
     Services.prefs.clearUserPref("privacy.firstparty.isolate");
   });
 
-  let url = "https://example.com/browser/browser/base/content/test/pageinfo/image.html";
+  let url =
+    "https://example.com/browser/browser/base/content/test/pageinfo/image.html";
   gBrowser.selectedTab = BrowserTestUtils.addTab(gBrowser);
-  let loadPromise = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser, false, url);
+  let loadPromise = BrowserTestUtils.browserLoaded(
+    gBrowser.selectedBrowser,
+    false,
+    url
+  );
   BrowserTestUtils.loadURI(gBrowser.selectedBrowser, url);
   await loadPromise;
 
@@ -82,7 +90,7 @@ async function test() {
   // see bug 1403365.
   let pageInfo = BrowserPageInfo(url, "mediaTab", {});
   info("waitForEvent pageInfo");
-  await waitForEvent(pageInfo, "load");
+  await BrowserTestUtils.waitForEvent(pageInfo, "load");
 
   info("calling testFirstPartyDomain");
   await testFirstPartyDomain(pageInfo);

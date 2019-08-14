@@ -7,6 +7,10 @@ pref("security.tls.version.max", 4);
 pref("security.tls.version.fallback-limit", 4);
 pref("security.tls.insecure_fallback_hosts", "");
 pref("security.tls.enable_0rtt_data", false);
+// Turn off post-handshake authentication for TLS 1.3 by default,
+// until the incompatibility with HTTP/2 is resolved:
+// https://tools.ietf.org/html/draft-davidben-http2-tls13-00
+pref("security.tls.enable_post_handshake_auth", false);
 #ifdef RELEASE_OR_BETA
 pref("security.tls.hello_downgrade_check", false);
 #else
@@ -43,11 +47,12 @@ pref("security.remember_cert_checkbox_default_setting", true);
 pref("security.ask_for_password",        0);
 pref("security.password_lifetime",       30);
 
-// The supported values of this pref are:
-// 0: disable detecting Family Safety mode and importing the root
-// 1: only attempt to detect Family Safety mode (don't import the root)
-// 2: detect Family Safety mode and import the root
-// (This is only relevant to Windows 8.1)
+// On Windows 8.1, if the following preference is 2, we will attempt to detect
+// if the Family Safety TLS interception feature has been enabled. If so, we
+// will behave as if the enterprise roots feature has been enabled (i.e. import
+// and trust third party root certificates from the OS).
+// With any other value of the pref or on any other platform, this does nothing.
+// This preference takes precedence over "security.enterprise_roots.enabled".
 pref("security.family_safety.mode", 2);
 
 pref("security.enterprise_roots.enabled", false);
@@ -113,13 +118,18 @@ pref("security.pki.netscape_step_up_policy", 2);
 // 1: Only collect telemetry. CT qualification checks are not performed.
 pref("security.pki.certificate_transparency.mode", 0);
 
-// Hardware Origin-bound Second Factor Support
-pref("security.webauth.u2f", false);
-pref("security.webauth.webauthn", true);
-// Only one of "enable_softtoken" and "enable_usbtoken" can be true
-// at a time.
+// Only one of ["enable_softtoken", "enable_usbtoken",
+// "webauthn_enable_android_fido2"] should be true at a time, as the
+// softtoken will override the other two. Note android's pref is set in
+// mobile.js / geckoview-prefs.js
 pref("security.webauth.webauthn_enable_softtoken", false);
+
+#ifdef MOZ_WIDGET_ANDROID
+// the Rust usbtoken support does not function on Android
+pref("security.webauth.webauthn_enable_usbtoken", false);
+#else
 pref("security.webauth.webauthn_enable_usbtoken", true);
+#endif
 
 pref("security.ssl.errorReporting.enabled", true);
 pref("security.ssl.errorReporting.url", "https://incoming.telemetry.mozilla.org/submit/sslreports/");
@@ -152,3 +162,16 @@ pref("security.pki.mitm_canary_issuer.enabled", true);
 // here the root is trusted but not a built-in, whereas for
 // security.pki.mitm_canary_issuer.enabled, the root is not trusted.
 pref("security.pki.mitm_detected", false);
+
+// Intermediate CA Preloading settings
+#if defined(RELEASE_OR_BETA) || defined(MOZ_WIDGET_ANDROID)
+pref("security.remote_settings.intermediates.enabled", false);
+#else
+pref("security.remote_settings.intermediates.enabled", true);
+#endif
+pref("security.remote_settings.intermediates.bucket", "security-state");
+pref("security.remote_settings.intermediates.collection", "intermediates");
+pref("security.remote_settings.intermediates.checked", 0);
+pref("security.remote_settings.intermediates.downloads_per_poll", 100);
+pref("security.remote_settings.intermediates.parallel_downloads", 8);
+pref("security.remote_settings.intermediates.signer", "onecrl.content-signature.mozilla.org");

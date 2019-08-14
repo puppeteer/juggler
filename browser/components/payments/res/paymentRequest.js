@@ -21,7 +21,7 @@ var paymentRequest = {
     window.addEventListener("keydown", this);
 
     this.domReadyPromise = new Promise(function dcl(resolve) {
-      window.addEventListener("DOMContentLoaded", resolve, {once: true});
+      window.addEventListener("DOMContentLoaded", resolve, { once: true });
     }).then(this.handleEvent.bind(this));
 
     // This scope is now ready to listen to the initialization data
@@ -65,10 +65,13 @@ var paymentRequest = {
     log.debug("sendMessageToChrome:", messageType, messageID, detail);
     let event = new CustomEvent("paymentContentToChrome", {
       bubbles: true,
-      detail: Object.assign({
-        messageType,
-        messageID,
-      }, detail),
+      detail: Object.assign(
+        {
+          messageType,
+          messageID,
+        },
+        detail
+      ),
     });
     document.dispatchEvent(event);
     return messageID;
@@ -82,13 +85,15 @@ var paymentRequest = {
     debuggingConsole.hidden = !debuggingConsole.hidden;
   },
 
-  onChromeToContent({detail}) {
-    let {messageType} = detail;
+  onChromeToContent({ detail }) {
+    let { messageType } = detail;
     log.debug("onChromeToContent:", messageType);
 
     switch (messageType) {
       case "responseSent": {
-        let {request} = document.querySelector("payment-dialog").requestStore.getState();
+        let { request } = document
+          .querySelector("payment-dialog")
+          .requestStore.getState();
         document.querySelector("payment-dialog").requestStore.setState({
           changesPrevented: true,
           request: Object.assign({}, request, { completeStatus: "processing" }),
@@ -108,7 +113,7 @@ var paymentRequest = {
 
   onPaymentRequestLoad() {
     log.debug("onPaymentRequestLoad");
-    window.addEventListener("unload", this, {once: true});
+    window.addEventListener("unload", this, { once: true });
 
     // Automatically show the debugging console if loaded with a truthy `debug` query parameter.
     if (new URLSearchParams(location.search).get("debug")) {
@@ -192,12 +197,20 @@ var paymentRequest = {
     this.sendMessageToChrome("closeDialog");
   },
 
+  changePaymentMethod(data) {
+    this.sendMessageToChrome("changePaymentMethod", data);
+  },
+
   changeShippingAddress(data) {
     this.sendMessageToChrome("changeShippingAddress", data);
   },
 
   changeShippingOption(data) {
     this.sendMessageToChrome("changeShippingOption", data);
+  },
+
+  changePayerAddress(data) {
+    this.sendMessageToChrome("changePayerAddress", data);
   },
 
   /**
@@ -217,14 +230,20 @@ var paymentRequest = {
         record,
       });
 
-      window.addEventListener("paymentChromeToContent", function onMsg({detail}) {
-        if (detail.messageType != "updateAutofillRecord:Response"
-            || detail.messageID != messageID) {
+      window.addEventListener("paymentChromeToContent", function onMsg({
+        detail,
+      }) {
+        if (
+          detail.messageType != "updateAutofillRecord:Response" ||
+          detail.messageID != messageID
+        ) {
           return;
         }
         log.debug("updateAutofillRecord: response:", detail);
         window.removeEventListener("paymentChromeToContent", onMsg);
-        document.querySelector("payment-dialog").setStateFromParent(detail.stateChange);
+        document
+          .querySelector("payment-dialog")
+          .setStateFromParent(detail.stateChange);
         if (detail.error) {
           reject(detail);
         } else {
@@ -236,24 +255,38 @@ var paymentRequest = {
 
   /**
    * @param {object} state object representing the UI state
-   * @param {string} methodID (GUID) uniquely identifying the selected payment method
+   * @param {string} selectedMethodID (GUID) uniquely identifying the selected payment method
    * @returns {object?} the applicable modifier for the payment method
    */
-  getModifierForPaymentMethod(state, methodID) {
-    let method = state.savedBasicCards[methodID] || null;
-    if (method && method.methodName !== "basic-card") {
-      throw new Error(`${method.methodName} (${methodID}) is not a supported payment method`);
+  getModifierForPaymentMethod(state, selectedMethodID) {
+    let basicCards = this.getBasicCards(state);
+    let selectedMethod = basicCards[selectedMethodID] || null;
+    if (selectedMethod && selectedMethod.methodName !== "basic-card") {
+      throw new Error(
+        `${selectedMethod.methodName} (${selectedMethodID}) ` +
+          `is not a supported payment method`
+      );
     }
     let modifiers = state.request.paymentDetails.modifiers;
-    if (!modifiers || !modifiers.length) {
+    if (!selectedMethod || !modifiers || !modifiers.length) {
       return null;
     }
-    let modifier = modifiers.find(m => {
+    let appliedModifier = modifiers.find(modifier => {
       // take the first matching modifier
-      // TODO (bug 1429198): match on supportedNetworks
-      return m.supportedMethods == "basic-card";
+      if (
+        modifier.supportedMethods &&
+        modifier.supportedMethods != selectedMethod.methodName
+      ) {
+        return false;
+      }
+      let supportedNetworks =
+        (modifier.data && modifier.data.supportedNetworks) || [];
+      return (
+        supportedNetworks.length == 0 ||
+        supportedNetworks.includes(selectedMethod["cc-type"])
+      );
     });
-    return modifier || null;
+    return appliedModifier || null;
   },
 
   /**
@@ -264,7 +297,10 @@ var paymentRequest = {
   getTotalItem(state) {
     let methodID = state.selectedPaymentCard;
     if (methodID) {
-      let modifier = paymentRequest.getModifierForPaymentMethod(state, methodID);
+      let modifier = paymentRequest.getModifierForPaymentMethod(
+        state,
+        methodID
+      );
       if (modifier && modifier.hasOwnProperty("total")) {
         return modifier.total;
       }
@@ -291,7 +327,11 @@ var paymentRequest = {
   },
 
   getAddresses(state) {
-    let addresses = Object.assign({}, state.savedAddresses, state.tempAddresses);
+    let addresses = Object.assign(
+      {},
+      state.savedAddresses,
+      state.tempAddresses
+    );
     return this._sortObjectsByTimeLastUsed(addresses);
   },
 

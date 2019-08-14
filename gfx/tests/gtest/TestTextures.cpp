@@ -41,7 +41,7 @@ namespace mozilla {
 namespace layers {
 
 // fills the surface with values betwee 0 and 100.
-void SetupSurface(gfxImageSurface* surface) {
+static void SetupSurface(gfxImageSurface* surface) {
   int bpp = gfxASurface::BytePerPixelFromFormat(surface->Format());
   int stride = surface->Stride();
   uint8_t val = 0;
@@ -61,7 +61,8 @@ void SetupSurface(gfxImageSurface* surface) {
 }
 
 // return true if two surfaces contain the same data
-void AssertSurfacesEqual(gfxImageSurface* surface1, gfxImageSurface* surface2) {
+static void AssertSurfacesEqual(gfxImageSurface* surface1,
+                                gfxImageSurface* surface2) {
   ASSERT_EQ(surface1->GetSize(), surface2->GetSize());
   ASSERT_EQ(surface1->Format(), surface2->Format());
 
@@ -81,7 +82,8 @@ void AssertSurfacesEqual(gfxImageSurface* surface1, gfxImageSurface* surface2) {
   }
 }
 
-void AssertSurfacesEqual(SourceSurface* surface1, SourceSurface* surface2) {
+static void AssertSurfacesEqual(SourceSurface* surface1,
+                                SourceSurface* surface2) {
   ASSERT_EQ(surface1->GetSize(), surface2->GetSize());
   ASSERT_EQ(surface1->GetFormat(), surface2->GetFormat());
 
@@ -211,7 +213,8 @@ void TestTextureClientYCbCr(TextureClient* client, PlanarYCbCrData& ycbcrData) {
 }  // namespace layers
 }  // namespace mozilla
 
-TEST(Layers, TextureSerialization) {
+TEST(Layers, TextureSerialization)
+{
   // the test is run on all the following image formats
   gfxImageFormat formats[3] = {
       SurfaceFormat::A8R8G8B8_UINT32,
@@ -240,7 +243,8 @@ TEST(Layers, TextureSerialization) {
   }
 }
 
-TEST(Layers, TextureYCbCrSerialization) {
+TEST(Layers, TextureYCbCrSerialization)
+{
   RefPtr<gfxImageSurface> ySurface =
       new gfxImageSurface(IntSize(400, 300), SurfaceFormat::A8);
   RefPtr<gfxImageSurface> cbSurface =

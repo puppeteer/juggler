@@ -8,9 +8,10 @@
 
 from __future__ import absolute_import, print_function
 
-import mozinfo
 import os
 import sys
+
+import mozinfo
 
 __all__ = ['findInPath', 'get_metadata_from_egg']
 
@@ -134,7 +135,7 @@ def test_environment(xrePath, env=None, crashreporter=True, debugger=False,
     # Set WebRTC logging in case it is not set yet
     env.setdefault(
         'MOZ_LOG',
-        'signaling:3,mtransport:4,DataChannel:4,jsep:4,MediaPipelineFactory:4'
+        'signaling:3,mtransport:4,DataChannel:4,jsep:4'
     )
     env.setdefault('R_LOG_LEVEL', '6')
     env.setdefault('R_LOG_DESTINATION', 'stderr')

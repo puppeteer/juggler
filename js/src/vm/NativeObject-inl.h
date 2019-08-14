@@ -10,6 +10,7 @@
 #include "vm/NativeObject.h"
 
 #include "builtin/TypedObject.h"
+#include "gc/Allocator.h"
 #include "gc/GCTrace.h"
 #include "proxy/Proxy.h"
 #include "vm/JSContext.h"
@@ -443,44 +444,15 @@ inline DenseElementResult NativeObject::setOrExtendDenseElements(
   return DenseElementResult::Success;
 }
 
-inline Value NativeObject::getDenseOrTypedArrayElement(uint32_t idx) {
+template <AllowGC allowGC>
+inline bool NativeObject::getDenseOrTypedArrayElement(
+    JSContext* cx, uint32_t idx,
+    typename MaybeRooted<Value, allowGC>::MutableHandleType val) {
   if (is<TypedArrayObject>()) {
-    return as<TypedArrayObject>().getElement(idx);
+    return as<TypedArrayObject>().getElement<allowGC>(cx, idx, val);
   }
-  return getDenseElement(idx);
-}
-
-/* static */ inline NativeObject* NativeObject::copy(
-    JSContext* cx, gc::AllocKind kind, gc::InitialHeap heap,
-    HandleNativeObject templateObject) {
-  RootedShape shape(cx, templateObject->lastProperty());
-  RootedObjectGroup group(cx, templateObject->group());
-  MOZ_ASSERT(!templateObject->denseElementsAreCopyOnWrite());
-
-  JSObject* baseObj;
-  JS_TRY_VAR_OR_RETURN_NULL(cx, baseObj, create(cx, kind, heap, shape, group));
-
-  NativeObject* obj = &baseObj->as<NativeObject>();
-
-  size_t span = shape->slotSpan();
-  if (span) {
-    uint32_t numFixed = templateObject->numFixedSlots();
-    const Value* fixed = &templateObject->getSlot(0);
-    // Only copy elements which are registered in the shape, even if the
-    // number of fixed slots is larger.
-    if (span < numFixed) {
-      numFixed = span;
-    }
-    obj->copySlotRange(0, fixed, numFixed);
-
-    if (numFixed < span) {
-      uint32_t numSlots = span - numFixed;
-      const Value* slots = &templateObject->getSlot(numFixed);
-      obj->copySlotRange(numFixed, slots, numSlots);
-    }
-  }
-
-  return obj;
+  val.set(getDenseElement(idx));
+  return true;
 }
 
 MOZ_ALWAYS_INLINE void NativeObject::setSlotWithType(JSContext* cx,
@@ -494,13 +466,6 @@ MOZ_ALWAYS_INLINE void NativeObject::setSlotWithType(JSContext* cx,
   }
 
   AddTypePropertyId(cx, this, shape->propid(), value);
-}
-
-inline void NativeObject::updateShapeAfterMovingGC() {
-  Shape* shape = this->shape();
-  if (IsForwarded(shape)) {
-    shapeRef().unsafeSet(Forwarded(shape));
-  }
 }
 
 inline bool NativeObject::isInWholeCellBuffer() const {
@@ -521,7 +486,7 @@ inline bool NativeObject::isInWholeCellBuffer() const {
   size_t nDynamicSlots =
       dynamicSlotsCount(shape->numFixedSlots(), shape->slotSpan(), clasp);
 
-  JSObject* obj = js::Allocate<JSObject>(cx, kind, nDynamicSlots, heap, clasp);
+  JSObject* obj = js::AllocateObject(cx, kind, nDynamicSlots, heap, clasp);
   if (!obj) {
     return cx->alreadyReportedOOM();
   }
@@ -555,9 +520,11 @@ inline bool NativeObject::isInWholeCellBuffer() const {
 }
 
 /* static */ inline JS::Result<NativeObject*, JS::OOM&>
-NativeObject::createWithTemplate(JSContext* cx, js::gc::InitialHeap heap,
-                                 HandleObject templateObject) {
+NativeObject::createWithTemplate(JSContext* cx, HandleObject templateObject) {
   RootedObjectGroup group(cx, templateObject->group());
+
+  gc::InitialHeap heap = GetInitialHeap(GenericObject, group);
+
   RootedShape shape(cx, templateObject->as<NativeObject>().lastProperty());
 
   gc::AllocKind kind = gc::GetGCObjectKind(shape->numFixedSlots());
@@ -565,35 +532,6 @@ NativeObject::createWithTemplate(JSContext* cx, js::gc::InitialHeap heap,
   kind = gc::GetBackgroundAllocKind(kind);
 
   return create(cx, kind, heap, shape, group);
-}
-
-MOZ_ALWAYS_INLINE uint32_t NativeObject::numDynamicSlots() const {
-  return dynamicSlotsCount(numFixedSlots(), slotSpan(), getClass());
-}
-
-/* static */ MOZ_ALWAYS_INLINE uint32_t NativeObject::dynamicSlotsCount(
-    uint32_t nfixed, uint32_t span, const Class* clasp) {
-  if (span <= nfixed) {
-    return 0;
-  }
-  span -= nfixed;
-
-  // Increase the slots to SLOT_CAPACITY_MIN to decrease the likelihood
-  // the dynamic slots need to get increased again. ArrayObjects ignore
-  // this because slots are uncommon in that case.
-  if (clasp != &ArrayObject::class_ && span <= SLOT_CAPACITY_MIN) {
-    return SLOT_CAPACITY_MIN;
-  }
-
-  uint32_t slots = mozilla::RoundUpPow2(span);
-  MOZ_ASSERT(slots >= span);
-  return slots;
-}
-
-/* static */ MOZ_ALWAYS_INLINE uint32_t
-NativeObject::dynamicSlotsCount(Shape* shape) {
-  return dynamicSlotsCount(shape->numFixedSlots(), shape->slotSpan(),
-                           shape->getObjectClass());
 }
 
 MOZ_ALWAYS_INLINE bool NativeObject::updateSlotsForSpan(JSContext* cx,
@@ -840,7 +778,7 @@ static MOZ_ALWAYS_INLINE bool LookupOwnPropertyInline(
 
   // id was not found in obj. Try obj's resolve hook, if any.
   if (obj->getClass()->getResolve()) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     if (!allowGC) {
       return false;
     }
@@ -935,7 +873,7 @@ static MOZ_ALWAYS_INLINE bool LookupPropertyInline(
       break;
     }
     if (!proto->isNative()) {
-      MOZ_ASSERT(!cx->helperThread());
+      MOZ_ASSERT(!cx->isHelperThreadContext());
       if (!allowGC) {
         return false;
       }

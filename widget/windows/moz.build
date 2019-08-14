@@ -19,6 +19,8 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
+    'ShellHeaderOnlyUtils.h',
+    'WindowsConsole.h',
     'WinHeaderOnlyUtils.h',
 ]
 
@@ -66,6 +68,7 @@ UNIFIED_SOURCES += [
     'nsWindowDbg.cpp',
     'nsWindowGfx.cpp',
     'nsWinGesture.cpp',
+    'ProcInfo.cpp',
     'ScreenHelperWin.cpp',
     'TaskbarPreview.cpp',
     'TaskbarPreviewButton.cpp',
@@ -74,6 +77,7 @@ UNIFIED_SOURCES += [
     'WidgetTraceEvent.cpp',
     'WinCompositorWindowThread.cpp',
     'WindowHook.cpp',
+    'WindowsConsole.cpp',
     'WinIMEHandler.cpp',
     'WinPointerEvents.cpp',
     'WinTaskbar.cpp',
@@ -116,6 +120,10 @@ if CONFIG['NS_ENABLE_TSF']:
         'TSFTextStore.cpp',
     ]
 
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
+
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
@@ -151,15 +159,8 @@ OS_LIBS += [
     'rpcrt4',
 ]
 
-if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
+if CONFIG['CC_TYPE'] == 'clang-cl':
     SOURCES += [
         'ToastNotification.cpp',
         'ToastNotificationHandler.cpp',
     ]
-    # C5038: Suppress initializer list order warnings from wrl.h
-    SOURCES['ToastNotification.cpp'].flags += ['-wd5038']
-    SOURCES['ToastNotificationHandler.cpp'].flags += ['-wd5038']
-    SOURCES['WindowsUIUtils.cpp'].flags += ['-wd5038']
-
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497

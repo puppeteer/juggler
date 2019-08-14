@@ -12,7 +12,7 @@
 namespace js {
 namespace gc {
 
-struct ClearEdgesTracer : public JS::CallbackTracer {
+struct ClearEdgesTracer final : public JS::CallbackTracer {
   ClearEdgesTracer();
 
 #ifdef DEBUG
@@ -25,9 +25,7 @@ struct ClearEdgesTracer : public JS::CallbackTracer {
   void onObjectEdge(JSObject** objp) override;
   void onStringEdge(JSString** strp) override;
   void onSymbolEdge(JS::Symbol** symp) override;
-#ifdef ENABLE_BIGINT
   void onBigIntEdge(JS::BigInt** bip) override;
-#endif
   void onScriptEdge(JSScript** scriptp) override;
   void onShapeEdge(js::Shape** shapep) override;
   void onObjectGroupEdge(js::ObjectGroup** groupp) override;
@@ -38,14 +36,6 @@ struct ClearEdgesTracer : public JS::CallbackTracer {
   void onRegExpSharedEdge(js::RegExpShared** sharedp) override;
   void onChild(const JS::GCCellPtr& thing) override;
 };
-
-#ifdef DEBUG
-inline bool IsClearEdgesTracer(JSTracer* trc) {
-  return trc->isCallbackTracer() &&
-         trc->asCallbackTracer()->getTracerKind() ==
-             JS::CallbackTracer::TracerKind::ClearEdges;
-}
-#endif
 
 }  // namespace gc
 

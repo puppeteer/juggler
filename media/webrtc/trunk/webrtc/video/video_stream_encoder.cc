@@ -678,6 +678,7 @@ void VideoStreamEncoder::OnFrame(const VideoFrame& video_frame) {
   // the timestamp may be set to the future. As the encoding pipeline assumes
   // capture time to be less than present time, we should reset the capture
   // timestamps here. Otherwise there may be issues with RTP send stream.
+
   if (incoming_frame.timestamp_us() > current_time_us)
     incoming_frame.set_timestamp_us(current_time_us);
 

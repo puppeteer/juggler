@@ -30,6 +30,7 @@
                  android:hardwareAccelerated="true"
                  android:supportsRtl="true"
                  android:allowBackup="false"
+                 android:usesCleartextTraffic="true"
                  >
 
         <meta-data android:name="com.sec.android.support.multiwindow" android:value="true"/>
@@ -57,7 +58,7 @@
                   android:label="@string/moz_app_displayname"
                   android:taskAffinity="@ANDROID_PACKAGE_NAME@.BROWSER"
                   android:alwaysRetainTaskState="true"
-                  android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize|locale|layoutDirection|smallestScreenSize|screenLayout"
+                  android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize|locale|layoutDirection|smallestScreenSize|screenLayout|uiMode"
                   android:resizeableActivity="true"
                   android:supportsPictureInPicture="true"
                   android:windowSoftInputMode="stateUnspecified|adjustResize"
@@ -204,10 +205,6 @@
             android:permission="android.permission.BIND_JOB_SERVICE">
         </service>
 
-        <activity android:name="org.mozilla.gecko.trackingprotection.TrackingProtectionPrompt"
-                  android:launchMode="singleTop"
-                  android:theme="@style/OverlayActivity" />
-
         <activity android:name="org.mozilla.gecko.promotion.SimpleHelperUI"
                   android:launchMode="singleTop"
                   android:theme="@style/OverlayActivity" />
@@ -226,6 +223,23 @@
             <action android:name="android.intent.action.GET_RESTRICTION_ENTRIES" />
           </intent-filter>
         </receiver>
+
+         <receiver android:name="org.mozilla.gecko.search.SearchWidgetProvider">
+             <intent-filter>
+                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+             </intent-filter>
+
+             <meta-data
+                 android:name="android.appwidget.provider"
+                 android:resource="@xml/search_widget_info" />
+         </receiver>
+
+         <activity android:name="org.mozilla.gecko.search.SearchWidgetConfigurationActivity"
+                   android:theme="@style/OverlayActivity">
+             <intent-filter>
+                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE"/>
+             </intent-filter>
+         </activity>
 
         <!-- Masquerade as the Resolver so that we can be opened from the Marketplace. -->
         <activity-alias
@@ -250,11 +264,6 @@
                 <action android:name="com.android.vending.INSTALL_REFERRER" />
             </intent-filter>
         </receiver>
-
-        <service android:name="org.mozilla.gecko.Restarter"
-                 android:exported="false"
-                 android:process="@MANGLED_ANDROID_PACKAGE_NAME@.Restarter">
-        </service>
 
         <service android:name="org.mozilla.gecko.media.MediaControlService"
                  android:exported="false"
@@ -314,6 +323,13 @@
                   android:authorities="@ANDROID_PACKAGE_NAME@.partnerbookmarks"
                   android:exported="false"/>
 
+        <!-- FxA state access provider. NB: this provider performs its own strict caller verification,
+        and so we export it without requiring any read or write permissions. -->
+        <provider tools:ignore="ExportedContentProvider"
+                  android:name="org.mozilla.gecko.fxa.AuthStateProvider"
+                  android:authorities="@ANDROID_PACKAGE_NAME@.fxa.auth"
+                  android:exported="true" />
+
         <!-- Share overlay activity
 
              Setting launchMode="singleTop" ensures onNewIntent is called when the Activity is
@@ -334,7 +350,7 @@
         </activity>
 
         <activity android:name="org.mozilla.gecko.customtabs.CustomTabsActivity"
-                  android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize|locale|layoutDirection|smallestScreenSize|screenLayout"
+                  android:configChanges="keyboard|keyboardHidden|mcc|mnc|orientation|screenSize|locale|layoutDirection|smallestScreenSize|screenLayout|uiMode"
                   android:windowSoftInputMode="stateUnspecified|adjustResize"
                   android:theme="@style/GeckoCustomTabs" />
 
@@ -514,10 +530,10 @@
 
         <!-- New child services must also be added to the GeckoView AndroidManifest.xml -->
         <service
-            android:name="org.mozilla.gecko.process.GeckoServiceChildProcess$geckomediaplugin"
+            android:name="org.mozilla.gecko.process.GeckoServiceChildProcess$gmplugin"
             android:enabled="true"
             android:exported="false"
-            android:process=":geckomediaplugin"
+            android:process=":gmplugin"
             android:isolatedProcess="false">
         </service>
 

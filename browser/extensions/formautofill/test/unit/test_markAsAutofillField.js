@@ -48,20 +48,17 @@ const TESTCASES = [
                <input id="without-autocomplete-1">
                <input id="without-autocomplete-2">`,
     targetElementId: "street-addr",
-    expectedResult: [
-      "street-addr",
-      "city",
-      "country",
-      "email",
-      "tel",
-    ],
+    expectedResult: ["street-addr", "city", "country", "email", "tel"],
   },
 ];
 
 let markedFieldId = [];
 
+var FormAutofillContent;
 add_task(async function setup() {
-  ChromeUtils.import("resource://formautofill/FormAutofillContent.jsm");
+  ({ FormAutofillContent } = ChromeUtils.import(
+    "resource://formautofill/FormAutofillContent.jsm"
+  ));
 
   FormAutofillContent._markAsAutofillField = function(field) {
     markedFieldId.push(field.id);
@@ -75,11 +72,16 @@ TESTCASES.forEach(testcase => {
     markedFieldId = [];
 
     let doc = MockDocument.createTestDocument(
-      "http://localhost:8080/test/", testcase.document);
+      "http://localhost:8080/test/",
+      testcase.document
+    );
     let element = doc.getElementById(testcase.targetElementId);
     FormAutofillContent.identifyAutofillFields(element);
 
-    Assert.deepEqual(markedFieldId, testcase.expectedResult,
-      "Check the fields were marked correctly.");
+    Assert.deepEqual(
+      markedFieldId,
+      testcase.expectedResult,
+      "Check the fields were marked correctly."
+    );
   });
 });

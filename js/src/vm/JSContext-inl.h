@@ -10,11 +10,10 @@
 #include "vm/JSContext.h"
 
 #include "builtin/Object.h"
+#include "gc/Zone.h"
 #include "jit/JitFrames.h"
 #include "proxy/Proxy.h"
-#ifdef ENABLE_BIGINT
 #include "vm/BigIntType.h"
-#endif
 #include "vm/HelperThreads.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -70,7 +69,7 @@ class ContextChecks {
 
   void check(JSObject* obj, int argIndex) {
     if (obj) {
-      MOZ_ASSERT(JS::ObjectIsNotGray(obj));
+      JS::AssertObjectIsNotGray(obj);
       MOZ_ASSERT(!js::gc::IsAboutToBeFinalizedUnbarriered(&obj));
       check(obj->compartment(), argIndex);
     }
@@ -95,7 +94,7 @@ class ContextChecks {
   }
 
   void check(JSString* str, int argIndex) {
-    MOZ_ASSERT(JS::CellIsNotGray(str));
+    JS::AssertCellIsNotGray(str);
     if (str->isAtom()) {
       checkAtom(&str->asAtom(), argIndex);
     } else {
@@ -105,9 +104,7 @@ class ContextChecks {
 
   void check(JS::Symbol* symbol, int argIndex) { checkAtom(symbol, argIndex); }
 
-#ifdef ENABLE_BIGINT
   void check(JS::BigInt* bi, int argIndex) { check(bi->zone(), argIndex); }
-#endif
 
   void check(const js::Value& v, int argIndex) {
     if (v.isObject()) {
@@ -116,12 +113,9 @@ class ContextChecks {
       check(v.toString(), argIndex);
     } else if (v.isSymbol()) {
       check(v.toSymbol(), argIndex);
-    }
-#ifdef ENABLE_BIGINT
-    else if (v.isBigInt()) {
+    } else if (v.isBigInt()) {
       check(v.toBigInt(), argIndex);
     }
-#endif
   }
 
   // Check the contents of any container class that supports the C++
@@ -159,7 +153,7 @@ class ContextChecks {
   }
 
   void check(JSScript* script, int argIndex) {
-    MOZ_ASSERT(JS::CellIsNotGray(script));
+    JS::AssertCellIsNotGray(script);
     if (script) {
       check(script->realm(), argIndex);
     }
@@ -305,11 +299,12 @@ inline js::LifoAlloc& JSContext::typeLifoAlloc() {
 
 inline js::Nursery& JSContext::nursery() { return runtime()->gc.nursery(); }
 
-inline void JSContext::minorGC(JS::gcreason::Reason reason) {
+inline void JSContext::minorGC(JS::GCReason reason) {
   runtime()->gc.minorGC(reason);
 }
 
-inline void JSContext::setPendingException(JS::HandleValue v) {
+inline void JSContext::setPendingException(JS::HandleValue v,
+                                           js::HandleSavedFrame stack) {
 #if defined(NIGHTLY_BUILD)
   do {
     // Do not intercept exceptions if we are already
@@ -342,6 +337,7 @@ inline void JSContext::setPendingException(JS::HandleValue v) {
   this->overRecursed_ = false;
   this->throwing = true;
   this->unwrappedException() = v;
+  this->unwrappedExceptionStack() = stack;
   check(v);
 }
 
@@ -376,7 +372,7 @@ inline void JSContext::setZone(js::Zone* zone,
     return;
   }
 
-  if (isAtomsZone == AtomsZone && helperThread()) {
+  if (isAtomsZone == AtomsZone && isHelperThreadContext()) {
     MOZ_ASSERT(!zone_->wasGCStarted());
     freeLists_ = atomsZoneFreeLists_;
   } else {
@@ -385,17 +381,17 @@ inline void JSContext::setZone(js::Zone* zone,
 }
 
 inline void JSContext::enterRealmOf(JSObject* target) {
-  MOZ_ASSERT(JS::CellIsNotGray(target));
+  JS::AssertCellIsNotGray(target);
   enterRealm(target->nonCCWRealm());
 }
 
 inline void JSContext::enterRealmOf(JSScript* target) {
-  MOZ_ASSERT(JS::CellIsNotGray(target));
+  JS::AssertCellIsNotGray(target);
   enterRealm(target->realm());
 }
 
 inline void JSContext::enterRealmOf(js::ObjectGroup* target) {
-  MOZ_ASSERT(JS::CellIsNotGray(target));
+  JS::AssertCellIsNotGray(target);
   enterRealm(target->realm());
 }
 

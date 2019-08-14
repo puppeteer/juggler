@@ -15,7 +15,6 @@
 #include "nsISizeOf.h"
 #include "nsString.h"
 #include "mozilla/Attributes.h"
-#include "nsIIPCSerializableURI.h"
 #include "mozilla/MemoryReporting.h"
 #include "NullPrincipal.h"
 #include "nsID.h"
@@ -33,13 +32,10 @@ namespace mozilla {
 
 class Encoding;
 
-class NullPrincipalURI final : public nsIURI,
-                               public nsISizeOf,
-                               public nsIIPCSerializableURI {
+class NullPrincipalURI final : public nsIURI, public nsISizeOf {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIURI
-  NS_DECL_NSIIPCSERIALIZABLEURI
 
   // nsISizeOf
   virtual size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const override;
@@ -50,7 +46,7 @@ class NullPrincipalURI final : public nsIURI,
 
  private:
   NullPrincipalURI();
-  NullPrincipalURI(const NullPrincipalURI &aOther);
+  NullPrincipalURI(const NullPrincipalURI& aOther);
 
   ~NullPrincipalURI() {}
 
@@ -58,22 +54,22 @@ class NullPrincipalURI final : public nsIURI,
 
   nsAutoCStringN<NSID_LENGTH> mPath;
 
-  nsresult Clone(nsIURI **aURI);
-  nsresult SetSpecInternal(const nsACString &input);
-  nsresult SetScheme(const nsACString &input);
-  nsresult SetUserPass(const nsACString &input);
-  nsresult SetUsername(const nsACString &input);
-  nsresult SetPassword(const nsACString &input);
-  nsresult SetHostPort(const nsACString &aValue);
-  nsresult SetHost(const nsACString &input);
+  nsresult Clone(nsIURI** aURI);
+  nsresult SetSpecInternal(const nsACString& input);
+  nsresult SetScheme(const nsACString& input);
+  nsresult SetUserPass(const nsACString& input);
+  nsresult SetUsername(const nsACString& input);
+  nsresult SetPassword(const nsACString& input);
+  nsresult SetHostPort(const nsACString& aValue);
+  nsresult SetHost(const nsACString& input);
   nsresult SetPort(int32_t port);
-  nsresult SetPathQueryRef(const nsACString &input);
-  nsresult SetRef(const nsACString &input);
-  nsresult SetFilePath(const nsACString &input);
-  nsresult SetQuery(const nsACString &input);
-  nsresult SetQueryWithEncoding(const nsACString &input,
-                                const Encoding *encoding);
-  bool Deserialize(const mozilla::ipc::URIParams &);
+  nsresult SetPathQueryRef(const nsACString& input);
+  nsresult SetRef(const nsACString& input);
+  nsresult SetFilePath(const nsACString& input);
+  nsresult SetQuery(const nsACString& input);
+  nsresult SetQueryWithEncoding(const nsACString& input,
+                                const Encoding* encoding);
+  bool Deserialize(const mozilla::ipc::URIParams&);
 
  public:
   class Mutator final : public nsIURIMutator,
@@ -81,17 +77,17 @@ class NullPrincipalURI final : public nsIURI,
     NS_DECL_ISUPPORTS
     NS_FORWARD_SAFE_NSIURISETTERS_RET(mURI)
 
-    NS_IMETHOD Deserialize(const mozilla::ipc::URIParams &aParams) override {
+    NS_IMETHOD Deserialize(const mozilla::ipc::URIParams& aParams) override {
       return InitFromIPCParams(aParams);
     }
 
-    NS_IMETHOD Finalize(nsIURI **aURI) override {
+    NS_IMETHOD Finalize(nsIURI** aURI) override {
       mURI.forget(aURI);
       return NS_OK;
     }
 
-    NS_IMETHOD SetSpec(const nsACString &aSpec,
-                       nsIURIMutator **aMutator) override {
+    NS_IMETHOD SetSpec(const nsACString& aSpec,
+                       nsIURIMutator** aMutator) override {
       if (aMutator) {
         nsCOMPtr<nsIURIMutator> mutator = this;
         mutator.forget(aMutator);

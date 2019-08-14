@@ -32,7 +32,27 @@ def symlink(source, link_name):
 
 def check_run(args):
     print >> sys.stderr, ' '.join(args)
-    r = subprocess.call(args)
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # CMake `message(STATUS)` messages, as appearing in failed source code
+    # compiles, appear on stdout, so we only capture that.
+    (out, _) = p.communicate()
+    r = p.returncode
+    if r != 0:
+        cmake_output_re = re.compile("See also \"(.*/CMakeOutput.log)\"")
+        cmake_error_re = re.compile("See also \"(.*/CMakeError.log)\"")
+        output_match = cmake_output_re.search(out)
+        error_match = cmake_error_re.search(out)
+
+        print >> sys.stderr, out
+
+        def dump_file(log):
+            with open(log, 'rb') as f:
+                print >> sys.stderr, "\nContents of", log, "follow\n"
+                print >> sys.stderr, f.read()
+        if output_match:
+            dump_file(output_match.group(1))
+        if error_match:
+            dump_file(error_match.group(1))
     assert r == 0
 
 
@@ -120,8 +140,23 @@ def delete(path):
             pass
 
 
-def install_libgcc(gcc_dir, clang_dir):
-    out = subprocess.check_output([os.path.join(gcc_dir, "bin", "gcc"),
+def install_libgcc(gcc_dir, clang_dir, is_final_stage):
+    gcc_bin_dir = os.path.join(gcc_dir, 'bin')
+
+    # Copy over gcc toolchain bits that clang looks for, to ensure that
+    # clang is using a consistent version of ld, since the system ld may
+    # be incompatible with the output clang produces.  But copy it to a
+    # target-specific directory so a cross-compiler to Mac doesn't pick
+    # up the (Linux-specific) ld with disastrous results.
+    #
+    # Only install this for the bootstrap process; we expect any consumers of
+    # the newly-built toolchain to provide an appropriate ld themselves.
+    if not is_final_stage:
+        x64_bin_dir = os.path.join(clang_dir, 'x86_64-unknown-linux-gnu', 'bin')
+        mkdir_p(x64_bin_dir)
+        shutil.copy2(os.path.join(gcc_bin_dir, 'ld'), x64_bin_dir)
+
+    out = subprocess.check_output([os.path.join(gcc_bin_dir, "gcc"),
                                    '-print-libgcc-file-name'])
 
     libgcc_dir = os.path.dirname(out.rstrip())
@@ -186,7 +221,19 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
                     src_dir, stage_dir, package_name, build_libcxx,
                     osx_cross_compile, build_type, assertions,
                     python_path, gcc_dir, libcxx_include_dir,
-                    is_final_stage=False):
+                    compiler_rt_source_dir=None, runtimes_source_link=None,
+                    compiler_rt_source_link=None,
+                    is_final_stage=False, android_targets=None,
+                    extra_targets=None):
+    if is_final_stage and (android_targets or extra_targets):
+        # Linking compiler-rt under "runtimes" activates LLVM_RUNTIME_TARGETS
+        # and related arguments.
+        symlink(compiler_rt_source_dir, runtimes_source_link)
+        try:
+            os.unlink(compiler_rt_source_link)
+        except Exception:
+            pass
+
     if not os.path.exists(stage_dir):
         os.mkdir(stage_dir)
 
@@ -247,11 +294,77 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
                 "-DCMAKE_OSX_ARCHITECTURES=x86_64",
                 "-DDARWIN_osx_ARCHS=x86_64",
                 "-DDARWIN_osx_SYSROOT=%s" % slashify_path(os.getenv("CROSS_SYSROOT")),
-                "-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-apple-darwin11"
+                "-DLLVM_DEFAULT_TARGET_TRIPLE=x86_64-apple-darwin"
             ]
         return cmake_args
 
-    cmake_args = cmake_base_args(
+    cmake_args = []
+
+    runtime_targets = []
+    if is_final_stage:
+        if android_targets:
+            runtime_targets = list(sorted(android_targets.keys()))
+        if extra_targets:
+            runtime_targets.extend(sorted(extra_targets))
+
+    if runtime_targets:
+        cmake_args += [
+            "-DLLVM_BUILTIN_TARGETS=%s" % ";".join(runtime_targets),
+            "-DLLVM_RUNTIME_TARGETS=%s" % ";".join(runtime_targets),
+        ]
+
+        for target in runtime_targets:
+            cmake_args += [
+                "-DRUNTIMES_%s_COMPILER_RT_BUILD_PROFILE=ON" % target,
+                "-DRUNTIMES_%s_COMPILER_RT_BUILD_SANITIZERS=ON" % target,
+                "-DRUNTIMES_%s_COMPILER_RT_BUILD_XRAY=OFF" % target,
+                "-DRUNTIMES_%s_SANITIZER_ALLOW_CXXABI=OFF" % target,
+                "-DRUNTIMES_%s_COMPILER_RT_BUILD_LIBFUZZER=OFF" % target,
+                "-DRUNTIMES_%s_COMPILER_RT_INCLUDE_TESTS=OFF" % target,
+                "-DRUNTIMES_%s_LLVM_ENABLE_PER_TARGET_RUNTIME_DIR=OFF" % target,
+                "-DRUNTIMES_%s_LLVM_INCLUDE_TESTS=OFF" % target,
+            ]
+
+    # The above code flipped switches to build various runtime libraries on
+    # Android; we now have to provide all the necessary compiler switches to
+    # make that work.
+    if is_final_stage and android_targets:
+        cmake_args += [
+            "-DLLVM_LIBDIR_SUFFIX=64",
+        ]
+
+        android_link_flags = "-fuse-ld=lld"
+
+        for target, cfg in android_targets.iteritems():
+            sysroot_dir = cfg["ndk_sysroot"]
+            android_gcc_dir = cfg["ndk_toolchain"]
+            android_include_dirs = cfg["ndk_includes"]
+            api_level = cfg["api_level"]
+
+            android_flags = ["-isystem %s" % d for d in android_include_dirs]
+            android_flags += ["--gcc-toolchain=%s" % android_gcc_dir]
+            android_flags += ["-D__ANDROID_API__=%s" % api_level]
+
+            # Our flags go last to override any --gcc-toolchain that may have
+            # been set earlier.
+            rt_c_flags = " ".join(cc[1:] + android_flags)
+            rt_cxx_flags = " ".join(cxx[1:] + android_flags)
+            rt_asm_flags = " ".join(asm[1:] + android_flags)
+
+            for kind in ('BUILTINS', 'RUNTIMES'):
+                for var, arg in (
+                        ('ANDROID', '1'),
+                        ('CMAKE_ASM_FLAGS', rt_asm_flags),
+                        ('CMAKE_CXX_FLAGS', rt_cxx_flags),
+                        ('CMAKE_C_FLAGS', rt_c_flags),
+                        ('CMAKE_EXE_LINKER_FLAGS', android_link_flags),
+                        ('CMAKE_SHARED_LINKER_FLAGS', android_link_flags),
+                        ('CMAKE_SYSROOT', sysroot_dir),
+                        ('ANDROID_NATIVE_API_LEVEL', api_level),
+                ):
+                    cmake_args += ['-D%s_%s_%s=%s' % (kind, target, var, arg)]
+
+    cmake_args += cmake_base_args(
         cc, cxx, asm, ld, ar, ranlib, libtool, inst_dir)
     cmake_args += [
         src_dir
@@ -259,7 +372,7 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
     build_package(build_dir, cmake_args)
 
     if is_linux():
-        install_libgcc(gcc_dir, inst_dir)
+        install_libgcc(gcc_dir, inst_dir, is_final_stage)
     # For some reasons the import library clang.lib of clang.exe is not
     # installed, so we copy it by ourselves.
     if is_windows():
@@ -355,7 +468,9 @@ def get_tool(config, key):
 #       run-clang-tidy.py
 def prune_final_dir_for_clang_tidy(final_dir, osx_cross_compile):
     # Make sure we only have what we expect.
-    dirs = ("bin", "include", "lib", "lib32", "libexec", "msbuild-bin", "share", "tools")
+    dirs = ["bin", "include", "lib", "lib32", "libexec", "msbuild-bin", "share", "tools"]
+    if is_linux():
+        dirs.append("x86_64-unknown-linux-gnu")
     for f in glob.glob("%s/*" % final_dir):
         if os.path.basename(f) not in dirs:
             raise Exception("Found unknown file %s in the final directory" % f)
@@ -371,6 +486,10 @@ def prune_final_dir_for_clang_tidy(final_dir, osx_cross_compile):
             delete(f)
 
     # Keep include/ intact.
+
+    # Remove the target-specific files.
+    if is_linux():
+        shutil.rmtree(os.path.join(final_dir, "x86_64-unknown-linux-gnu"))
 
     # In lib/, only keep lib/clang/N.M.O/include and the LLVM shared library.
     re_ver_num = re.compile(r"^\d+\.\d+\.\d+$", re.I)
@@ -534,6 +653,22 @@ if __name__ == "__main__":
         gcc_dir = config["gcc_dir"]
         if not os.path.exists(gcc_dir):
             raise ValueError("gcc_dir must point to an existing path")
+    ndk_dir = None
+    android_targets = None
+    if "android_targets" in config:
+        android_targets = config["android_targets"]
+        for attr in ("ndk_toolchain", "ndk_sysroot", "ndk_includes", "api_level"):
+            for target, cfg in android_targets.iteritems():
+                if attr not in cfg:
+                    raise ValueError("must specify '%s' as a key for android target: %s" %
+                                     (attr, target))
+    extra_targets = None
+    if "extra_targets" in config:
+        extra_targets = config["extra_targets"]
+        if not isinstance(extra_targets, list):
+            raise ValueError("extra_targets must be a list")
+        if not all(isinstance(t, (str, unicode)) for t in extra_targets):
+            raise ValueError("members of extra_targets should be strings")
     if is_linux() and gcc_dir is None:
         raise ValueError("Config file needs to set gcc_dir")
     cc = get_tool(config, "cc")
@@ -570,14 +705,15 @@ if __name__ == "__main__":
         for p in config.get("patches", []):
             patch(p, source_dir)
 
+    compiler_rt_source_link = llvm_source_dir + "/projects/compiler-rt"
+
     symlinks = [(clang_source_dir,
                  llvm_source_dir + "/tools/clang"),
                 (extra_source_dir,
                  llvm_source_dir + "/tools/clang/tools/extra"),
                 (lld_source_dir,
                  llvm_source_dir + "/tools/lld"),
-                (compiler_rt_source_dir,
-                 llvm_source_dir + "/projects/compiler-rt"),
+                (compiler_rt_source_dir, compiler_rt_source_link),
                 (libcxx_source_dir,
                  llvm_source_dir + "/projects/libcxx"),
                 (libcxxabi_source_dir,
@@ -616,9 +752,13 @@ if __name__ == "__main__":
     elif is_linux():
         extra_cflags = []
         extra_cxxflags = []
-        extra_cflags2 = ["-fPIC"]
+        # When building stage2 and stage3, we want the newly-built clang to pick
+        # up whatever headers were installed from the gcc we used to build stage1,
+        # always, rather than the system headers.  Providing -gcc-toolchain
+        # encourages clang to do that.
+        extra_cflags2 = ["-fPIC", '-gcc-toolchain', stage1_inst_dir]
         # Silence clang's warnings about arguments not being used in compilation.
-        extra_cxxflags2 = ["-fPIC", '-Qunused-arguments']
+        extra_cxxflags2 = ["-fPIC", '-Qunused-arguments', '-gcc-toolchain', stage1_inst_dir]
         extra_asmflags = []
         # Avoid libLLVM internal function calls going through the PLT.
         extra_ldflags = ['-Wl,-Bsymbolic-functions']
@@ -646,7 +786,7 @@ if __name__ == "__main__":
         extra_cxxflags = ["-stdlib=libc++"]
         extra_cxxflags2 = ["-stdlib=libc++"]
 
-        extra_flags = ["-target", "x86_64-apple-darwin11", "-mlinker-version=137",
+        extra_flags = ["-target", "x86_64-apple-darwin", "-mlinker-version=137",
                        "-B", "%s/bin" % os.getenv("CROSS_CCTOOLS_PATH"),
                        "-isysroot", os.getenv("CROSS_SYSROOT"),
                        # technically the sysroot flag there should be enough to deduce this,
@@ -670,6 +810,8 @@ if __name__ == "__main__":
         llvm_source_dir, stage1_dir, package_name, build_libcxx, osx_cross_compile,
         build_type, assertions, python_path, gcc_dir, libcxx_include_dir)
 
+    runtimes_source_link = llvm_source_dir + "/runtimes/compiler-rt"
+
     if stages > 1:
         stage2_dir = build_dir + '/stage2'
         stage2_inst_dir = stage2_dir + '/' + package_name
@@ -685,7 +827,9 @@ if __name__ == "__main__":
             ar, ranlib, libtool,
             llvm_source_dir, stage2_dir, package_name, build_libcxx, osx_cross_compile,
             build_type, assertions, python_path, gcc_dir, libcxx_include_dir,
-            stages == 2)
+            compiler_rt_source_dir, runtimes_source_link, compiler_rt_source_link,
+            is_final_stage=(stages == 2), android_targets=android_targets,
+            extra_targets=extra_targets)
 
     if stages > 2:
         stage3_dir = build_dir + '/stage3'
@@ -701,7 +845,8 @@ if __name__ == "__main__":
             ar, ranlib, libtool,
             llvm_source_dir, stage3_dir, package_name, build_libcxx, osx_cross_compile,
             build_type, assertions, python_path, gcc_dir, libcxx_include_dir,
-            stages == 3)
+            compiler_rt_source_dir, runtimes_source_link, compiler_rt_source_link,
+            (stages == 3), extra_targets=extra_targets)
 
     if build_clang_tidy:
         prune_final_dir_for_clang_tidy(os.path.join(final_stage_dir, package_name),

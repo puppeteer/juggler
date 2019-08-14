@@ -20,6 +20,8 @@ namespace gmp {
 class GMPContentChild;
 
 class GMPChild : public PGMPChild {
+  friend class PGMPChild;
+
  public:
   GMPChild();
   virtual ~GMPChild();
@@ -32,36 +34,33 @@ class GMPChild : public PGMPChild {
   GMPTimerChild* GetGMPTimers();
   GMPStorageChild* GetGMPStorage();
 
-#if defined(XP_MACOSX) && defined(MOZ_GMP_SANDBOX)
-  bool SetMacSandboxInfo(MacSandboxPluginType aPluginType);
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+  bool SetMacSandboxInfo(bool aAllowWindowServer);
 #endif
 
  private:
   friend class GMPContentChild;
 
-  bool ResolveLinks(nsCOMPtr<nsIFile>& aPath);
-
   bool GetUTF8LibPath(nsACString& aOutLibPath);
 
-  mozilla::ipc::IPCResult RecvProvideStorageId(
-      const nsCString& aStorageId) override;
+  mozilla::ipc::IPCResult RecvProvideStorageId(const nsCString& aStorageId);
 
-  mozilla::ipc::IPCResult AnswerStartPlugin(const nsString& aAdapter) override;
-  mozilla::ipc::IPCResult RecvPreloadLibs(const nsCString& aLibs) override;
+  mozilla::ipc::IPCResult AnswerStartPlugin(const nsString& aAdapter);
+  mozilla::ipc::IPCResult RecvPreloadLibs(const nsCString& aLibs);
 
-  PGMPTimerChild* AllocPGMPTimerChild() override;
-  bool DeallocPGMPTimerChild(PGMPTimerChild* aActor) override;
+  PGMPTimerChild* AllocPGMPTimerChild();
+  bool DeallocPGMPTimerChild(PGMPTimerChild* aActor);
 
-  PGMPStorageChild* AllocPGMPStorageChild() override;
-  bool DeallocPGMPStorageChild(PGMPStorageChild* aActor) override;
+  PGMPStorageChild* AllocPGMPStorageChild();
+  bool DeallocPGMPStorageChild(PGMPStorageChild* aActor);
 
   void GMPContentChildActorDestroy(GMPContentChild* aGMPContentChild);
 
-  mozilla::ipc::IPCResult RecvCrashPluginNow() override;
-  mozilla::ipc::IPCResult RecvCloseActive() override;
+  mozilla::ipc::IPCResult RecvCrashPluginNow();
+  mozilla::ipc::IPCResult RecvCloseActive();
 
   mozilla::ipc::IPCResult RecvInitGMPContentChild(
-      Endpoint<PGMPContentChild>&& aEndpoint) override;
+      Endpoint<PGMPContentChild>&& aEndpoint);
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
   void ProcessingError(Result aCode, const char* aReason) override;

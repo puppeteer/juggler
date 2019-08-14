@@ -13,12 +13,12 @@
 
 #include "builtin/ModuleObject.h"
 #include "gc/Allocator.h"
-#include "gc/FreeOp.h"
 #include "util/StringBuffer.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/JSScript.h"
 #include "wasm/WasmInstance.h"
 
+#include "gc/FreeOp-inl.h"
 #include "gc/ObjectKind-inl.h"
 #include "vm/Shape-inl.h"
 
@@ -141,6 +141,11 @@ static Shape* CreateEnvironmentShape(JSContext* cx, BindingIter& bi,
   return shape;
 }
 
+template <class Data>
+inline size_t SizeOfAllocatedData(Data* data) {
+  return SizeOfData<Data>(data->length);
+}
+
 template <typename ConcreteScope>
 static UniquePtr<typename ConcreteScope::Data> CopyScopeData(
     JSContext* cx, typename ConcreteScope::Data* data) {
@@ -154,7 +159,7 @@ static UniquePtr<typename ConcreteScope::Data> CopyScopeData(
     }
   }
 
-  size_t size = SizeOfData<typename ConcreteScope::Data>(data->length);
+  size_t size = SizeOfAllocatedData(data);
   void* bytes = cx->pod_malloc<char>(size);
   if (!bytes) {
     return nullptr;
@@ -260,7 +265,8 @@ static void DeleteScopeData(ConcreteScopeData* data) {
 }
 
 template <typename ConcreteScope, XDRMode mode>
-/* static */ XDRResult Scope::XDRSizedBindingNames(
+/* static */
+XDRResult Scope::XDRSizedBindingNames(
     XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
     MutableHandle<typename ConcreteScope::Data*> data) {
   MOZ_ASSERT(!data);
@@ -301,8 +307,9 @@ template <typename ConcreteScope, XDRMode mode>
   return Ok();
 }
 
-/* static */ Scope* Scope::create(JSContext* cx, ScopeKind kind,
-                                  HandleScope enclosing, HandleShape envShape) {
+/* static */
+Scope* Scope::create(JSContext* cx, ScopeKind kind, HandleScope enclosing,
+                     HandleShape envShape) {
   Scope* scope = Allocate<Scope>(cx);
   if (scope) {
     new (scope) Scope(kind, enclosing, envShape);
@@ -311,7 +318,8 @@ template <typename ConcreteScope, XDRMode mode>
 }
 
 template <typename ConcreteScope>
-/* static */ ConcreteScope* Scope::create(
+/* static */
+ConcreteScope* Scope::create(
     JSContext* cx, ScopeKind kind, HandleScope enclosing, HandleShape envShape,
     MutableHandle<UniquePtr<typename ConcreteScope::Data>> data) {
   Scope* scope = create(cx, kind, enclosing, envShape);
@@ -331,6 +339,10 @@ template <typename ConcreteScope>
 inline void Scope::initData(
     MutableHandle<UniquePtr<typename ConcreteScope::Data>> data) {
   MOZ_ASSERT(!data_);
+
+  AddCellMemory(this, SizeOfAllocatedData(data.get().get()),
+                MemoryUse::ScopeData);
+
   data_ = data.get().release();
 }
 
@@ -364,8 +376,8 @@ Shape* Scope::maybeCloneEnvironmentShape(JSContext* cx) {
   return environmentShape_;
 }
 
-/* static */ Scope* Scope::clone(JSContext* cx, HandleScope scope,
-                                 HandleScope enclosing) {
+/* static */
+Scope* Scope::clone(JSContext* cx, HandleScope scope, HandleScope enclosing) {
   RootedShape envShape(cx);
   if (scope->environmentShape()) {
     envShape = scope->maybeCloneEnvironmentShape(cx);
@@ -450,12 +462,10 @@ Shape* Scope::maybeCloneEnvironmentShape(JSContext* cx) {
 
 void Scope::finalize(FreeOp* fop) {
   MOZ_ASSERT(CurrentThreadIsGCSweeping());
-  if (data_) {
-    // We don't need to call the destructors for any GCPtrs in Data because
-    // this only happens during a GC.
-    fop->free_(data_);
-    data_ = nullptr;
-  }
+  applyScopeDataTyped([this, fop](auto data) {
+    fop->delete_(this, data, SizeOfAllocatedData(data), MemoryUse::ScopeData);
+  });
+  data_ = nullptr;
 }
 
 size_t Scope::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
@@ -493,7 +503,8 @@ uint32_t LexicalScope::firstFrameSlot() const {
   return 0;
 }
 
-/* static */ uint32_t LexicalScope::nextFrameSlot(Scope* scope) {
+/* static */
+uint32_t LexicalScope::nextFrameSlot(Scope* scope) {
   for (ScopeIter si(scope); si; si++) {
     switch (si.kind()) {
       case ScopeKind::Function:
@@ -530,10 +541,10 @@ uint32_t LexicalScope::firstFrameSlot() const {
   MOZ_CRASH("Not an enclosing intra-frame Scope");
 }
 
-/* static */ LexicalScope* LexicalScope::create(JSContext* cx, ScopeKind kind,
-                                                Handle<Data*> data,
-                                                uint32_t firstFrameSlot,
-                                                HandleScope enclosing) {
+/* static */
+LexicalScope* LexicalScope::create(JSContext* cx, ScopeKind kind,
+                                   Handle<Data*> data, uint32_t firstFrameSlot,
+                                   HandleScope enclosing) {
   MOZ_ASSERT(data,
              "LexicalScopes should not be created if there are no bindings.");
 
@@ -547,9 +558,11 @@ uint32_t LexicalScope::firstFrameSlot() const {
   return createWithData(cx, kind, &copy, firstFrameSlot, enclosing);
 }
 
-/* static */ LexicalScope* LexicalScope::createWithData(
-    JSContext* cx, ScopeKind kind, MutableHandle<UniquePtr<Data>> data,
-    uint32_t firstFrameSlot, HandleScope enclosing) {
+/* static */
+LexicalScope* LexicalScope::createWithData(JSContext* cx, ScopeKind kind,
+                                           MutableHandle<UniquePtr<Data>> data,
+                                           uint32_t firstFrameSlot,
+                                           HandleScope enclosing) {
   bool isNamedLambda =
       kind == ScopeKind::NamedLambda || kind == ScopeKind::StrictNamedLambda;
 
@@ -574,16 +587,16 @@ uint32_t LexicalScope::firstFrameSlot() const {
   return scope;
 }
 
-/* static */ Shape* LexicalScope::getEmptyExtensibleEnvironmentShape(
-    JSContext* cx) {
+/* static */
+Shape* LexicalScope::getEmptyExtensibleEnvironmentShape(JSContext* cx) {
   const Class* cls = &LexicalEnvironmentObject::class_;
   return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), BaseShape::DELEGATE);
 }
 
 template <XDRMode mode>
-/* static */ XDRResult LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
-                                         HandleScope enclosing,
-                                         MutableHandleScope scope) {
+/* static */
+XDRResult LexicalScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
+                            HandleScope enclosing, MutableHandleScope scope) {
   JSContext* cx = xdr->cx();
 
   Rooted<Data*> data(cx);
@@ -624,12 +637,14 @@ template <XDRMode mode>
 }
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     LexicalScope::XDR(XDRState<XDR_ENCODE>* xdr, ScopeKind kind,
                       HandleScope enclosing, MutableHandleScope scope);
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     LexicalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind,
                       HandleScope enclosing, MutableHandleScope scope);
 
@@ -640,13 +655,11 @@ static inline uint32_t FunctionScopeEnvShapeFlags(bool hasParameterExprs) {
   return BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
 }
 
-Zone* FunctionScope::Data::zone() const {
-  return canonicalFunction ? canonicalFunction->zone() : nullptr;
-}
-
-/* static */ FunctionScope* FunctionScope::create(
-    JSContext* cx, Handle<Data*> dataArg, bool hasParameterExprs,
-    bool needsEnvironment, HandleFunction fun, HandleScope enclosing) {
+/* static */
+FunctionScope* FunctionScope::create(JSContext* cx, Handle<Data*> dataArg,
+                                     bool hasParameterExprs,
+                                     bool needsEnvironment, HandleFunction fun,
+                                     HandleScope enclosing) {
   // The data that's passed in is from the frontend and is LifoAlloc'd.
   // Copy it now that we're creating a permanent VM scope.
   Rooted<UniquePtr<Data>> data(
@@ -656,13 +669,17 @@ Zone* FunctionScope::Data::zone() const {
     return nullptr;
   }
 
-  return createWithData(cx, &data, hasParameterExprs, needsEnvironment, fun,
-                        enclosing);
+  return createWithData(
+      cx, &data, hasParameterExprs,
+      dataArg ? dataArg->isFieldInitializer : IsFieldInitializer::No,
+      needsEnvironment, fun, enclosing);
 }
 
-/* static */ FunctionScope* FunctionScope::createWithData(
+/* static */
+FunctionScope* FunctionScope::createWithData(
     JSContext* cx, MutableHandle<UniquePtr<Data>> data, bool hasParameterExprs,
-    bool needsEnvironment, HandleFunction fun, HandleScope enclosing) {
+    IsFieldInitializer isFieldInitializer, bool needsEnvironment,
+    HandleFunction fun, HandleScope enclosing) {
   MOZ_ASSERT(data);
   MOZ_ASSERT(fun->isTenured());
 
@@ -678,6 +695,7 @@ Zone* FunctionScope::Data::zone() const {
     return nullptr;
   }
 
+  data->isFieldInitializer = isFieldInitializer;
   data->hasParameterExprs = hasParameterExprs;
   data->canonicalFunction.init(fun);
 
@@ -702,22 +720,23 @@ JSScript* FunctionScope::script() const {
   return canonicalFunction()->nonLazyScript();
 }
 
-/* static */ bool FunctionScope::isSpecialName(JSContext* cx, JSAtom* name) {
+/* static */
+bool FunctionScope::isSpecialName(JSContext* cx, JSAtom* name) {
   return name == cx->names().arguments || name == cx->names().dotThis ||
          name == cx->names().dotGenerator;
 }
 
-/* static */ Shape* FunctionScope::getEmptyEnvironmentShape(
-    JSContext* cx, bool hasParameterExprs) {
+/* static */
+Shape* FunctionScope::getEmptyEnvironmentShape(JSContext* cx,
+                                               bool hasParameterExprs) {
   const Class* cls = &CallObject::class_;
   uint32_t shapeFlags = FunctionScopeEnvShapeFlags(hasParameterExprs);
   return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls), shapeFlags);
 }
 
-/* static */ FunctionScope* FunctionScope::clone(JSContext* cx,
-                                                 Handle<FunctionScope*> scope,
-                                                 HandleFunction fun,
-                                                 HandleScope enclosing) {
+/* static */
+FunctionScope* FunctionScope::clone(JSContext* cx, Handle<FunctionScope*> scope,
+                                    HandleFunction fun, HandleScope enclosing) {
   MOZ_ASSERT(fun != scope->canonicalFunction());
 
   // FunctionScope::Data has GCManagedDeletePolicy because it contains a
@@ -745,10 +764,9 @@ JSScript* FunctionScope::script() const {
 }
 
 template <XDRMode mode>
-/* static */ XDRResult FunctionScope::XDR(XDRState<mode>* xdr,
-                                          HandleFunction fun,
-                                          HandleScope enclosing,
-                                          MutableHandleScope scope) {
+/* static */
+XDRResult FunctionScope::XDR(XDRState<mode>* xdr, HandleFunction fun,
+                             HandleScope enclosing, MutableHandleScope scope) {
   JSContext* cx = xdr->cx();
   Rooted<Data*> data(cx);
   MOZ_TRY(XDRSizedBindingNames<FunctionScope>(xdr, scope.as<FunctionScope>(),
@@ -762,14 +780,18 @@ template <XDRMode mode>
 
     uint8_t needsEnvironment;
     uint8_t hasParameterExprs;
+    uint8_t isFieldInitializer;
     uint32_t nextFrameSlot;
     if (mode == XDR_ENCODE) {
       needsEnvironment = scope->hasEnvironment();
       hasParameterExprs = data->hasParameterExprs;
+      isFieldInitializer =
+          (data->isFieldInitializer == IsFieldInitializer::Yes ? 1 : 0);
       nextFrameSlot = data->nextFrameSlot;
     }
     MOZ_TRY(xdr->codeUint8(&needsEnvironment));
     MOZ_TRY(xdr->codeUint8(&hasParameterExprs));
+    MOZ_TRY(xdr->codeUint8(&isFieldInitializer));
     MOZ_TRY(xdr->codeUint16(&data->nonPositionalFormalStart));
     MOZ_TRY(xdr->codeUint16(&data->varStart));
     MOZ_TRY(xdr->codeUint32(&nextFrameSlot));
@@ -781,8 +803,10 @@ template <XDRMode mode>
         MOZ_ASSERT(!data->nextFrameSlot);
       }
 
-      scope.set(createWithData(cx, &uniqueData.ref(), hasParameterExprs,
-                               needsEnvironment, fun, enclosing));
+      scope.set(createWithData(
+          cx, &uniqueData.ref(), hasParameterExprs,
+          isFieldInitializer ? IsFieldInitializer::Yes : IsFieldInitializer::No,
+          needsEnvironment, fun, enclosing));
       if (!scope) {
         return xdr->fail(JS::TranscodeResult_Throw);
       }
@@ -797,12 +821,14 @@ template <XDRMode mode>
 }
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     FunctionScope::XDR(XDRState<XDR_ENCODE>* xdr, HandleFunction fun,
                        HandleScope enclosing, MutableHandleScope scope);
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     FunctionScope::XDR(XDRState<XDR_DECODE>* xdr, HandleFunction fun,
                        HandleScope enclosing, MutableHandleScope scope);
 
@@ -819,11 +845,10 @@ static UniquePtr<VarScope::Data> NewEmptyVarScopeData(JSContext* cx,
   return data;
 }
 
-/* static */ VarScope* VarScope::create(JSContext* cx, ScopeKind kind,
-                                        Handle<Data*> dataArg,
-                                        uint32_t firstFrameSlot,
-                                        bool needsEnvironment,
-                                        HandleScope enclosing) {
+/* static */
+VarScope* VarScope::create(JSContext* cx, ScopeKind kind, Handle<Data*> dataArg,
+                           uint32_t firstFrameSlot, bool needsEnvironment,
+                           HandleScope enclosing) {
   // The data that's passed in is from the frontend and is LifoAlloc'd.
   // Copy it now that we're creating a permanent VM scope.
   Rooted<UniquePtr<Data>> data(
@@ -837,9 +862,12 @@ static UniquePtr<VarScope::Data> NewEmptyVarScopeData(JSContext* cx,
                         enclosing);
 }
 
-/* static */ VarScope* VarScope::createWithData(
-    JSContext* cx, ScopeKind kind, MutableHandle<UniquePtr<Data>> data,
-    uint32_t firstFrameSlot, bool needsEnvironment, HandleScope enclosing) {
+/* static */
+VarScope* VarScope::createWithData(JSContext* cx, ScopeKind kind,
+                                   MutableHandle<UniquePtr<Data>> data,
+                                   uint32_t firstFrameSlot,
+                                   bool needsEnvironment,
+                                   HandleScope enclosing) {
   MOZ_ASSERT(data);
 
   RootedShape envShape(cx);
@@ -863,7 +891,8 @@ static UniquePtr<VarScope::Data> NewEmptyVarScopeData(JSContext* cx,
   return Scope::create<VarScope>(cx, kind, enclosing, envShape, data);
 }
 
-/* static */ Shape* VarScope::getEmptyEnvironmentShape(JSContext* cx) {
+/* static */
+Shape* VarScope::getEmptyEnvironmentShape(JSContext* cx) {
   const Class* cls = &VarEnvironmentObject::class_;
   return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
                                VarScopeEnvShapeFlags);
@@ -877,9 +906,9 @@ uint32_t VarScope::firstFrameSlot() const {
 }
 
 template <XDRMode mode>
-/* static */ XDRResult VarScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
-                                     HandleScope enclosing,
-                                     MutableHandleScope scope) {
+/* static */
+XDRResult VarScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
+                        HandleScope enclosing, MutableHandleScope scope) {
   JSContext* cx = xdr->cx();
   Rooted<Data*> data(cx);
   MOZ_TRY(XDRSizedBindingNames<VarScope>(xdr, scope.as<VarScope>(), &data));
@@ -922,17 +951,20 @@ template <XDRMode mode>
 }
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     VarScope::XDR(XDRState<XDR_ENCODE>* xdr, ScopeKind kind,
                   HandleScope enclosing, MutableHandleScope scope);
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     VarScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind,
                   HandleScope enclosing, MutableHandleScope scope);
 
-/* static */ GlobalScope* GlobalScope::create(JSContext* cx, ScopeKind kind,
-                                              Handle<Data*> dataArg) {
+/* static */
+GlobalScope* GlobalScope::create(JSContext* cx, ScopeKind kind,
+                                 Handle<Data*> dataArg) {
   // The data that's passed in is from the frontend and is LifoAlloc'd.
   // Copy it now that we're creating a permanent VM scope.
   Rooted<UniquePtr<Data>> data(cx, dataArg
@@ -945,8 +977,9 @@ template
   return createWithData(cx, kind, &data);
 }
 
-/* static */ GlobalScope* GlobalScope::createWithData(
-    JSContext* cx, ScopeKind kind, MutableHandle<UniquePtr<Data>> data) {
+/* static */
+GlobalScope* GlobalScope::createWithData(JSContext* cx, ScopeKind kind,
+                                         MutableHandle<UniquePtr<Data>> data) {
   MOZ_ASSERT(data);
 
   // The global scope has no environment shape. Its environment is the
@@ -956,9 +989,9 @@ template
   return Scope::create<GlobalScope>(cx, kind, nullptr, nullptr, data);
 }
 
-/* static */ GlobalScope* GlobalScope::clone(JSContext* cx,
-                                             Handle<GlobalScope*> scope,
-                                             ScopeKind kind) {
+/* static */
+GlobalScope* GlobalScope::clone(JSContext* cx, Handle<GlobalScope*> scope,
+                                ScopeKind kind) {
   Rooted<Data*> dataOriginal(cx, &scope->as<GlobalScope>().data());
   Rooted<UniquePtr<Data>> dataClone(
       cx, CopyScopeData<GlobalScope>(cx, dataOriginal));
@@ -970,8 +1003,9 @@ template
 }
 
 template <XDRMode mode>
-/* static */ XDRResult GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
-                                        MutableHandleScope scope) {
+/* static */
+XDRResult GlobalScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
+                           MutableHandleScope scope) {
   MOZ_ASSERT((mode == XDR_DECODE) == !scope);
 
   JSContext* cx = xdr->cx();
@@ -1005,27 +1039,57 @@ template <XDRMode mode>
 }
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     GlobalScope::XDR(XDRState<XDR_ENCODE>* xdr, ScopeKind kind,
                      MutableHandleScope scope);
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     GlobalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind,
                      MutableHandleScope scope);
 
-/* static */ WithScope* WithScope::create(JSContext* cx,
-                                          HandleScope enclosing) {
+/* static */
+WithScope* WithScope::create(JSContext* cx, HandleScope enclosing) {
   Scope* scope = Scope::create(cx, ScopeKind::With, enclosing, nullptr);
   return static_cast<WithScope*>(scope);
 }
 
+template <XDRMode mode>
+/* static */
+XDRResult WithScope::XDR(XDRState<mode>* xdr, HandleScope enclosing,
+                         MutableHandleScope scope) {
+  JSContext* cx = xdr->cx();
+
+  if (mode == XDR_DECODE) {
+    scope.set(create(cx, enclosing));
+    if (!scope) {
+      return xdr->fail(JS::TranscodeResult_Throw);
+    }
+  }
+
+  return Ok();
+}
+
+template
+    /* static */
+    XDRResult
+    WithScope::XDR(XDRState<XDR_ENCODE>* xdr, HandleScope enclosing,
+                   MutableHandleScope scope);
+
+template
+    /* static */
+    XDRResult
+    WithScope::XDR(XDRState<XDR_DECODE>* xdr, HandleScope enclosing,
+                   MutableHandleScope scope);
+
 static const uint32_t EvalScopeEnvShapeFlags =
     BaseShape::QUALIFIED_VAROBJ | BaseShape::DELEGATE;
 
-/* static */ EvalScope* EvalScope::create(JSContext* cx, ScopeKind scopeKind,
-                                          Handle<Data*> dataArg,
-                                          HandleScope enclosing) {
+/* static */
+EvalScope* EvalScope::create(JSContext* cx, ScopeKind scopeKind,
+                             Handle<Data*> dataArg, HandleScope enclosing) {
   // The data that's passed in is from the frontend and is LifoAlloc'd.
   // Copy it now that we're creating a permanent VM scope.
   Rooted<UniquePtr<Data>> data(cx, dataArg
@@ -1038,9 +1102,10 @@ static const uint32_t EvalScopeEnvShapeFlags =
   return createWithData(cx, scopeKind, &data, enclosing);
 }
 
-/* static */ EvalScope* EvalScope::createWithData(
-    JSContext* cx, ScopeKind scopeKind, MutableHandle<UniquePtr<Data>> data,
-    HandleScope enclosing) {
+/* static */
+EvalScope* EvalScope::createWithData(JSContext* cx, ScopeKind scopeKind,
+                                     MutableHandle<UniquePtr<Data>> data,
+                                     HandleScope enclosing) {
   MOZ_ASSERT(data);
 
   RootedShape envShape(cx);
@@ -1065,7 +1130,8 @@ static const uint32_t EvalScopeEnvShapeFlags =
   return Scope::create<EvalScope>(cx, scopeKind, enclosing, envShape, data);
 }
 
-/* static */ Scope* EvalScope::nearestVarScopeForDirectEval(Scope* scope) {
+/* static */
+Scope* EvalScope::nearestVarScopeForDirectEval(Scope* scope) {
   for (ScopeIter si(scope); si; si++) {
     switch (si.kind()) {
       case ScopeKind::Function:
@@ -1081,16 +1147,17 @@ static const uint32_t EvalScopeEnvShapeFlags =
   return nullptr;
 }
 
-/* static */ Shape* EvalScope::getEmptyEnvironmentShape(JSContext* cx) {
+/* static */
+Shape* EvalScope::getEmptyEnvironmentShape(JSContext* cx) {
   const Class* cls = &VarEnvironmentObject::class_;
   return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
                                EvalScopeEnvShapeFlags);
 }
 
 template <XDRMode mode>
-/* static */ XDRResult EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
-                                      HandleScope enclosing,
-                                      MutableHandleScope scope) {
+/* static */
+XDRResult EvalScope::XDR(XDRState<mode>* xdr, ScopeKind kind,
+                         HandleScope enclosing, MutableHandleScope scope) {
   JSContext* cx = xdr->cx();
   Rooted<Data*> data(cx);
 
@@ -1118,12 +1185,14 @@ template <XDRMode mode>
 }
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     EvalScope::XDR(XDRState<XDR_ENCODE>* xdr, ScopeKind kind,
                    HandleScope enclosing, MutableHandleScope scope);
 
 template
-    /* static */ XDRResult
+    /* static */
+    XDRResult
     EvalScope::XDR(XDRState<XDR_DECODE>* xdr, ScopeKind kind,
                    HandleScope enclosing, MutableHandleScope scope);
 
@@ -1135,10 +1204,10 @@ Zone* ModuleScope::Data::zone() const {
   return module ? module->zone() : nullptr;
 }
 
-/* static */ ModuleScope* ModuleScope::create(JSContext* cx,
-                                              Handle<Data*> dataArg,
-                                              HandleModuleObject module,
-                                              HandleScope enclosing) {
+/* static */
+ModuleScope* ModuleScope::create(JSContext* cx, Handle<Data*> dataArg,
+                                 HandleModuleObject module,
+                                 HandleScope enclosing) {
   Rooted<UniquePtr<Data>> data(cx, dataArg
                                        ? CopyScopeData<ModuleScope>(cx, dataArg)
                                        : NewEmptyScopeData<ModuleScope>(cx));
@@ -1149,9 +1218,11 @@ Zone* ModuleScope::Data::zone() const {
   return createWithData(cx, &data, module, enclosing);
 }
 
-/* static */ ModuleScope* ModuleScope::createWithData(
-    JSContext* cx, MutableHandle<UniquePtr<Data>> data,
-    HandleModuleObject module, HandleScope enclosing) {
+/* static */
+ModuleScope* ModuleScope::createWithData(JSContext* cx,
+                                         MutableHandle<UniquePtr<Data>> data,
+                                         HandleModuleObject module,
+                                         HandleScope enclosing) {
   MOZ_ASSERT(data);
   MOZ_ASSERT(enclosing->is<GlobalScope>());
 
@@ -1182,7 +1253,8 @@ Zone* ModuleScope::Data::zone() const {
                                     data);
 }
 
-/* static */ Shape* ModuleScope::getEmptyEnvironmentShape(JSContext* cx) {
+/* static */
+Shape* ModuleScope::getEmptyEnvironmentShape(JSContext* cx) {
   const Class* cls = &ModuleEnvironmentObject::class_;
   return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
                                ModuleScopeEnvShapeFlags);
@@ -1219,8 +1291,9 @@ static void InitializeNextTrailingName(const Rooted<UniquePtr<Data>>& data,
   data->length++;
 }
 
-/* static */ WasmInstanceScope* WasmInstanceScope::create(
-    JSContext* cx, WasmInstanceObject* instance) {
+/* static */
+WasmInstanceScope* WasmInstanceScope::create(JSContext* cx,
+                                             WasmInstanceObject* instance) {
   // WasmInstanceScope::Data has GCManagedDeletePolicy because it contains a
   // GCPtr. Destruction of |data| below may trigger calls into the GC.
 
@@ -1269,7 +1342,8 @@ static void InitializeNextTrailingName(const Rooted<UniquePtr<Data>>& data,
                                           /* envShape = */ nullptr, &data);
 }
 
-/* static */ Shape* WasmInstanceScope::getEmptyEnvironmentShape(JSContext* cx) {
+/* static */
+Shape* WasmInstanceScope::getEmptyEnvironmentShape(JSContext* cx) {
   const Class* cls = &WasmInstanceEnvironmentObject::class_;
   return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
                                WasmInstanceEnvShapeFlags);
@@ -1280,9 +1354,10 @@ static void InitializeNextTrailingName(const Rooted<UniquePtr<Data>>& data,
 static const uint32_t WasmFunctionEnvShapeFlags =
     BaseShape::NOT_EXTENSIBLE | BaseShape::DELEGATE;
 
-/* static */ WasmFunctionScope* WasmFunctionScope::create(JSContext* cx,
-                                                          HandleScope enclosing,
-                                                          uint32_t funcIndex) {
+/* static */
+WasmFunctionScope* WasmFunctionScope::create(JSContext* cx,
+                                             HandleScope enclosing,
+                                             uint32_t funcIndex) {
   MOZ_ASSERT(enclosing->is<WasmInstanceScope>());
 
   Rooted<WasmFunctionScope*> wasmFunctionScope(cx);
@@ -1322,7 +1397,8 @@ static const uint32_t WasmFunctionEnvShapeFlags =
                                           /* envShape = */ nullptr, &data);
 }
 
-/* static */ Shape* WasmFunctionScope::getEmptyEnvironmentShape(JSContext* cx) {
+/* static */
+Shape* WasmFunctionScope::getEmptyEnvironmentShape(JSContext* cx) {
   const Class* cls = &WasmFunctionCallObject::class_;
   return EmptyEnvironmentShape(cx, cls, JSSLOT_FREE(cls),
                                WasmFunctionEnvShapeFlags);
@@ -1514,14 +1590,17 @@ void BindingIter::init(WasmFunctionScope::Data& data) {
        data.trailingNames.start(), data.length);
 }
 
-PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
-    : BindingIter(script) {
+PositionalFormalParameterIter::PositionalFormalParameterIter(Scope* scope)
+    : BindingIter(scope) {
   // Reinit with flags = 0, i.e., iterate over all positional parameters.
-  if (script->bodyScope()->is<FunctionScope>()) {
-    init(script->bodyScope()->as<FunctionScope>().data(), /* flags = */ 0);
+  if (scope->is<FunctionScope>()) {
+    init(scope->as<FunctionScope>().data(), /* flags = */ 0);
   }
   settle();
 }
+
+PositionalFormalParameterIter::PositionalFormalParameterIter(JSScript* script)
+    : PositionalFormalParameterIter(script->bodyScope()) {}
 
 void js::DumpBindings(JSContext* cx, Scope* scopeArg) {
   RootedScope scope(cx, scopeArg);

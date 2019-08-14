@@ -1,3 +1,4 @@
+from __future__ import absolute_import, print_function
 import os
 import shutil
 import time
@@ -141,7 +142,7 @@ class TestFirefoxRefresh(MarionetteTestCase):
           // Expire in 15 minutes:
           let expireTime = Math.floor(Date.now() / 1000) + 15 * 60;
           Services.cookies.add(arguments[0], arguments[1], arguments[2], arguments[3],
-                               true, false, false, expireTime, {}, Ci.nsICookie2.SAMESITE_UNSET);
+                               true, false, false, expireTime, {}, Ci.nsICookie.SAMESITE_NONE);
         """, script_args=(self._cookieHost, self._cookiePath, self._cookieName, self._cookieValue))
 
     def createSession(self):
@@ -198,7 +199,7 @@ class TestFirefoxRefresh(MarionetteTestCase):
 
     def checkPassword(self):
         loginInfo = self.marionette.execute_script("""
-          let ary = Services.logins.findLogins({},
+          let ary = Services.logins.findLogins(
             "test.marionette.mozilla.com",
             "http://test.marionette.mozilla.com/some/form/",
             null, {});
@@ -320,7 +321,7 @@ class TestFirefoxRefresh(MarionetteTestCase):
             let cookie = null;
             while (cookieEnum.hasMoreElements()) {
               let hostCookie = cookieEnum.getNext();
-              hostCookie.QueryInterface(Ci.nsICookie2);
+              hostCookie.QueryInterface(Ci.nsICookie);
               // getCookiesFromHost returns any cookie from the BASE host.
               if (hostCookie.rawHost != arguments[0])
                 continue;
@@ -541,7 +542,6 @@ class TestFirefoxRefresh(MarionetteTestCase):
           env.set("MOZ_MARIONETTE_PREF_STATE_ACROSS_RESTARTS", JSON.stringify(prefObj));
           env.set("MOZ_RESET_PROFILE_RESTART", "1");
           env.set("XRE_PROFILE_PATH", arguments[0]);
-          env.set("XRE_PROFILE_NAME", profileName);
         """, script_args=(self.marionette.instance.profile.profile, profileName,))
 
         profileLeafName = os.path.basename(os.path.normpath(
@@ -567,7 +567,7 @@ class TestFirefoxRefresh(MarionetteTestCase):
             container = Services.dirsvc.get("Home", Ci.nsIFile);
           }
           let bundle = Services.strings.createBundle("chrome://mozapps/locale/profile/profileSelection.properties");
-          let dirName = bundle.formatStringFromName("resetBackupDirectory", [Services.appinfo.name], 1);
+          let dirName = bundle.formatStringFromName("resetBackupDirectory", [Services.appinfo.name]);
           container.append(dirName);
           container.append(arguments[0]);
           return container.path;

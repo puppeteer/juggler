@@ -6,37 +6,37 @@
 
 #ifdef JS_STRUCTURED_SPEW
 
-#include "util/StructuredSpewer.h"
+#  include "util/StructuredSpewer.h"
 
-#include "mozilla/Sprintf.h"
+#  include "mozilla/Sprintf.h"
 
-#include "util/Text.h"
-#include "vm/JSContext.h"
-#include "vm/JSScript.h"
+#  include "util/Text.h"
+#  include "vm/JSContext.h"
+#  include "vm/JSScript.h"
 
 using namespace js;
 
 const StructuredSpewer::NameArray StructuredSpewer::names_ = {
-#define STRUCTURED_CHANNEL(name) #name,
+#  define STRUCTURED_CHANNEL(name) #  name,
     STRUCTURED_CHANNEL_LIST(STRUCTURED_CHANNEL)
-#undef STRUCTURED_CHANNEL
+#  undef STRUCTURED_CHANNEL
 };
 
 // Choose a sensible default spew directory.
 //
 // The preference here is to use the current working directory,
 // except on Android.
-#ifndef DEFAULT_SPEW_DIRECTORY
-#if defined(_WIN32)
-#define DEFAULT_SPEW_DIRECTORY "."
-#elif defined(__ANDROID__)
-#define DEFAULT_SPEW_DIRECTORY "/data/local/tmp"
-#else
-#define DEFAULT_SPEW_DIRECTORY "."
-#endif
-#endif
+#  ifndef DEFAULT_SPEW_DIRECTORY
+#    if defined(_WIN32)
+#      define DEFAULT_SPEW_DIRECTORY "."
+#    elif defined(__ANDROID__)
+#      define DEFAULT_SPEW_DIRECTORY "/data/local/tmp"
+#    else
+#      define DEFAULT_SPEW_DIRECTORY "."
+#    endif
+#  endif
 
-void StructuredSpewer::ensureInitializationAttempted() {
+bool StructuredSpewer::ensureInitializationAttempted() {
   if (!outputInitializationAttempted_) {
     // We cannot call getenv during record replay, so disable
     // the spewer.
@@ -57,6 +57,8 @@ void StructuredSpewer::ensureInitializationAttempted() {
     // we track the attempt separately.
     outputInitializationAttempted_ = true;
   }
+
+  return json_.isSome();
 }
 
 void StructuredSpewer::tryToInitializeOutput(const char* path) {
@@ -71,7 +73,7 @@ void StructuredSpewer::tryToInitializeOutput(const char* path) {
     // Returning here before we've emplaced the JSONPrinter
     // means this is effectively disabled, but fail earlier
     // we also disable all the bits
-    selectedChannels_.disableAll();
+    selectedChannels_.disableAllChannels();
     return;
   }
 
@@ -100,7 +102,11 @@ static bool MatchJSScript(JSScript* script, const char* pattern) {
   return result != nullptr;
 }
 
-/* static */ bool StructuredSpewer::enabled(JSScript* script) {
+bool StructuredSpewer::enabled(JSScript* script) {
+  if (!spewingEnabled_) {
+    return false;
+  }
+
   // We cannot call getenv under record/replay.
   if (mozilla::recordreplay::IsRecordingOrReplaying()) {
     return false;
@@ -114,7 +120,10 @@ static bool MatchJSScript(JSScript* script, const char* pattern) {
 
 bool StructuredSpewer::enabled(JSContext* cx, const JSScript* script,
                                SpewChannel channel) const {
-  return script->spewEnabled() && cx->spewer().filter().enabled(channel);
+  if (script && !script->spewEnabled()) {
+    return false;
+  }
+  return cx->spewer().enabled(channel);
 }
 
 // Attempt to setup a common header for objects based on script/channel.
@@ -128,24 +137,27 @@ void StructuredSpewer::startObject(JSContext* cx, const JSScript* script,
 
   json.beginObject();
   json.property("channel", getName(channel));
-  json.beginObjectProperty("location");
-  {
+  if (script) {
+    json.beginObjectProperty("location");
     json.property("filename", script->filename());
     json.property("line", script->lineno());
     json.property("column", script->column());
+    json.endObject();
   }
-  json.endObject();
 }
 
-/* static */ void StructuredSpewer::spew(JSContext* cx, SpewChannel channel,
-                                         const char* fmt, ...) {
+/* static */
+void StructuredSpewer::spew(JSContext* cx, SpewChannel channel, const char* fmt,
+                            ...) {
   // Because we don't have a script here, use the singleton's
   // filter to determine if the channel is active.
-  if (!cx->spewer().filter().enabled(channel)) {
+  if (!cx->spewer().enabled(channel)) {
     return;
   }
 
-  cx->spewer().ensureInitializationAttempted();
+  if (!cx->spewer().ensureInitializationAttempted()) {
+    return;
+  }
 
   va_list ap;
   va_start(ap, fmt);
@@ -166,28 +178,37 @@ void StructuredSpewer::startObject(JSContext* cx, const JSScript* script,
 void StructuredSpewer::parseSpewFlags(const char* flags) {
   // If '*' or 'all' are in the list, enable all spew.
   bool star = ContainsFlag(flags, "*") || ContainsFlag(flags, "all");
-#define CHECK_CHANNEL(name)                             \
-  if (ContainsFlag(flags, #name) || star) {             \
-    selectedChannels_.enableChannel(SpewChannel::name); \
-  }
+#  define CHECK_CHANNEL(name)                             \
+    if (ContainsFlag(flags, #name) || star) {             \
+      selectedChannels_.enableChannel(SpewChannel::name); \
+    }
 
   STRUCTURED_CHANNEL_LIST(CHECK_CHANNEL)
 
-#undef CHECK_CHANNEL
+#  undef CHECK_CHANNEL
+
+  if (ContainsFlag(flags, "AtStartup")) {
+    enableSpewing();
+  }
 
   if (ContainsFlag(flags, "help")) {
-     printf(
+    printf(
         "\n"
         "usage: SPEW=option,option,option,... where options can be:\n"
         "\n"
         "  help               Dump this help message\n"
         "  all|*              Enable all the below channels\n"
         "  channel[,channel]  Enable the selected channels from below\n"
+        "  AtStartup          Enable spewing at browser startup instead\n"
+        "                     of when gecko profiling starts."
         "\n"
         " Channels: \n"
         "\n"
         // List Channels
         "  BaselineICStats    Dump the IC Entry counters during Ion analysis\n"
+        "  ScriptStats        Dump statistics collected by tracelogger that\n"
+        "                     is aggregated by script. Requires\n"
+        "                     JS_TRACE_LOGGING=1\n"
         // End Channel list
         "\n\n"
         "By default output goes to a file called spew_output.$PID.$THREAD\n"
@@ -208,7 +229,7 @@ void StructuredSpewer::parseSpewFlags(const char* flags) {
         "        output goes to $MOZ_UPLOAD_DIR/spew_output* to ease usage\n"
         "        with Treeherder.\n"
 
-        );
+    );
     exit(0);
   }
 }
@@ -220,7 +241,9 @@ AutoStructuredSpewer::AutoStructuredSpewer(JSContext* cx, SpewChannel channel,
     return;
   }
 
-  cx->spewer().ensureInitializationAttempted();
+  if (!cx->spewer().ensureInitializationAttempted()) {
+    return;
+  }
 
   cx->spewer().startObject(cx, script, channel);
   printer_.emplace(&cx->spewer().json_.ref());

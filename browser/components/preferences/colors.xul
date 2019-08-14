@@ -16,15 +16,14 @@
         buttons="accept,cancel,help"
         persist="lastSelected screenX screenY"
         role="dialog"
-        helpTopic="prefs-fonts-and-colors"
-        ondialoghelp="openPrefsHelp()">
+        helpTopic="prefs-fonts-and-colors">
 
   <linkset>
-    <link rel="localization" href="browser/preferences/colors.ftl"/>
+    <html:link rel="localization" href="browser/preferences/colors.ftl"/>
   </linkset>
 
-  <script type="application/javascript" src="chrome://browser/content/utilityOverlay.js"/>
-  <script type="application/javascript" src="chrome://global/content/preferencesBindings.js"/>
+  <script src="chrome://browser/content/utilityOverlay.js"/>
+  <script src="chrome://global/content/preferencesBindings.js"/>
 
   <keyset>
     <key data-l10n-id="colors-close-key" modifiers="accel" oncommand="Preferences.close(event)"/>
@@ -89,5 +88,5 @@
   </hbox>
 
   <!-- Load the script after the elements for layout issues (bug 1501755). -->
-  <script type="application/javascript" src="chrome://browser/content/preferences/colors.js"/>
+  <script src="chrome://browser/content/preferences/colors.js"/>
 </dialog>

@@ -31,6 +31,7 @@ class SavedFrame : public NativeObject {
   // Prototype methods and properties to be exposed to JS.
   static bool construct(JSContext* cx, unsigned argc, Value* vp);
   static bool sourceProperty(JSContext* cx, unsigned argc, Value* vp);
+  static bool sourceIdProperty(JSContext* cx, unsigned argc, Value* vp);
   static bool lineProperty(JSContext* cx, unsigned argc, Value* vp);
   static bool columnProperty(JSContext* cx, unsigned argc, Value* vp);
   static bool functionDisplayNameProperty(JSContext* cx, unsigned argc,
@@ -44,6 +45,7 @@ class SavedFrame : public NativeObject {
 
   // Convenient getters for SavedFrame's reserved slots for use from C++.
   JSAtom* getSource();
+  uint32_t getSourceId();
   uint32_t getLine();
   uint32_t getColumn();
   JSAtom* getFunctionDisplayName();
@@ -104,31 +106,17 @@ class SavedFrame : public NativeObject {
   struct Lookup;
   struct HashPolicy;
 
-  typedef JS::GCHashSet<ReadBarriered<SavedFrame*>, HashPolicy,
-                        SystemAllocPolicy>
+  typedef JS::GCHashSet<WeakHeapPtr<SavedFrame*>, HashPolicy, SystemAllocPolicy>
       Set;
-
-  class AutoLookupVector;
-
-  class MOZ_STACK_CLASS HandleLookup {
-    friend class AutoLookupVector;
-
-    Lookup& lookup;
-
-    explicit HandleLookup(Lookup& lookup) : lookup(lookup) {}
-
-   public:
-    inline Lookup& get() { return lookup; }
-    inline Lookup* operator->() { return &lookup; }
-  };
 
  private:
   static SavedFrame* create(JSContext* cx);
   static MOZ_MUST_USE bool finishSavedFrameInit(JSContext* cx,
                                                 HandleObject ctor,
                                                 HandleObject proto);
-  void initFromLookup(JSContext* cx, HandleLookup lookup);
+  void initFromLookup(JSContext* cx, Handle<Lookup> lookup);
   void initSource(JSAtom* source);
+  void initSourceId(uint32_t id);
   void initLine(uint32_t line);
   void initColumn(uint32_t column);
   void initFunctionDisplayName(JSAtom* maybeName);
@@ -140,6 +128,7 @@ class SavedFrame : public NativeObject {
   enum {
     // The reserved slots in the SavedFrame class.
     JSSLOT_SOURCE,
+    JSSLOT_SOURCEID,
     JSSLOT_LINE,
     JSSLOT_COLUMN,
     JSSLOT_FUNCTIONDISPLAYNAME,
@@ -162,7 +151,7 @@ struct SavedFrame::HashPolicy {
   static HashNumber hash(const Lookup& lookup);
   static bool match(SavedFrame* existing, const Lookup& lookup);
 
-  typedef ReadBarriered<SavedFrame*> Key;
+  typedef WeakHeapPtr<SavedFrame*> Key;
   static void rekey(Key& key, const Key& newKey);
 };
 
@@ -259,6 +248,8 @@ class ConcreteStackFrame<SavedFrame> : public BaseStackFrame {
     auto source = get().getSource();
     return AtomOrTwoByteChars(source);
   }
+
+  uint32_t sourceId() const override { return get().getSourceId(); }
 
   AtomOrTwoByteChars functionDisplayName() const override {
     auto name = get().getFunctionDisplayName();

@@ -14,11 +14,11 @@
 #include "mozilla/RefPtr.h"
 #include "nsError.h"
 #include "nsString.h"
-#include "nsSVGPathDataParser.h"
+#include "SVGPathDataParser.h"
 #include <stdarg.h>
 #include "nsStyleConsts.h"
 #include "SVGContentUtils.h"
-#include "SVGGeometryElement.h"  // for nsSVGMark
+#include "SVGGeometryElement.h"
 #include "SVGPathSegUtils.h"
 #include <algorithm>
 
@@ -83,7 +83,7 @@ nsresult SVGPathData::SetValueFromString(const nsAString& aValue) {
   // the first error. We still return any error though so that callers know if
   // there's a problem.
 
-  nsSVGPathDataParser pathParser(aValue, this);
+  SVGPathDataParser pathParser(aValue, this);
   return pathParser.Parse() ? NS_OK : NS_ERROR_DOM_SYNTAX_ERR;
 }
 
@@ -396,8 +396,8 @@ already_AddRefed<Path> SVGPathData::BuildPath(PathBuilder* aBuilder,
           if (radii.x == 0.0f || radii.y == 0.0f) {
             aBuilder->LineTo(segEnd);
           } else {
-            nsSVGArcConverter converter(segStart, segEnd, radii, mData[i + 2],
-                                        mData[i + 3] != 0, mData[i + 4] != 0);
+            SVGArcConverter converter(segStart, segEnd, radii, mData[i + 2],
+                                      mData[i + 3] != 0, mData[i + 4] != 0);
             while (converter.GetNextSegment(&cp1, &cp2, &segEnd)) {
               aBuilder->BezierTo(cp1, cp2, segEnd);
             }
@@ -528,8 +528,9 @@ already_AddRefed<Path> SVGPathData::BuildPathForMeasuring() const {
 // We could simplify this function because this is only used by CSS motion path
 // and clip-path, which don't render the SVG Path. i.e. The returned path is
 // used as a reference.
-/* static */ already_AddRefed<Path> SVGPathData::BuildPath(
-    const nsTArray<StylePathCommand>& aPath, PathBuilder* aBuilder,
+/* static */
+already_AddRefed<Path> SVGPathData::BuildPath(
+    Span<const StylePathCommand> aPath, PathBuilder* aBuilder,
     uint8_t aStrokeLineCap, Float aStrokeWidth, float aZoomFactor) {
   if (aPath.IsEmpty() || !aPath[0].IsMoveTo()) {
     return nullptr;  // paths without an initial moveto are invalid
@@ -646,9 +647,8 @@ already_AddRefed<Path> SVGPathData::BuildPathForMeasuring() const {
           if (radii.x == 0.0f || radii.y == 0.0f) {
             aBuilder->LineTo(scale(segEnd));
           } else {
-            nsSVGArcConverter converter(segStart, segEnd, radii, arc.angle,
-                                        arc.large_arc_flag._0,
-                                        arc.sweep_flag._0);
+            SVGArcConverter converter(segStart, segEnd, radii, arc.angle,
+                                      arc.large_arc_flag._0, arc.sweep_flag._0);
             while (converter.GetNextSegment(&cp1, &cp2, &segEnd)) {
               aBuilder->BezierTo(scale(cp1), scale(cp2), scale(segEnd));
             }
@@ -749,7 +749,7 @@ static float AngleOfVector(const Point& cp1, const Point& cp2) {
   return static_cast<float>(AngleOfVector(cp1 - cp2));
 }
 
-void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
+void SVGPathData::GetMarkerPositioningData(nsTArray<SVGMark>* aMarks) const {
   // This code should assume that ANY type of segment can appear at ANY index.
   // It should also assume that segments such as M and Z can appear in weird
   // places, and repeat multiple times consecutively.
@@ -757,6 +757,7 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
   // info on current [sub]path (reset every M command):
   Point pathStart(0.0, 0.0);
   float pathStartAngle = 0.0f;
+  uint32_t pathStartIndex = 0;
 
   // info on previous segment:
   uint16_t prevSegType = PATHSEG_UNKNOWN;
@@ -788,6 +789,7 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
           segEnd = segStart + Point(mData[i], mData[i + 1]);
         }
         pathStart = segEnd;
+        pathStartIndex = aMarks->Length();
         // If authors are going to specify multiple consecutive moveto commands
         // with markers, me might as well make the angle do something useful:
         segStartAngle = segEndAngle = AngleOfVector(segEnd, segStart);
@@ -1019,7 +1021,7 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
 
     // Set the angle of the mark at the start of this segment:
     if (aMarks->Length()) {
-      nsSVGMark& mark = aMarks->LastElement();
+      SVGMark& mark = aMarks->LastElement();
       if (!IsMoveto(segType) && IsMoveto(prevSegType)) {
         // start of new subpath
         pathStartAngle = mark.angle = segStartAngle;
@@ -1034,16 +1036,15 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
     }
 
     // Add the mark at the end of this segment, and set its position:
-    if (!aMarks->AppendElement(nsSVGMark(static_cast<float>(segEnd.x),
-                                         static_cast<float>(segEnd.y), 0.0f,
-                                         nsSVGMark::eMid))) {
+    if (!aMarks->AppendElement(SVGMark(static_cast<float>(segEnd.x),
+                                       static_cast<float>(segEnd.y), 0.0f,
+                                       SVGMark::eMid))) {
       aMarks->Clear();  // OOM, so try to free some
       return;
     }
 
     if (segType == PATHSEG_CLOSEPATH && prevSegType != PATHSEG_CLOSEPATH) {
-      aMarks->LastElement().angle =
-          // aMarks->ElementAt(pathStartIndex).angle =
+      aMarks->LastElement().angle = aMarks->ElementAt(pathStartIndex).angle =
           SVGContentUtils::AngleBisect(segEndAngle, pathStartAngle);
     }
 
@@ -1058,8 +1059,8 @@ void SVGPathData::GetMarkerPositioningData(nsTArray<nsSVGMark>* aMarks) const {
     if (prevSegType != PATHSEG_CLOSEPATH) {
       aMarks->LastElement().angle = prevSegEndAngle;
     }
-    aMarks->LastElement().type = nsSVGMark::eEnd;
-    aMarks->ElementAt(0).type = nsSVGMark::eStart;
+    aMarks->LastElement().type = SVGMark::eEnd;
+    aMarks->ElementAt(0).type = SVGMark::eStart;
   }
 }
 

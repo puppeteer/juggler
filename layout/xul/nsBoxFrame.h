@@ -23,15 +23,16 @@ horizontally. It lays them out according to a min max or preferred size.
 class nsBoxLayoutState;
 
 namespace mozilla {
+class PresShell;
 namespace gfx {
 class DrawTarget;
 }  // namespace gfx
 }  // namespace mozilla
 
-nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewBoxFrame(mozilla::PresShell* aPresShell,
                          mozilla::ComputedStyle* aStyle, bool aIsRoot,
                          nsBoxLayout* aLayoutManager);
-nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewBoxFrame(mozilla::PresShell* aPresShell,
                          mozilla::ComputedStyle* aStyle);
 
 class nsBoxFrame : public nsContainerFrame {
@@ -44,10 +45,10 @@ class nsBoxFrame : public nsContainerFrame {
   NS_DECL_QUERYFRAME
 #endif
 
-  friend nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewBoxFrame(mozilla::PresShell* aPresShell,
                                   ComputedStyle* aStyle, bool aIsRoot,
                                   nsBoxLayout* aLayoutManager);
-  friend nsIFrame* NS_NewBoxFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewBoxFrame(mozilla::PresShell* aPresShell,
                                   ComputedStyle* aStyle);
 
   // gets the rect inside our border and debug border. If you wish to paint
@@ -112,7 +113,7 @@ class nsBoxFrame : public nsContainerFrame {
     // This is bogus, but it's what we've always done.
     // (Given that we're replaced, we need to say we're a replaced element
     // that contains a block so ReflowInput doesn't tell us to be
-    // NS_INTRINSICSIZE wide.)
+    // NS_UNCONSTRAINEDSIZE wide.)
     return nsContainerFrame::IsFrameOfType(
         aFlags & ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock |
                    eXULBox | nsIFrame::eExcludesIgnorableWhitespace));
@@ -153,12 +154,12 @@ class nsBoxFrame : public nsContainerFrame {
   void AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult) override;
 
  private:
-  explicit nsBoxFrame(ComputedStyle* aStyle)
-      : nsBoxFrame(aStyle, kClassID, false, nullptr) {}
+  explicit nsBoxFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsBoxFrame(aStyle, aPresContext, kClassID, false, nullptr) {}
 
  protected:
-  nsBoxFrame(ComputedStyle* aStyle, ClassID aID, bool aIsRoot = false,
-             nsBoxLayout* aLayoutManager = nullptr);
+  nsBoxFrame(ComputedStyle* aStyle, nsPresContext* aPresContext, ClassID aID,
+             bool aIsRoot = false, nsBoxLayout* aLayoutManager = nullptr);
   virtual ~nsBoxFrame();
 
   virtual bool GetInitialEqualSize(bool& aEqualSize);

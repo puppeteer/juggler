@@ -19,9 +19,9 @@
 
 // For usleep/Sleep & QueryPerformanceFrequency
 #ifdef XP_WIN
-#include <windows.h>
+#  include <windows.h>
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 using namespace mozilla;
@@ -32,7 +32,7 @@ static LazyLogModule sFuzzyfoxLog("Fuzzyfox");
 #define NS_TO_US(x) ((x) / 1000)
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 
 #define LOG(level, args) MOZ_LOG(sFuzzyfoxLog, mozilla::LogLevel::level, args)
@@ -47,7 +47,8 @@ Atomic<uint32_t, Relaxed> Fuzzyfox::sFuzzyfoxClockGrain;
 
 NS_IMPL_ISUPPORTS_INHERITED(Fuzzyfox, Runnable, nsIObserver)
 
-/* static */ void Fuzzyfox::Start() {
+/* static */
+void Fuzzyfox::Start() {
   MOZ_ASSERT(NS_IsMainThread());
 
   RefPtr<Fuzzyfox> r = new Fuzzyfox();

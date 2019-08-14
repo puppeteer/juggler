@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <title>MozAutoplayMediaBlocked test</title>
   <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/AddTask.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://global/skin"/>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"/>
   <script type="application/javascript" src="head.js"></script>
@@ -19,8 +18,7 @@
 /* globals InspectorUtils */
 
 ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Task.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 let gChromeWin;
 let gBrowserApp;
@@ -39,8 +37,6 @@ SimpleTest.requestLongerTimeout(2);
 })();
 
 add_task(async function test_UAWidgetMozAutoplayMediaBlocked() {
-  Services.prefs.setBoolPref("dom.ua_widget.enabled", true);
-
   info("- open a new tab -");
   let tab = gBrowserApp.addTab(URL);
   let browser = tab.browser;
@@ -58,34 +54,6 @@ add_task(async function test_UAWidgetMozAutoplayMediaBlocked() {
   let video = doc.getElementById("testAudio");
 
   let button = video.openOrClosedShadowRoot.getElementById("clickToPlay");
-  ok(!button.hidden, "Click to play button is not hidden");
-
-  info("- remove tab -");
-  gBrowserApp.closeTab(tab);
-});
-
-add_task(async function test_XBLBindingMozAutoplayMediaBlocked() {
-  Services.prefs.setBoolPref("dom.ua_widget.enabled", false);
-
-  info("- open a new tab -");
-  let tab = gBrowserApp.addTab(URL);
-  let browser = tab.browser;
-
-  const mediaBlockedPromise = promiseTabEvent(browser, "MozAutoplayMediaBlocked");
-
-  info("- wait for loading tab's content -");
-  await promiseBrowserEvent(browser, "load");
-
-  info("- wait for 'MozAutoplayMediaBlocked' event -");
-  await mediaBlockedPromise;
-  ok(true, "got `MozAutoplayMediaBlocked` event");
-
-  let doc = browser.contentWindow.document;
-  let video = doc.getElementById("testAudio");
-
-  let kids = InspectorUtils.getChildrenForNode(video, true);
-  let videocontrols = kids[1];
-  let button = doc.getAnonymousElementByAttribute(videocontrols, "anonid", "clickToPlay");
   ok(!button.hidden, "Click to play button is not hidden");
 
   info("- remove tab -");

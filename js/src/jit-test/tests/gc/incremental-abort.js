@@ -12,7 +12,7 @@ function testAbort(zoneCount, objectCount, sliceCount, abortState)
 
     var zones = [];
     for (var i = 0; i < zoneCount; i++) {
-        var zone = newGlobal();
+        var zone = newGlobal({newCompartment: true});
         evaluate("var objects; " +
                  "function makeObjectGraph(objectCount) { " +
                  "    objects = []; " +
@@ -24,11 +24,13 @@ function testAbort(zoneCount, objectCount, sliceCount, abortState)
         zones.push(zone);
     }
 
+    gc();
+
     var didAbort = false;
     startgc(sliceCount, "shrinking");
+    assertEq(currentgc().isShrinking, true);
     while (gcstate() !== "NotActive") {
-        var state = gcstate();
-        if (state == abortState) {
+        if (gcstate() == abortState) {
             abortgc();
             didAbort = true;
             break;

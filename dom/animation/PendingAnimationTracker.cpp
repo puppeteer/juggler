@@ -6,10 +6,10 @@
 
 #include "PendingAnimationTracker.h"
 
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/AnimationTimeline.h"
 #include "mozilla/dom/Nullable.h"
 #include "nsIFrame.h"
-#include "nsIPresShell.h"
 #include "nsTransitionManager.h"  // For CSSTransition
 
 using mozilla::dom::Nullable;
@@ -96,7 +96,7 @@ void PendingAnimationTracker::TriggerPendingAnimationsNow() {
   mHasPlayPendingGeometricAnimations = CheckState::Absent;
 }
 
-static bool IsTransition(const Animation& aAnimation) {
+static bool IsTransition(const dom::Animation& aAnimation) {
   const dom::CSSTransition* transition = aAnimation.AsCSSTransition();
   return transition && transition->IsTiedToMarkup();
 }
@@ -173,7 +173,7 @@ void PendingAnimationTracker::EnsurePaintIsScheduled() {
     return;
   }
 
-  nsIPresShell* presShell = mDocument->GetShell();
+  PresShell* presShell = mDocument->GetPresShell();
   if (!presShell) {
     return;
   }

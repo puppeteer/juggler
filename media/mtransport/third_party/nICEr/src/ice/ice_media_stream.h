@@ -93,7 +93,7 @@ int nr_ice_media_stream_start_checks(nr_ice_peer_ctx *pctx, nr_ice_media_stream 
 int nr_ice_media_stream_service_pre_answer_requests(nr_ice_peer_ctx *pctx,nr_ice_media_stream *lstream,nr_ice_media_stream *pstream, int *serviced);
 int nr_ice_media_stream_unfreeze_pairs(nr_ice_peer_ctx *pctx, nr_ice_media_stream *stream);
 int nr_ice_media_stream_unfreeze_pairs_foundation(nr_ice_media_stream *stream, char *foundation);
-int nr_ice_media_stream_dump_state(nr_ice_peer_ctx *pctx, nr_ice_media_stream *stream,FILE *out);
+void nr_ice_media_stream_dump_state(nr_ice_peer_ctx *pctx, nr_ice_media_stream *stream, int log_level);
 void nr_ice_media_stream_component_nominated(nr_ice_media_stream *stream,nr_ice_component *component);
 void nr_ice_media_stream_component_failed(nr_ice_media_stream *stream,nr_ice_component *component);
 void nr_ice_media_stream_refresh_consent_all(nr_ice_media_stream *stream);
@@ -103,6 +103,7 @@ int nr_ice_media_stream_check_if_connected(nr_ice_media_stream *stream);
 int nr_ice_media_stream_set_state(nr_ice_media_stream *str, int state);
 void nr_ice_media_stream_stop_checking(nr_ice_media_stream *str);
 void nr_ice_media_stream_set_obsolete(nr_ice_media_stream *str);
+int nr_ice_media_stream_is_done_gathering(nr_ice_media_stream *str);
 int nr_ice_media_stream_get_best_candidate(nr_ice_media_stream *str, int component, nr_ice_candidate **candp);
 int nr_ice_media_stream_send(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, int component, UCHAR *data, int len);
 int nr_ice_media_stream_get_active(nr_ice_peer_ctx *pctx, nr_ice_media_stream *str, int component, nr_ice_candidate **local, nr_ice_candidate **remote);

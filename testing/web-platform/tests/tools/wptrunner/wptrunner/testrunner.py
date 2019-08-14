@@ -3,13 +3,11 @@ from __future__ import unicode_literals
 import multiprocessing
 import threading
 import traceback
-from Queue import Empty
+from six.moves.queue import Empty
 from collections import namedtuple
 from multiprocessing import Process, current_process, Queue
 
-from mozlog import structuredlog
-
-import wptlogging
+from mozlog import structuredlog, capture
 
 # Special value used as a sentinal in various commands
 Stop = object()
@@ -70,7 +68,13 @@ class TestRunner(object):
 
     def setup(self):
         self.logger.debug("Executor setup")
-        self.executor.setup(self)
+        try:
+            self.executor.setup(self)
+        except Exception:
+            # The caller is responsible for logging the exception if required
+            self.send_message("init_failed")
+        else:
+            self.send_message("init_succeeded")
         self.logger.debug("Executor setup done")
 
     def teardown(self):
@@ -85,6 +89,7 @@ class TestRunner(object):
         the associated methods"""
         self.setup()
         commands = {"run_test": self.run_test,
+                    "reset": self.reset,
                     "stop": self.stop,
                     "wait": self.wait}
         while True:
@@ -101,6 +106,9 @@ class TestRunner(object):
 
     def stop(self):
         return Stop
+
+    def reset(self):
+        self.executor.reset()
 
     def run_test(self, test):
         try:
@@ -132,7 +140,7 @@ def start_runner(runner_command_queue, runner_result_queue,
 
     logger = MessageLogger(send_message)
 
-    with wptlogging.CaptureIO(logger, capture_stdio):
+    with capture.CaptureIO(logger, capture_stdio):
         try:
             browser = executor_browser_cls(**executor_browser_kwargs)
             executor = executor_cls(browser, **executor_kwargs)
@@ -233,11 +241,8 @@ class BrowserManager(object):
         if self.init_timer is not None:
             self.init_timer.cancel()
 
-    def check_for_crashes(self):
-        return self.browser.check_for_crashes()
-
-    def log_crash(self, test_id):
-        return self.browser.log_crash(process=self.browser_pid, test=test_id)
+    def check_crash(self, test_id):
+        return self.browser.check_crash(process=self.browser_pid, test=test_id)
 
     def is_alive(self):
         return self.browser.is_alive()
@@ -504,8 +509,7 @@ class TestRunnerManager(threading.Thread):
 
     def init_failed(self):
         assert isinstance(self.state, RunnerManagerState.initializing)
-        if self.browser.check_for_crashes():
-            self.browser.log_crash(None)
+        self.browser.check_crash(None)
         self.browser.after_init()
         self.stop_runner(force=True)
         return RunnerManagerState.initializing(self.state.test,
@@ -538,6 +542,7 @@ class TestRunnerManager(threading.Thread):
         self.logger.test_start(self.state.test.id)
         if self.rerun > 1:
             self.logger.info("Run %d/%d" % (self.run_count, self.rerun))
+            self.send_message("reset")
         self.run_count += 1
         self.send_message("run_test", self.state.test)
 
@@ -580,16 +585,14 @@ class TestRunnerManager(threading.Thread):
         expected = test.expected()
         status = status_subns.get(file_result.status, file_result.status)
 
-        if self.browser.check_for_crashes():
-            status = "CRASH"
+        if self.browser.check_crash(test.id) and status != "CRASH":
+            self.logger.info("Found a crash dump; should change status from %s to CRASH but this causes instability" % (status,))
 
         self.test_count += 1
         is_unexpected = expected != status
         if is_unexpected:
             self.unexpected_count += 1
             self.logger.debug("Unexpected count in this thread %i" % self.unexpected_count)
-        if status == "CRASH":
-            self.browser.log_crash(test.id)
 
         if "assertion_count" in file_result.extra:
             assertion_count = file_result.extra.pop("assertion_count")
@@ -639,7 +642,6 @@ class TestRunnerManager(threading.Thread):
                 # We are starting a new group of tests, so force a restart
                 restart = True
         else:
-            test = test
             test_group = self.state.test_group
             group_metadata = self.state.group_metadata
         if restart:

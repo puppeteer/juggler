@@ -2,8 +2,11 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-ChromeUtils.defineModuleGetter(this, "Preferences",
-                               "resource://gre/modules/Preferences.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "Preferences",
+  "resource://gre/modules/Preferences.jsm"
+);
 
 const {
   createAppInfo,
@@ -32,7 +35,7 @@ add_task(async function test_browser_settings() {
     "network.proxy.socks_port": 0,
     "network.proxy.socks_version": 5,
     "network.proxy.socks_remote_dns": false,
-    "network.proxy.no_proxies_on": "localhost, 127.0.0.1",
+    "network.proxy.no_proxies_on": "",
     "network.proxy.autoconfig_url": "",
     "signon.autologin.proxy": false,
   };
@@ -40,7 +43,7 @@ add_task(async function test_browser_settings() {
   async function background() {
     browser.test.onMessage.addListener(async (msg, value) => {
       let apiObj = browser.proxy.settings;
-      let result = await apiObj.set({value});
+      let result = await apiObj.set({ value });
       if (msg === "set") {
         browser.test.assertTrue(result, "set returns true.");
         browser.test.sendMessage("settingData", await apiObj.get({}));
@@ -68,6 +71,7 @@ add_task(async function test_browser_settings() {
     manifest: {
       permissions: ["proxy"],
     },
+    incognitoOverride: "spanning",
     useAddonManager: "temporary",
   });
 
@@ -77,12 +81,18 @@ add_task(async function test_browser_settings() {
   async function testSetting(value, expected, expectedValue = value) {
     extension.sendMessage("set", value);
     let data = await extension.awaitMessage("settingData");
-    deepEqual(data.value, expectedValue,
-              `The setting has the expected value.`);
-    equal(data.levelOfControl, "controlled_by_this_extension",
-          `The setting has the expected levelOfControl.`);
+    deepEqual(data.value, expectedValue, `The setting has the expected value.`);
+    equal(
+      data.levelOfControl,
+      "controlled_by_this_extension",
+      `The setting has the expected levelOfControl.`
+    );
     for (let pref in expected) {
-      equal(Preferences.get(pref), expected[pref], `${pref} set correctly for ${value}`);
+      equal(
+        Preferences.get(pref),
+        expected[pref],
+        `${pref} set correctly for ${value}`
+      );
     }
   }
 
@@ -99,7 +109,7 @@ add_task(async function test_browser_settings() {
       proxyDNS: false,
       httpProxyAll: false,
       socksVersion: 5,
-      passthrough: "localhost, 127.0.0.1",
+      passthrough: "",
       http: "",
       ftp: "",
       ssl: "",
@@ -109,13 +119,15 @@ add_task(async function test_browser_settings() {
     expectedConfig.proxyType = expectedConfig.proxyType || "system";
 
     return testSetting(
-      config, expectedPrefs, Object.assign(proxyConfig, expectedConfig)
+      config,
+      expectedPrefs,
+      Object.assign(proxyConfig, expectedConfig)
     );
   }
 
   await testProxy(
-    {proxyType: "none"},
-    {"network.proxy.type": proxySvc.PROXYCONFIG_DIRECT},
+    { proxyType: "none" },
+    { "network.proxy.type": proxySvc.PROXYCONFIG_DIRECT }
   );
 
   await testProxy(
@@ -128,7 +140,7 @@ add_task(async function test_browser_settings() {
       "network.proxy.type": proxySvc.PROXYCONFIG_WPAD,
       "signon.autologin.proxy": true,
       "network.proxy.socks_remote_dns": true,
-    },
+    }
   );
 
   await testProxy(
@@ -141,7 +153,7 @@ add_task(async function test_browser_settings() {
       "network.proxy.type": proxySvc.PROXYCONFIG_SYSTEM,
       "signon.autologin.proxy": false,
       "network.proxy.socks_remote_dns": false,
-    },
+    }
   );
 
   // Verify that proxyType is optional and it defaults to "system".
@@ -154,7 +166,7 @@ add_task(async function test_browser_settings() {
       "network.proxy.type": proxySvc.PROXYCONFIG_SYSTEM,
       "signon.autologin.proxy": false,
       "network.proxy.socks_remote_dns": false,
-    },
+    }
   );
 
   await testProxy(
@@ -165,7 +177,7 @@ add_task(async function test_browser_settings() {
     {
       "network.proxy.type": proxySvc.PROXYCONFIG_PAC,
       "network.proxy.autoconfig_url": "http://mozilla.org",
-    },
+    }
   );
 
   await testProxy(
@@ -281,7 +293,6 @@ add_task(async function test_browser_settings() {
     }
   );
 
-
   await testProxy(
     {
       proxyType: "manual",
@@ -318,6 +329,42 @@ add_task(async function test_browser_settings() {
     }
   );
 
+  await testProxy(
+    {
+      proxyType: "manual",
+      http: "http://www.mozilla.org:80",
+      ftp: "ftp://www.mozilla.org:80",
+      ssl: "https://www.mozilla.org:80",
+      socks: "mozilla.org:80",
+      socksVersion: 4,
+      passthrough: ".mozilla.org",
+    },
+    {
+      "network.proxy.type": proxySvc.PROXYCONFIG_MANUAL,
+      "network.proxy.http": "www.mozilla.org",
+      "network.proxy.http_port": 80,
+      "network.proxy.share_proxy_settings": false,
+      "network.proxy.ftp": "www.mozilla.org",
+      "network.proxy.ftp_port": 80,
+      "network.proxy.ssl": "www.mozilla.org",
+      "network.proxy.ssl_port": 80,
+      "network.proxy.socks": "mozilla.org",
+      "network.proxy.socks_port": 80,
+      "network.proxy.socks_version": 4,
+      "network.proxy.no_proxies_on": ".mozilla.org",
+    },
+    {
+      proxyType: "manual",
+      http: "www.mozilla.org:80",
+      httpProxyAll: false,
+      ftp: "www.mozilla.org:80",
+      ssl: "www.mozilla.org:80",
+      socks: "mozilla.org:80",
+      socksVersion: 4,
+      passthrough: ".mozilla.org",
+    }
+  );
+
   // Test resetting values.
   await testProxy(
     {
@@ -349,74 +396,96 @@ add_task(async function test_browser_settings() {
 });
 
 add_task(async function test_bad_value_proxy_config() {
-  let background = AppConstants.platform === "android" ?
-    async () => {
-      await browser.test.assertRejects(
-        browser.proxy.settings.set({value: {
-          proxyType: "none",
-        }}),
-        /proxy.settings is not supported on android/,
-        "proxy.settings.set rejects on Android.");
+  let background =
+    AppConstants.platform === "android"
+      ? async () => {
+          await browser.test.assertRejects(
+            browser.proxy.settings.set({
+              value: {
+                proxyType: "none",
+              },
+            }),
+            /proxy.settings is not supported on android/,
+            "proxy.settings.set rejects on Android."
+          );
 
-      await browser.test.assertRejects(
-        browser.proxy.settings.get({}),
-        /proxy.settings is not supported on android/,
-        "proxy.settings.get rejects on Android.");
+          await browser.test.assertRejects(
+            browser.proxy.settings.get({}),
+            /proxy.settings is not supported on android/,
+            "proxy.settings.get rejects on Android."
+          );
 
-      await browser.test.assertRejects(
-        browser.proxy.settings.clear({}),
-        /proxy.settings is not supported on android/,
-        "proxy.settings.clear rejects on Android.");
+          await browser.test.assertRejects(
+            browser.proxy.settings.clear({}),
+            /proxy.settings is not supported on android/,
+            "proxy.settings.clear rejects on Android."
+          );
 
-      browser.test.sendMessage("done");
-    } :
-    async () => {
-      await browser.test.assertRejects(
-        browser.proxy.settings.set({value: {
-          proxyType: "abc",
-        }}),
-        /abc is not a valid value for proxyType/,
-        "proxy.settings.set rejects with an invalid proxyType value.");
+          browser.test.sendMessage("done");
+        }
+      : async () => {
+          await browser.test.assertRejects(
+            browser.proxy.settings.set({
+              value: {
+                proxyType: "abc",
+              },
+            }),
+            /abc is not a valid value for proxyType/,
+            "proxy.settings.set rejects with an invalid proxyType value."
+          );
 
-      await browser.test.assertRejects(
-        browser.proxy.settings.set({value: {
-          proxyType: "autoConfig",
-        }}),
-        /undefined is not a valid value for autoConfigUrl/,
-        "proxy.settings.set for type autoConfig rejects with an empty autoConfigUrl value.");
+          await browser.test.assertRejects(
+            browser.proxy.settings.set({
+              value: {
+                proxyType: "autoConfig",
+              },
+            }),
+            /undefined is not a valid value for autoConfigUrl/,
+            "proxy.settings.set for type autoConfig rejects with an empty autoConfigUrl value."
+          );
 
-      await browser.test.assertRejects(
-        browser.proxy.settings.set({value: {
-          proxyType: "autoConfig",
-          autoConfigUrl: "abc",
-        }}),
-        /abc is not a valid value for autoConfigUrl/,
-        "proxy.settings.set rejects with an invalid autoConfigUrl value.");
+          await browser.test.assertRejects(
+            browser.proxy.settings.set({
+              value: {
+                proxyType: "autoConfig",
+                autoConfigUrl: "abc",
+              },
+            }),
+            /abc is not a valid value for autoConfigUrl/,
+            "proxy.settings.set rejects with an invalid autoConfigUrl value."
+          );
 
-      await browser.test.assertRejects(
-        browser.proxy.settings.set({value: {
-          proxyType: "manual",
-          socksVersion: "abc",
-        }}),
-        /abc is not a valid value for socksVersion/,
-        "proxy.settings.set rejects with an invalid socksVersion value.");
+          await browser.test.assertRejects(
+            browser.proxy.settings.set({
+              value: {
+                proxyType: "manual",
+                socksVersion: "abc",
+              },
+            }),
+            /abc is not a valid value for socksVersion/,
+            "proxy.settings.set rejects with an invalid socksVersion value."
+          );
 
-      await browser.test.assertRejects(
-        browser.proxy.settings.set({value: {
-          proxyType: "manual",
-          socksVersion: 3,
-        }}),
-        /3 is not a valid value for socksVersion/,
-        "proxy.settings.set rejects with an invalid socksVersion value.");
+          await browser.test.assertRejects(
+            browser.proxy.settings.set({
+              value: {
+                proxyType: "manual",
+                socksVersion: 3,
+              },
+            }),
+            /3 is not a valid value for socksVersion/,
+            "proxy.settings.set rejects with an invalid socksVersion value."
+          );
 
-      browser.test.sendMessage("done");
-    };
+          browser.test.sendMessage("done");
+        };
 
   let extension = ExtensionTestUtils.loadExtension({
     background,
     manifest: {
       permissions: ["proxy"],
     },
+    incognitoOverride: "spanning",
   });
 
   await extension.startup();

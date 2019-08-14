@@ -1,14 +1,13 @@
-commit f3fa0d604ef6527a01dab96f4bfa3c5290127337
-Author: Markus Scherer <markus.icu@gmail.com>
-Date:   Fri Nov 9 12:54:22 2018 -0800
+commit e2d85306162d3a0691b070b4f0a73e4012433444
+Author: Steven R. Loomis <srloomis@us.ibm.com>
+Date:   Wed Apr 17 08:58:08 2019 -0700
 
-    ICU-20250 make UnicodeSet(intprop=value) faster
-    - fastpath for UnicodeSet.add(new last range)
-    - fewer UnicodeSet memory allocations:
-      initial internal list array, exponential array growth,
-      allocate strings list/set only when first one is added
-    - faster CodePointTrie.getRange(): fewer calls to filter function
-    - revert UnicodeSet(intprop=value) from trie ranges to range starts + lookup
-    - cache per-int-prop range starts: fewer lookups
+    ICU-20563 fix macosx rpath breakage in the data build
     
-    (cherry picked from commit 98f9170004c29388d756a8a283573164a7a26bef)
+    - in the rpath case, we do NOT want a trailing space in LD_SONAME
+    
+    regression was introduced in ICU-20526 with
+     83a0542b5b52a30b7af736f5ef6b0405f6582867 (master)
+     b76cb6517efa113739a3ffadda7ff024db0d5689 (in maint-64)
+    
+    (cherry picked from commit 1c553b9cf28d25c0aaf961c5f587f4ad3cee2679)

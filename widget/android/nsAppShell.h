@@ -13,6 +13,7 @@
 #include "mozilla/Monitor.h"
 #include "mozilla/Move.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/TimeStamp.h"  // for mozilla::TimeDuration
 #include "mozilla/TypeTraits.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
@@ -66,7 +67,7 @@ class nsAppShell : public nsBaseAppShell {
 
    public:
     explicit LambdaEvent(T&& l) : lambda(std::move(l)) {}
-    void Run() override { return lambda(); }
+    void Run() override { lambda(); }
   };
 
   class ProxyEvent : public Event {
@@ -123,9 +124,11 @@ class nsAppShell : public nsBaseAppShell {
   }
 
   // Post a event and wait for it to finish running on the Gecko thread.
-  static void SyncRunEvent(Event&& event,
-                           mozilla::UniquePtr<Event> (*eventFactory)(
-                               mozilla::UniquePtr<Event>&&) = nullptr);
+  static bool SyncRunEvent(
+      Event&& event,
+      mozilla::UniquePtr<Event> (*eventFactory)(mozilla::UniquePtr<Event>&&) =
+          nullptr,
+      const mozilla::TimeDuration timeout = mozilla::TimeDuration::Forever());
 
   template <typename T>
   static typename mozilla::EnableIf<!mozilla::IsBaseOf<Event, T>::value,
@@ -197,13 +200,23 @@ class nsAppShell : public nsBaseAppShell {
     }
 
     mozilla::UniquePtr<Event> Pop(bool mayWait) {
+#ifdef EARLY_BETA_OR_EARLIER
+      bool isQueueEmpty = false;
+      if (mayWait) {
+        mozilla::MonitorAutoLock lock(mMonitor);
+        isQueueEmpty = mQueue.isEmpty();
+      }
+      if (isQueueEmpty) {
+        // Record latencies when we're about to be idle.
+        // Note: We can't call this while holding the lock because
+        // nsAppShell::RecordLatencies may try to dispatch an event to the main
+        // thread which tries to acquire the lock again.
+        nsAppShell::RecordLatencies();
+      }
+#endif
       mozilla::MonitorAutoLock lock(mMonitor);
 
       if (mayWait && mQueue.isEmpty()) {
-#ifdef EARLY_BETA_OR_EARLIER
-        // Record latencies when we're about to be idle.
-        nsAppShell::RecordLatencies();
-#endif
         lock.Wait();
       }
 

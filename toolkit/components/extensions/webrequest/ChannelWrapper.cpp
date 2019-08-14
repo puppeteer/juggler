@@ -22,7 +22,7 @@
 #include "mozilla/Unused.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
-#include "mozilla/dom/TabParent.h"
+#include "mozilla/dom/BrowserHost.h"
 #include "nsIContentPolicy.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIHttpHeaderVisitor.h"
@@ -140,10 +140,10 @@ already_AddRefed<ChannelWrapper> ChannelWrapper::Get(const GlobalObject& global,
 
 already_AddRefed<ChannelWrapper> ChannelWrapper::GetRegisteredChannel(
     const GlobalObject& global, uint64_t aChannelId,
-    const WebExtensionPolicy& aAddon, nsITabParent* aTabParent) {
-  nsIContentParent* contentParent = nullptr;
-  if (TabParent* parent = static_cast<TabParent*>(aTabParent)) {
-    contentParent = static_cast<nsIContentParent*>(parent->Manager());
+    const WebExtensionPolicy& aAddon, nsIRemoteTab* aRemoteTab) {
+  ContentParent* contentParent = nullptr;
+  if (BrowserHost* host = BrowserHost::GetFrom(aRemoteTab)) {
+    contentParent = host->GetActor()->Manager();
   }
 
   auto& webreq = WebRequestService::GetSingleton();
@@ -521,7 +521,19 @@ bool ChannelWrapper::Matches(
     return false;
   }
 
+  nsCOMPtr<nsILoadInfo> loadInfo = GetLoadInfo();
+  bool isPrivate =
+      loadInfo && loadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+  if (!aFilter.mIncognito.IsNull() && aFilter.mIncognito.Value() != isPrivate) {
+    return false;
+  }
+
   if (aExtension) {
+    // Verify extension access to private requests
+    if (isPrivate && !aExtension->PrivateBrowsingAllowed()) {
+      return false;
+    }
+
     bool isProxy =
         aOptions.mIsProxy && aExtension->HasPermission(nsGkAtoms::proxy);
     // Proxies are allowed access to all urls, including restricted urls.
@@ -654,14 +666,14 @@ nsresult ChannelWrapper::GetFrameAncestors(
  *****************************************************************************/
 
 void ChannelWrapper::RegisterTraceableChannel(const WebExtensionPolicy& aAddon,
-                                              nsITabParent* aTabParent) {
+                                              nsIRemoteTab* aBrowserParent) {
   // We can't attach new listeners after the response has started, so don't
   // bother registering anything.
   if (mResponseStarted || !CanModify()) {
     return;
   }
 
-  mAddonEntries.Put(aAddon.Id(), aTabParent);
+  mAddonEntries.Put(aAddon.Id(), aBrowserParent);
   if (!mChannelEntry) {
     mChannelEntry = WebRequestService::GetSingleton().RegisterChannel(this);
     CheckEventListeners();
@@ -669,13 +681,13 @@ void ChannelWrapper::RegisterTraceableChannel(const WebExtensionPolicy& aAddon,
 }
 
 already_AddRefed<nsITraceableChannel> ChannelWrapper::GetTraceableChannel(
-    nsAtom* aAddonId, dom::nsIContentParent* aContentParent) const {
-  nsCOMPtr<nsITabParent> tabParent;
-  if (mAddonEntries.Get(aAddonId, getter_AddRefs(tabParent))) {
-    nsIContentParent* contentParent = nullptr;
-    if (tabParent) {
-      contentParent = static_cast<nsIContentParent*>(
-          static_cast<TabParent*>(tabParent.get())->Manager());
+    nsAtom* aAddonId, dom::ContentParent* aContentParent) const {
+  nsCOMPtr<nsIRemoteTab> remoteTab;
+  if (mAddonEntries.Get(aAddonId, getter_AddRefs(remoteTab))) {
+    ContentParent* contentParent = nullptr;
+    if (remoteTab) {
+      contentParent =
+          BrowserHost::GetFrom(remoteTab.get())->GetActor()->Manager();
     }
 
     if (contentParent == aContentParent) {
@@ -812,6 +824,9 @@ nsresult FillProxyInfo(MozProxyInfo& aDict, nsIProxyInfo* aProxyInfo) {
   MOZ_TRY(aProxyInfo->GetPort(&aDict.mPort));
   MOZ_TRY(aProxyInfo->GetType(aDict.mType));
   MOZ_TRY(aProxyInfo->GetUsername(aDict.mUsername));
+  MOZ_TRY(
+      aProxyInfo->GetProxyAuthorizationHeader(aDict.mProxyAuthorizationHeader));
+  MOZ_TRY(aProxyInfo->GetConnectionIsolationKey(aDict.mConnectionIsolationKey));
   MOZ_TRY(aProxyInfo->GetFailoverTimeout(&aDict.mFailoverTimeout.Construct()));
 
   uint32_t flags;
@@ -915,8 +930,7 @@ nsresult ChannelWrapper::RequestListener::Init() {
 }
 
 NS_IMETHODIMP
-ChannelWrapper::RequestListener::OnStartRequest(nsIRequest* request,
-                                                nsISupports* aCtxt) {
+ChannelWrapper::RequestListener::OnStartRequest(nsIRequest* request) {
   MOZ_ASSERT(mOrigStreamListener, "Should have mOrigStreamListener");
 
   mChannelWrapper->mChannelEntry = nullptr;
@@ -924,12 +938,11 @@ ChannelWrapper::RequestListener::OnStartRequest(nsIRequest* request,
   mChannelWrapper->ErrorCheck();
   mChannelWrapper->FireEvent(NS_LITERAL_STRING("start"));
 
-  return mOrigStreamListener->OnStartRequest(request, aCtxt);
+  return mOrigStreamListener->OnStartRequest(request);
 }
 
 NS_IMETHODIMP
 ChannelWrapper::RequestListener::OnStopRequest(nsIRequest* request,
-                                               nsISupports* aCtxt,
                                                nsresult aStatus) {
   MOZ_ASSERT(mOrigStreamListener, "Should have mOrigStreamListener");
 
@@ -937,18 +950,17 @@ ChannelWrapper::RequestListener::OnStopRequest(nsIRequest* request,
   mChannelWrapper->ErrorCheck();
   mChannelWrapper->FireEvent(NS_LITERAL_STRING("stop"));
 
-  return mOrigStreamListener->OnStopRequest(request, aCtxt, aStatus);
+  return mOrigStreamListener->OnStopRequest(request, aStatus);
 }
 
 NS_IMETHODIMP
 ChannelWrapper::RequestListener::OnDataAvailable(nsIRequest* request,
-                                                 nsISupports* aCtxt,
                                                  nsIInputStream* inStr,
                                                  uint64_t sourceOffset,
                                                  uint32_t count) {
   MOZ_ASSERT(mOrigStreamListener, "Should have mOrigStreamListener");
-  return mOrigStreamListener->OnDataAvailable(request, aCtxt, inStr,
-                                              sourceOffset, count);
+  return mOrigStreamListener->OnDataAvailable(request, inStr, sourceOffset,
+                                              count);
 }
 
 NS_IMETHODIMP

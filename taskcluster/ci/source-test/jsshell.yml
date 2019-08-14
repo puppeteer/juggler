@@ -1,9 +1,13 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
 job-defaults:
     platform: linux64/opt
     require-build: true
     worker-type:
         by-platform:
-            linux64.*: releng-hardware/gecko-t-linux-talos
+            linux64.*: t-linux-talos
     worker:
         by-platform:
             linux64.*:
@@ -14,7 +18,7 @@ job-defaults:
                             JSSHELL: /home/cltbld/fetches/js
                         v8:
                             SHELL: /bin/bash
-                            JSSHELL: /home/cltbld/fetches/d8/d8
+                            JSSHELL: /home/cltbld/fetches/d8/release/d8
                 max-run-time: 1800
     treeherder:
         kind: test
@@ -30,8 +34,8 @@ job-defaults:
     fetches:
         build:
             - target.jsshell.zip
-        fetch:
-            - d8
+        toolchain:
+            - linux64-custom-v8
 
 bench-ares6:
     description: Ares6 JavaScript shell benchmark suite

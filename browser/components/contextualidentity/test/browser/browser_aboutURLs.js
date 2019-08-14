@@ -5,10 +5,19 @@
 requestLongerTimeout(2);
 
 add_task(async function() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["signon.management.page.enabled", true]],
+  });
+
   let aboutURLs = [];
 
   // List of about: URLs that may cause problem, so we skip them in this test.
   let skipURLs = [
+    // about:addons triggers an assertion in NS_CompareLoadInfoAndLoadContext:
+    // "The value of mUserContextId in the loadContext and in the loadInfo are not the same"
+    // This is due to a fetch request that has the default user context. Since
+    // the fetch request omits credentials, the user context doesn't matter.
+    "addons",
     // about:credits will initiate network request.
     "credits",
     // about:telemetry will fetch Telemetry asynchronously and takes longer,
@@ -18,10 +27,13 @@ add_task(async function() {
     "downloads",
     // about:debugging requires specific wait code for internal pending RDP requests.
     "debugging",
+    "debugging-new",
   ];
 
   for (let cid in Cc) {
-    let result = cid.match(/@mozilla.org\/network\/protocol\/about;1\?what\=(.*)$/);
+    let result = cid.match(
+      /@mozilla.org\/network\/protocol\/about;1\?what\=(.*)$/
+    );
     if (!result) {
       continue;
     }
@@ -32,8 +44,10 @@ add_task(async function() {
       let am = Cc[contract].getService(Ci.nsIAboutModule);
       let uri = Services.io.newURI("about:" + aboutType);
       let flags = am.getURIFlags(uri);
-      if (!(flags & Ci.nsIAboutModule.HIDE_FROM_ABOUTABOUT) &&
-          !skipURLs.includes(aboutType)) {
+      if (
+        !(flags & Ci.nsIAboutModule.HIDE_FROM_ABOUTABOUT) &&
+        !skipURLs.includes(aboutType)
+      ) {
         aboutURLs.push(aboutType);
       }
     } catch (e) {
@@ -44,7 +58,9 @@ add_task(async function() {
 
   for (let url of aboutURLs) {
     info("Loading about:" + url);
-    let tab = BrowserTestUtils.addTab(gBrowser, "about:" + url, {userContextId: 1});
+    let tab = BrowserTestUtils.addTab(gBrowser, "about:" + url, {
+      userContextId: 1,
+    });
     await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
 
     ok(true, "Done loading about:" + url);

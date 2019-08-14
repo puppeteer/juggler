@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate app_units;
 extern crate base64;
 extern crate bincode;
 extern crate byteorder;
@@ -60,13 +59,14 @@ mod yaml_helper;
 #[cfg(target_os = "macos")]
 mod cgfont_to_data;
 
-use binary_frame_reader::BinaryFrameReader;
+use crate::binary_frame_reader::BinaryFrameReader;
 use gleam::gl;
 use glutin::GlContext;
-use perf::PerfHarness;
-use png::save_flipped;
-use rawtest::RawtestHarness;
-use reftest::{ReftestHarness, ReftestOptions};
+use crate::perf::PerfHarness;
+use crate::png::save_flipped;
+use crate::rawtest::RawtestHarness;
+use crate::reftest::{ReftestHarness, ReftestOptions};
+use std::fs;
 #[cfg(feature = "headless")]
 use std::ffi::CString;
 #[cfg(feature = "headless")]
@@ -79,10 +79,11 @@ use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use webrender::DebugFlags;
 use webrender::api::*;
+use webrender::api::units::*;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::VirtualKeyCode;
-use wrench::{Wrench, WrenchThing};
-use yaml_frame_reader::YamlFrameReader;
+use crate::wrench::{Wrench, WrenchThing};
+use crate::yaml_frame_reader::YamlFrameReader;
 
 lazy_static! {
     static ref PLATFORM_DEFAULT_FACE_NAME: String = String::from("Arial");
@@ -163,9 +164,9 @@ impl HeadlessContext {
 }
 
 pub enum WindowWrapper {
-    Window(glutin::GlWindow, Rc<gl::Gl>),
-    Angle(winit::Window, angle::Context, Rc<gl::Gl>),
-    Headless(HeadlessContext, Rc<gl::Gl>),
+    Window(glutin::GlWindow, Rc<dyn gl::Gl>),
+    Angle(winit::Window, angle::Context, Rc<dyn gl::Gl>),
+    Headless(HeadlessContext, Rc<dyn gl::Gl>),
 }
 
 pub struct HeadlessEventIterater;
@@ -222,7 +223,7 @@ impl WindowWrapper {
         }
     }
 
-    pub fn gl(&self) -> &gl::Gl {
+    pub fn gl(&self) -> &dyn gl::Gl {
         match *self {
             WindowWrapper::Window(_, ref gl) |
             WindowWrapper::Angle(_, _, ref gl) |
@@ -230,7 +231,7 @@ impl WindowWrapper {
         }
     }
 
-    pub fn clone_gl(&self) -> Rc<gl::Gl> {
+    pub fn clone_gl(&self) -> Rc<dyn gl::Gl> {
         match *self {
             WindowWrapper::Window(_, ref gl) |
             WindowWrapper::Angle(_, _, ref gl) |
@@ -245,21 +246,19 @@ fn make_window(
     vsync: bool,
     events_loop: &Option<winit::EventsLoop>,
     angle: bool,
+    gl_request: glutin::GlRequest,
 ) -> WindowWrapper {
     let wrapper = match *events_loop {
         Some(ref events_loop) => {
             let context_builder = glutin::ContextBuilder::new()
-                .with_gl(glutin::GlRequest::GlThenGles {
-                    opengl_version: (3, 2),
-                    opengles_version: (3, 0),
-                })
+                .with_gl(gl_request)
                 .with_vsync(vsync);
             let window_builder = winit::WindowBuilder::new()
                 .with_title("WRench")
                 .with_multitouch()
                 .with_dimensions(LogicalSize::new(size.width as f64, size.height as f64));
 
-            let init = |context: &glutin::GlContext| {
+            let init = |context: &dyn glutin::GlContext| {
                 unsafe {
                     context
                         .make_current()
@@ -278,11 +277,11 @@ fn make_window(
             };
 
             if angle {
-                let (window, context) = angle::Context::with_window(
+                let (_window, _context) = angle::Context::with_window(
                     window_builder, context_builder, events_loop
                 ).unwrap();
-                let gl = init(&context);
-                WindowWrapper::Angle(window, context, gl)
+                let gl = init(&_context);
+                WindowWrapper::Angle(_window, _context, gl)
             } else {
                 let window = glutin::GlWindow::new(window_builder, context_builder, events_loop)
                     .unwrap();
@@ -335,7 +334,7 @@ struct Notifier {
 
 // setup a notifier so we can wait for frames to be finished
 impl RenderNotifier for Notifier {
-    fn clone(&self) -> Box<RenderNotifier> {
+    fn clone(&self) -> Box<dyn RenderNotifier> {
         Box::new(Notifier {
             tx: self.tx.clone(),
         })
@@ -360,7 +359,7 @@ impl RenderNotifier for Notifier {
     }
 }
 
-fn create_notifier() -> (Box<RenderNotifier>, Receiver<NotifierEvent>) {
+fn create_notifier() -> (Box<dyn RenderNotifier>, Receiver<NotifierEvent>) {
     let (tx, rx) = channel();
     (Box::new(Notifier { tx: tx }), rx)
 }
@@ -377,7 +376,11 @@ fn reftest<'a>(
     rx: Receiver<NotifierEvent>
 ) -> usize {
     let dim = window.get_inner_size();
-    let base_manifest = Path::new("reftests/reftest.list");
+    let base_manifest = if cfg!(target_os = "android") {
+        Path::new("/sdcard/wrench/reftests/reftest.list")
+    } else {
+        Path::new("reftests/reftest.list")
+    };
     let specific_reftest = subargs.value_of("REFTEST").map(|x| Path::new(x));
     let mut reftest_options = ReftestOptions::default();
     if let Some(allow_max_diff) = subargs.value_of("fuzz_tolerance") {
@@ -395,9 +398,39 @@ fn main() {
     env_logger::init();
 
     let args_yaml = load_yaml!("args.yaml");
-    let args = clap::App::from_yaml(args_yaml)
-        .setting(clap::AppSettings::ArgRequiredElseHelp)
-        .get_matches();
+    let clap = clap::App::from_yaml(args_yaml)
+        .setting(clap::AppSettings::ArgRequiredElseHelp);
+
+    // On android devices, attempt to read command line arguments
+    // from a text file located at /sdcard/wrench/args.
+    let args = if cfg!(target_os = "android") {
+        // get full backtraces by default because it's hard to request
+        // externally on android
+        std::env::set_var("RUST_BACKTRACE", "full");
+
+        let mut args = vec!["wrench".to_string()];
+
+        if let Ok(wrench_args) = fs::read_to_string("/sdcard/wrench/args") {
+            for line in wrench_args.lines() {
+                if line.starts_with("env: ") {
+                    let envvar = &line[5..];
+                    if let Some(ix) = envvar.find('=') {
+                        std::env::set_var(&envvar[0..ix], &envvar[ix + 1..]);
+                    } else {
+                        std::env::set_var(envvar, "");
+                    }
+                    continue;
+                }
+                for arg in line.split_whitespace() {
+                    args.push(arg.to_string());
+                }
+            }
+        }
+
+        clap.get_matches_from(&args)
+    } else {
+        clap.get_matches()
+    };
 
     // handle some global arguments
     let res_path = args.value_of("shaders").map(|s| PathBuf::from(s));
@@ -428,7 +461,7 @@ fn main() {
     let zoom_factor = args.value_of("zoom").map(|z| z.parse::<f32>().unwrap());
     let chase_primitive = match args.value_of("chase") {
         Some(s) => {
-            let mut items = s
+            let items = s
                 .split(',')
                 .map(|s| s.parse::<f32>().unwrap())
                 .collect::<Vec<_>>();
@@ -441,14 +474,39 @@ fn main() {
         None => webrender::ChasePrimitive::Nothing,
     };
 
+    let dump_shader_source = args.value_of("dump_shader_source").map(String::from);
+
     let mut events_loop = if args.is_present("headless") {
         None
     } else {
         Some(winit::EventsLoop::new())
     };
 
+    let gl_request = match args.value_of("renderer") {
+        Some("es3") => {
+            glutin::GlRequest::Specific(glutin::Api::OpenGlEs, (3, 0))
+        }
+        Some("gl3") => {
+            glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2))
+        }
+        Some("default") | None => {
+            glutin::GlRequest::GlThenGles {
+                opengl_version: (3, 2),
+                opengles_version: (3, 0),
+            }
+        }
+        Some(api) => {
+            panic!("Unexpected renderer string {}", api);
+        }
+    };
+
     let mut window = make_window(
-        size, dp_ratio, args.is_present("vsync"), &events_loop, args.is_present("angle"),
+        size,
+        dp_ratio,
+        args.is_present("vsync"),
+        &events_loop,
+        args.is_present("angle"),
+        gl_request,
     );
     let dp_ratio = dp_ratio.unwrap_or(window.hidpi_factor());
     let dim = window.get_inner_size();
@@ -472,6 +530,7 @@ fn main() {
         dim,
         args.is_present("rebuild"),
         args.is_present("no_subpixel_aa"),
+        args.is_present("no_picture_caching"),
         args.is_present("verbose"),
         args.is_present("no_scissor"),
         args.is_present("no_batch"),
@@ -479,6 +538,7 @@ fn main() {
         args.is_present("slow_subpixel"),
         zoom_factor.unwrap_or(1.0),
         chase_primitive,
+        dump_shader_source,
         notifier,
     );
 
@@ -489,15 +549,24 @@ fn main() {
     }
 
     if let Some(subargs) = args.subcommand_matches("show") {
-        render(&mut wrench, &mut window, size, &mut events_loop, subargs);
+        let no_block = args.is_present("no_block");
+        render(
+            &mut wrench,
+            &mut window,
+            size,
+            &mut events_loop,
+            subargs,
+            no_block,
+        );
     } else if let Some(subargs) = args.subcommand_matches("png") {
         let surface = match subargs.value_of("surface") {
             Some("screen") | None => png::ReadSurface::Screen,
             Some("gpu-cache") => png::ReadSurface::GpuCache,
             _ => panic!("Unknown surface argument value")
         };
+        let output_path = subargs.value_of("OUTPUT").map(|s| PathBuf::from(s));
         let reader = YamlFrameReader::new_from_args(subargs);
-        png::png(&mut wrench, surface, &mut window, reader, rx.unwrap());
+        png::png(&mut wrench, surface, &mut window, reader, rx.unwrap(), output_path);
     } else if let Some(subargs) = args.subcommand_matches("reftest") {
         // Exit with an error code in order to ensure the CI job fails.
         process::exit(reftest(wrench, &mut window, subargs, rx.unwrap()) as _);
@@ -531,6 +600,7 @@ fn render<'a>(
     size: DeviceIntSize,
     events_loop: &mut Option<winit::EventsLoop>,
     subargs: &clap::ArgMatches<'a>,
+    no_block: bool,
 ) {
     let input_path = subargs.value_of("INPUT").map(PathBuf::from).unwrap();
 
@@ -539,9 +609,11 @@ fn render<'a>(
         let mut documents = wrench.api.load_capture(input_path);
         println!("loaded {:?}", documents.iter().map(|cd| cd.document_id).collect::<Vec<_>>());
         let captured = documents.swap_remove(0);
-        window.resize(captured.window_size);
+        if let Some(fb_size) = wrench.renderer.device_size() {
+            window.resize(fb_size);
+        }
         wrench.document_id = captured.document_id;
-        Box::new(captured) as Box<WrenchThing>
+        Box::new(captured) as Box<dyn WrenchThing>
     } else {
         let extension = input_path
             .extension()
@@ -550,8 +622,8 @@ fn render<'a>(
             .expect("Tried to render with an unknown file type.");
 
         match extension {
-            "yaml" => Box::new(YamlFrameReader::new_from_args(subargs)) as Box<WrenchThing>,
-            "bin" => Box::new(BinaryFrameReader::new_from_args(subargs)) as Box<WrenchThing>,
+            "yaml" => Box::new(YamlFrameReader::new_from_args(subargs)) as Box<dyn WrenchThing>,
+            "bin" => Box::new(BinaryFrameReader::new_from_args(subargs)) as Box<dyn WrenchThing>,
             _ => panic!("Tried to render with an unknown file type."),
         }
     };
@@ -565,155 +637,189 @@ fn render<'a>(
     wrench.update(dim);
     thing.do_frame(wrench);
 
-    let mut body = |wrench: &mut Wrench, global_event: winit::Event| {
+    let mut debug_flags = DebugFlags::empty();
+
+    // Default the profile overlay on for android.
+    if cfg!(target_os = "android") {
+        debug_flags.toggle(DebugFlags::PROFILER_DBG | DebugFlags::COMPACT_PROFILER);
+        wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+    }
+
+    let mut body = |wrench: &mut Wrench, events: Vec<winit::Event>| {
         let mut do_frame = false;
         let mut do_render = false;
 
-        match global_event {
-            winit::Event::Awakened => {
-                do_render = true;
-            }
-            winit::Event::WindowEvent { event, .. } => match event {
-                winit::WindowEvent::CloseRequested => {
-                    return winit::ControlFlow::Break;
-                }
-                winit::WindowEvent::Refresh |
-                winit::WindowEvent::Focused(..) => {
+        for event in events {
+            match event {
+                winit::Event::Awakened => {
                     do_render = true;
                 }
-                winit::WindowEvent::CursorMoved { position: LogicalPosition { x, y }, .. } => {
-                    cursor_position = WorldPoint::new(x as f32, y as f32);
-                    do_render = true;
-                }
-                winit::WindowEvent::KeyboardInput {
-                    input: winit::KeyboardInput {
-                        state: winit::ElementState::Pressed,
-                        virtual_keycode: Some(vk),
-                        ..
-                    },
-                    ..
-                } => match vk {
-                    VirtualKeyCode::Escape => {
+                winit::Event::WindowEvent { event, .. } => match event {
+                    winit::WindowEvent::CloseRequested => {
                         return winit::ControlFlow::Break;
                     }
-                    VirtualKeyCode::P => {
-                        wrench.renderer.toggle_debug_flags(DebugFlags::PROFILER_DBG);
+                    winit::WindowEvent::Refresh |
+                    winit::WindowEvent::Focused(..) => {
                         do_render = true;
                     }
-                    VirtualKeyCode::O => {
-                        wrench.renderer.toggle_debug_flags(DebugFlags::RENDER_TARGET_DBG);
-                        do_render = true;
-                    }
-                    VirtualKeyCode::I => {
-                        wrench.renderer.toggle_debug_flags(DebugFlags::TEXTURE_CACHE_DBG);
-                        do_render = true;
-                    }
-                    VirtualKeyCode::S => {
-                        wrench.renderer.toggle_debug_flags(DebugFlags::COMPACT_PROFILER);
-                        do_render = true;
-                    }
-                    VirtualKeyCode::Q => {
-                        wrench.renderer.toggle_debug_flags(
-                            DebugFlags::GPU_TIME_QUERIES | DebugFlags::GPU_SAMPLE_QUERIES
+                    winit::WindowEvent::CursorMoved { position: LogicalPosition { x, y }, .. } => {
+                        cursor_position = WorldPoint::new(x as f32, y as f32);
+                        wrench.renderer.set_cursor_position(
+                            DeviceIntPoint::new(
+                                (cursor_position.x * wrench.device_pixel_ratio).round() as i32,
+                                (cursor_position.y * wrench.device_pixel_ratio).round() as i32,
+                            ),
                         );
                         do_render = true;
                     }
-                    VirtualKeyCode::V => {
-                        wrench.renderer.toggle_debug_flags(DebugFlags::SHOW_OVERDRAW);
-                        do_render = true;
-                    }
-                    VirtualKeyCode::G => {
-                        // go through the API so that we reach the render backend
-                        wrench.api.send_debug_cmd(DebugCommand::EnableGpuCacheDebug(
-                            !wrench.renderer.get_debug_flags().contains(webrender::DebugFlags::GPU_CACHE_DBG)
-                        ));
-                        // force scene rebuild to see the full set of used GPU cache entries
-                        let mut txn = Transaction::new();
-                        txn.set_root_pipeline(wrench.root_pipeline_id);
-                        wrench.api.send_transaction(wrench.document_id, txn);
-
-                        do_frame = true;
-                    }
-                    VirtualKeyCode::R => {
-                        wrench.set_page_zoom(ZoomFactor::new(1.0));
-                        do_frame = true;
-                    }
-                    VirtualKeyCode::M => {
-                        wrench.api.notify_memory_pressure();
-                        do_render = true;
-                    }
-                    VirtualKeyCode::L => {
-                        do_loop = !do_loop;
-                        do_render = true;
-                    }
-                    VirtualKeyCode::Left => {
-                        thing.prev_frame();
-                        do_frame = true;
-                    }
-                    VirtualKeyCode::Right => {
-                        thing.next_frame();
-                        do_frame = true;
-                    }
-                    VirtualKeyCode::H => {
-                        show_help = !show_help;
-                        do_render = true;
-                    }
-                    VirtualKeyCode::T => {
-                        let file_name = format!("profile-{}.json", cpu_profile_index);
-                        wrench.renderer.save_cpu_profile(&file_name);
-                        cpu_profile_index += 1;
-                    }
-                    VirtualKeyCode::C => {
-                        let path = PathBuf::from("../captures/wrench");
-                        wrench.api.save_capture(path, CaptureBits::all());
-                    }
-                    VirtualKeyCode::Up | VirtualKeyCode::Down => {
-                        let mut txn = Transaction::new();
-
-                        let offset = match vk {
-                            winit::VirtualKeyCode::Up => LayoutVector2D::new(0.0, 10.0),
-                            winit::VirtualKeyCode::Down => LayoutVector2D::new(0.0, -10.0),
-                            _ => unreachable!("Should not see non directional keys here.")
-                        };
-
-                        txn.scroll(ScrollLocation::Delta(offset), cursor_position);
-                        txn.generate_frame();
-                        wrench.api.send_transaction(wrench.document_id, txn);
-
-                        do_frame = true;
-                    }
-                    VirtualKeyCode::Add => {
-                        let current_zoom = wrench.get_page_zoom();
-                        let new_zoom_factor = ZoomFactor::new(current_zoom.get() + 0.1);
-                        wrench.set_page_zoom(new_zoom_factor);
-                        do_frame = true;
-                    }
-                    VirtualKeyCode::Subtract => {
-                        let current_zoom = wrench.get_page_zoom();
-                        let new_zoom_factor = ZoomFactor::new((current_zoom.get() - 0.1).max(0.1));
-                        wrench.set_page_zoom(new_zoom_factor);
-                        do_frame = true;
-                    }
-                    VirtualKeyCode::X => {
-                        let results = wrench.api.hit_test(
-                            wrench.document_id,
-                            None,
-                            cursor_position,
-                            HitTestFlags::FIND_ALL
-                        );
-
-                        println!("Hit test results:");
-                        for item in &results.items {
-                            println!("  • {:?}", item);
+                    winit::WindowEvent::KeyboardInput {
+                        input: winit::KeyboardInput {
+                            state: winit::ElementState::Pressed,
+                            virtual_keycode: Some(vk),
+                            ..
+                        },
+                        ..
+                    } => match vk {
+                        VirtualKeyCode::Escape => {
+                            return winit::ControlFlow::Break;
                         }
-                        println!("");
+                        VirtualKeyCode::P => {
+                            debug_flags.toggle(DebugFlags::PROFILER_DBG);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::O => {
+                            debug_flags.toggle(DebugFlags::RENDER_TARGET_DBG);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::I => {
+                            debug_flags.toggle(DebugFlags::TEXTURE_CACHE_DBG);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::S => {
+                            debug_flags.toggle(DebugFlags::COMPACT_PROFILER);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::D => {
+                            debug_flags.toggle(DebugFlags::PICTURE_CACHING_DBG);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::Q => {
+                            debug_flags.toggle(DebugFlags::GPU_TIME_QUERIES | DebugFlags::GPU_SAMPLE_QUERIES);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::V => {
+                            debug_flags.toggle(DebugFlags::SHOW_OVERDRAW);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::G => {
+                            debug_flags.toggle(DebugFlags::GPU_CACHE_DBG);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+
+                            // force scene rebuild to see the full set of used GPU cache entries
+                            let mut txn = Transaction::new();
+                            txn.set_root_pipeline(wrench.root_pipeline_id);
+                            wrench.api.send_transaction(wrench.document_id, txn);
+
+                            do_frame = true;
+                        }
+                        VirtualKeyCode::R => {
+                            wrench.set_page_zoom(ZoomFactor::new(1.0));
+                            do_frame = true;
+                        }
+                        VirtualKeyCode::M => {
+                            wrench.api.notify_memory_pressure();
+                            do_render = true;
+                        }
+                        VirtualKeyCode::L => {
+                            do_loop = !do_loop;
+                            do_render = true;
+                        }
+                        VirtualKeyCode::Left => {
+                            thing.prev_frame();
+                            do_frame = true;
+                        }
+                        VirtualKeyCode::Right => {
+                            thing.next_frame();
+                            do_frame = true;
+                        }
+                        VirtualKeyCode::H => {
+                            show_help = !show_help;
+                            do_render = true;
+                        }
+                        VirtualKeyCode::T => {
+                            let file_name = format!("profile-{}.json", cpu_profile_index);
+                            wrench.renderer.save_cpu_profile(&file_name);
+                            cpu_profile_index += 1;
+                        }
+                        VirtualKeyCode::C => {
+                            let path = PathBuf::from("../captures/wrench");
+                            wrench.api.save_capture(path, CaptureBits::all());
+                        }
+                        VirtualKeyCode::Up | VirtualKeyCode::Down => {
+                            let mut txn = Transaction::new();
+
+                            let offset = match vk {
+                                winit::VirtualKeyCode::Up => LayoutVector2D::new(0.0, 10.0),
+                                winit::VirtualKeyCode::Down => LayoutVector2D::new(0.0, -10.0),
+                                _ => unreachable!("Should not see non directional keys here.")
+                            };
+
+                            txn.scroll(ScrollLocation::Delta(offset), cursor_position);
+                            txn.generate_frame();
+                            wrench.api.send_transaction(wrench.document_id, txn);
+
+                            do_frame = true;
+                        }
+                        VirtualKeyCode::Add => {
+                            let current_zoom = wrench.get_page_zoom();
+                            let new_zoom_factor = ZoomFactor::new(current_zoom.get() + 0.1);
+                            wrench.set_page_zoom(new_zoom_factor);
+                            do_frame = true;
+                        }
+                        VirtualKeyCode::Subtract => {
+                            let current_zoom = wrench.get_page_zoom();
+                            let new_zoom_factor = ZoomFactor::new((current_zoom.get() - 0.1).max(0.1));
+                            wrench.set_page_zoom(new_zoom_factor);
+                            do_frame = true;
+                        }
+                        VirtualKeyCode::X => {
+                            let results = wrench.api.hit_test(
+                                wrench.document_id,
+                                None,
+                                cursor_position,
+                                HitTestFlags::FIND_ALL
+                            );
+
+                            println!("Hit test results:");
+                            for item in &results.items {
+                                println!("  • {:?}", item);
+                            }
+                            println!("");
+                        }
+                        VirtualKeyCode::Z => {
+                            debug_flags.toggle(DebugFlags::ZOOM_DBG);
+                            wrench.api.send_debug_cmd(DebugCommand::SetFlags(debug_flags));
+                            do_render = true;
+                        }
+                        VirtualKeyCode::Y => {
+                            println!("Clearing all caches...");
+                            wrench.api.send_debug_cmd(DebugCommand::ClearCaches(ClearCache::all()));
+                            do_frame = true;
+                        }
+                        _ => {}
                     }
                     _ => {}
-                }
+                },
                 _ => {}
-            },
-            _ => return winit::ControlFlow::Continue,
-        };
+            }
+        }
 
         let dim = window.get_inner_size();
         wrench.update(dim);
@@ -743,11 +849,45 @@ fn render<'a>(
 
     match *events_loop {
         None => {
-            while body(wrench, winit::Event::Awakened) == winit::ControlFlow::Continue {}
-            let rect = DeviceIntRect::new(DeviceIntPoint::zero(), size);
-            let pixels = wrench.renderer.read_pixels_rgba8(rect);
+            while body(wrench, vec![winit::Event::Awakened]) == winit::ControlFlow::Continue {}
+            let fb_rect = FramebufferIntSize::new(size.width, size.height).into();
+            let pixels = wrench.renderer.read_pixels_rgba8(fb_rect);
             save_flipped("screenshot.png", pixels, size);
         }
-        Some(ref mut events_loop) => events_loop.run_forever(|event| body(wrench, event)),
+        Some(ref mut events_loop) => {
+            // We want to ensure that we:
+            //
+            // (a) Block the thread when no events are present (for CPU/battery purposes)
+            // (b) Don't lag the input events by having the event queue back up.
+            loop {
+                let mut pending_events = Vec::new();
+
+                // Block the thread until at least one event arrives
+                // On Android, we are generally profiling when running
+                // wrench, and don't want to block on UI events.
+                if !no_block && cfg!(not(target_os = "android")) {
+                    events_loop.run_forever(|event| {
+                        pending_events.push(event);
+                        winit::ControlFlow::Break
+                    });
+                }
+
+                // Collect any other pending events that are also available
+                events_loop.poll_events(|event| {
+                    pending_events.push(event);
+                });
+
+                // Ensure there is at least one event present so that the
+                // frame gets rendered.
+                if pending_events.is_empty() {
+                    pending_events.push(winit::Event::Awakened);
+                }
+
+                // Process all of those pending events in the next vsync period
+                if body(wrench, pending_events) == winit::ControlFlow::Break {
+                    break;
+                }
+            }
+        }
     }
 }

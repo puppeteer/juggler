@@ -26,7 +26,7 @@ use style_traits::{CssWriter, ParseError, ParsingMode, StyleParseErrorKind, ToCs
 /// A [`@keyframes`][keyframes] rule.
 ///
 /// [keyframes]: https://drafts.csswg.org/css-animations/#keyframes
-#[derive(Debug)]
+#[derive(Debug, ToShmem)]
 pub struct KeyframesRule {
     /// The name of the current animation.
     pub name: KeyframesName,
@@ -99,7 +99,7 @@ impl DeepCloneWithLock for KeyframesRule {
 
 /// A number from 0 to 1, indicating the percentage of the animation when this
 /// keyframe should run.
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, PartialOrd, ToShmem)]
 pub struct KeyframePercentage(pub f32);
 
 impl ::std::cmp::Ord for KeyframePercentage {
@@ -141,11 +141,7 @@ impl KeyframePercentage {
             Token::Percentage {
                 unit_value: percentage,
                 ..
-            }
-                if percentage >= 0. && percentage <= 1. =>
-            {
-                Ok(KeyframePercentage::new(percentage))
-            },
+            } if percentage >= 0. && percentage <= 1. => Ok(KeyframePercentage::new(percentage)),
             _ => Err(input.new_unexpected_token_error(token)),
         }
     }
@@ -154,7 +150,7 @@ impl KeyframePercentage {
 /// A keyframes selector is a list of percentages or from/to symbols, which are
 /// converted at parse time to percentages.
 #[css(comma)]
-#[derive(Clone, Debug, Eq, PartialEq, ToCss)]
+#[derive(Clone, Debug, Eq, PartialEq, ToCss, ToShmem)]
 pub struct KeyframeSelector(#[css(iterable)] Vec<KeyframePercentage>);
 
 impl KeyframeSelector {
@@ -178,7 +174,7 @@ impl KeyframeSelector {
 }
 
 /// A keyframe.
-#[derive(Debug)]
+#[derive(Debug, ToShmem)]
 pub struct Keyframe {
     /// The selector this keyframe was specified from.
     pub selector: KeyframeSelector,
@@ -600,7 +596,7 @@ impl<'a, 'b, 'i> DeclarationParser<'i> for KeyframeDeclarationParser<'a, 'b> {
         let id = match PropertyId::parse(&name, self.context) {
             Ok(id) => id,
             Err(()) => {
-                return Err(input.new_custom_error(StyleParseErrorKind::UnknownProperty(name)))
+                return Err(input.new_custom_error(StyleParseErrorKind::UnknownProperty(name)));
             },
         };
 

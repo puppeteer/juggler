@@ -8,8 +8,6 @@ const TEST_URI = URL_ROOT + "doc_browser_fontinspector.html";
 // in its font tab.
 // Non-regression test for https://bugzilla.mozilla.org/show_bug.cgi?id=1435469
 add_task(async function() {
-  await pushPref("devtools.inspector.fonteditor.enabled", true);
-
   const { inspector, view } = await openFontInspectorForURL(TEST_URI);
   const viewDoc = view.document;
 
@@ -21,6 +19,8 @@ add_task(async function() {
 
   const fontEls = getUsedFontsEls(viewDoc);
   ok(fontEls.length == 1, `Used fonts found for styled input element`);
-  ok(fontEls[0].textContent == "Ostrich Sans Medium",
-    `Proper font found: 'Ostrich Sans Medium' for styled input.`);
+  ok(
+    fontEls[0].textContent == "Ostrich Sans Medium",
+    `Proper font found: 'Ostrich Sans Medium' for styled input.`
+  );
 });

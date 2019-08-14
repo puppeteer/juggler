@@ -7,7 +7,10 @@
 #ifndef builtin_Promise_h
 #define builtin_Promise_h
 
+#include "js/Promise.h"
+
 #include "builtin/SelfHostingDefines.h"
+#include "ds/Fifo.h"
 #include "threading/ConditionVariable.h"
 #include "threading/Mutex.h"
 #include "vm/NativeObject.h"
@@ -30,10 +33,7 @@ enum PromiseSlots {
   //   This slot holds only the reject function. The resolve function is
   //   reachable from the reject function's extended slot.
   // * if this promise is either fulfilled or rejected, undefined
-  // * (special case) if this promise is the return value of an async function
-  //   invocation, the generator object for the function's internal generator
   PromiseSlot_RejectFunction,
-  PromiseSlot_AwaitGenerator = PromiseSlot_RejectFunction,
 
   // Promise object's debug info, which is created on demand.
   // * if this promise has no debug info, undefined
@@ -98,6 +98,9 @@ class PromiseObject : public NativeObject {
   static JSObject* unforgeableReject(JSContext* cx, HandleValue value);
 
   int32_t flags() { return getFixedSlot(PromiseSlot_Flags).toInt32(); }
+  void setHandled() {
+    setFixedSlot(PromiseSlot_Flags, Int32Value(flags() | PROMISE_FLAG_HANDLED));
+  }
   JS::PromiseState state() {
     int32_t flags = this->flags();
     if (!(flags & PROMISE_FLAG_RESOLVED)) {
@@ -172,7 +175,7 @@ class PromiseObject : public NativeObject {
 /**
  * Unforgeable version of the JS builtin Promise.all.
  *
- * Takes an AutoObjectVector of Promise objects and returns a promise that's
+ * Takes a HandleValueVector of Promise objects and returns a promise that's
  * resolved with an array of resolution values when all those promises have
  * been resolved, or rejected with the rejection value of the first rejected
  * promise.
@@ -180,8 +183,8 @@ class PromiseObject : public NativeObject {
  * Asserts that all objects in the `promises` vector are, maybe wrapped,
  * instances of `Promise` or a subclass of `Promise`.
  */
-MOZ_MUST_USE JSObject* GetWaitForAllPromise(
-    JSContext* cx, const JS::AutoObjectVector& promises);
+MOZ_MUST_USE JSObject* GetWaitForAllPromise(JSContext* cx,
+                                            JS::HandleObjectVector promises);
 
 // Whether to create a promise as the return value of Promise#{then,catch}.
 // If the return value is known to be unused, and if the operation is known
@@ -232,8 +235,7 @@ MOZ_MUST_USE bool RejectPromiseWithPendingError(JSContext* cx,
  * Create the promise object which will be used as the return value of an async
  * function.
  */
-MOZ_MUST_USE PromiseObject* CreatePromiseObjectForAsync(
-    JSContext* cx, HandleValue generatorVal);
+MOZ_MUST_USE PromiseObject* CreatePromiseObjectForAsync(JSContext* cx);
 
 /**
  * Returns true if the given object is a promise created by
@@ -241,16 +243,21 @@ MOZ_MUST_USE PromiseObject* CreatePromiseObjectForAsync(
  */
 MOZ_MUST_USE bool IsPromiseForAsync(JSObject* promise);
 
+class AsyncFunctionGeneratorObject;
+
 MOZ_MUST_USE bool AsyncFunctionReturned(JSContext* cx,
                                         Handle<PromiseObject*> resultPromise,
                                         HandleValue value);
 
 MOZ_MUST_USE bool AsyncFunctionThrown(JSContext* cx,
-                                      Handle<PromiseObject*> resultPromise);
+                                      Handle<PromiseObject*> resultPromise,
+                                      HandleValue reason);
 
-MOZ_MUST_USE bool AsyncFunctionAwait(JSContext* cx,
-                                     Handle<PromiseObject*> resultPromise,
-                                     HandleValue value);
+// Start awaiting `value` in an async function (, but doesn't suspend the
+// async function's execution!). Returns the async function's result promise.
+MOZ_MUST_USE JSObject* AsyncFunctionAwait(
+    JSContext* cx, Handle<AsyncFunctionGeneratorObject*> genObj,
+    HandleValue value);
 
 // If the await operation can be skipped and the resolution value for `val` can
 // be acquired, stored the resolved value to `resolved` and `true` to
@@ -417,13 +424,81 @@ class MOZ_NON_TEMPORARY_CLASS PromiseLookup final {
   }
 };
 
-// An OffThreadPromiseTask holds a rooted Promise JSObject while executing an
-// off-thread task (defined by the subclass) that needs to resolve the Promise
-// on completion. Because OffThreadPromiseTask contains a PersistentRooted, it
-// must be destroyed on an active JSContext thread of the Promise's JSRuntime.
-// OffThreadPromiseTasks may be run off-thread in various ways (e.g., see
-// PromiseHelperTask). At any time, the task can be dispatched to an active
-// JSContext of the Promise's JSRuntime by calling dispatchResolve().
+class OffThreadPromiseRuntimeState;
+
+// [SMDOC] OffThreadPromiseTask: an off-main-thread task that resolves a promise
+//
+// An OffThreadPromiseTask is an abstract base class holding a JavaScript
+// promise that will be resolved (fulfilled or rejected) with the results of a
+// task possibly performed by some other thread.
+//
+// An OffThreadPromiseTask's lifecycle is as follows:
+//
+// - Some JavaScript native wishes to return a promise of the result of some
+//   computation that might be performed by other threads (say, helper threads
+//   or the embedding's I/O threads), so it creates a PromiseObject to represent
+//   the result, and an OffThreadPromiseTask referring to it. After handing the
+//   OffThreadPromiseTask to the code doing the actual work, the native is free
+//   to return the PromiseObject to its caller.
+//
+// - When the computation is done, successfully or otherwise, it populates the
+//   OffThreadPromiseTask—which is actually an instance of some concrete
+//   subclass specific to the task—with the information needed to resolve the
+//   promise, and calls OffThreadPromiseTask::dispatchResolveAndDestroy. This
+//   enqueues a runnable on the JavaScript thread to which the promise belongs.
+//
+// - When it gets around to the runnable, the JavaScript thread calls the
+//   OffThreadPromiseTask's `resolve` method, which the concrete subclass has
+//   overriden to resolve the promise appropriately. This probably enqueues a
+//   promise reaction job.
+//
+// - The JavaScript thread then deletes the OffThreadPromiseTask.
+//
+// During shutdown, the process is slightly different. Enqueuing runnables to
+// the JavaScript thread begins to fail. JSRuntime shutdown waits for all
+// outstanding tasks to call dispatchResolveAndDestroy, and then deletes them on
+// the main thread, without calling `resolve`.
+//
+// For example, the JavaScript function WebAssembly.compile uses
+// OffThreadPromiseTask to manage the result of a helper thread task, accepting
+// binary WebAssembly code and returning a promise of a compiled
+// WebAssembly.Module. It would like to do this compilation work on a helper
+// thread. When called by JavaScript, WebAssembly.compile creates a promise,
+// builds a CompileBufferTask (the OffThreadPromiseTask concrete subclass) to
+// keep track of it, and then hands that to a helper thread. When the helper
+// thread is done, successfully or otherwise, it calls the CompileBufferTask's
+// dispatchResolveAndDestroy method, which enqueues a runnable to the JavaScript
+// thread to resolve the promise and delete the CompileBufferTask.
+// (CompileBufferTask actually implements PromiseHelperTask, which implements
+// OffThreadPromiseTask; PromiseHelperTask is what our helper thread scheduler
+// requires.)
+//
+// OffThreadPromiseTasks are not limited to use with helper threads. For
+// example, a function returning a promise of the result of a network operation
+// could provide the code collecting the incoming data with an
+// OffThreadPromiseTask for the promise, and let the embedding's network I/O
+// threads call dispatchResolveAndDestroy.
+//
+// OffThreadPromiseTask may also be used purely on the main thread, as a way to
+// "queue a task" in HTML terms. Note that a "task" is not the same as a
+// "microtask" and there are separate queues for tasks and microtasks that are
+// drained at separate times in the browser. The task queue is implemented by
+// the browser's main event loop. The microtask queue is implemented
+// by JS::JobQueue, used for promises and gets drained before returning to
+// the event loop. Thus OffThreadPromiseTask can only be used when the spec
+// says "queue a task", as the WebAssembly APIs do.
+//
+// An OffThreadPromiseTask has a JSContext, and must be constructed and have its
+// 'init' method called on that JSContext's thread. Once initialized, its
+// dispatchResolveAndDestroy method may be called from any thread. This is the
+// only safe way to destruct an OffThreadPromiseTask; doing so ensures the
+// OffThreadPromiseTask's destructor will run on the JSContext's thread, either
+// from the event loop or during shutdown.
+//
+// OffThreadPromiseTask::dispatchResolveAndDestroy uses the
+// JS::DispatchToEventLoopCallback provided by the embedding to enqueue
+// runnables on the JavaScript thread. See the comments for
+// DispatchToEventLoopCallback for details.
 
 class OffThreadPromiseTask : public JS::Dispatchable {
   friend class OffThreadPromiseRuntimeState;
@@ -434,6 +509,8 @@ class OffThreadPromiseTask : public JS::Dispatchable {
 
   void operator=(const OffThreadPromiseTask&) = delete;
   OffThreadPromiseTask(const OffThreadPromiseTask&) = delete;
+
+  void unregister(OffThreadPromiseRuntimeState& state);
 
  protected:
   OffThreadPromiseTask(JSContext* cx, Handle<PromiseObject*> promise);
@@ -464,7 +541,7 @@ using OffThreadPromiseTaskSet =
     HashSet<OffThreadPromiseTask*, DefaultHasher<OffThreadPromiseTask*>,
             SystemAllocPolicy>;
 
-using DispatchableVector = Vector<JS::Dispatchable*, 0, SystemAllocPolicy>;
+using DispatchableFifo = Fifo<JS::Dispatchable*, 0, SystemAllocPolicy>;
 
 class OffThreadPromiseRuntimeState {
   friend class OffThreadPromiseTask;
@@ -474,12 +551,24 @@ class OffThreadPromiseRuntimeState {
   JS::DispatchToEventLoopCallback dispatchToEventLoopCallback_;
   void* dispatchToEventLoopClosure_;
 
-  // These fields are mutated by any thread and are guarded by mutex_.
+  // All following fields are mutated by any thread and are guarded by mutex_.
   Mutex mutex_;
-  ConditionVariable allCanceled_;
+
+  // A set of all OffThreadPromiseTasks that have successfully called 'init'.
+  // OffThreadPromiseTask's destructor removes them from the set.
   OffThreadPromiseTaskSet live_;
+
+  // The allCancelled_ condition is waited on and notified during engine
+  // shutdown, communicating when all off-thread tasks in live_ are safe to be
+  // destroyed from the (shutting down) main thread. This condition is met when
+  // live_.count() == numCanceled_ where "canceled" means "the
+  // DispatchToEventLoopCallback failed after this task finished execution".
+  ConditionVariable allCanceled_;
   size_t numCanceled_;
-  DispatchableVector internalDispatchQueue_;
+
+  // The queue of JS::Dispatchables used by the DispatchToEventLoopCallback that
+  // calling js::UseInternalJobQueues installs.
+  DispatchableFifo internalDispatchQueue_;
   ConditionVariable internalDispatchQueueAppended_;
   bool internalDispatchQueueClosed_;
 

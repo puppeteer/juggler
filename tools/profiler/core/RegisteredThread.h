@@ -7,11 +7,15 @@
 #ifndef RegisteredThread_h
 #define RegisteredThread_h
 
-#include "mozilla/UniquePtrExtensions.h"
-
 #include "platform.h"
+#include "ProfilerMarker.h"
+#include "ProfilerMarkerPayload.h"
 #include "ThreadInfo.h"
+
 #include "js/TraceLoggerAPI.h"
+#include "jsapi.h"
+#include "mozilla/UniquePtr.h"
+#include "nsIEventTarget.h"
 
 // This class contains the state for a single thread that is accessible without
 // protection from gPSMutex in platform.cpp. Because there is no external
@@ -34,12 +38,13 @@ class RacyRegisteredThread final {
   bool IsBeingProfiled() const { return mIsBeingProfiled; }
 
   void AddPendingMarker(const char* aMarkerName,
+                        JS::ProfilingCategoryPair aCategoryPair,
                         mozilla::UniquePtr<ProfilerMarkerPayload> aPayload,
                         double aTime) {
     // Note: We don't assert on mIsBeingProfiled, because it could have changed
     // between the check in the caller and now.
-    ProfilerMarker* marker =
-        new ProfilerMarker(aMarkerName, mThreadId, std::move(aPayload), aTime);
+    ProfilerMarker* marker = new ProfilerMarker(
+        aMarkerName, aCategoryPair, mThreadId, std::move(aPayload), aTime);
     mPendingMarkers.insert(marker);
   }
 
@@ -149,7 +154,7 @@ class RacyRegisteredThread final {
   // Accesses to this atomic are not recorded by web replay as they may occur
   // at non-deterministic points.
   mozilla::Atomic<bool, mozilla::MemoryOrdering::Relaxed,
-                  recordreplay::Behavior::DontPreserve>
+                  mozilla::recordreplay::Behavior::DontPreserve>
       mIsBeingProfiled;
 };
 
@@ -245,13 +250,22 @@ class RegisteredThread final {
         if (JSTracerEnabled()) {
           JS::StartTraceLogger(mContext);
         }
-        js::RegisterContextProfilingEventMarker(mContext, profiler_add_marker);
+        if (JSAllocationsEnabled()) {
+          // TODO - This probability should not be hardcoded. See Bug 1547284.
+          JS::EnableRecordingAllocations(
+              mContext, profiler_add_js_allocation_marker, 0.01);
+        }
+        js::RegisterContextProfilingEventMarker(mContext,
+                                                profiler_add_js_marker);
 
       } else if (mJSSampling == INACTIVE_REQUESTED) {
         mJSSampling = INACTIVE;
         js::EnableContextProfilingStack(mContext, false);
         if (JSTracerEnabled()) {
           JS::StopTraceLogger(mContext);
+        }
+        if (JSAllocationsEnabled()) {
+          JS::DisableRecordingAllocations(mContext);
         }
       }
     }
@@ -320,11 +334,15 @@ class RegisteredThread final {
   uint32_t mJSFlags;
 
   bool TrackOptimizationsEnabled() {
-    return mJSFlags & uint32_t(JSSamplingFlags::TrackOptimizations);
+    return mJSFlags & uint32_t(JSInstrumentationFlags::TrackOptimizations);
   }
 
   bool JSTracerEnabled() {
-    return mJSFlags & uint32_t(JSSamplingFlags::TraceLogging);
+    return mJSFlags & uint32_t(JSInstrumentationFlags::TraceLogging);
+  }
+
+  bool JSAllocationsEnabled() {
+    return mJSFlags & uint32_t(JSInstrumentationFlags::Allocations);
   }
 };
 

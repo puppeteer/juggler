@@ -10,7 +10,7 @@
              accesskey="&editBookmarkOverlay.name.accesskey;"
              control="editBMPanel_namePicker"/>
       <textbox id="editBMPanel_namePicker"
-               onchange="gEditItemOverlay.onNamePickerChange().catch(Components.utils.reportError);"/>
+               onchange="gEditItemOverlay.onNamePickerChange().catch(Cu.reportError);"/>
     </vbox>
 
     <vbox id="editBMPanel_locationRow"
@@ -31,7 +31,7 @@
         <menulist id="editBMPanel_folderMenuList"
                   class="folder-icon panel-button"
                   flex="1"
-                  oncommand="gEditItemOverlay.onFolderMenuListCommand(event).catch(Components.utils.reportError);">
+                  oncommand="gEditItemOverlay.onFolderMenuListCommand(event).catch(Cu.reportError);">
           <menupopup>
             <!-- Static item for special folders -->
             <menuitem id="editBMPanel_toolbarFolderItem"
@@ -58,27 +58,12 @@
 
     <vbox id="editBMPanel_folderTreeRow"
           collapsed="true">
-      <tree id="editBMPanel_folderTree"
-            flex="1"
-            class="placesTree"
-            type="places"
-            height="150"
-            minheight="150"
-            editable="true"
-            onselect="gEditItemOverlay.onFolderTreeSelect();"
-            disableUserActions="true"
-            hidecolumnpicker="true">
-        <treecols>
-          <treecol anonid="title" flex="1" primary="true" hideheader="true"/>
-        </treecols>
-        <treechildren flex="1"/>
-      </tree>
-
+      <!-- editBMPanel_folderTree will go here when this is shown -->
       <hbox id="editBMPanel_newFolderBox">
         <button label="&editBookmarkOverlay.newFolderButton.label;"
                 id="editBMPanel_newFolderButton"
                 accesskey="&editBookmarkOverlay.newFolderButton.accesskey;"
-                oncommand="gEditItemOverlay.newFolder().catch(Components.utils.reportError);"/>
+                oncommand="gEditItemOverlay.newFolder().catch(Cu.reportError);"/>
       </hbox>
     </vbox>
 

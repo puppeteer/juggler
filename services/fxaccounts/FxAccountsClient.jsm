@@ -4,13 +4,31 @@
 
 var EXPORTED_SYMBOLS = ["FxAccountsClient"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://services-common/hawkclient.js");
-ChromeUtils.import("resource://services-common/hawkrequest.js");
-ChromeUtils.import("resource://services-crypto/utils.js");
-ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
-ChromeUtils.import("resource://gre/modules/Credentials.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { CommonUtils } = ChromeUtils.import(
+  "resource://services-common/utils.js"
+);
+const { HawkClient } = ChromeUtils.import(
+  "resource://services-common/hawkclient.js"
+);
+const { deriveHawkCredentials } = ChromeUtils.import(
+  "resource://services-common/hawkrequest.js"
+);
+const { CryptoUtils } = ChromeUtils.import(
+  "resource://services-crypto/utils.js"
+);
+const {
+  ERRNO_ACCOUNT_DOES_NOT_EXIST,
+  ERRNO_INCORRECT_EMAIL_CASE,
+  ERRNO_INCORRECT_PASSWORD,
+  ERRNO_INVALID_AUTH_NONCE,
+  ERRNO_INVALID_AUTH_TIMESTAMP,
+  ERRNO_INVALID_AUTH_TOKEN,
+  log,
+} = ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
+const { Credentials } = ChromeUtils.import(
+  "resource://gre/modules/Credentials.jsm"
+);
 
 const HOST_PREF = "identity.fxaccounts.auth.uri";
 
@@ -31,7 +49,6 @@ var FxAccountsClient = function(host = Services.prefs.getCharPref(HOST_PREF)) {
 };
 
 this.FxAccountsClient.prototype = {
-
   /**
    * Return client clock offset, in milliseconds, as determined by hawk client.
    * Provided because callers should not have to know about hawk
@@ -83,9 +100,8 @@ this.FxAccountsClient.prototype = {
    *                               email
    *        }
    */
-  _createSession(path, email, password, getKeys = false,
-                 retryOK = true) {
-    return Credentials.setup(email, password).then((creds) => {
+  _createSession(path, email, password, getKeys = false, retryOK = true) {
+    return Credentials.setup(email, password).then(creds => {
       let data = {
         authPW: CommonUtils.bytesAsHex(creds.authPW),
         email,
@@ -119,8 +135,13 @@ this.FxAccountsClient.prototype = {
               log.error("Server returned errno 120 but did not provide email");
               throw error;
             }
-            return this._createSession(path, error.email, password, getKeys,
-                                       false);
+            return this._createSession(
+              path,
+              error.email,
+              password,
+              getKeys,
+              false
+            );
           }
           throw error;
         }
@@ -148,8 +169,13 @@ this.FxAccountsClient.prototype = {
    *        }
    */
   signUp(email, password, getKeys = false) {
-    return this._createSession(SIGNUP, email, password, getKeys,
-                               false /* no retry */);
+    return this._createSession(
+      SIGNUP,
+      email,
+      password,
+      getKeys,
+      false /* no retry */
+    );
   },
 
   /**
@@ -175,8 +201,13 @@ this.FxAccountsClient.prototype = {
    *        }
    */
   signIn: function signIn(email, password, getKeys = false) {
-    return this._createSession(SIGNIN, email, password, getKeys,
-                               true /* retry */);
+    return this._createSession(
+      SIGNIN,
+      email,
+      password,
+      getKeys,
+      true /* retry */
+    );
   },
 
   /**
@@ -187,17 +218,54 @@ this.FxAccountsClient.prototype = {
    * @return Promise
    *        Resolves with a boolean indicating if the session is still valid
    */
-  sessionStatus(sessionTokenHex) {
-    return this._request("/session/status", "GET",
-      deriveHawkCredentials(sessionTokenHex, "sessionToken")).then(
-        () => Promise.resolve(true),
-        error => {
-          if (isInvalidTokenError(error)) {
-            return Promise.resolve(false);
-          }
-          throw error;
+  async sessionStatus(sessionTokenHex) {
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
+    return this._request("/session/status", "GET", credentials).then(
+      () => Promise.resolve(true),
+      error => {
+        if (isInvalidTokenError(error)) {
+          return Promise.resolve(false);
         }
-      );
+        throw error;
+      }
+    );
+  },
+
+  /**
+   * Query for the information required to derive
+   * scoped encryption keys requested by the specified OAuth client.
+   *
+   * @param sessionTokenHex
+   *        The session token encoded in hex
+   * @param clientId
+   * @param scope
+   *        Space separated list of scopes
+   * @return Promise
+   */
+  async getScopedKeyData(sessionTokenHex, clientId, scope) {
+    if (!clientId) {
+      throw new Error("Missing 'clientId' parameter");
+    }
+    if (!scope) {
+      throw new Error("Missing 'scope' parameter");
+    }
+    const params = {
+      client_id: clientId,
+      scope,
+    };
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
+    return this._request(
+      "/account/scoped-key-data",
+      "POST",
+      credentials,
+      params
+    );
   },
 
   /**
@@ -208,13 +276,16 @@ this.FxAccountsClient.prototype = {
    *        The session token encoded in hex
    * @return Promise
    */
-  signOut(sessionTokenHex, options = {}) {
+  async signOut(sessionTokenHex, options = {}) {
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
     let path = "/session/destroy";
     if (options.service) {
       path += "?service=" + encodeURIComponent(options.service);
     }
-    return this._request(path, "POST",
-      deriveHawkCredentials(sessionTokenHex, "sessionToken"));
+    return this._request(path, "POST", credentials);
   },
 
   /**
@@ -224,14 +295,17 @@ this.FxAccountsClient.prototype = {
    *        The current session token encoded in hex
    * @return Promise
    */
-  recoveryEmailStatus(sessionTokenHex, options = {}) {
+  async recoveryEmailStatus(sessionTokenHex, options = {}) {
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
     let path = "/recovery_email/status";
     if (options.reason) {
       path += "?reason=" + encodeURIComponent(options.reason);
     }
 
-    return this._request(path, "GET",
-      deriveHawkCredentials(sessionTokenHex, "sessionToken"));
+    return this._request(path, "GET", credentials);
   },
 
   /**
@@ -241,9 +315,12 @@ this.FxAccountsClient.prototype = {
    *        The current token encoded in hex
    * @return Promise
    */
-  resendVerificationEmail(sessionTokenHex) {
-    return this._request("/recovery_email/resend_code", "POST",
-      deriveHawkCredentials(sessionTokenHex, "sessionToken"));
+  async resendVerificationEmail(sessionTokenHex) {
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
+    return this._request("/recovery_email/resend_code", "POST", credentials);
   },
 
   /**
@@ -259,37 +336,42 @@ this.FxAccountsClient.prototype = {
    *                  user's password (bytes)
    *        }
    */
-  accountKeys(keyFetchTokenHex) {
-    let creds = deriveHawkCredentials(keyFetchTokenHex, "keyFetchToken");
+  async accountKeys(keyFetchTokenHex) {
+    let creds = await deriveHawkCredentials(keyFetchTokenHex, "keyFetchToken");
     let keyRequestKey = creds.extra.slice(0, 32);
-    let morecreds = CryptoUtils.hkdf(keyRequestKey, undefined,
-                                     Credentials.keyWord("account/keys"), 3 * 32);
+    let morecreds = await CryptoUtils.hkdfLegacy(
+      keyRequestKey,
+      undefined,
+      Credentials.keyWord("account/keys"),
+      3 * 32
+    );
     let respHMACKey = morecreds.slice(0, 32);
     let respXORKey = morecreds.slice(32, 96);
 
-    return this._request("/account/keys", "GET", creds).then(resp => {
-      if (!resp.bundle) {
-        throw new Error("failed to retrieve keys");
-      }
+    const resp = await this._request("/account/keys", "GET", creds);
+    if (!resp.bundle) {
+      throw new Error("failed to retrieve keys");
+    }
 
-      let bundle = CommonUtils.hexToBytes(resp.bundle);
-      let mac = bundle.slice(-32);
+    let bundle = CommonUtils.hexToBytes(resp.bundle);
+    let mac = bundle.slice(-32);
 
-      let hasher = CryptoUtils.makeHMACHasher(Ci.nsICryptoHMAC.SHA256,
-        CryptoUtils.makeHMACKey(respHMACKey));
+    let hasher = CryptoUtils.makeHMACHasher(
+      Ci.nsICryptoHMAC.SHA256,
+      CryptoUtils.makeHMACKey(respHMACKey)
+    );
 
-      let bundleMAC = CryptoUtils.digestBytes(bundle.slice(0, -32), hasher);
-      if (mac !== bundleMAC) {
-        throw new Error("error unbundling encryption keys");
-      }
+    let bundleMAC = CryptoUtils.digestBytes(bundle.slice(0, -32), hasher);
+    if (mac !== bundleMAC) {
+      throw new Error("error unbundling encryption keys");
+    }
 
-      let keyAWrapB = CryptoUtils.xor(respXORKey, bundle.slice(0, 64));
+    let keyAWrapB = CryptoUtils.xor(respXORKey, bundle.slice(0, 64));
 
-      return {
-        kA: keyAWrapB.slice(0, 32),
-        wrapKB: keyAWrapB.slice(32),
-      };
-    });
+    return {
+      kA: keyAWrapB.slice(0, 32),
+      wrapKB: keyAWrapB.slice(32),
+    };
   },
 
   /**
@@ -308,18 +390,19 @@ this.FxAccountsClient.prototype = {
    *         wrapping any of these HTTP code/errno pairs:
    *           https://github.com/mozilla/fxa-auth-server/blob/master/docs/api.md#response-12
    */
-  signCertificate(sessionTokenHex, serializedPublicKey, lifetime) {
-    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+  async signCertificate(sessionTokenHex, serializedPublicKey, lifetime) {
+    let creds = await deriveHawkCredentials(sessionTokenHex, "sessionToken");
 
-    let body = { publicKey: serializedPublicKey,
-                 duration: lifetime };
+    let body = { publicKey: serializedPublicKey, duration: lifetime };
     return Promise.resolve()
       .then(_ => this._request("/certificate/sign", "POST", creds, body))
-      .then(resp => resp.cert,
-            err => {
-              log.error("HAWK.signCertificate error: " + JSON.stringify(err));
-              throw err;
-            });
+      .then(
+        resp => resp.cert,
+        err => {
+          log.error("HAWK.signCertificate error: " + JSON.stringify(err));
+          throw err;
+        }
+      );
   },
 
   /**
@@ -333,10 +416,10 @@ this.FxAccountsClient.prototype = {
    */
   accountExists(email) {
     return this.signIn(email, "").then(
-      (cantHappen) => {
+      cantHappen => {
         throw new Error("How did I sign in with an empty password?");
       },
-      (expectedError) => {
+      expectedError => {
         switch (expectedError.errno) {
           case ERRNO_ACCOUNT_DOES_NOT_EXIST:
             return false;
@@ -358,10 +441,10 @@ this.FxAccountsClient.prototype = {
    */
   accountStatus(uid) {
     return this._request("/account/status?uid=" + uid, "GET").then(
-      (result) => {
+      result => {
         return result.exists;
       },
-      (error) => {
+      error => {
         log.error("accountStatus failed with: " + error);
         return Promise.reject(error);
       }
@@ -397,10 +480,10 @@ this.FxAccountsClient.prototype = {
    *           type: Type of device (mobile|desktop)
    *         }
    */
-  registerDevice(sessionTokenHex, name, type, options = {}) {
+  async registerDevice(sessionTokenHex, name, type, options = {}) {
     let path = "/account/device";
 
-    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+    let creds = await deriveHawkCredentials(sessionTokenHex, "sessionToken");
     let body = { name, type };
 
     if (options.pushCallback) {
@@ -432,9 +515,21 @@ this.FxAccountsClient.prototype = {
    *         Resolves to an empty object:
    *         {}
    */
-  notifyDevices(sessionTokenHex, deviceIds, excludedIds, payload, TTL = 0) {
+  async notifyDevices(
+    sessionTokenHex,
+    deviceIds,
+    excludedIds,
+    payload,
+    TTL = 0
+  ) {
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
     if (deviceIds && excludedIds) {
-      throw new Error("You cannot specify excluded devices if deviceIds is set.");
+      throw new Error(
+        "You cannot specify excluded devices if deviceIds is set."
+      );
     }
     const body = {
       to: deviceIds || "all",
@@ -444,8 +539,7 @@ this.FxAccountsClient.prototype = {
     if (excludedIds) {
       body.excluded = excludedIds;
     }
-    return this._request("/account/devices/notify", "POST",
-      deriveHawkCredentials(sessionTokenHex, "sessionToken"), body);
+    return this._request("/account/devices/notify", "POST", credentials, body);
   },
 
   /**
@@ -457,7 +551,11 @@ this.FxAccountsClient.prototype = {
    *                   had that index will be retrieved.
    * @param  [limit] - Maximum number of messages to retrieve.
    */
-  getCommands(sessionTokenHex, {index, limit}) {
+  async getCommands(sessionTokenHex, { index, limit }) {
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
     const params = new URLSearchParams();
     if (index != undefined) {
       params.set("index", index);
@@ -466,8 +564,7 @@ this.FxAccountsClient.prototype = {
       params.set("limit", limit);
     }
     const path = `/account/device/commands?${params.toString()}`;
-    return this._request(path, "GET",
-      deriveHawkCredentials(sessionTokenHex, "sessionToken"));
+    return this._request(path, "GET", credentials);
   },
 
   /**
@@ -481,14 +578,22 @@ this.FxAccountsClient.prototype = {
    * @return Promise
    *         Resolves to the request's response, (which should be an empty object)
    */
-  invokeCommand(sessionTokenHex, command, target, payload) {
+  async invokeCommand(sessionTokenHex, command, target, payload) {
+    const credentials = await deriveHawkCredentials(
+      sessionTokenHex,
+      "sessionToken"
+    );
     const body = {
       command,
       target,
       payload,
     };
-    return this._request("/account/devices/invoke_command", "POST",
-      deriveHawkCredentials(sessionTokenHex, "sessionToken"), body);
+    return this._request(
+      "/account/devices/invoke_command",
+      "POST",
+      credentials,
+      body
+    );
   },
 
   /**
@@ -518,10 +623,10 @@ this.FxAccountsClient.prototype = {
    *           name: Device name
    *         }
    */
-  updateDevice(sessionTokenHex, id, name, options = {}) {
+  async updateDevice(sessionTokenHex, id, name, options = {}) {
     let path = "/account/device";
 
-    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+    let creds = await deriveHawkCredentials(sessionTokenHex, "sessionToken");
     let body = { id, name };
     if (options.pushCallback) {
       body.pushCallback = options.pushCallback;
@@ -554,15 +659,15 @@ this.FxAccountsClient.prototype = {
    *           ...
    *         ]
    */
-  getDeviceList(sessionTokenHex) {
+  async getDeviceList(sessionTokenHex) {
     let path = "/account/devices";
-    let creds = deriveHawkCredentials(sessionTokenHex, "sessionToken");
+    let creds = await deriveHawkCredentials(sessionTokenHex, "sessionToken");
 
     return this._request(path, "GET", creds, {});
   },
 
   _clearBackoff() {
-      this.backoffError = null;
+    this.backoffError = null;
   },
 
   /**
@@ -596,9 +701,16 @@ this.FxAccountsClient.prototype = {
     }
     let response;
     try {
-      response = await this.hawk.request(path, method, credentials, jsonPayload);
+      response = await this.hawk.request(
+        path,
+        method,
+        credentials,
+        jsonPayload
+      );
     } catch (error) {
-      log.error("error " + method + "ing " + path + ": " + JSON.stringify(error));
+      log.error(
+        "error " + method + "ing " + path + ": " + JSON.stringify(error)
+      );
       if (error.retryAfter) {
         log.debug("Received backoff response; caching error as flag.");
         this.backoffError = error;
@@ -608,7 +720,7 @@ this.FxAccountsClient.prototype = {
           error.retryAfter * 1000,
           this,
           "fxaBackoffTimer"
-         );
+        );
       }
       throw error;
     }
@@ -617,7 +729,7 @@ this.FxAccountsClient.prototype = {
     } catch (error) {
       log.error("json parse error on response: " + response.body);
       // eslint-disable-next-line no-throw-literal
-      throw {error};
+      throw { error };
     }
   },
 };

@@ -16,7 +16,6 @@
 #include "nsIHttpChannel.h"
 
 class nsIContent;
-class nsIDocument;
 
 namespace mozilla {
 namespace dom {
@@ -84,16 +83,23 @@ class HTMLTrackElement final : public nsGenericHTMLElement {
 
   // Override BindToTree() so that we can trigger a load when we become
   // the child of a media element.
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent) override;
-  virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
+  virtual nsresult BindToTree(BindContext&, nsINode& aParent) override;
+  virtual void UnbindFromTree(bool aNullParent) override;
+
+  virtual nsresult AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
+                                const nsAttrValue* aValue,
+                                const nsAttrValue* aOldValue,
+                                nsIPrincipal* aMaybeScriptedPrincipal,
+                                bool aNotify) override;
 
   void DispatchTrackRunnable(const nsString& aEventName);
   void DispatchTrustedEvent(const nsAString& aName);
+  void DispatchTestEvent(const nsAString& aName);
 
-  void DropChannel();
+  void CancelChannelAndListener();
 
-  void NotifyShutdown();
+  // Only load resource for the non-disabled track with media parent.
+  void MaybeDispatchLoadResource();
 
  protected:
   virtual ~HTMLTrackElement();
@@ -102,9 +108,6 @@ class HTMLTrackElement final : public nsGenericHTMLElement {
                              JS::Handle<JSObject*> aGivenProto) override;
   void OnChannelRedirect(nsIChannel* aChannel, nsIChannel* aNewChannel,
                          uint32_t aFlags);
-  // Open a new channel to the HTMLTrackElement's src attribute and call
-  // mListener's LoadResource().
-  void LoadResource();
 
   friend class TextTrackCue;
   friend class WebVTTListener;
@@ -117,8 +120,12 @@ class HTMLTrackElement final : public nsGenericHTMLElement {
   void CreateTextTrack();
 
  private:
-  void DispatchLoadResource();
+  // Open a new channel to the HTMLTrackElement's src attribute and call
+  // mListener's LoadResource().
+  void LoadResource(RefPtr<WebVTTListener>&& aWebVTTListener);
   bool mLoadResourceDispatched;
+
+  void MaybeClearAllCues();
 
   RefPtr<WindowDestroyObserver> mWindowDestroyObserver;
 };

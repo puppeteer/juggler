@@ -15,20 +15,21 @@
 //!    be compatible. Otherwise, the value must be copied into a new register for some of the
 //!    operands.
 
-use cursor::{Cursor, EncCursor};
-use dominator_tree::DominatorTree;
-use ir::{ArgumentLoc, Ebb, Function, Inst, InstBuilder, SigRef, Value, ValueLoc};
-use isa::registers::{RegClass, RegClassIndex, RegClassMask, RegUnit};
-use isa::{ConstraintKind, EncInfo, RecipeConstraints, RegInfo, TargetIsa};
-use regalloc::affinity::Affinity;
-use regalloc::live_value_tracker::{LiveValue, LiveValueTracker};
-use regalloc::liveness::Liveness;
-use regalloc::pressure::Pressure;
-use regalloc::virtregs::VirtRegs;
-use std::fmt;
+use crate::cursor::{Cursor, EncCursor};
+use crate::dominator_tree::DominatorTree;
+use crate::ir::{ArgumentLoc, Ebb, Function, Inst, InstBuilder, SigRef, Value, ValueLoc};
+use crate::isa::registers::{RegClass, RegClassIndex, RegClassMask, RegUnit};
+use crate::isa::{ConstraintKind, EncInfo, RecipeConstraints, RegInfo, TargetIsa};
+use crate::regalloc::affinity::Affinity;
+use crate::regalloc::live_value_tracker::{LiveValue, LiveValueTracker};
+use crate::regalloc::liveness::Liveness;
+use crate::regalloc::pressure::Pressure;
+use crate::regalloc::virtregs::VirtRegs;
+use crate::timing;
+use crate::topo_order::TopoOrder;
+use core::fmt;
+use log::debug;
 use std::vec::Vec;
-use timing;
-use topo_order::TopoOrder;
 
 /// Return a top-level register class which contains `unit`.
 fn toprc_containing_regunit(unit: RegUnit, reginfo: &RegInfo) -> RegClass {
@@ -90,7 +91,7 @@ impl Spilling {
     /// Run the spilling algorithm over `func`.
     pub fn run(
         &mut self,
-        isa: &TargetIsa,
+        isa: &dyn TargetIsa,
         func: &mut Function,
         domtree: &DominatorTree,
         liveness: &mut Liveness,
@@ -419,6 +420,7 @@ impl<'a> Context<'a> {
         // secondary `opidx` key makes it possible to use an unstable (non-allocating) sort.
         self.reg_uses.sort_unstable_by_key(|u| (u.value, u.opidx));
 
+        self.cur.use_srcloc(inst);
         for i in 0..self.reg_uses.len() {
             let ru = self.reg_uses[i];
 
@@ -504,7 +506,8 @@ impl<'a> Context<'a> {
                     }
                 }
                 None
-            }).min_by(|&a, &b| {
+            })
+            .min_by(|&a, &b| {
                 // Find the minimum candidate according to the RPO of their defs.
                 self.domtree.rpo_cmp(
                     self.cur.func.dfg.value_def(a),

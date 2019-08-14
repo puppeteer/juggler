@@ -19,7 +19,7 @@
 class nsPresContext;
 
 namespace mozilla {
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 
 namespace dom {
 class Element;
@@ -47,10 +47,10 @@ class CommonAnimationManager {
   /**
    * Stop animations on the element. This method takes the real element
    * rather than the element for the generated content for animations on
-   * ::before and ::after.
+   * ::before, ::after and ::marker.
    */
   void StopAnimationsForElement(dom::Element* aElement,
-                                CSSPseudoElementType aPseudoType) {
+                                PseudoStyleType aPseudoType) {
     MOZ_ASSERT(aElement);
     AnimationCollection<AnimationType>* collection =
         AnimationCollection<AnimationType>::GetAnimationCollection(aElement,
@@ -103,7 +103,7 @@ class OwningElementRef final {
   explicit OwningElementRef(const NonOwningAnimationTarget& aTarget)
       : mTarget(aTarget) {}
 
-  OwningElementRef(dom::Element& aElement, CSSPseudoElementType aPseudoType)
+  OwningElementRef(dom::Element& aElement, PseudoStyleType aPseudoType)
       : mTarget(&aElement, aPseudoType) {}
 
   bool Equals(const OwningElementRef& aOther) const {
@@ -121,15 +121,18 @@ class OwningElementRef final {
                                               &aChildIndex, &aOtherChildIndex);
     }
 
-    return mTarget.mPseudoType == CSSPseudoElementType::NotPseudo ||
-           (mTarget.mPseudoType == CSSPseudoElementType::before &&
-            aOther.mTarget.mPseudoType == CSSPseudoElementType::after);
+    return mTarget.mPseudoType == PseudoStyleType::NotPseudo ||
+           (mTarget.mPseudoType == PseudoStyleType::before &&
+            aOther.mTarget.mPseudoType == PseudoStyleType::after) ||
+           (mTarget.mPseudoType == PseudoStyleType::marker &&
+            aOther.mTarget.mPseudoType == PseudoStyleType::before) ||
+           (mTarget.mPseudoType == PseudoStyleType::marker &&
+            aOther.mTarget.mPseudoType == PseudoStyleType::after);
   }
 
   bool IsSet() const { return !!mTarget.mElement; }
 
-  void GetElement(dom::Element*& aElement,
-                  CSSPseudoElementType& aPseudoType) const {
+  void GetElement(dom::Element*& aElement, PseudoStyleType& aPseudoType) const {
     aElement = mTarget.mElement;
     aPseudoType = mTarget.mPseudoType;
   }

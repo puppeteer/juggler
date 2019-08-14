@@ -6,10 +6,8 @@
   <link rel="stylesheet" type="text/css"
         href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
 
   <script type="application/javascript"
           src="../common.js"></script>
@@ -105,7 +103,6 @@
               nWord = nWord.nextWord;
             }
             pWord = cWord.prevWord;
-
           } else if (this.mOffset < cWord.start) {
             while (this.mOffset < cWord.start) {
               cWord = pWord;
@@ -345,8 +342,8 @@
             }
           }
 
-          func.call(null, kCaretOffset, boundary, text, startOffset, endOffset,
-                    aID, isOk1, isOk2, isOk3);
+          func(kCaretOffset, boundary, text, startOffset, endOffset,
+               aID, isOk1, isOk2, isOk3);
         }
       };
 

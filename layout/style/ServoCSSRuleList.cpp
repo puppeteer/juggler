@@ -22,7 +22,7 @@
 #include "mozilla/IntegerRange.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StyleSheet.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 using namespace mozilla::dom;
 
@@ -154,10 +154,21 @@ nsresult ServoCSSRuleList::InsertRule(const nsAString& aRule, uint32_t aIndex) {
   MOZ_ASSERT(mStyleSheet,
              "Caller must ensure that "
              "the list is not unlinked from stylesheet");
+
+  if (IsReadOnly()) {
+    return NS_OK;
+  }
+
   NS_ConvertUTF16toUTF8 rule(aRule);
   bool nested = !!mParentRule;
   css::Loader* loader = nullptr;
-  if (nsIDocument* doc = mStyleSheet->GetAssociatedDocument()) {
+
+  // TODO(emilio, bug 1535456): Should probably always be able to get a handle
+  // to some loader if we're parsing an @import rule, but which one?
+  //
+  // StyleSheet::ReparseSheet just mints a new loader, but that'd be wrong in
+  // this case I think, since such a load will bypass CSP checks.
+  if (Document* doc = mStyleSheet->GetAssociatedDocument()) {
     loader = doc->CSSLoader();
   }
   uint16_t type;
@@ -172,6 +183,10 @@ nsresult ServoCSSRuleList::InsertRule(const nsAString& aRule, uint32_t aIndex) {
 }
 
 nsresult ServoCSSRuleList::DeleteRule(uint32_t aIndex) {
+  if (IsReadOnly()) {
+    return NS_OK;
+  }
+
   nsresult rv = Servo_CssRules_DeleteRule(mRawRules, aIndex);
   if (!NS_FAILED(rv)) {
     uintptr_t rule = mRules[aIndex];
@@ -195,6 +210,14 @@ ServoCSSRuleList::~ServoCSSRuleList() {
   MOZ_ASSERT(!mStyleSheet, "Backpointer should have been cleared");
   MOZ_ASSERT(!mParentRule, "Backpointer should have been cleared");
   DropAllRules();
+}
+
+bool ServoCSSRuleList::IsReadOnly() const {
+  MOZ_ASSERT(!mStyleSheet || !mParentRule ||
+                 mStyleSheet->IsReadOnly() == mParentRule->IsReadOnly(),
+             "a parent rule should be read only iff the owning sheet is "
+             "read only");
+  return mStyleSheet && mStyleSheet->IsReadOnly();
 }
 
 }  // namespace mozilla

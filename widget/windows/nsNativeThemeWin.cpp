@@ -18,7 +18,6 @@
 #include "nsSize.h"
 #include "nsTransform2D.h"
 #include "nsStyleConsts.h"
-#include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
@@ -2661,7 +2660,9 @@ nsITheme::Transparency nsNativeThemeWin::GetWidgetTransparency(
   if (IsWidgetScrollbarPart(aAppearance)) {
     ComputedStyle* style = nsLayoutUtils::StyleForScrollbar(aFrame);
     if (ShouldDrawCustomScrollbar(style)) {
-      if (style->StyleUI()->mScrollbarTrackColor.MaybeTransparent()) {
+      auto* ui = style->StyleUI();
+      if (ui->mScrollbarColor.IsAuto() ||
+          ui->mScrollbarColor.AsColors().track.MaybeTransparent()) {
         return eTransparent;
       }
       // DrawCustomScrollbarPart doesn't draw the track background for
@@ -3026,40 +3027,40 @@ nsresult nsNativeThemeWin::ClassicGetMinimumWidgetSize(
         (*aResult).width = (*aResult).height = 15;
       *aIsOverridable = false;
       break;
-      case StyleAppearance::ScrollbarthumbVertical:
-        (*aResult).width = ::GetSystemMetrics(SM_CXVSCROLL);
-        (*aResult).height = ::GetSystemMetrics(SM_CYVTHUMB);
-        // Without theming, divide the thumb size by two in order to look more
-        // native
-        if (!GetTheme(aAppearance)) {
-          (*aResult).height >>= 1;
-        }
-        // If scrollbar-width is thin, divide the thickness by two to make
-        // it look more compact.
-        if (IsScrollbarWidthThin(aFrame)) {
-          aResult->width >>= 1;
-        }
-        *aIsOverridable = false;
-        break;
-      case StyleAppearance::ScrollbarthumbHorizontal:
-        (*aResult).width = ::GetSystemMetrics(SM_CXHTHUMB);
-        (*aResult).height = ::GetSystemMetrics(SM_CYHSCROLL);
-        // Without theming, divide the thumb size by two in order to look more
-        // native
-        if (!GetTheme(aAppearance)) {
-          (*aResult).width >>= 1;
-        }
-        // If scrollbar-width is thin, divide the thickness by two to make
-        // it look more compact.
-        if (IsScrollbarWidthThin(aFrame)) {
-          aResult->height >>= 1;
-        }
-        *aIsOverridable = false;
-        break;
-      case StyleAppearance::ScrollbarHorizontal:
-        (*aResult).width = ::GetSystemMetrics(SM_CXHTHUMB) << 1;
-        break;
     }
+    case StyleAppearance::ScrollbarthumbVertical:
+      (*aResult).width = ::GetSystemMetrics(SM_CXVSCROLL);
+      (*aResult).height = ::GetSystemMetrics(SM_CYVTHUMB);
+      // Without theming, divide the thumb size by two in order to look more
+      // native
+      if (!GetTheme(aAppearance)) {
+        (*aResult).height >>= 1;
+      }
+      // If scrollbar-width is thin, divide the thickness by two to make
+      // it look more compact.
+      if (IsScrollbarWidthThin(aFrame)) {
+        aResult->width >>= 1;
+      }
+      *aIsOverridable = false;
+      break;
+    case StyleAppearance::ScrollbarthumbHorizontal:
+      (*aResult).width = ::GetSystemMetrics(SM_CXHTHUMB);
+      (*aResult).height = ::GetSystemMetrics(SM_CYHSCROLL);
+      // Without theming, divide the thumb size by two in order to look more
+      // native
+      if (!GetTheme(aAppearance)) {
+        (*aResult).width >>= 1;
+      }
+      // If scrollbar-width is thin, divide the thickness by two to make
+      // it look more compact.
+      if (IsScrollbarWidthThin(aFrame)) {
+        aResult->height >>= 1;
+      }
+      *aIsOverridable = false;
+      break;
+    case StyleAppearance::ScrollbarHorizontal:
+      (*aResult).width = ::GetSystemMetrics(SM_CXHTHUMB) << 1;
+      break;
     case StyleAppearance::Menuseparator: {
       aResult->width = 0;
       aResult->height = 10;
@@ -4171,9 +4172,10 @@ nsresult nsNativeThemeWin::DrawCustomScrollbarPart(
       ThebesRect(LayoutDevicePixel::FromAppUnits(aRect, p2a).ToUnknownRect());
 
   const nsStyleUI* ui = aStyle->StyleUI();
-  nscolor trackColor = ui->mScrollbarTrackColor.IsAuto()
-                           ? NS_RGB(240, 240, 240)
-                           : ui->mScrollbarTrackColor.CalcColor(aStyle);
+  auto* customColors =
+      ui->mScrollbarColor.IsAuto() ? nullptr : &ui->mScrollbarColor.AsColors();
+  nscolor trackColor = customColors ? customColors->track.CalcColor(*aStyle)
+                                    : NS_RGB(240, 240, 240);
   switch (aAppearance) {
     case StyleAppearance::ScrollbarHorizontal:
     case StyleAppearance::ScrollbarVertical:
@@ -4208,9 +4210,8 @@ nsresult nsNativeThemeWin::DrawCustomScrollbarPart(
   switch (aAppearance) {
     case StyleAppearance::ScrollbarthumbVertical:
     case StyleAppearance::ScrollbarthumbHorizontal: {
-      nscolor faceColor = ui->mScrollbarFaceColor.IsAuto()
-                              ? NS_RGB(205, 205, 205)
-                              : ui->mScrollbarFaceColor.CalcColor(aStyle);
+      nscolor faceColor = customColors ? customColors->thumb.CalcColor(*aStyle)
+                                       : NS_RGB(205, 205, 205);
       faceColor = AdjustScrollbarFaceColor(faceColor, eventStates);
       ctx->SetColor(Color::FromABGR(faceColor));
       ctx->Rectangle(bgRect);

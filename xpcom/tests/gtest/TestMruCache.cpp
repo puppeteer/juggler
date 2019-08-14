@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
 #include "gtest/gtest.h"
 
 #include "mozilla/MruCache.h"
@@ -13,41 +12,44 @@
 using namespace mozilla;
 
 // A few MruCache implementations to use during testing.
-struct IntMap : public MruCache<int, int, IntMap>
-{
+struct IntMap : public MruCache<int, int, IntMap> {
   static HashNumber Hash(const KeyType& aKey) { return aKey - 1; }
-  static bool Match(const KeyType& aKey, const ValueType& aVal) { return aKey == aVal; }
+  static bool Match(const KeyType& aKey, const ValueType& aVal) {
+    return aKey == aVal;
+  }
 };
 
-struct UintPtrMap : public MruCache<uintptr_t, int*, UintPtrMap>
-{
+struct UintPtrMap : public MruCache<uintptr_t, int*, UintPtrMap> {
   static HashNumber Hash(const KeyType& aKey) { return aKey - 1; }
-  static bool Match(const KeyType& aKey, const ValueType& aVal) { return aKey == (KeyType)aVal; }
+  static bool Match(const KeyType& aKey, const ValueType& aVal) {
+    return aKey == (KeyType)aVal;
+  }
 };
 
-struct StringStruct
-{
+struct StringStruct {
   nsCString mKey;
   nsCString mOther;
 };
 
-struct StringStructMap : public MruCache<nsCString, StringStruct, StringStructMap>
-{
-  static HashNumber Hash(const KeyType& aKey) { return *aKey.BeginReading() - 1; }
-  static bool Match(const KeyType& aKey, const ValueType& aVal) { return aKey == aVal.mKey; }
+struct StringStructMap
+    : public MruCache<nsCString, StringStruct, StringStructMap> {
+  static HashNumber Hash(const KeyType& aKey) {
+    return *aKey.BeginReading() - 1;
+  }
+  static bool Match(const KeyType& aKey, const ValueType& aVal) {
+    return aKey == aVal.mKey;
+  }
 };
 
 // Helper for emulating convertable holders such as RefPtr.
 template <typename T>
-struct Convertable
-{
+struct Convertable {
   T mItem;
   operator T() const { return mItem; }
 };
 
 // Helper to create a StringStructMap key.
-nsCString MakeStringKey(char aKey)
-{
+static nsCString MakeStringKey(char aKey) {
   nsCString key;
   key.Append(aKey);
   return key;
@@ -321,7 +323,7 @@ TEST(MruCache, TestLookupAndOverwrite)
 
   // Lookup a key that maps the 1's entry.
   auto p = mru.Lookup(32);
-  EXPECT_FALSE(p); // not a match
+  EXPECT_FALSE(p);  // not a match
 
   // Now overwrite the entry.
   p.Set(32);

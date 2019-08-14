@@ -17,10 +17,6 @@ from taskgraph.util.taskcluster import get_artifact_prefix
 
 from voluptuous import Optional, Required
 
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
-
 
 push_apk_description_schema = Schema({
     Required('dependent-tasks'): object,
@@ -34,18 +30,12 @@ push_apk_description_schema = Schema({
     Required('worker-type'): optionally_keyed_by('release-level', basestring),
     Required('worker'): object,
     Required('scopes'): None,
-    Required('requires'): task_description_schema['requires'],
-    Required('deadline-after'): basestring,
     Required('shipping-phase'): task_description_schema['shipping-phase'],
     Required('shipping-product'): task_description_schema['shipping-product'],
     Optional('extra'): task_description_schema['extra'],
 })
 
 
-REQUIRED_ARCHITECTURES = {
-    'android-x86-nightly',
-    'android-api-16-nightly',
-}
 PLATFORM_REGEX = re.compile(r'build-signing-android-(\S+)-nightly')
 
 transforms = TransformSequence()
@@ -53,21 +43,31 @@ transforms.add_validate(push_apk_description_schema)
 
 
 @transforms.add
-def validate_dependent_tasks(_, jobs):
+def validate_dependent_tasks(config, jobs):
     for job in jobs:
-        check_every_architecture_is_present_in_dependent_tasks(job['dependent-tasks'])
+        check_every_architecture_is_present_in_dependent_tasks(
+            config.params['project'], job['dependent-tasks']
+        )
         yield job
 
 
-def check_every_architecture_is_present_in_dependent_tasks(dependent_tasks):
+_REQUIRED_ARCHITECTURES = {
+    'android-aarch64-nightly',
+    'android-api-16-nightly',
+    'android-x86_64-nightly',
+    'android-x86-nightly',
+}
+
+
+def check_every_architecture_is_present_in_dependent_tasks(project, dependent_tasks):
     dep_platforms = set(t.attributes.get('build_platform') for t in dependent_tasks)
-    missed_architectures = REQUIRED_ARCHITECTURES - dep_platforms
+    missed_architectures = _REQUIRED_ARCHITECTURES - dep_platforms
     if missed_architectures:
         raise Exception('''One or many required architectures are missing.
 
 Required architectures: {}.
 Given dependencies: {}.
-'''.format(REQUIRED_ARCHITECTURES, dependent_tasks)
+'''.format(_REQUIRED_ARCHITECTURES, dependent_tasks)
         )
 
 
@@ -108,7 +108,7 @@ def generate_dependencies(dependent_tasks):
     dependencies = {}
     for task in dependent_tasks:
         platform_match = PLATFORM_REGEX.match(task.label)
-        # platform_match is None when the google-play-string task is given, for instance
+        # platform_match is None when the push-apk-checks task is given, for instance
         task_kind = task.kind if platform_match is None else \
             '{}-{}'.format(task.kind, platform_match.group(1))
         dependencies[task_kind] = task.label
@@ -117,24 +117,13 @@ def generate_dependencies(dependent_tasks):
 
 def generate_upstream_artifacts(job, dependencies):
     artifact_prefix = get_artifact_prefix(job)
-    apks = [{
+    return [{
         'taskId': {'task-reference': '<{}>'.format(task_kind)},
         'taskType': 'signing',
         'paths': ['{}/target.apk'.format(artifact_prefix)],
     } for task_kind in dependencies.keys()
-      if 'google-play-strings' not in task_kind
+      if task_kind != 'push-apk-checks'
     ]
-
-    google_play_strings = [{
-        'taskId': {'task-reference': '<{}>'.format(task_kind)},
-        'taskType': 'build',
-        'paths': ['public/google_play_strings.json'],
-        'optional': True,
-    } for task_kind in dependencies.keys()
-      if 'google-play-strings' in task_kind
-    ]
-
-    return apks + google_play_strings
 
 
 @transforms.add

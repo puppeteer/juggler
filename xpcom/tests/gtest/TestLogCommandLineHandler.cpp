@@ -16,9 +16,8 @@
 
 using namespace mozilla;
 
-template<class T, size_t N>
-constexpr size_t array_size(T (&)[N])
-{
+template <class T, size_t N>
+constexpr size_t array_size(T (&)[N]) {
   return N;
 }
 
@@ -32,7 +31,7 @@ TEST(LogCommandLineHandler, Empty)
   mozilla::LoggingHandleCommandLineArgs(0, nullptr, callback);
   EXPECT_FALSE(callbackInvoked);
 
-  char const* argv1[] = { "" };
+  char const* argv1[] = {""};
   mozilla::LoggingHandleCommandLineArgs(array_size(argv1), argv1, callback);
   EXPECT_FALSE(callbackInvoked);
 }
@@ -45,25 +44,26 @@ TEST(LogCommandLineHandler, MOZ_LOG_regular)
     results.AppendElement(env);
   };
 
-  char const* argv1[] = { "", "-MOZ_LOG", "module1:5,module2:4,sync,timestamp" };
+  char const* argv1[] = {"", "-MOZ_LOG", "module1:5,module2:4,sync,timestamp"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv1), argv1, callback);
   EXPECT_TRUE(results.Length() == 1);
-  EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=module1:5,module2:4,sync,timestamp").Equals(results[0]));
+  EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=module1:5,module2:4,sync,timestamp")
+                  .Equals(results[0]));
 
-  char const* argv2[] = { "", "-MOZ_LOG=modules" };
+  char const* argv2[] = {"", "-MOZ_LOG=modules"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv2), argv2, callback);
   EXPECT_TRUE(results.Length() == 1);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
 
-  char const* argv3[] = { "", "--MOZ_LOG", "modules" };
+  char const* argv3[] = {"", "--MOZ_LOG", "modules"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv3), argv3, callback);
   EXPECT_TRUE(results.Length() == 1);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
 
-  char const* argv4[] = { "", "--MOZ_LOG=modules" };
+  char const* argv4[] = {"", "--MOZ_LOG=modules"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv4), argv4, callback);
   EXPECT_TRUE(results.Length() == 1);
@@ -78,35 +78,38 @@ TEST(LogCommandLineHandler, MOZ_LOG_and_FILE_regular)
     results.AppendElement(env);
   };
 
-  char const* argv1[] = { "", "-MOZ_LOG", "modules", "-MOZ_LOG_FILE", "c:\\file/path" };
+  char const* argv1[] = {"", "-MOZ_LOG", "modules", "-MOZ_LOG_FILE",
+                         "c:\\file/path"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv1), argv1, callback);
   EXPECT_TRUE(results.Length() == 2);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
-  EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG_FILE=c:\\file/path").Equals(results[1]));
+  EXPECT_TRUE(
+      NS_LITERAL_CSTRING("MOZ_LOG_FILE=c:\\file/path").Equals(results[1]));
 
-  char const* argv2[] = { "", "-MOZ_LOG=modules", "-MOZ_LOG_FILE=file" };
+  char const* argv2[] = {"", "-MOZ_LOG=modules", "-MOZ_LOG_FILE=file"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv2), argv2, callback);
   EXPECT_TRUE(results.Length() == 2);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG_FILE=file").Equals(results[1]));
 
-  char const* argv3[] = { "", "--MOZ_LOG", "modules", "--MOZ_LOG_FILE", "file" };
+  char const* argv3[] = {"", "--MOZ_LOG", "modules", "--MOZ_LOG_FILE", "file"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv3), argv3, callback);
   EXPECT_TRUE(results.Length() == 2);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG_FILE=file").Equals(results[1]));
 
-  char const* argv4[] = { "", "--MOZ_LOG=modules", "--MOZ_LOG_FILE=file" };
+  char const* argv4[] = {"", "--MOZ_LOG=modules", "--MOZ_LOG_FILE=file"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv4), argv4, callback);
   EXPECT_TRUE(results.Length() == 2);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG_FILE=file").Equals(results[1]));
 
-  char const* argv5[] = { "", "--MOZ_LOG", "modules", "-P", "foo", "--MOZ_LOG_FILE", "file" };
+  char const* argv5[] = {"",    "--MOZ_LOG",      "modules", "-P",
+                         "foo", "--MOZ_LOG_FILE", "file"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv5), argv5, callback);
   EXPECT_TRUE(results.Length() == 2);
@@ -122,27 +125,27 @@ TEST(LogCommandLineHandler, MOZ_LOG_fuzzy)
     results.AppendElement(env);
   };
 
-  char const* argv1[] = { "", "-MOZ_LOG" };
+  char const* argv1[] = {"", "-MOZ_LOG"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv1), argv1, callback);
   EXPECT_TRUE(results.Length() == 0);
 
-  char const* argv2[] = { "", "modules" };
+  char const* argv2[] = {"", "modules"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv2), argv2, callback);
   EXPECT_TRUE(results.Length() == 0);
 
-  char const* argv3[] = { "", "-MOZ_LOG,modules", "-MOZ_LOG" };
+  char const* argv3[] = {"", "-MOZ_LOG,modules", "-MOZ_LOG"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv3), argv3, callback);
   EXPECT_TRUE(results.Length() == 0);
 
-  char const* argv4[] = { "", "-MOZ_LOG", "-MOZ_LOG", "-MOZ_LOG" };
+  char const* argv4[] = {"", "-MOZ_LOG", "-MOZ_LOG", "-MOZ_LOG"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv4), argv4, callback);
   EXPECT_TRUE(results.Length() == 0);
 
-  char const* argv5[] = { "", "-MOZ_LOG", "-diffent_command", "modules" };
+  char const* argv5[] = {"", "-MOZ_LOG", "-diffent_command", "modules"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv5), argv5, callback);
   EXPECT_TRUE(results.Length() == 0);
@@ -156,26 +159,26 @@ TEST(LogCommandLineHandler, MOZ_LOG_overlapping)
     results.AppendElement(env);
   };
 
-  char const* argv1[] = { "", "-MOZ_LOG=modules1", "-MOZ_LOG=modules2" };
+  char const* argv1[] = {"", "-MOZ_LOG=modules1", "-MOZ_LOG=modules2"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv1), argv1, callback);
   EXPECT_TRUE(results.Length() == 2);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules1").Equals(results[0]));
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules2").Equals(results[1]));
 
-  char const* argv2[] = { "", "-MOZ_LOG", "--MOZ_LOG", "modules" };
+  char const* argv2[] = {"", "-MOZ_LOG", "--MOZ_LOG", "modules"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv2), argv2, callback);
   EXPECT_TRUE(results.Length() == 1);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
 
-  char const* argv3[] = { "", "-MOZ_LOG_FILE", "-MOZ_LOG", "modules" };
+  char const* argv3[] = {"", "-MOZ_LOG_FILE", "-MOZ_LOG", "modules"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv3), argv3, callback);
   EXPECT_TRUE(results.Length() == 1);
   EXPECT_TRUE(NS_LITERAL_CSTRING("MOZ_LOG=modules").Equals(results[0]));
 
-  char const* argv4[] = { "", "-MOZ_LOG", "-MOZ_LOG_FILE", "-MOZ_LOG" };
+  char const* argv4[] = {"", "-MOZ_LOG", "-MOZ_LOG_FILE", "-MOZ_LOG"};
   results.Clear();
   mozilla::LoggingHandleCommandLineArgs(array_size(argv4), argv4, callback);
   EXPECT_TRUE(results.Length() == 0);

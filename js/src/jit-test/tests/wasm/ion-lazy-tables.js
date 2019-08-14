@@ -16,11 +16,11 @@ const EXPECTED_STACKS = [SLOW_ENTRY_STACK, FAST_ENTRY_STACK, INLINED_CALL_STACK]
 function main() {
     var { table } = wasmEvalText(`(module
         (func $add (result i32) (param i32) (param i32)
-         get_local 0
-         get_local 1
+         local.get 0
+         local.get 1
          i32.add
         )
-        (table (export "table") 10 anyfunc)
+        (table (export "table") 10 funcref)
         (elem (i32.const 0) $add)
     )`).exports;
 
@@ -36,11 +36,11 @@ function withTier2() {
 
     var module = new WebAssembly.Module(wasmTextToBinary(`(module
         (func $add (result i32) (param i32) (param i32)
-         get_local 0
-         get_local 1
+         local.get 0
+         local.get 1
          i32.add
         )
-        (table (export "table") 10 anyfunc)
+        (table (export "table") 10 funcref)
         (elem (i32.const 0) $add)
     )`));
     var { table } = new WebAssembly.Instance(module).exports;

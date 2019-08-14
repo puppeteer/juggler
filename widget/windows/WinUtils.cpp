@@ -40,7 +40,7 @@
 #include "nsNetCID.h"
 #include "prtime.h"
 #ifdef MOZ_PLACES
-#include "nsIFaviconService.h"
+#  include "nsIFaviconService.h"
 #endif
 #include "nsIIconURI.h"
 #include "nsIDownloader.h"
@@ -55,8 +55,8 @@
 #include "nsWindowsHelpers.h"
 
 #ifdef NS_ENABLE_TSF
-#include <textstor.h>
-#include "TSFTextStore.h"
+#  include <textstor.h>
+#  include "TSFTextStore.h"
 #endif  // #ifdef NS_ENABLE_TSF
 
 #include <shlobj.h>
@@ -602,7 +602,8 @@ static bool SlowIsPerMonitorDPIAware() {
          dpiAwareness == PROCESS_PER_MONITOR_DPI_AWARE;
 }
 
-/* static */ bool WinUtils::IsPerMonitorDPIAware() {
+/* static */
+bool WinUtils::IsPerMonitorDPIAware() {
   static bool perMonitorDPIAware = SlowIsPerMonitorDPIAware();
   return perMonitorDPIAware;
 }
@@ -1152,7 +1153,7 @@ nsresult AsyncFaviconDataReady::OnFaviconDataNotAvailable(void) {
   rv = NS_NewDownloader(getter_AddRefs(listener), downloadObserver, icoFile);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return channel->AsyncOpen2(listener);
+  return channel->AsyncOpen(listener);
 }
 
 NS_IMETHODIMP
@@ -1193,10 +1194,11 @@ AsyncFaviconDataReady::OnComplete(nsIURI* aFaviconURI, uint32_t aDataLen,
   RefPtr<DataSourceSurface> dataSurface;
   IntSize size;
 
-  if (mURLShortcut) {
-    // Create a 48x48 surface and paint the icon into the central 16x16 rect.
-    size.width = 48;
-    size.height = 48;
+  if (mURLShortcut &&
+      (surface->GetSize().width < 48 || surface->GetSize().height < 48)) {
+    // Create a 48x48 surface and paint the icon into the central rect.
+    size.width = std::max(surface->GetSize().width, 48);
+    size.height = std::max(surface->GetSize().height, 48);
     dataSurface =
         Factory::CreateDataSourceSurface(size, SurfaceFormat::B8G8R8A8);
     NS_ENSURE_TRUE(dataSurface, NS_ERROR_FAILURE);
@@ -1216,7 +1218,12 @@ AsyncFaviconDataReady::OnComplete(nsIURI* aFaviconURI, uint32_t aDataLen,
     }
     dt->FillRect(Rect(0, 0, size.width, size.height),
                  ColorPattern(Color(1.0f, 1.0f, 1.0f, 1.0f)));
-    dt->DrawSurface(surface, Rect(16, 16, 16, 16),
+    IntPoint point;
+    point.x = (size.width - surface->GetSize().width) / 2;
+    point.y = (size.height - surface->GetSize().height) / 2;
+    dt->DrawSurface(surface,
+                    Rect(point.x, point.y, surface->GetSize().width,
+                         surface->GetSize().height),
                     Rect(Point(0, 0), Size(surface->GetSize().width,
                                            surface->GetSize().height)));
 
@@ -1273,13 +1280,12 @@ NS_IMETHODIMP AsyncEncodeAndWriteIcon::Run() {
       mBuffer.get(), mStride, IntSize(mWidth, mHeight),
       SurfaceFormat::B8G8R8A8);
 
-  FILE* file = fopen(NS_ConvertUTF16toUTF8(mIconPath).get(), "wb");
+  FILE* file = _wfopen(mIconPath.get(), L"wb");
   if (!file) {
     // Maybe the directory doesn't exist; try creating it, then fopen again.
     nsresult rv = NS_ERROR_FAILURE;
     nsCOMPtr<nsIFile> comFile = do_CreateInstance("@mozilla.org/file/local;1");
     if (comFile) {
-      // NS_ConvertUTF8toUTF16 utf16path(mIconPath);
       rv = comFile->InitWithPath(mIconPath);
       if (NS_SUCCEEDED(rv)) {
         nsCOMPtr<nsIFile> dirPath;
@@ -1287,7 +1293,7 @@ NS_IMETHODIMP AsyncEncodeAndWriteIcon::Run() {
         if (dirPath) {
           rv = dirPath->Create(nsIFile::DIRECTORY_TYPE, 0777);
           if (NS_SUCCEEDED(rv) || rv == NS_ERROR_FILE_ALREADY_EXISTS) {
-            file = fopen(NS_ConvertUTF16toUTF8(mIconPath).get(), "wb");
+            file = _wfopen(mIconPath.get(), L"wb");
             if (!file) {
               rv = NS_ERROR_FAILURE;
             }
@@ -1300,8 +1306,7 @@ NS_IMETHODIMP AsyncEncodeAndWriteIcon::Run() {
     }
   }
   nsresult rv = gfxUtils::EncodeSourceSurface(
-      surface, NS_LITERAL_CSTRING("image/vnd.microsoft.icon"), EmptyString(),
-      gfxUtils::eBinaryEncode, file);
+      surface, ImageType::ICO, EmptyString(), gfxUtils::eBinaryEncode, file);
   fclose(file);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1656,28 +1661,35 @@ nsresult WinUtils::WriteBitmap(nsIFile* aFile, SourceSurface* surface) {
   int32_t height = dataSurface->GetSize().height;
   int32_t bytesPerPixel = 4 * sizeof(uint8_t);
   uint32_t bytesPerRow = bytesPerPixel * width;
+  bool hasAlpha = surface->GetFormat() == SurfaceFormat::B8G8R8A8;
 
   // initialize these bitmap structs which we will later
   // serialize directly to the head of the bitmap file
-  BITMAPINFOHEADER bmi;
-  bmi.biSize = sizeof(BITMAPINFOHEADER);
-  bmi.biWidth = width;
-  bmi.biHeight = height;
-  bmi.biPlanes = 1;
-  bmi.biBitCount = (WORD)bytesPerPixel * 8;
-  bmi.biCompression = BI_RGB;
-  bmi.biSizeImage = bytesPerRow * height;
-  bmi.biXPelsPerMeter = 0;
-  bmi.biYPelsPerMeter = 0;
-  bmi.biClrUsed = 0;
-  bmi.biClrImportant = 0;
+  BITMAPV4HEADER bmi;
+  memset(&bmi, 0, sizeof(BITMAPV4HEADER));
+  bmi.bV4Size = sizeof(BITMAPV4HEADER);
+  bmi.bV4Width = width;
+  bmi.bV4Height = height;
+  bmi.bV4Planes = 1;
+  bmi.bV4BitCount = (WORD)bytesPerPixel * 8;
+  bmi.bV4V4Compression = hasAlpha ? BI_BITFIELDS : BI_RGB;
+  bmi.bV4SizeImage = bytesPerRow * height;
+  bmi.bV4CSType = LCS_sRGB;
+  if (hasAlpha) {
+    bmi.bV4RedMask = 0x00FF0000;
+    bmi.bV4GreenMask = 0x0000FF00;
+    bmi.bV4BlueMask = 0x000000FF;
+    bmi.bV4AlphaMask = 0xFF000000;
+  }
 
   BITMAPFILEHEADER bf;
+  DWORD colormask[3];
   bf.bfType = 0x4D42;  // 'BM'
   bf.bfReserved1 = 0;
   bf.bfReserved2 = 0;
-  bf.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-  bf.bfSize = bf.bfOffBits + bmi.biSizeImage;
+  bf.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPV4HEADER) +
+                 (hasAlpha ? sizeof(colormask) : 0);
+  bf.bfSize = bf.bfOffBits + bmi.bV4SizeImage;
 
   // get a file output stream
   nsCOMPtr<nsIOutputStream> stream;
@@ -1695,21 +1707,31 @@ nsresult WinUtils::WriteBitmap(nsIFile* aFile, SourceSurface* surface) {
     uint32_t written;
     stream->Write((const char*)&bf, sizeof(BITMAPFILEHEADER), &written);
     if (written == sizeof(BITMAPFILEHEADER)) {
-      stream->Write((const char*)&bmi, sizeof(BITMAPINFOHEADER), &written);
-      if (written == sizeof(BITMAPINFOHEADER)) {
-        // write out the image data backwards because the desktop won't
-        // show bitmaps with negative heights for top-to-bottom
-        uint32_t i = map.mStride * height;
-        do {
-          i -= map.mStride;
-          stream->Write(((const char*)map.mData) + i, bytesPerRow, &written);
-          if (written == bytesPerRow) {
-            rv = NS_OK;
-          } else {
-            rv = NS_ERROR_FAILURE;
-            break;
-          }
-        } while (i != 0);
+      stream->Write((const char*)&bmi, sizeof(BITMAPV4HEADER), &written);
+      if (written == sizeof(BITMAPV4HEADER)) {
+        if (hasAlpha) {
+          // color mask
+          colormask[0] = 0x00FF0000;
+          colormask[1] = 0x0000FF00;
+          colormask[2] = 0x000000FF;
+
+          stream->Write((const char*)colormask, sizeof(colormask), &written);
+        }
+        if (!hasAlpha || written == sizeof(colormask)) {
+          // write out the image data backwards because the desktop won't
+          // show bitmaps with negative heights for top-to-bottom
+          uint32_t i = map.mStride * height;
+          do {
+            i -= map.mStride;
+            stream->Write(((const char*)map.mData) + i, bytesPerRow, &written);
+            if (written == bytesPerRow) {
+              rv = NS_OK;
+            } else {
+              rv = NS_ERROR_FAILURE;
+              break;
+            }
+          } while (i != 0);
+        }
       }
     }
 

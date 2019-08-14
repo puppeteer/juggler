@@ -24,11 +24,13 @@
  *     Called to clean up at the end of use
  */
 
-const {StreamUtils} =
-    ChromeUtils.import("chrome://marionette/content/stream-utils.js", {});
+const { StreamUtils } = ChromeUtils.import(
+  "chrome://marionette/content/stream-utils.js"
+);
 
-const unicodeConverter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
-    .createInstance(Ci.nsIScriptableUnicodeConverter);
+const unicodeConverter = Cc[
+  "@mozilla.org/intl/scriptableunicodeconverter"
+].createInstance(Ci.nsIScriptableUnicodeConverter);
 unicodeConverter.charset = "UTF-8";
 
 const defer = function() {
@@ -72,20 +74,25 @@ function Packet(transport) {
  *     Parsed packet of the matching type, or null if no types matched.
  */
 Packet.fromHeader = function(header, transport) {
-  return JSONPacket.fromHeader(header, transport) ||
-         BulkPacket.fromHeader(header, transport);
+  return (
+    JSONPacket.fromHeader(header, transport) ||
+    BulkPacket.fromHeader(header, transport)
+  );
 };
 
 Packet.prototype = {
-
   get length() {
     return this._length;
   },
 
   set length(length) {
     if (length > PACKET_LENGTH_MAX) {
-      throw new Error("Packet length " + length +
-                      " exceeds the max length of " + PACKET_LENGTH_MAX);
+      throw new Error(
+        "Packet length " +
+          length +
+          " exceeds the max length of " +
+          PACKET_LENGTH_MAX
+      );
     }
     this._length = length;
   },
@@ -159,7 +166,6 @@ Object.defineProperty(JSONPacket.prototype, "object", {
 });
 
 JSONPacket.prototype.read = function(stream, scriptableStream) {
-
   // Read in more packet data.
   this._readData(stream, scriptableStream);
 
@@ -173,8 +179,14 @@ JSONPacket.prototype.read = function(stream, scriptableStream) {
     json = unicodeConverter.ConvertToUnicode(json);
     this._object = JSON.parse(json);
   } catch (e) {
-    let msg = "Error parsing incoming packet: " + json + " (" + e +
-              " - " + e.stack + ")";
+    let msg =
+      "Error parsing incoming packet: " +
+      json +
+      " (" +
+      e +
+      " - " +
+      e.stack +
+      ")";
     console.error(msg);
     dump(msg + "\n");
     return;
@@ -185,14 +197,14 @@ JSONPacket.prototype.read = function(stream, scriptableStream) {
 
 JSONPacket.prototype._readData = function(stream, scriptableStream) {
   let bytesToRead = Math.min(
-      this.length - this._data.length,
-      stream.available());
+    this.length - this._data.length,
+    stream.available()
+  );
   this._data += scriptableStream.readBytes(bytesToRead);
   this._done = this._data.length === this.length;
 };
 
 JSONPacket.prototype.write = function(stream) {
-
   if (this._outgoing === undefined) {
     // Format the serialized packet to a buffer
     this._outgoing = this.length + ":" + this._data;
@@ -277,7 +289,7 @@ BulkPacket.prototype.read = function(stream) {
     actor: this.actor,
     type: this.type,
     length: this.length,
-    copyTo: (output) => {
+    copyTo: output => {
       let copying = StreamUtils.copyStream(stream, output, this.length);
       deferred.resolve(copying);
       return copying;
@@ -301,14 +313,16 @@ BulkPacket.prototype.read = function(stream) {
 BulkPacket.prototype.write = function(stream) {
   if (this._outgoingHeader === undefined) {
     // Format the serialized packet header to a buffer
-    this._outgoingHeader = "bulk " + this.actor + " " + this.type + " " +
-                           this.length + ":";
+    this._outgoingHeader =
+      "bulk " + this.actor + " " + this.type + " " + this.length + ":";
   }
 
   // Write the header, or whatever's left of it to write.
   if (this._outgoingHeader.length) {
-    let written = stream.write(this._outgoingHeader,
-        this._outgoingHeader.length);
+    let written = stream.write(
+      this._outgoingHeader,
+      this._outgoingHeader.length
+    );
     this._outgoingHeader = this._outgoingHeader.slice(written);
     return;
   }
@@ -319,7 +333,7 @@ BulkPacket.prototype.write = function(stream) {
   let deferred = defer();
 
   this._readyForWriting.resolve({
-    copyFrom: (input) => {
+    copyFrom: input => {
       let copying = StreamUtils.copyStream(input, stream, this.length);
       deferred.resolve(copying);
       return copying;

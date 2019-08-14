@@ -3,17 +3,17 @@
 //! This module exports the `expand_global_value` function which transforms a `global_value`
 //! instruction into code that depends on the kind of global value referenced.
 
-use cursor::{Cursor, FuncCursor};
-use flowgraph::ControlFlowGraph;
-use ir::{self, InstBuilder};
-use isa::TargetIsa;
+use crate::cursor::{Cursor, FuncCursor};
+use crate::flowgraph::ControlFlowGraph;
+use crate::ir::{self, InstBuilder};
+use crate::isa::TargetIsa;
 
 /// Expand a `global_value` instruction according to the definition of the global value.
 pub fn expand_global_value(
     inst: ir::Inst,
     func: &mut ir::Function,
     _cfg: &mut ControlFlowGraph,
-    isa: &TargetIsa,
+    isa: &dyn TargetIsa,
 ) {
     // Unpack the instruction.
     let gv = match func.dfg[inst] {
@@ -90,7 +90,7 @@ fn load_addr(
     offset: ir::immediates::Offset32,
     global_type: ir::Type,
     readonly: bool,
-    isa: &TargetIsa,
+    isa: &dyn TargetIsa,
 ) {
     // We need to load a pointer from the `base` global value, so insert a new `global_value`
     // instruction. This depends on the iterative legalization loop. Note that the IR verifier
@@ -110,9 +110,7 @@ fn load_addr(
     };
 
     // Global-value loads are always notrap and aligned. They may be readonly.
-    let mut mflags = ir::MemFlags::new();
-    mflags.set_notrap();
-    mflags.set_aligned();
+    let mut mflags = ir::MemFlags::trusted();
     if readonly {
         mflags.set_readonly();
     }
@@ -125,7 +123,7 @@ fn load_addr(
 }
 
 /// Expand a `global_value` instruction for a symbolic name global.
-fn symbol(inst: ir::Inst, func: &mut ir::Function, gv: ir::GlobalValue, isa: &TargetIsa) {
+fn symbol(inst: ir::Inst, func: &mut ir::Function, gv: ir::GlobalValue, isa: &dyn TargetIsa) {
     let ptr_ty = isa.pointer_type();
     func.dfg.replace(inst).symbol_value(ptr_ty, gv);
 }

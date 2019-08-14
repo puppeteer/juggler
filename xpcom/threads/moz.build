@@ -22,11 +22,14 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'xpcom_threads'
 
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
+
 EXPORTS += [
     'MainThreadUtils.h',
     'nsICancelableRunnable.h',
     'nsIIdleRunnable.h',
-    'nsILabelableRunnable.h',
     'nsMemoryPressure.h',
     'nsProcess.h',
     'nsProxyRelease.h',
@@ -41,8 +44,8 @@ EXPORTS.mozilla += [
     'AbstractThread.h',
     'BlockingResourceBase.h',
     'CondVar.h',
-    'CooperativeThreadPool.h',
     'CPUUsageWatcher.h',
+    'DataMutex.h',
     'DeadlockDetector.h',
     'EventQueue.h',
     'IdleTaskRunner.h',
@@ -56,7 +59,6 @@ EXPORTS.mozilla += [
     'RecursiveMutex.h',
     'ReentrantMonitor.h',
     'RWLock.h',
-    'Scheduler.h',
     'SchedulerGroup.h',
     'SharedThreadPool.h',
     'StateMirroring.h',
@@ -80,15 +82,12 @@ SOURCES += [
 UNIFIED_SOURCES += [
     'AbstractThread.cpp',
     'BlockingResourceBase.cpp',
-    'CooperativeThreadPool.cpp',
     'CPUUsageWatcher.cpp',
     'EventQueue.cpp',
     'InputEventStatistics.cpp',
-    'LabeledEventQueue.cpp',
     'LazyIdleThread.cpp',
     'MainThreadIdlePeriod.cpp',
     'nsEnvironment.cpp',
-    'nsILabelableRunnable.cpp',
     'nsMemoryPressure.cpp',
     'nsProcessCommon.cpp',
     'nsProxyRelease.cpp',
@@ -101,7 +100,6 @@ UNIFIED_SOURCES += [
     'PrioritizedEventQueue.cpp',
     'RecursiveMutex.cpp',
     'RWLock.cpp',
-    'Scheduler.cpp',
     'SchedulerGroup.cpp',
     'SharedThreadPool.cpp',
     'SynchronizedEventQueue.cpp',
@@ -109,6 +107,7 @@ UNIFIED_SOURCES += [
     'TaskQueue.cpp',
     'ThreadEventQueue.cpp',
     'ThreadEventTarget.cpp',
+    'ThreadLocalVariables.cpp',
     'ThrottledEventQueue.cpp',
     'TimerThread.cpp',
 ]
@@ -122,6 +121,3 @@ LOCAL_INCLUDES += [
 FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
-
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497

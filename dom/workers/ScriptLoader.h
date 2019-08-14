@@ -13,9 +13,10 @@
 
 class nsIPrincipal;
 class nsIURI;
-class nsIDocument;
+
 class nsILoadGroup;
 class nsIChannel;
+class nsICookieSettings;
 
 namespace mozilla {
 
@@ -25,15 +26,17 @@ namespace dom {
 
 struct WorkerLoadInfo;
 class WorkerPrivate;
+class SerializedStackHolder;
 
 enum WorkerScriptType { WorkerScript, DebuggerScript };
 
 namespace workerinternals {
 
 nsresult ChannelFromScriptURLMainThread(
-    nsIPrincipal* aPrincipal, nsIDocument* aParentDoc, nsILoadGroup* aLoadGroup,
+    nsIPrincipal* aPrincipal, Document* aParentDoc, nsILoadGroup* aLoadGroup,
     nsIURI* aScriptURL, const Maybe<ClientInfo>& aClientInfo,
-    nsContentPolicyType aContentPolicyType, nsIChannel** aChannel);
+    nsContentPolicyType aContentPolicyType, nsICookieSettings* aCookieSettings,
+    nsIReferrerInfo* aReferrerInfo, nsIChannel** aChannel);
 
 nsresult ChannelFromScriptURLWorkerThread(JSContext* aCx,
                                           WorkerPrivate* aParent,
@@ -43,10 +46,14 @@ nsresult ChannelFromScriptURLWorkerThread(JSContext* aCx,
 void ReportLoadError(ErrorResult& aRv, nsresult aLoadResult,
                      const nsAString& aScriptURL);
 
-void LoadMainScript(WorkerPrivate* aWorkerPrivate, const nsAString& aScriptURL,
+void LoadMainScript(WorkerPrivate* aWorkerPrivate,
+                    UniquePtr<SerializedStackHolder> aOriginStack,
+                    const nsAString& aScriptURL,
                     WorkerScriptType aWorkerScriptType, ErrorResult& aRv);
 
-void Load(WorkerPrivate* aWorkerPrivate, const nsTArray<nsString>& aScriptURLs,
+void Load(WorkerPrivate* aWorkerPrivate,
+          UniquePtr<SerializedStackHolder> aOriginStack,
+          const nsTArray<nsString>& aScriptURLs,
           WorkerScriptType aWorkerScriptType, ErrorResult& aRv);
 
 }  // namespace workerinternals

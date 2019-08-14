@@ -86,12 +86,12 @@ static bool sInSendMessageExHackEnabled = false;
 static PVOID sVectoredExceptionHandler = nullptr;
 
 #if defined(_MSC_VER)
-#include <intrin.h>
-#pragma intrinsic(_ReturnAddress)
-#define RETURN_ADDRESS() _ReturnAddress()
+#  include <intrin.h>
+#  pragma intrinsic(_ReturnAddress)
+#  define RETURN_ADDRESS() _ReturnAddress()
 #elif defined(__GNUC__) || defined(__clang__)
-#define RETURN_ADDRESS() \
-  __builtin_extract_return_addr(__builtin_return_address(0))
+#  define RETURN_ADDRESS() \
+    __builtin_extract_return_addr(__builtin_return_address(0))
 #endif
 
 static inline bool IsCurrentThreadInBlockingMessageSend(
@@ -166,7 +166,8 @@ uint32_t Compatibility::sConsumers = Compatibility::UNKNOWN;
 /**
  * This function is safe to call multiple times.
  */
-/* static */ void Compatibility::InitConsumers() {
+/* static */
+void Compatibility::InitConsumers() {
   HMODULE jawsHandle = ::GetModuleHandleW(L"jhook");
   if (jawsHandle) {
     sConsumers |=
@@ -203,7 +204,8 @@ uint32_t Compatibility::sConsumers = Compatibility::UNKNOWN;
     sConsumers &= ~Compatibility::UNKNOWN;
 }
 
-/* static */ bool Compatibility::HasKnownNonUiaConsumer() {
+/* static */
+bool Compatibility::HasKnownNonUiaConsumer() {
   InitConsumers();
   return sConsumers & ~(Compatibility::UNKNOWN | UIAUTOMATION);
 }

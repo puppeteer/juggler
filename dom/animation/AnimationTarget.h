@@ -7,7 +7,9 @@
 #ifndef mozilla_AnimationTarget_h
 #define mozilla_AnimationTarget_h
 
-#include "mozilla/Attributes.h"  // For MOZ_NON_OWNING_REF
+#include "mozilla/Attributes.h"     // For MOZ_NON_OWNING_REF
+#include "mozilla/HashFunctions.h"  // For HashNumber, AddToHash
+#include "mozilla/HashTable.h"      // For DefaultHasher, PointerHasher
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "nsCSSPseudoElements.h"
@@ -19,7 +21,7 @@ class Element;
 }  // namespace dom
 
 struct OwningAnimationTarget {
-  OwningAnimationTarget(dom::Element* aElement, CSSPseudoElementType aType)
+  OwningAnimationTarget(dom::Element* aElement, PseudoStyleType aType)
       : mElement(aElement), mPseudoType(aType) {}
 
   explicit OwningAnimationTarget(dom::Element* aElement) : mElement(aElement) {}
@@ -31,13 +33,13 @@ struct OwningAnimationTarget {
   // mElement represents the parent element of a pseudo-element, not the
   // generated content element.
   RefPtr<dom::Element> mElement;
-  CSSPseudoElementType mPseudoType = CSSPseudoElementType::NotPseudo;
+  PseudoStyleType mPseudoType = PseudoStyleType::NotPseudo;
 };
 
 struct NonOwningAnimationTarget {
   NonOwningAnimationTarget() = default;
 
-  NonOwningAnimationTarget(dom::Element* aElement, CSSPseudoElementType aType)
+  NonOwningAnimationTarget(dom::Element* aElement, PseudoStyleType aType)
       : mElement(aElement), mPseudoType(aType) {}
 
   explicit NonOwningAnimationTarget(const OwningAnimationTarget& aOther)
@@ -50,7 +52,7 @@ struct NonOwningAnimationTarget {
   // mElement represents the parent element of a pseudo-element, not the
   // generated content element.
   dom::Element* MOZ_NON_OWNING_REF mElement = nullptr;
-  CSSPseudoElementType mPseudoType = CSSPseudoElementType::NotPseudo;
+  PseudoStyleType mPseudoType = PseudoStyleType::NotPseudo;
 };
 
 // Helper functions for cycle-collecting Maybe<OwningAnimationTarget>
@@ -68,6 +70,26 @@ inline void ImplCycleCollectionUnlink(Maybe<OwningAnimationTarget>& aTarget) {
     ImplCycleCollectionUnlink(aTarget->mElement);
   }
 }
+
+// A DefaultHasher specialization for OwningAnimationTarget.
+template <>
+struct DefaultHasher<OwningAnimationTarget> {
+  using Key = OwningAnimationTarget;
+  using Lookup = OwningAnimationTarget;
+  using PtrHasher = PointerHasher<dom::Element*>;
+
+  static HashNumber hash(const Lookup& aLookup) {
+    return AddToHash(PtrHasher::hash(aLookup.mElement.get()),
+                     static_cast<uint8_t>(aLookup.mPseudoType));
+  }
+
+  static bool match(const Key& aKey, const Lookup& aLookup) {
+    return PtrHasher::match(aKey.mElement.get(), aLookup.mElement.get()) &&
+           aKey.mPseudoType == aLookup.mPseudoType;
+  }
+
+  static void rekey(Key& aKey, Key&& aNewKey) { aKey = std::move(aNewKey); }
+};
 
 }  // namespace mozilla
 

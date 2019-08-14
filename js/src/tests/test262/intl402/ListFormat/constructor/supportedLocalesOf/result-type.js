@@ -1,4 +1,4 @@
-// |reftest| skip-if(!Intl.hasOwnProperty('ListFormat')) -- Intl.ListFormat is not enabled unconditionally
+// |reftest| skip -- Intl.ListFormat is not supported
 // Copyright 2018 Igalia, S.L. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -22,14 +22,13 @@ assert.sameValue(Object.isExtensible(result), true,
 assert.notSameValue(result.length, 0);
 for (let i = 0; i < result.length; ++i) {
   verifyProperty(result, String(i), {
-    "writable": false,
+    "writable": true,
     "enumerable": true,
-    "configurable": false,
+    "configurable": true,
   });
 }
 
 verifyProperty(result, "length", {
-  "writable": false,
   "enumerable": false,
   "configurable": false,
 });

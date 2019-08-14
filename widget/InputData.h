@@ -89,6 +89,10 @@ class InputData {
   // content, and focus can be reconfirmed for async keyboard scrolling.
   uint64_t mFocusSequenceNumber;
 
+  // The LayersId of the content process that the corresponding WidgetEvent
+  // should be dispatched to.
+  layers::LayersId mLayersId;
+
   Modifiers modifiers;
 
   INPUTDATA_AS_CHILD_TYPE(MultiTouchInput, MULTITOUCH_INPUT)
@@ -197,13 +201,6 @@ class MultiTouchInput : public InputData {
   MultiTouchInput();
   MultiTouchInput(const MultiTouchInput& aOther);
   explicit MultiTouchInput(const WidgetTouchEvent& aTouchEvent);
-  // This conversion from WidgetMouseEvent to MultiTouchInput is needed because
-  // on the B2G emulator we can only receive mouse events, but we need to be
-  // able to pan correctly. To do this, we convert the events into a format that
-  // the panning code can handle. This code is very limited and only supports
-  // SingleTouchData. It also sends garbage for the identifier, radius, force
-  // and rotation angle.
-  explicit MultiTouchInput(const WidgetMouseEvent& aMouseEvent);
   void Translate(const ScreenPoint& aTranslation);
 
   WidgetTouchEvent ToWidgetTouchEvent(nsIWidget* aWidget) const;
@@ -219,6 +216,9 @@ class MultiTouchInput : public InputData {
   // fields must be reflected in its ParamTraits<>, in nsGUIEventIPC.h
   MultiTouchType mType;
   nsTArray<SingleTouchData> mTouches;
+  // The screen offset of the root widget. This can be changing along with
+  // the touch interaction, so we sstore it in the event.
+  ExternalPoint mScreenOffset;
   bool mHandledByAPZ;
 };
 
@@ -332,6 +332,17 @@ class PanGestureInput : public InputData {
       // user has stopped the animation by putting their fingers on a touchpad.
       PANGESTURE_MOMENTUMEND
   ));
+
+  MOZ_DEFINE_ENUM_AT_CLASS_SCOPE(
+    PanDeltaType, (
+      // There are three kinds of scroll delta modes in Gecko: "page", "line"
+      // and "pixel". Touchpad pan gestures only support "page" and "pixel".
+      //
+      // NOTE: PANDELTA_PAGE currently replicates Gtk behavior
+      // (see AsyncPanZoomController::OnPan).
+      PANDELTA_PAGE,
+      PANDELTA_PIXEL
+  ));
   // clang-format on
 
   PanGestureInput(PanGestureType aType, uint32_t aTime, TimeStamp aTimeStamp,
@@ -368,11 +379,13 @@ class PanGestureInput : public InputData {
   double mUserDeltaMultiplierX;
   double mUserDeltaMultiplierY;
 
-  bool mHandledByAPZ;
+  PanDeltaType mDeltaType = PANDELTA_PIXEL;
+
+  bool mHandledByAPZ : 1;
 
   // true if this is a PANGESTURE_END event that will be followed by a
   // PANGESTURE_MOMENTUMSTART event.
-  bool mFollowedByMomentum;
+  bool mFollowedByMomentum : 1;
 
   // If this is true, and this event started a new input block that couldn't
   // find a scrollable target which is scrollable in the horizontal component
@@ -380,15 +393,32 @@ class PanGestureInput : public InputData {
   // hold until a content response has arrived, even if the block has a
   // confirmed target.
   // This is used by events that can result in a swipe instead of a scroll.
-  bool mRequiresContentResponseIfCannotScrollHorizontallyInStartDirection;
+  bool mRequiresContentResponseIfCannotScrollHorizontallyInStartDirection : 1;
 
   // This is used by APZ to communicate to the macOS widget code whether
   // the overscroll-behavior of the scroll frame handling this swipe allows
   // non-local overscroll behaviors in the horizontal direction (such as
   // swipe navigation).
-  bool mOverscrollBehaviorAllowsSwipe;
+  bool mOverscrollBehaviorAllowsSwipe : 1;
 
-  // XXX: If adding any more bools, switch to using bitfields instead.
+  // true if APZ should do a fling animation after this pan ends, like
+  // it would with touchscreens. (For platforms that don't emit momentum
+  // events.)
+  bool mSimulateMomentum : 1;
+
+  void SetHandledByAPZ(bool aHandled) { mHandledByAPZ = aHandled; }
+  void SetFollowedByMomentum(bool aFollowed) {
+    mFollowedByMomentum = aFollowed;
+  }
+  void SetRequiresContentResponseIfCannotScrollHorizontallyInStartDirection(
+      bool aRequires) {
+    mRequiresContentResponseIfCannotScrollHorizontallyInStartDirection =
+        aRequires;
+  }
+  void SetOverscrollBehaviorAllowsSwipe(bool aAllows) {
+    mOverscrollBehaviorAllowsSwipe = aAllows;
+  }
+  void SetSimulateMomentum(bool aSimulate) { mSimulateMomentum = aSimulate; }
 };
 
 /**
@@ -414,24 +444,10 @@ class PinchGestureInput : public InputData {
   // clang-format on
 
   // Construct a pinch gesture from a Screen point.
-  // (Technically, we should take the span values in Screen pixels as well,
-  // but that would require also storing them in Screen pixels and then
-  // converting them in TransformToLocal() like the focus point. Since pinch
-  // gesture events are processed by the root content APZC, the only transform
-  // between Screen and ParentLayer pixels should be a translation, which is
-  // irrelevant to span values, so we don't bother.)
   PinchGestureInput(PinchGestureType aType, uint32_t aTime,
-                    TimeStamp aTimeStamp, const ScreenPoint& aFocusPoint,
-                    ParentLayerCoord aCurrentSpan,
-                    ParentLayerCoord aPreviousSpan, Modifiers aModifiers);
-
-  // Construct a pinch gesture from a ParentLayer point.
-  // mFocusPoint remains (0,0) unless it's set later.
-  PinchGestureInput(PinchGestureType aType, uint32_t aTime,
-                    TimeStamp aTimeStamp,
-                    const ParentLayerPoint& aLocalFocusPoint,
-                    ParentLayerCoord aCurrentSpan,
-                    ParentLayerCoord aPreviousSpan, Modifiers aModifiers);
+                    TimeStamp aTimeStamp, const ExternalPoint& aScreenOffset,
+                    const ScreenPoint& aFocusPoint, ScreenCoord aCurrentSpan,
+                    ScreenCoord aPreviousSpan, Modifiers aModifiers);
 
   bool TransformToLocal(const ScreenToParentLayerMatrix4x4& aTransform);
 
@@ -449,17 +465,21 @@ class PinchGestureInput : public InputData {
   // store |BothFingersLifted()|.
   ScreenPoint mFocusPoint;
 
+  // The screen offset of the root widget. This can be changing along with
+  // the touch interaction, so we sstore it in the event.
+  ExternalPoint mScreenOffset;
+
   // |mFocusPoint| transformed to the local coordinates of the APZC targeted
   // by the hit. This is set and used by APZ.
   ParentLayerPoint mLocalFocusPoint;
 
   // The distance between the touches responsible for the pinch gesture.
-  ParentLayerCoord mCurrentSpan;
+  ScreenCoord mCurrentSpan;
 
   // The previous |mCurrentSpan| in the PinchGestureInput preceding this one.
   // This is only really relevant during a PINCHGESTURE_SCALE because when it is
   // of this type then there must have been a history of spans.
-  ParentLayerCoord mPreviousSpan;
+  ScreenCoord mPreviousSpan;
 
   // A special value for mFocusPoint used in PINCHGESTURE_END events to
   // indicate that both fingers have been lifted. If only one finger has

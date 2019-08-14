@@ -26,13 +26,16 @@ async function test() {
   const gClient = new DebuggerClient(transport);
   await gClient.connect();
 
-  const { errorActor } = await gClient.listTabs();
+  const { errorActor } = await gClient.mainRoot.rootForm;
   ok(errorActor, "Found the error actor.");
 
-  await Assert.rejects(gClient.request({ to: errorActor, type: "error" }),
-    err => err.error == "unknownError" &&
-           /error occurred while processing 'error/.test(err.message),
-    "The request should be rejected");
+  await Assert.rejects(
+    gClient.request({ to: errorActor, type: "error" }),
+    err =>
+      err.error == "unknownError" &&
+      /error occurred while processing 'error/.test(err.message),
+    "The request should be rejected"
+  );
 
   await gClient.close();
 

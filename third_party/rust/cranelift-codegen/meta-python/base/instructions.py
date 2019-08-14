@@ -143,6 +143,12 @@ br_table = Instruction(
 
         Note that this branch instruction can't pass arguments to the targeted
         blocks. Split critical edges as needed to work around this.
+
+        Do not confuse this with "tables" in WebAssembly. ``br_table`` is for
+        jump tables with destinations within the current function only -- think
+        of a ``match`` in Rust or a ``switch`` in C.  If you want to call a
+        function in a dynamic library, that will typically use
+        ``call_indirect``.
         """,
         ins=(x, EBB, JT), is_branch=True, is_terminator=True)
 
@@ -158,7 +164,7 @@ jump_table_entry = Instruction(
     Currently, the only type supported is entries which are relative to the
     base of the jump table.
     """,
-    ins=(x, addr, Size, JT), outs=entry)
+    ins=(x, addr, Size, JT), outs=entry, can_load=True)
 
 jump_table_base = Instruction(
     'jump_table_base', r"""
@@ -180,6 +186,10 @@ indirect_jump_table_br = Instruction(
     """,
     ins=(addr, JT),
     is_branch=True, is_indirect_branch=True, is_terminator=True)
+
+debugtrap = Instruction('debugtrap', r"""
+    Encodes an assembly debug trap.
+    """, can_load=True, can_store=True, other_side_effects=True)
 
 code = Operand('code', trapcode)
 trap = Instruction(
@@ -753,6 +763,16 @@ copy_special = Instruction(
         """,
         ins=(src, dst),
         other_side_effects=True)
+
+copy_nop = Instruction(
+        'copy_nop', r"""
+        Stack-slot-to-the-same-stack-slot copy, which is guaranteed to turn
+        into a no-op.  This instruction is for use only within Cranelift
+        itself.
+
+        This instruction copies its input, preserving the value type.
+        """,
+        ins=x, outs=a)
 
 delta = Operand('delta', Int)
 adjust_sp_down = Instruction(

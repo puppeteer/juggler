@@ -7,36 +7,22 @@
 #ifndef gc_Heap_h
 #define gc_Heap_h
 
-#include "mozilla/ArrayUtils.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/PodOperations.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
-#include "jsfriendapi.h"
-#include "jspubtd.h"
-#include "jstypes.h"
 #include "jsutil.h"
 
 #include "ds/BitArray.h"
 #include "gc/AllocKind.h"
 #include "gc/GCEnum.h"
-#include "gc/Memory.h"
-#include "js/HeapAPI.h"
-#include "js/RootingAPI.h"
-#include "js/TracingAPI.h"
 #include "js/TypeDecls.h"
-
-#include "vm/Printer.h"
 
 namespace js {
 
 class AutoLockGC;
 class AutoLockGCBgAlloc;
 class FreeOp;
+class NurseryDecommitChunksTask;
 
 namespace gc {
 
@@ -97,7 +83,7 @@ const size_t ArenaBitmapWords =
  */
 class FreeSpan {
   friend class Arena;
-  friend class ArenaCellIterImpl;
+  friend class ArenaCellIter;
   friend class ArenaFreeCellIter;
 
   uint16_t first;
@@ -166,7 +152,7 @@ class FreeSpan {
       return nullptr;  // The span is empty.
     }
     checkSpan(arena);
-    JS_EXTRA_POISON(reinterpret_cast<void*>(thing),
+    DebugOnlyPoison(reinterpret_cast<void*>(thing),
                     JS_ALLOCATED_TENURED_PATTERN, thingSize,
                     MemCheckKind::MakeUndefined);
     return reinterpret_cast<TenuredCell*>(thing);
@@ -230,19 +216,24 @@ class Arena {
    */
   size_t allocKind : 8;
 
- public:
+ private:
   /*
    * When recursive marking uses too much stack we delay marking of
    * arenas and link them into a list for later processing. This
    * uses the following fields.
    */
-  size_t hasDelayedMarking : 1;
-  size_t auxNextLink : JS_BITS_PER_WORD - 8 - 1;
-  static_assert(ArenaShift >= 8 + 1,
-                "Arena::auxNextLink packing assumes that ArenaShift has "
-                "enough bits to cover allocKind and hasDelayedMarking.");
+  static const size_t DELAYED_MARKING_FLAG_BITS = 3;
+  static const size_t DELAYED_MARKING_ARENA_BITS =
+      JS_BITS_PER_WORD - 8 - DELAYED_MARKING_FLAG_BITS;
+  size_t onDelayedMarkingList_ : 1;
+  size_t hasDelayedBlackMarking_ : 1;
+  size_t hasDelayedGrayMarking_ : 1;
+  size_t nextDelayedMarkingArena_ : DELAYED_MARKING_ARENA_BITS;
+  static_assert(
+      DELAYED_MARKING_ARENA_BITS >= JS_BITS_PER_WORD - ArenaShift,
+      "Arena::nextDelayedMarkingArena_ packing assumes that ArenaShift has "
+      "enough bits to cover allocKind and delayed marking state.");
 
- private:
   union {
     /*
      * For arenas in zones other than the atoms zone, if non-null, points
@@ -285,10 +276,16 @@ class Arena {
   // previously allocated for some zone, use release() instead.
   void setAsNotAllocated() {
     firstFreeSpan.initAsEmpty();
-    zone = nullptr;
+
+    // Poison zone pointer to highlight UAF on released arenas in crash data.
+    AlwaysPoison(&zone, JS_FREED_ARENA_PATTERN, sizeof(zone),
+                 MemCheckKind::MakeUndefined);
+
     allocKind = size_t(AllocKind::LIMIT);
-    hasDelayedMarking = 0;
-    auxNextLink = 0;
+    onDelayedMarkingList_ = 0;
+    hasDelayedBlackMarking_ = 0;
+    hasDelayedGrayMarking_ = 0;
+    nextDelayedMarkingArena_ = 0;
     bufferedCells_ = nullptr;
   }
 
@@ -387,24 +384,57 @@ class Arena {
     return tailOffset % thingSize == 0;
   }
 
+  bool onDelayedMarkingList() const { return onDelayedMarkingList_; }
+
   Arena* getNextDelayedMarking() const {
-    MOZ_ASSERT(hasDelayedMarking);
-    return reinterpret_cast<Arena*>(auxNextLink << ArenaShift);
+    MOZ_ASSERT(onDelayedMarkingList_);
+    return reinterpret_cast<Arena*>(nextDelayedMarkingArena_ << ArenaShift);
   }
 
-  void setNextDelayedMarking(Arena* arena) {
+  void setNextDelayedMarkingArena(Arena* arena) {
     MOZ_ASSERT(!(uintptr_t(arena) & ArenaMask));
-    MOZ_ASSERT(!auxNextLink && !hasDelayedMarking);
-    hasDelayedMarking = 1;
+    MOZ_ASSERT(!onDelayedMarkingList_);
+    MOZ_ASSERT(!hasDelayedBlackMarking_);
+    MOZ_ASSERT(!hasDelayedGrayMarking_);
+    MOZ_ASSERT(!nextDelayedMarkingArena_);
+    onDelayedMarkingList_ = 1;
     if (arena) {
-      auxNextLink = arena->address() >> ArenaShift;
+      nextDelayedMarkingArena_ = arena->address() >> ArenaShift;
     }
   }
 
-  void unsetDelayedMarking() {
-    MOZ_ASSERT(hasDelayedMarking);
-    hasDelayedMarking = 0;
-    auxNextLink = 0;
+  void updateNextDelayedMarkingArena(Arena* arena) {
+    MOZ_ASSERT(!(uintptr_t(arena) & ArenaMask));
+    MOZ_ASSERT(onDelayedMarkingList_);
+    nextDelayedMarkingArena_ = arena ? arena->address() >> ArenaShift : 0;
+  }
+
+  bool hasDelayedMarking(MarkColor color) const {
+    MOZ_ASSERT(onDelayedMarkingList_);
+    return color == MarkColor::Black ? hasDelayedBlackMarking_
+                                     : hasDelayedGrayMarking_;
+  }
+
+  bool hasAnyDelayedMarking() const {
+    MOZ_ASSERT(onDelayedMarkingList_);
+    return hasDelayedBlackMarking_ || hasDelayedGrayMarking_;
+  }
+
+  void setHasDelayedMarking(MarkColor color, bool value) {
+    MOZ_ASSERT(onDelayedMarkingList_);
+    if (color == MarkColor::Black) {
+      hasDelayedBlackMarking_ = value;
+    } else {
+      hasDelayedGrayMarking_ = value;
+    }
+  }
+
+  void clearDelayedMarkingState() {
+    MOZ_ASSERT(onDelayedMarkingList_);
+    onDelayedMarkingList_ = 0;
+    hasDelayedBlackMarking_ = 0;
+    hasDelayedGrayMarking_ = 0;
+    nextDelayedMarkingArena_ = 0;
   }
 
   inline ArenaCellSet*& bufferedCells();
@@ -513,6 +543,7 @@ struct ChunkInfo {
 
  private:
   friend class ChunkPool;
+  friend class js::NurseryDecommitChunksTask;
   Chunk* next;
   Chunk* prev;
 
@@ -758,14 +789,16 @@ struct Chunk {
   void recycleArena(Arena* arena, SortedArenaList& dest, size_t thingsPerArena);
 
   MOZ_MUST_USE bool decommitOneFreeArena(JSRuntime* rt, AutoLockGC& lock);
-  void decommitAllArenasWithoutUnlocking(const AutoLockGC& lock);
+  void decommitAllArenas();
+
+  // This will decommit each unused not-already decommitted arena. It performs a
+  // system call for each arena but is only used during OOM.
+  void decommitFreeArenasWithoutUnlocking(const AutoLockGC& lock);
 
   static Chunk* allocate(JSRuntime* rt);
   void init(JSRuntime* rt);
 
  private:
-  void decommitAllArenas();
-
   /* Search for a decommitted arena to allocate. */
   unsigned findDecommittedArenaOffset();
   Arena* fetchNextDecommittedArena();
@@ -797,54 +830,6 @@ static_assert(
     js::gc::ChunkStoreBufferOffset ==
         offsetof(Chunk, trailer) + offsetof(ChunkTrailer, storeBuffer),
     "The hardcoded API storeBuffer offset must match the actual offset.");
-
-/*
- * Tracks the used sizes for owned heap data and automatically maintains the
- * memory usage relationship between GCRuntime and Zones.
- */
-class HeapUsage {
-  /*
-   * A heap usage that contains our parent's heap usage, or null if this is
-   * the top-level usage container.
-   */
-  HeapUsage* const parent_;
-
-  /*
-   * The approximate number of bytes in use on the GC heap, to the nearest
-   * ArenaSize. This does not include any malloc data. It also does not
-   * include not-actively-used addresses that are still reserved at the OS
-   * level for GC usage. It is atomic because it is updated by both the active
-   * and GC helper threads.
-   */
-  mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      gcBytes_;
-
- public:
-  explicit HeapUsage(HeapUsage* parent) : parent_(parent), gcBytes_(0) {}
-
-  size_t gcBytes() const { return gcBytes_; }
-
-  void addGCArena() {
-    gcBytes_ += ArenaSize;
-    if (parent_) {
-      parent_->addGCArena();
-    }
-  }
-  void removeGCArena() {
-    MOZ_ASSERT(gcBytes_ >= ArenaSize);
-    gcBytes_ -= ArenaSize;
-    if (parent_) {
-      parent_->removeGCArena();
-    }
-  }
-
-  /* Pair to adoptArenas. Adopts the attendant usage statistics. */
-  void adopt(HeapUsage& other) {
-    gcBytes_ += other.gcBytes_;
-    other.gcBytes_ = 0;
-  }
-};
 
 inline void Arena::checkAddress() const {
   mozilla::DebugOnly<uintptr_t> addr = uintptr_t(this);

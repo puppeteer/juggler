@@ -420,12 +420,12 @@ inline nsWrapperCache* GetWrapperCache(const SmartPtr<T>& aObject) {
   return GetWrapperCache(aObject.get());
 }
 
-enum class ReflectionScope { Content, XBL, UAWidget };
+enum class ReflectionScope { Content, NAC, UAWidget };
 
 struct MOZ_STACK_CLASS ParentObject {
   template <class T>
   MOZ_IMPLICIT ParentObject(T* aObject)
-      : mObject(aObject),
+      : mObject(ToSupports(aObject)),
         mWrapperCache(GetWrapperCache(aObject)),
         mReflectionScope(ReflectionScope::Content) {}
 

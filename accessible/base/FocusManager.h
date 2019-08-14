@@ -8,10 +8,13 @@
 #include "mozilla/RefPtr.h"
 
 class nsINode;
-class nsIDocument;
 class nsISupports;
 
 namespace mozilla {
+namespace dom {
+class Document;
+}
+
 namespace a11y {
 
 class AccEvent;
@@ -67,6 +70,18 @@ class FocusManager {
   enum FocusDisposition { eNone, eFocused, eContainsFocus, eContainedByFocus };
   FocusDisposition IsInOrContainsFocus(const Accessible* aAccessible) const;
 
+  /**
+   * Return true if the given accessible was the last accessible focused.
+   * This is useful to detect the case where the last focused accessible was
+   * removed before something else was focused. This can happen in one of two
+   * ways:
+   * 1. The DOM focus was removed. DOM doesn't fire a blur event when this
+   *    happens; see bug 559561.
+   * 2. The accessibility focus was an active item (e.g. aria-activedescendant)
+   *    and that item was removed.
+   */
+  bool WasLastFocused(const Accessible* aAccessible) const;
+
   //////////////////////////////////////////////////////////////////////////////
   // Focus notifications and processing (don't use until you know what you do).
 
@@ -117,10 +132,11 @@ class FocusManager {
   /**
    * Return DOM document having DOM focus.
    */
-  nsIDocument* FocusedDOMDocument() const;
+  dom::Document* FocusedDOMDocument() const;
 
  private:
   RefPtr<Accessible> mActiveItem;
+  RefPtr<Accessible> mLastFocus;
   RefPtr<Accessible> mActiveARIAMenubar;
 };
 

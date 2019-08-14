@@ -11,15 +11,12 @@ XPIDL_SOURCES += [
     'nsIASN1PrintableItem.idl',
     'nsIASN1Sequence.idl',
     'nsIBadCertListener2.idl',
-    'nsICertBlocklist.idl',
     'nsICertificateDialogs.idl',
     'nsICertOverrideService.idl',
     'nsIClientAuthDialogs.idl',
     'nsIContentSignatureVerifier.idl',
     'nsICryptoHash.idl',
     'nsICryptoHMAC.idl',
-    'nsIGenKeypairInfoDlg.idl',
-    'nsIKeygenThread.idl',
     'nsIKeyModule.idl',
     'nsILocalCertService.idl',
     'nsINSSComponent.idl',
@@ -51,15 +48,19 @@ if CONFIG['MOZ_XUL']:
 
 XPIDL_MODULE = 'pipnss'
 
-# These aren't actually used in production code yet, so we don't want to
-# ship them with the browser.
-TESTING_JS_MODULES.psm += [
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
+
+EXTRA_JS_MODULES.psm += [
     'DER.jsm',
+    'RemoteSecuritySettings.jsm',
     'X509.jsm',
 ]
 
 EXPORTS += [
     'CryptoTask.h',
+    'EnterpriseRoots.h',
     'nsClientAuthRemember.h',
     'nsNSSCallbacks.h',
     'nsNSSCertificate.h',
@@ -90,7 +91,6 @@ EXPORTS.ipc += [
 ]
 
 UNIFIED_SOURCES += [
-    'CertBlocklist.cpp',
     'ContentSignatureVerifier.cpp',
     'CryptoTask.cpp',
     'CSTrustDomain.cpp',
@@ -100,9 +100,6 @@ UNIFIED_SOURCES += [
     'nsCertOverrideService.cpp',
     'nsClientAuthRemember.cpp',
     'nsCryptoHash.cpp',
-    'nsKeygenHandler.cpp',
-    'nsKeygenHandlerContent.cpp',
-    'nsKeygenThread.cpp',
     'nsKeyModule.cpp',
     'nsNSSASN1Object.cpp',
     'nsNSSCallbacks.cpp',
@@ -141,12 +138,12 @@ UNIFIED_SOURCES += [
     'TransportSecurityInfo.cpp',
 ]
 
-if CONFIG['MOZ_LIB_SECRET']:
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     UNIFIED_SOURCES += [
         'LibSecret.cpp',
     ]
-    CFLAGS += CONFIG['MOZ_LIB_SECRET_CFLAGS']
-    CXXFLAGS += CONFIG['MOZ_LIB_SECRET_CFLAGS']
+    CFLAGS += CONFIG['GLIB_CFLAGS']
+    CXXFLAGS += CONFIG['GLIB_CFLAGS']
 
 if CONFIG['OS_ARCH'] == 'Darwin':
     UNIFIED_SOURCES += [
@@ -178,6 +175,21 @@ if CONFIG['MOZ_XUL']:
 UNIFIED_SOURCES += [
     'md4.c',
 ]
+
+if CONFIG['MOZ_NEW_CERT_STORAGE']:
+    XPIDL_SOURCES += [
+        'nsICertStorage.idl',
+    ]
+    UNIFIED_SOURCES += [
+        'cert_storage/src/cert_storage.cpp',
+    ]
+else:
+    XPIDL_SOURCES += [
+        'nsICertBlocklist.idl',
+    ]
+    UNIFIED_SOURCES += [
+        'CertBlocklist.cpp',
+    ]
 
 FINAL_LIBRARY = 'xul'
 
@@ -226,6 +238,3 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += [
         '-Wno-unused-parameter',
     ]
-
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497

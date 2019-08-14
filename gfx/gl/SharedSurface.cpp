@@ -13,6 +13,7 @@
 #include "nsThreadUtils.h"
 #include "ScopedGLHelpers.h"
 #include "SharedSurfaceGL.h"
+#include "mozilla/gfx/Logging.h"
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/TextureClientSharedSurface.h"
 #include "mozilla/layers/TextureForwarder.h"
@@ -22,8 +23,9 @@
 namespace mozilla {
 namespace gl {
 
-/*static*/ void SharedSurface::ProdCopy(SharedSurface* src, SharedSurface* dest,
-                                        SurfaceFactory* factory) {
+/*static*/
+bool SharedSurface::ProdCopy(SharedSurface* src, SharedSurface* dest,
+                             SurfaceFactory* factory) {
   GLContext* gl = src->mGL;
 
   // If `src` begins locked, it must end locked, though we may
@@ -38,10 +40,14 @@ namespace gl {
     UniquePtr<SharedSurface_Basic> tempSurf;
     tempSurf = SharedSurface_Basic::Create(gl, factory->mFormats, src->mSize,
                                            factory->mCaps.alpha);
+    if (!tempSurf) {
+      gfxCriticalNote << "Failed to allocate SharedSurface_Basic.";
+      return false;
+    }
 
     ProdCopy(src, tempSurf.get(), factory);
     ProdCopy(tempSurf.get(), dest, factory);
-    return;
+    return true;
   }
 
   if (src->mAttachType == AttachmentType::Screen) {
@@ -80,7 +86,7 @@ namespace gl {
 
     if (origNeedsRelock) origLocked->LockProd();
 
-    return;
+    return true;
   }
 
   if (dest->mAttachType == AttachmentType::Screen) {
@@ -119,7 +125,7 @@ namespace gl {
 
     if (origNeedsRelock) origLocked->LockProd();
 
-    return;
+    return true;
   }
 
   // Alright, done with cases involving Screen types.
@@ -136,7 +142,7 @@ namespace gl {
       gl->BlitHelper()->BlitTextureToTexture(
           srcTex, destTex, src->mSize, dest->mSize, srcTarget, destTarget);
 
-      return;
+      return true;
     }
 
     if (dest->mAttachType == AttachmentType::GLRenderbuffer) {
@@ -146,7 +152,7 @@ namespace gl {
       gl->BlitHelper()->BlitTextureToFramebuffer(srcTex, src->mSize,
                                                  dest->mSize, srcTarget);
 
-      return;
+      return true;
     }
 
     MOZ_CRASH("GFX: Unhandled dest->mAttachType 3.");
@@ -164,7 +170,7 @@ namespace gl {
       gl->BlitHelper()->BlitFramebufferToTexture(destTex, src->mSize,
                                                  dest->mSize, destTarget);
 
-      return;
+      return true;
     }
 
     if (dest->mAttachType == AttachmentType::GLRenderbuffer) {
@@ -174,7 +180,7 @@ namespace gl {
       gl->BlitHelper()->BlitFramebufferToFramebuffer(
           srcWrapper.FB(), destWrapper.FB(), src->mSize, dest->mSize);
 
-      return;
+      return true;
     }
 
     MOZ_CRASH("GFX: Unhandled dest->mAttachType 4.");
@@ -240,21 +246,10 @@ static void ChooseBufferBits(const SurfaceCaps& caps,
   screenCaps.depth = caps.depth;
   screenCaps.stencil = caps.stencil;
 
-  screenCaps.antialias = caps.antialias;
   screenCaps.preserve = caps.preserve;
 
-  if (caps.antialias) {
-    *out_drawCaps = screenCaps;
-    out_readCaps->Clear();
-
-    // Color caps need to be duplicated in readCaps.
-    out_readCaps->color = caps.color;
-    out_readCaps->alpha = caps.alpha;
-    out_readCaps->bpp16 = caps.bpp16;
-  } else {
-    out_drawCaps->Clear();
-    *out_readCaps = screenCaps;
-  }
+  out_drawCaps->Clear();
+  *out_readCaps = screenCaps;
 }
 
 SurfaceFactory::SurfaceFactory(
@@ -275,7 +270,6 @@ SurfaceFactory::~SurfaceFactory() {
   while (!mRecycleTotalPool.empty()) {
     RefPtr<layers::SharedSurfaceTextureClient> tex = *mRecycleTotalPool.begin();
     StopRecycling(tex);
-    tex->CancelWaitForRecycle();
   }
 
   MOZ_RELEASE_ASSERT(mRecycleTotalPool.empty(),
@@ -334,8 +328,9 @@ void SurfaceFactory::StopRecycling(layers::SharedSurfaceTextureClient* tc) {
   mozilla::Unused << didErase;
 }
 
-/*static*/ void SurfaceFactory::RecycleCallback(layers::TextureClient* rawTC,
-                                                void* rawFactory) {
+/*static*/
+void SurfaceFactory::RecycleCallback(layers::TextureClient* rawTC,
+                                     void* rawFactory) {
   RefPtr<layers::SharedSurfaceTextureClient> tc;
   tc = static_cast<layers::SharedSurfaceTextureClient*>(rawTC);
   SurfaceFactory* factory = static_cast<SurfaceFactory*>(rawFactory);
@@ -506,14 +501,9 @@ bool ReadbackSharedSurface(SharedSurface* src, gfx::DrawTarget* dst) {
 
     // ReadPixels from the current FB into lockedBits.
     {
-      size_t alignment = 8;
-      if (dstStride % 4 == 0) alignment = 4;
-
       ScopedPackState scopedPackState(gl);
-      if (alignment != 4) {
-        gl->fPixelStorei(LOCAL_GL_PACK_ALIGNMENT, alignment);
-      }
-
+      bool handled = scopedPackState.SetForWidthAndStrideRGBA(width, dstStride);
+      MOZ_RELEASE_ASSERT(handled, "Unhandled stride");
       gl->raw_fReadPixels(0, 0, width, height, readGLFormat, readType,
                           dstBytes);
     }

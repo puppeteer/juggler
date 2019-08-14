@@ -7,9 +7,9 @@
 #include "nsDebug.h"
 
 #ifdef XP_WIN
-#include <stdlib.h>  // for _exit()
+#  include <stdlib.h>  // for _exit()
 #else
-#include <unistd.h>  // for _exit()
+#  include <unistd.h>  // for _exit()
 #endif
 
 #include "mozilla/ipc/IOThreadChild.h"
@@ -31,7 +31,8 @@ ProcessChild::ProcessChild(ProcessId aParentPid)
 
 ProcessChild::~ProcessChild() { gProcessChild = nullptr; }
 
-/* static */ void ProcessChild::QuickExit() {
+/* static */
+void ProcessChild::QuickExit() {
 #ifdef XP_WIN
   // In bug 1254829, the destructor got called when dll got detached on windows,
   // switch to TerminateProcess to bypass dll detach handler during the process

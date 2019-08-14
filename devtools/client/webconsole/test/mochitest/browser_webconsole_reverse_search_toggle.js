@@ -10,14 +10,13 @@ const TEST_URI = `data:text/html,<meta charset=utf8>Test reverse search toggle`;
 const isMacOS = AppConstants.platform === "macosx";
 
 add_task(async function() {
-  // Force reverse search on.
-  await pushPref("devtools.webconsole.jsterm.reverse-search", true);
-
   const hud = await openNewTabAndConsole(TEST_URI);
 
   info("Close the reverse search UI with ESC");
   await openReverseSearch(hud);
-  let onReverseSearchUiClose = waitFor(() => getReverseSearchElement(hud) === null);
+  let onReverseSearchUiClose = waitFor(
+    () => getReverseSearchElement(hud) === null
+  );
   EventUtils.sendKey("ESCAPE");
   await onReverseSearchUiClose;
   ok(true, "Reverse search was closed with the Esc keyboard shortcut");
@@ -25,18 +24,25 @@ add_task(async function() {
   if (isMacOS) {
     info("Close the reverse search UI with Ctrl + C on OSX");
     await openReverseSearch(hud);
-    onReverseSearchUiClose = waitFor(() => getReverseSearchElement(hud) === null);
-    EventUtils.synthesizeKey("c", {ctrlKey: true});
+    onReverseSearchUiClose = waitFor(
+      () => getReverseSearchElement(hud) === null
+    );
+    EventUtils.synthesizeKey("c", { ctrlKey: true });
     await onReverseSearchUiClose;
     ok(true, "Reverse search was closed with the Ctrl + C keyboard shortcut");
   }
 
   info("Close the reverse search UI with the close button");
   const reverseSearchElement = await openReverseSearch(hud);
-  const closeButton = reverseSearchElement.querySelector(".reverse-search-close-button");
+  const closeButton = reverseSearchElement.querySelector(
+    ".reverse-search-close-button"
+  );
   ok(closeButton, "The close button is displayed");
-  is(closeButton.title, `Close (Esc${isMacOS ? " | Ctrl + C" : ""})`,
-    "The close button has the expected tooltip");
+  is(
+    closeButton.title,
+    `Close (Esc${isMacOS ? " | Ctrl + C" : ""})`,
+    "The close button has the expected tooltip"
+  );
   onReverseSearchUiClose = waitFor(() => getReverseSearchElement(hud) === null);
   closeButton.click();
   await onReverseSearchUiClose;

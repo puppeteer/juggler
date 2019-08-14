@@ -32,7 +32,6 @@
 class nsICSSLoaderObserver;
 class nsIConsoleReportCollector;
 class nsIContent;
-class nsIDocument;
 
 namespace mozilla {
 namespace dom {
@@ -200,6 +199,7 @@ class Loader final {
   typedef nsIStyleSheetLinkingElement::HasAlternateRel HasAlternateRel;
   typedef nsIStyleSheetLinkingElement::IsAlternate IsAlternate;
   typedef nsIStyleSheetLinkingElement::IsInline IsInline;
+  typedef nsIStyleSheetLinkingElement::IsExplicitlyEnabled IsExplicitlyEnabled;
   typedef nsIStyleSheetLinkingElement::MediaMatched MediaMatched;
   typedef nsIStyleSheetLinkingElement::Update LoadSheetResult;
   typedef nsIStyleSheetLinkingElement::SheetInfo SheetInfo;
@@ -209,7 +209,7 @@ class Loader final {
   // can be null if you want to use this constructor, and there's no
   // document when the Loader is constructed.
   explicit Loader(mozilla::dom::DocGroup*);
-  explicit Loader(nsIDocument*);
+  explicit Loader(mozilla::dom::Document*);
 
  private:
   // Private destructor, to discourage deletion outside of Release():
@@ -341,26 +341,6 @@ class Loader final {
                      RefPtr<StyleSheet>* aSheet);
 
   /**
-   * Asynchronously load the stylesheet at aURL.  If a successful result is
-   * returned, aObserver is guaranteed to be notified asynchronously once the
-   * sheet is loaded and marked complete.  This method can be used to load
-   * sheets not associated with a document.  This method cannot be used to
-   * load user or agent sheets.
-   *
-   * @param aURL the URL of the sheet to load
-   * @param aOriginPrincipal the principal to use for security checks.  This
-   *                         can be null to indicate that these checks should
-   *                         be skipped.
-   * @param aObserver the observer to notify when the load completes.
-   *                  Must not be null.
-   * @param [out] aSheet the sheet to load. Note that the sheet may well
-   *              not be loaded by the time this method returns.
-   */
-  nsresult LoadSheet(nsIURI* aURL, nsIPrincipal* aOriginPrincipal,
-                     nsICSSLoaderObserver* aObserver,
-                     RefPtr<StyleSheet>* aSheet);
-
-  /**
    * Same as above, to be used when the caller doesn't care about the
    * not-yet-loaded sheet.
    */
@@ -397,7 +377,7 @@ class Loader final {
   /**
    * Get the document we live for. May return null.
    */
-  nsIDocument* GetDocument() const { return mDocument; }
+  mozilla::dom::Document* GetDocument() const { return mDocument; }
 
   /**
    * Return true if this loader has pending loads (ones that would send
@@ -481,8 +461,8 @@ class Loader final {
   //
   // This method will set the sheet's enabled state based on aIsAlternate
   MediaMatched PrepareSheet(StyleSheet* aSheet, const nsAString& aTitle,
-                            const nsAString& aMediaString,
-                            dom::MediaList* aMediaList, IsAlternate);
+                            const nsAString& aMediaString, dom::MediaList*,
+                            IsAlternate, IsExplicitlyEnabled);
 
   // Inserts a style sheet in a document or a ShadowRoot.
   void InsertSheetInTree(StyleSheet& aSheet, nsIContent* aLinkingContent);
@@ -576,7 +556,8 @@ class Loader final {
 
   // This reference is nulled by the Document in it's destructor through
   // DropDocumentReference().
-  nsIDocument* MOZ_NON_OWNING_REF mDocument;  // the document we live for
+  mozilla::dom::Document* MOZ_NON_OWNING_REF
+      mDocument;  // the document we live for
 
   // For dispatching events via DocGroup::Dispatch() when mDocument is nullptr.
   RefPtr<mozilla::dom::DocGroup> mDocGroup;

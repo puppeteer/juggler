@@ -11,7 +11,7 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/ServoBindings.h"
 #include "nsGlobalWindow.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIURI.h"
 #include "nsStyleUtil.h"
 #include "xpcpublic.h"
@@ -19,22 +19,24 @@
 namespace mozilla {
 namespace dom {
 
-/* static */ bool CSS::Supports(const GlobalObject& aGlobal,
-                                const nsAString& aProperty,
-                                const nsAString& aValue, ErrorResult& aRv) {
+/* static */
+bool CSS::Supports(const GlobalObject& aGlobal, const nsAString& aProperty,
+                   const nsAString& aValue, ErrorResult& aRv) {
   NS_ConvertUTF16toUTF8 property(aProperty);
   NS_ConvertUTF16toUTF8 value(aValue);
   return Servo_CSSSupports2(&property, &value);
 }
 
-/* static */ bool CSS::Supports(const GlobalObject& aGlobal,
-                                const nsAString& aCondition, ErrorResult& aRv) {
+/* static */
+bool CSS::Supports(const GlobalObject& aGlobal, const nsAString& aCondition,
+                   ErrorResult& aRv) {
   NS_ConvertUTF16toUTF8 cond(aCondition);
   return Servo_CSSSupports(&cond);
 }
 
-/* static */ void CSS::Escape(const GlobalObject& aGlobal,
-                              const nsAString& aIdent, nsAString& aReturn) {
+/* static */
+void CSS::Escape(const GlobalObject& aGlobal, const nsAString& aIdent,
+                 nsAString& aReturn) {
   nsStyleUtil::AppendEscapedCSSIdent(aIdent, aReturn);
 }
 

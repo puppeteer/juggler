@@ -28,6 +28,7 @@ STATIC_ATOMS = [
     # Generic atoms
     # --------------------------------------------------------------------------
 
+    Atom("SystemPrincipal", "[System Principal]"),
     Atom("_empty", ""),
     Atom("_0", "0"),
     Atom("_1", "1"),
@@ -41,11 +42,11 @@ STATIC_ATOMS = [
     Atom("moztype", "_moz-type"),
     Atom("mozdirty", "_moz_dirty"),
     Atom("mozdisallowselectionprint", "mozdisallowselectionprint"),
-    Atom("mozpersist", "mozpersist"),
     Atom("mozdonotsend", "moz-do-not-send"),
     Atom("mozeditorbogusnode", "_moz_editor_bogus_node"),
     Atom("mozgeneratedcontentbefore", "_moz_generated_content_before"),
     Atom("mozgeneratedcontentafter", "_moz_generated_content_after"),
+    Atom("mozgeneratedcontentmarker", "_moz_generated_content_marker"),
     Atom("mozgeneratedcontentimage", "_moz_generated_content_image"),
     Atom("mozquote", "_moz_quote"),
     Atom("mozsignature", "moz-signature"),
@@ -222,12 +223,10 @@ STATIC_ATOMS = [
     Atom("childList", "childList"),
     Atom("choose", "choose"),
     Atom("chromemargin", "chromemargin"),
-    Atom("chromeOnlyContent", "chromeOnlyContent"),
     Atom("exposeToUntrustedContent", "exposeToUntrustedContent"),
     Atom("circ", "circ"),
     Atom("circle", "circle"),
     Atom("cite", "cite"),
-    Atom("cjkDecimal", "cjk-decimal"),
     Atom("_class", "class"),
     Atom("classid", "classid"),
     Atom("clear", "clear"),
@@ -289,11 +288,12 @@ STATIC_ATOMS = [
     Atom("datal10nid", "data-l10n-id"),
     Atom("datal10nargs", "data-l10n-args"),
     Atom("datal10nattrs", "data-l10n-attrs"),
+    Atom("datal10nname", "data-l10n-name"),
+    Atom("datal10nsync", "data-l10n-sync"),
     Atom("dataType", "data-type"),
     Atom("dateTime", "date-time"),
     Atom("date", "date"),
     Atom("datetime", "datetime"),
-    Atom("datetimebox", "datetimebox"),
     Atom("dd", "dd"),
     Atom("decimal", "decimal"),
     Atom("decimalFormat", "decimal-format"),
@@ -426,6 +426,7 @@ STATIC_ATOMS = [
     Atom("figure", "figure"),
     Atom("findbar", "findbar"),
     Atom("fixed", "fixed"),
+    Atom("fission", "fission"),
     Atom("flags", "flags"),
     Atom("flex", "flex"),
     Atom("flip", "flip"),
@@ -517,6 +518,7 @@ STATIC_ATOMS = [
     Atom("import", "import"),
     Atom("include", "include"),
     Atom("includes", "includes"),
+    Atom("incontentshell", "incontentshell"),
     Atom("increment", "increment"),
     Atom("indent", "indent"),
     Atom("indeterminate", "indeterminate"),
@@ -524,7 +526,6 @@ STATIC_ATOMS = [
     Atom("infinity", "infinity"),
     Atom("inherits", "inherits"),
     Atom("inheritOverflow", "inherit-overflow"),
-    Atom("inheritScrollBehavior", "inherit-scroll-behavior"),
     Atom("inheritstyle", "inheritstyle"),
     Atom("initial_scale", "initial-scale"),
     Atom("input", "input"),
@@ -594,9 +595,7 @@ STATIC_ATOMS = [
     Atom("longdesc", "longdesc"),
     Atom("loop", "loop"),
     Atom("low", "low"),
-    Atom("lowerAlpha", "lower-alpha"),
     Atom("lowerFirst", "lower-first"),
-    Atom("lowerRoman", "lower-roman"),
     Atom("lowest", "lowest"),
     Atom("lowsrc", "lowsrc"),
     Atom("ltr", "ltr"),
@@ -636,6 +635,7 @@ STATIC_ATOMS = [
     Atom("meta", "meta"),
     Atom("referrer", "referrer"),
     Atom("referrerpolicy", "referrerpolicy"),
+    Atom("renderroot", "renderroot"),
     Atom("headerReferrerPolicy", "referrer-policy"),
     Atom("meter", "meter"),
     Atom("method", "method"),
@@ -672,7 +672,6 @@ STATIC_ATOMS = [
     Atom("mozTableRemoveColumn", "mozTableRemoveColumn"),
     Atom("moz_opaque", "moz-opaque"),
     Atom("moz_action_hint", "mozactionhint"),
-    Atom("x_moz_errormessage", "x-moz-errormessage"),
     Atom("multicol", "multicol"),
     Atom("multiple", "multiple"),
     Atom("muted", "muted"),
@@ -688,7 +687,7 @@ STATIC_ATOMS = [
     Atom("never", "never"),
     Atom("_new", "new"),
     Atom("newline", "newline"),
-    Atom("nextTabParentId", "nextTabParentId"),
+    Atom("nextRemoteTabId", "nextRemoteTabId"),
     Atom("no", "no"),
     Atom("noautofocus", "noautofocus"),
     Atom("noautohide", "noautohide"),
@@ -753,6 +752,7 @@ STATIC_ATOMS = [
     Atom("onchargingtimechange", "onchargingtimechange"),
     Atom("onchecking", "onchecking"),
     Atom("onCheckboxStateChange", "onCheckboxStateChange"),
+    Atom("onCheckKeyPressEventModel", "onCheckKeyPressEventModel"),
     Atom("onclick", "onclick"),
     Atom("onclose", "onclose"),
     Atom("oncommand", "oncommand"),
@@ -863,6 +863,8 @@ STATIC_ATOMS = [
     Atom("onpushsubscriptionchange", "onpushsubscriptionchange"),
     Atom("onRadioStateChange", "onRadioStateChange"),
     Atom("onreadystatechange", "onreadystatechange"),
+    Atom("onrejectionhandled", "onrejectionhandled"),
+    Atom("onremove", "onremove"),
     Atom("onrequestprogress", "onrequestprogress"),
     Atom("onresourcetimingbufferfull", "onresourcetimingbufferfull"),
     Atom("onresponseprogress", "onresponseprogress"),
@@ -894,6 +896,7 @@ STATIC_ATOMS = [
     Atom("ontransitionrun", "ontransitionrun"),
     Atom("ontransitionstart", "ontransitionstart"),
     Atom("onunderflow", "onunderflow"),
+    Atom("onunhandledrejection", "onunhandledrejection"),
     Atom("onunload", "onunload"),
     Atom("onunmute", "onunmute"),
     Atom("onupdatefound", "onupdatefound"),
@@ -928,6 +931,8 @@ STATIC_ATOMS = [
     Atom("otherwise", "otherwise"),
     Atom("output", "output"),
     Atom("overflow", "overflow"),
+    Atom("overflowBlock", "overflow-block"),
+    Atom("overflowInline", "overflow-inline"),
     Atom("overlay", "overlay"),
     Atom("p", "p"),
     Atom("pack", "pack"),
@@ -941,6 +946,7 @@ STATIC_ATOMS = [
     Atom("parent", "parent"),
     Atom("parentfocused", "parentfocused"),
     Atom("parsererror", "parsererror"),
+    Atom("part", "part"),
     Atom("password", "password"),
     Atom("pattern", "pattern"),
     Atom("patternSeparator", "pattern-separator"),
@@ -969,6 +975,7 @@ STATIC_ATOMS = [
     Atom("preceding", "preceding"),
     Atom("precedingSibling", "preceding-sibling"),
     Atom("prefersReducedMotion", "prefers-reduced-motion"),
+    Atom("prefersColorScheme", "prefers-color-scheme"),
     Atom("prefix", "prefix"),
     Atom("preload", "preload"),
     Atom("mozpresentation", "mozpresentation"),
@@ -1212,14 +1219,11 @@ STATIC_ATOMS = [
     Atom("truespeed", "truespeed"),
     Atom("tt", "tt"),
     Atom("type", "type"),
-    Atom("typemustmatch", "typemustmatch"),
     Atom("u", "u"),
     Atom("ul", "ul"),
     Atom("unparsedEntityUri", "unparsed-entity-uri"),
     Atom("up", "up"),
-    Atom("upperAlpha", "upper-alpha"),
     Atom("upperFirst", "upper-first"),
-    Atom("upperRoman", "upper-roman"),
     Atom("use", "use"),
     Atom("useAttributeSets", "use-attribute-sets"),
     Atom("usemap", "usemap"),
@@ -1238,7 +1242,6 @@ STATIC_ATOMS = [
     Atom("vertical", "vertical"),
     Atom("audio", "audio"),
     Atom("video", "video"),
-    Atom("videocontrols", "videocontrols"),
     Atom("viewport", "viewport"),
     Atom("viewport_height", "viewport-height"),
     Atom("viewport_initial_scale", "viewport-initial-scale"),
@@ -1415,6 +1418,7 @@ STATIC_ATOMS = [
     Atom("limitingConeAngle", "limitingConeAngle"),
     Atom("linear", "linear"),
     Atom("linearGradient", "linearGradient"),
+    Atom("list_item", "list-item"),
     Atom("list_style_type", "list-style-type"),
     Atom("luminanceToAlpha", "luminanceToAlpha"),
     Atom("luminosity", "luminosity"),
@@ -1883,6 +1887,10 @@ STATIC_ATOMS = [
     # MediaDevices device change event
     Atom("ondevicechange", "ondevicechange"),
 
+    # Internal Visual Viewport events
+    Atom("onmozvisualresize", "onmozvisualresize"),
+    Atom("onmozvisualscroll", "onmozvisualscroll"),
+
     # WebExtensions
     Atom("moz_extension", "moz-extension"),
     Atom("all_urlsPermission", "<all_urls>"),
@@ -1895,6 +1903,78 @@ STATIC_ATOMS = [
     Atom("http", "http"),
     Atom("https", "https"),
     Atom("proxy", "proxy"),
+    Atom("privateBrowsingAllowedPermission", "internal:privateBrowsingAllowed"),
+
+    # CSS Counter Styles
+    Atom("decimal_leading_zero", "decimal-leading-zero"),
+    Atom("arabic_indic", "arabic-indic"),
+    Atom("armenian", "armenian"),
+    Atom("upper_armenian", "upper-armenian"),
+    Atom("lower_armenian", "lower-armenian"),
+    Atom("bengali", "bengali"),
+    Atom("cambodian", "cambodian"),
+    Atom("khmer", "khmer"),
+    Atom("cjk_decimal", "cjk-decimal"),
+    Atom("devanagari", "devanagari"),
+    Atom("georgian", "georgian"),
+    Atom("gujarati", "gujarati"),
+    Atom("gurmukhi", "gurmukhi"),
+    Atom("kannada", "kannada"),
+    Atom("lao", "lao"),
+    Atom("malayalam", "malayalam"),
+    Atom("mongolian", "mongolian"),
+    Atom("myanmar", "myanmar"),
+    Atom("oriya", "oriya"),
+    Atom("persian", "persian"),
+    Atom("lower_roman", "lower-roman"),
+    Atom("upper_roman", "upper-roman"),
+    Atom("tamil", "tamil"),
+    Atom("telugu", "telugu"),
+    Atom("thai", "thai"),
+    Atom("tibetan", "tibetan"),
+    Atom("lower_alpha", "lower-alpha"),
+    Atom("lower_latin", "lower-latin"),
+    Atom("upper_alpha", "upper-alpha"),
+    Atom("upper_latin", "upper-latin"),
+    Atom("cjk_heavenly_stem", "cjk-heavenly-stem"),
+    Atom("cjk_earthly_branch", "cjk-earthly-branch"),
+    Atom("lower_greek", "lower-greek"),
+    Atom("hiragana", "hiragana"),
+    Atom("hiragana_iroha", "hiragana-iroha"),
+    Atom("katakana", "katakana"),
+    Atom("katakana_iroha", "katakana-iroha"),
+    Atom("cjk_ideographic", "cjk-ideographic"),
+    Atom("_moz_arabic_indic", "-moz-arabic-indic"),
+    Atom("_moz_persian", "-moz-persian"),
+    Atom("_moz_urdu", "-moz-urdu"),
+    Atom("_moz_devanagari", "-moz-devanagari"),
+    Atom("_moz_bengali", "-moz-bengali"),
+    Atom("_moz_gurmukhi", "-moz-gurmukhi"),
+    Atom("_moz_gujarati", "-moz-gujarati"),
+    Atom("_moz_oriya", "-moz-oriya"),
+    Atom("_moz_tamil", "-moz-tamil"),
+    Atom("_moz_telugu", "-moz-telugu"),
+    Atom("_moz_kannada", "-moz-kannada"),
+    Atom("_moz_malayalam", "-moz-malayalam"),
+    Atom("_moz_thai", "-moz-thai"),
+    Atom("_moz_lao", "-moz-lao"),
+    Atom("_moz_myanmar", "-moz-myanmar"),
+    Atom("_moz_khmer", "-moz-khmer"),
+    Atom("_moz_cjk_heavenly_stem", "-moz-cjk-heavenly-stem"),
+    Atom("_moz_cjk_earthly_branch", "-moz-cjk-earthly-branch"),
+    Atom("_moz_hangul", "-moz-hangul"),
+    Atom("_moz_hangul_consonant", "-moz-hangul-consonant"),
+    Atom("_moz_ethiopic_halehame", "-moz-ethiopic-halehame"),
+    Atom("_moz_ethiopic_halehame_am", "-moz-ethiopic-halehame-am"),
+    Atom("_moz_ethiopic_halehame_ti_er", "-moz-ethiopic-halehame-ti-er"),
+    Atom("_moz_ethiopic_halehame_ti_et", "-moz-ethiopic-halehame-ti-et"),
+    Atom("_moz_trad_chinese_informal", "-moz-trad-chinese-informal"),
+    Atom("_moz_trad_chinese_formal", "-moz-trad-chinese-formal"),
+    Atom("_moz_simp_chinese_informal", "-moz-simp-chinese-informal"),
+    Atom("_moz_simp_chinese_formal", "-moz-simp-chinese-formal"),
+    Atom("_moz_japanese_informal", "-moz-japanese-informal"),
+    Atom("_moz_japanese_formal", "-moz-japanese-formal"),
+    Atom("_moz_ethiopic_numeric", "-moz-ethiopic-numeric"),
 
     # --------------------------------------------------------------------------
     # Special atoms
@@ -1975,15 +2055,19 @@ STATIC_ATOMS = [
     Atom("animationsProperty", "AnimationsProperty"),        # FrameAnimations*
     Atom("animationsOfBeforeProperty", "AnimationsOfBeforeProperty"),  # FrameAnimations*
     Atom("animationsOfAfterProperty", "AnimationsOfAfterProperty"),  # FrameAnimations*
+    Atom("animationsOfMarkerProperty", "AnimationsOfMarkerProperty"),  # FrameAnimations*
     Atom("animationEffectsProperty", "AnimationEffectsProperty"),  # EffectSet*
     Atom("animationEffectsForBeforeProperty", "AnimationsEffectsForBeforeProperty"),  # EffectSet*
     Atom("animationEffectsForAfterProperty", "AnimationsEffectsForAfterProperty"),  # EffectSet*
+    Atom("animationEffectsForMarkerProperty", "AnimationsEffectsForMarkerProperty"),  # EffectSet*
     Atom("beforePseudoProperty", "beforePseudoProperty"),  # nsXMLElement*
     Atom("cssPseudoElementBeforeProperty", "CSSPseudoElementBeforeProperty"),  # CSSPseudoElement*
     Atom("cssPseudoElementAfterProperty", "CSSPseudoElementAfterProperty"),  # CSSPseudoElement*
+    Atom("cssPseudoElementMarkerProperty", "CSSPseudoElementMarkerProperty"),  # CSSPseudoElement*
     Atom("transitionsProperty", "TransitionsProperty"),        # FrameTransitions*
     Atom("transitionsOfBeforeProperty", "TransitionsOfBeforeProperty"),  # FrameTransitions*
     Atom("transitionsOfAfterProperty", "TransitionsOfAfterProperty"),  # FrameTransitions*
+    Atom("transitionsOfMarkerProperty", "TransitionsOfMarkerProperty"),  # FrameTransitions*
     Atom("genConInitializerProperty", "QuoteNodeProperty"),
     Atom("labelMouseDownPtProperty", "LabelMouseDownPtProperty"),
     Atom("lockedStyleStates", "lockedStyleStates"),
@@ -1991,8 +2075,9 @@ STATIC_ATOMS = [
     Atom("restylableAnonymousNode", "restylableAnonymousNode"),  # bool
     Atom("docLevelNativeAnonymousContent", "docLevelNativeAnonymousContent"),  # bool
     Atom("paintRequestTime", "PaintRequestTime"),
-    Atom("pseudoProperty", "PseudoProperty"),  # CSSPseudoElementType
+    Atom("pseudoProperty", "PseudoProperty"),  # PseudoStyleType
     Atom("manualNACProperty", "ManualNACProperty"),  # ManualNAC*
+    Atom("markerPseudoProperty", "markerPseudoProperty"),  # nsXMLElement*
 
     # Languages for lang-specific transforms
     Atom("Japanese", "ja"),
@@ -2033,6 +2118,7 @@ STATIC_ATOMS = [
     Atom("crh", "crh"),
     # Atom("el", "el"),  # "el" is present above
     Atom("ga", "ga"),
+    # Atom("lt", "lt"),  # "lt" is present above (atom name "lt_")
     Atom("nl", "nl"),
 
     # mathematical language, used for MathML
@@ -2093,10 +2179,12 @@ STATIC_ATOMS = [
     Atom("_moz_is_resource_document", "-moz-is-resource-document"),
     Atom("_moz_swipe_animation_enabled", "-moz-swipe-animation-enabled"),
     Atom("_moz_gtk_csd_available", "-moz-gtk-csd-available"),
+    Atom("_moz_gtk_csd_hide_titlebar_by_default", "-moz-gtk-csd-hide-titlebar-by-default"),
     Atom("_moz_gtk_csd_transparent_background", "-moz-gtk-csd-transparent-background"),
     Atom("_moz_gtk_csd_minimize_button", "-moz-gtk-csd-minimize-button"),
     Atom("_moz_gtk_csd_maximize_button", "-moz-gtk-csd-maximize-button"),
     Atom("_moz_gtk_csd_close_button", "-moz-gtk-csd-close-button"),
+    Atom("_moz_gtk_csd_reversed_placement", "-moz-gtk-csd-reversed-placement"),
     Atom("_moz_system_dark_theme", "-moz-system-dark-theme"),
 
     # application commands
@@ -2306,6 +2394,7 @@ STATIC_ATOMS = [
     # in nsCSSPseudoElementList.h
     PseudoElementAtom("PseudoElement_after", ":after"),
     PseudoElementAtom("PseudoElement_before", ":before"),
+    PseudoElementAtom("PseudoElement_marker", ":marker"),
     PseudoElementAtom("PseudoElement_backdrop", ":backdrop"),
     PseudoElementAtom("PseudoElement_cue", ":cue"),
     PseudoElementAtom("PseudoElement_firstLetter", ":first-letter"),
@@ -2313,8 +2402,6 @@ STATIC_ATOMS = [
     PseudoElementAtom("PseudoElement_selection", ":selection"),
     PseudoElementAtom("PseudoElement_mozFocusInner", ":-moz-focus-inner"),
     PseudoElementAtom("PseudoElement_mozFocusOuter", ":-moz-focus-outer"),
-    PseudoElementAtom("PseudoElement_mozListBullet", ":-moz-list-bullet"),
-    PseudoElementAtom("PseudoElement_mozListNumber", ":-moz-list-number"),
     PseudoElementAtom("PseudoElement_mozMathAnonymous", ":-moz-math-anonymous"),
     PseudoElementAtom("PseudoElement_mozNumberWrapper", ":-moz-number-wrapper"),
     PseudoElementAtom("PseudoElement_mozNumberText", ":-moz-number-text"),
@@ -2438,12 +2525,15 @@ def generate_nsgkatomconsts_h(output, *ignore):
                 anon_box_index = i
             anon_box_count += 1
     output.write("/* THIS IS AN AUTOGENERATED FILE.  DO NOT EDIT */\n\n"
+                 "#ifndef nsGkAtomConsts_h\n"
+                 "#define nsGkAtomConsts_h\n\n"
                  "namespace mozilla {\n"
                  "  constexpr uint32_t kAtomIndex_PseudoElements = %d;\n"
                  "  constexpr uint32_t kAtomCount_PseudoElements = %d;\n"
                  "  constexpr uint32_t kAtomIndex_AnonBoxes = %d;\n"
                  "  constexpr uint32_t kAtomCount_AnonBoxes = %d;\n"
-                 "}\n" % (pseudo_index, pseudo_count, anon_box_index, anon_box_count))
+                 "}\n\n"
+                 "#endif\n" % (pseudo_index, pseudo_count, anon_box_index, anon_box_count))
 
 
 if __name__ == '__main__':

@@ -10,6 +10,10 @@
   --preference-active-color: #858585;
 }
 
+#name {
+  -moz-box-flex: 1;
+}
+
 .radio-buttons {
   display: flex;
   margin-inline-start: 0.35rem;
@@ -31,7 +35,7 @@
   margin: 9px;
 }
 
-.icon-buttons > radio > [data-identity-icon] {
+.icon-buttons > radio > .userContext-icon {
   fill: #4d4d4d;
 }
 
@@ -39,7 +43,7 @@
   padding-inline-start: 2px;
 }
 
-radio > [data-identity-icon] {
+radio > .userContext-icon {
   inline-size: 22px;
   block-size: 22px;
 }

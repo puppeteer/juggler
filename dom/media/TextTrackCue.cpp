@@ -9,6 +9,13 @@
 #include "mozilla/dom/TextTrackRegion.h"
 #include "nsComponentManagerUtils.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "unicode/ubidi.h"
+
+extern mozilla::LazyLogModule gTextTrackLog;
+
+#define LOG(msg, ...)                     \
+  MOZ_LOG(gTextTrackLog, LogLevel::Debug, \
+          ("TextTrackCue=%p, " msg, this, ##__VA_ARGS__))
 
 namespace mozilla {
 namespace dom {
@@ -24,11 +31,11 @@ NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 StaticRefPtr<nsIWebVTTParserWrapper> TextTrackCue::sParserWrapper;
 
-// Set cue setting defaults based on step 19 & seq.
-// in http://dev.w3.org/html5/webvtt/#parsing
+// Set default value for cue, spec https://w3c.github.io/webvtt/#model-cues
 void TextTrackCue::SetDefaultCueSettings() {
   mPositionIsAutoKeyword = true;
-  mPositionAlign = PositionAlignSetting::Center;
+  // Spec https://www.w3.org/TR/webvtt1/#webvtt-cue-position-automatic-alignment
+  mPositionAlign = PositionAlignSetting::Auto;
   mSize = 100.0;
   mPauseOnExit = false;
   mSnapToLines = true;
@@ -52,6 +59,7 @@ TextTrackCue::TextTrackCue(nsPIDOMWindowInner* aOwnerWindow, double aStartTime,
       mHaveStartedWatcher(false),
       mWatchManager(
           this, GetOwnerGlobal()->AbstractMainThreadFor(TaskCategory::Other)) {
+  LOG("create TextTrackCue");
   SetDefaultCueSettings();
   MOZ_ASSERT(aOwnerWindow);
   if (NS_FAILED(StashDocument())) {
@@ -73,6 +81,7 @@ TextTrackCue::TextTrackCue(nsPIDOMWindowInner* aOwnerWindow, double aStartTime,
       mHaveStartedWatcher(false),
       mWatchManager(
           this, GetOwnerGlobal()->AbstractMainThreadFor(TaskCategory::Other)) {
+  LOG("create TextTrackCue");
   SetDefaultCueSettings();
   MOZ_ASSERT(aOwnerWindow);
   if (NS_FAILED(StashDocument())) {
@@ -181,9 +190,11 @@ double TextTrackCue::ComputedPosition() {
   // See spec https://w3c.github.io/webvtt/#cue-computed-position
   if (!mPositionIsAutoKeyword) {
     return mPosition;
-  } else if (mAlign == AlignSetting::Left) {
+  }
+  if (ComputedPositionAlign() == PositionAlignSetting::Line_left) {
     return 0.0;
-  } else if (mAlign == AlignSetting::Right) {
+  }
+  if (ComputedPositionAlign() == PositionAlignSetting::Line_right) {
     return 100.0;
   }
   return 50.0;
@@ -197,8 +208,22 @@ PositionAlignSetting TextTrackCue::ComputedPositionAlign() {
     return PositionAlignSetting::Line_left;
   } else if (mAlign == AlignSetting::Right) {
     return PositionAlignSetting::Line_right;
+  } else if (mAlign == AlignSetting::Start) {
+    return IsTextBaseDirectionLTR() ? PositionAlignSetting::Line_left
+                                    : PositionAlignSetting::Line_right;
+  } else if (mAlign == AlignSetting::End) {
+    return IsTextBaseDirectionLTR() ? PositionAlignSetting::Line_right
+                                    : PositionAlignSetting::Line_left;
   }
   return PositionAlignSetting::Center;
+}
+
+bool TextTrackCue::IsTextBaseDirectionLTR() const {
+  // The returned result by `ubidi_getBaseDirection` might be `neutral` if the
+  // text only contains netural charaters. In this case, we would treat its
+  // base direction as LTR.
+  return ubidi_getBaseDirection(mText.BeginReading(), mText.Length()) !=
+         UBIDI_RTL;
 }
 
 void TextTrackCue::NotifyDisplayStatesChanged() {
@@ -214,6 +239,19 @@ void TextTrackCue::NotifyDisplayStatesChanged() {
   mTrack->GetTextTrackList()
       ->GetMediaElement()
       ->NotifyCueDisplayStatesChanged();
+}
+
+void TextTrackCue::SetActive(bool aActive) {
+  if (mActive == aActive) {
+    return;
+  }
+
+  LOG("TextTrackCue, SetActive=%d", aActive);
+  mActive = aActive;
+  mDisplayState = mActive ? mDisplayState : nullptr;
+  if (mTrack) {
+    mTrack->NotifyCueActiveStateChanged(this);
+  }
 }
 
 }  // namespace dom

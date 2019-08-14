@@ -4,8 +4,8 @@
 "use strict";
 
 const TEST_FILE = "test-network-request.html";
-const TEST_PATH = "http://example.com/browser/devtools/client/webconsole/" +
-                  "test/mochitest/";
+const TEST_PATH =
+  "http://example.com/browser/devtools/client/webconsole/" + "test/mochitest/";
 const TEST_URI = TEST_PATH + TEST_FILE;
 
 add_task(async function task() {
@@ -31,16 +31,14 @@ add_task(async function task() {
 
   info("NetMonitor:PayloadReady received");
 
-  const webconsolePanel = await toolbox.selectTool("webconsole");
-  const { hud } = webconsolePanel;
+  const { hud } = await toolbox.selectTool("webconsole");
 
   const xhrUrl = TEST_PATH + "test-data.json";
   const messageNode = await waitFor(() => findMessage(hud, xhrUrl));
   const urlNode = messageNode.querySelector(".url");
   info("Network message found.");
 
-  const ui = hud.ui;
-  const consoleReady = ui.jsterm.hud.once("network-request-payload-ready");
+  const consoleReady = hud.ui.once("network-request-payload-ready");
 
   // Expand network log
   urlNode.click();
@@ -61,7 +59,8 @@ async function testNetworkMessage(messageNode) {
   let headersContent;
   await waitUntil(() => {
     headersContent = messageNode.querySelector(
-      "#headers-panel .headers-overview");
+      "#headers-panel .headers-overview"
+    );
     return headersContent;
   });
 
@@ -74,7 +73,7 @@ async function testNetworkMessage(messageNode) {
  */
 async function waitForLazyRequests(toolbox) {
   const { ui } = toolbox.getCurrentPanel().hud;
-  const proxy = ui.jsterm.hud.proxy;
+  const proxy = ui.proxy;
   return waitUntil(() => {
     return !proxy.networkDataProvider.lazyRequestData.size;
   });

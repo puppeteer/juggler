@@ -7,6 +7,13 @@
 #ifndef mozilla_dom_indexeddb_actorsparent_h__
 #define mozilla_dom_indexeddb_actorsparent_h__
 
+#include "nscore.h"
+
+#include <stdint.h>
+
+#include "mozilla/dom/indexedDB/PermissionRequestBase.h"
+#include "mozilla/dom/PBrowserParent.h"
+
 template <class>
 struct already_AddRefed;
 class nsIPrincipal;
@@ -25,10 +32,10 @@ class Client;
 
 namespace indexedDB {
 
+class FileManager;
 class LoggingInfo;
 class PBackgroundIDBFactoryParent;
 class PBackgroundIndexedDBUtilsParent;
-class PIndexedDBPermissionRequestParent;
 
 PBackgroundIDBFactoryParent* AllocPBackgroundIDBFactoryParent(
     const LoggingInfo& aLoggingInfo);
@@ -45,18 +52,28 @@ bool DeallocPBackgroundIndexedDBUtilsParent(
 
 bool RecvFlushPendingFileDeletions();
 
-PIndexedDBPermissionRequestParent* AllocPIndexedDBPermissionRequestParent(
-    Element* aOwnerElement, nsIPrincipal* aPrincipal);
-
-bool RecvPIndexedDBPermissionRequestConstructor(
-    PIndexedDBPermissionRequestParent* aActor);
-
-bool DeallocPIndexedDBPermissionRequestParent(
-    PIndexedDBPermissionRequestParent* aActor);
-
 already_AddRefed<mozilla::dom::quota::Client> CreateQuotaClient();
 
 FileHandleThreadPool* GetFileHandleThreadPool();
+
+class PermissionRequestHelper final : public PermissionRequestBase {
+ public:
+  PermissionRequestHelper(
+      Element* aOwnerElement, nsIPrincipal* aPrincipal,
+      PBrowserParent::IndexedDBPermissionRequestResolver& aResolver)
+      : PermissionRequestBase(aOwnerElement, aPrincipal),
+        mResolver(aResolver) {}
+
+ protected:
+  ~PermissionRequestHelper() override = default;
+
+ private:
+  PBrowserParent::IndexedDBPermissionRequestResolver mResolver;
+
+  void OnPromptComplete(PermissionValue aPermissionValue) override;
+};
+
+nsresult AsyncDeleteFile(FileManager* aFileManager, int64_t aFileId);
 
 }  // namespace indexedDB
 }  // namespace dom

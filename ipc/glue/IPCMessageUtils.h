@@ -20,7 +20,7 @@
 #include "mozilla/net/WebSocketFrame.h"
 #include "mozilla/TimeStamp.h"
 #ifdef XP_WIN
-#include "mozilla/TimeStamp_windows.h"
+#  include "mozilla/TimeStamp_windows.h"
 #endif
 #include "mozilla/TypeTraits.h"
 #include "mozilla/IntegerTypeTraits.h"
@@ -32,6 +32,7 @@
 #include "nsExceptionHandler.h"
 #include "nsHashKeys.h"
 #include "nsID.h"
+#include "nsILoadInfo.h"
 #include "nsIWidget.h"
 #include "nsMemory.h"
 #include "nsString.h"
@@ -41,7 +42,7 @@
 #include "nsCSSPropertyID.h"
 
 #ifdef _MSC_VER
-#pragma warning(disable : 4800)
+#  pragma warning(disable : 4800)
 #endif
 
 #if !defined(OS_POSIX)
@@ -83,7 +84,7 @@ struct SerializedStructuredCloneBuffer final {
       const SerializedStructuredCloneBuffer& aOther) {
     data.Clear();
     data.initScope(aOther.data.scope());
-    data.Append(aOther.data);
+    MOZ_RELEASE_ASSERT(data.Append(aOther.data), "out of memory");
     return *this;
   }
 
@@ -101,11 +102,6 @@ struct SerializedStructuredCloneBuffer final {
 }  // namespace mozilla
 
 namespace IPC {
-
-/**
- * Maximum size, in bytes, of a single IPC message.
- */
-static const uint32_t MAX_MESSAGE_SIZE = 65536;
 
 /**
  * Generic enum serializer.
@@ -975,18 +971,9 @@ struct ParamTraits<mozilla::Variant<Ts...>> {
   typedef mozilla::Variant<Ts...> paramType;
   using Tag = typename mozilla::detail::VariantTag<Ts...>::Type;
 
-  struct VariantWriter {
-    Message* msg;
-
-    template <class T>
-    void match(const T& t) {
-      WriteParam(msg, t);
-    }
-  };
-
   static void Write(Message* msg, const paramType& param) {
     WriteParam(msg, param.tag);
-    param.match(VariantWriter{msg});
+    param.match([msg](const auto& t) { WriteParam(msg, t); });
   }
 
   // Because VariantReader is a nested struct, we need the dummy template
@@ -1070,6 +1057,53 @@ struct ParamTraits<mozilla::dom::Optional<T>> {
     }
 
     return true;
+  }
+};
+
+struct CrossOriginOpenerPolicyValidator {
+  static bool IsLegalValue(nsILoadInfo::CrossOriginOpenerPolicy e) {
+    return e == nsILoadInfo::OPENER_POLICY_NULL ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_ORIGIN ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_SITE ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_ALLOW_OUTGOING ||
+           e == nsILoadInfo::OPENER_POLICY_SAME_SITE_ALLOW_OUTGOING;
+  }
+};
+
+template <>
+struct ParamTraits<nsILoadInfo::CrossOriginOpenerPolicy>
+    : EnumSerializer<nsILoadInfo::CrossOriginOpenerPolicy,
+                     CrossOriginOpenerPolicyValidator> {};
+
+struct CrossOriginPolicyValidator {
+  static bool IsLegalValue(nsILoadInfo::CrossOriginPolicy e) {
+    return e == nsILoadInfo::CROSS_ORIGIN_POLICY_NULL ||
+           e == nsILoadInfo::CROSS_ORIGIN_POLICY_ANONYMOUS ||
+           e == nsILoadInfo::CROSS_ORIGIN_POLICY_USE_CREDENTIALS;
+  }
+};
+
+template <>
+struct ParamTraits<nsILoadInfo::CrossOriginPolicy>
+    : EnumSerializer<nsILoadInfo::CrossOriginPolicy,
+                     CrossOriginPolicyValidator> {};
+
+// Helper class for reading bitfields.
+// If T has bitfields members, derive ParamTraits<T> from BitfieldHelper<T>.
+template <typename ParamType>
+struct BitfieldHelper {
+  // We need this helper because we can't get the address of a bitfield to
+  // pass directly to ReadParam. So instead we read it into a temporary bool
+  // and set the bitfield using a setter function
+  static bool ReadBoolForBitfield(const Message* aMsg, PickleIterator* aIter,
+                                  ParamType* aResult,
+                                  void (ParamType::*aSetter)(bool)) {
+    bool value;
+    if (ReadParam(aMsg, aIter, &value)) {
+      (aResult->*aSetter)(value);
+      return true;
+    }
+    return false;
   }
 };
 

@@ -8,18 +8,18 @@
 #include <windows.h>
 #include <stdlib.h>
 #ifdef _MSC_VER
-#include <strsafe.h>
+#  include <strsafe.h>
 #endif
 #ifdef __MINGW32__
 /* MingW currently does not implement a wide version of the
    startup routines.  Workaround is to implement something like
    it ourselves.  See bug 472063 */
-#include <stdio.h>
-#include <shellapi.h>
+#  include <stdio.h>
+#  include <shellapi.h>
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int);
 
-#undef __argc
-#undef __wargv
+#  undef __argc
+#  undef __wargv
 
 static int __argc;
 static wchar_t** __wargv;
@@ -80,7 +80,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                 KEY_READ, &hkeyCU);
   RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"Software\\mozilla.org\\windbgdlg", 0,
                 KEY_READ, &hkeyLM);
-  int argc = 0;
   for (int i = __argc - 1; regValue == (DWORD)-1 && i; --i) {
     bool ok = false;
     if (hkeyCU)

@@ -57,11 +57,12 @@
   border.
 */
 #navigator-toolbox::after {
+  content: "";
+  display: -moz-box;
   -moz-appearance: toolbox;
   height: 1px;
-  /* use inset box-shadow instead of border because -moz-appearance hides the border */
-  border: none;
-  box-shadow: inset 0 -1px var(--chrome-content-separator-color);
+  margin-top: -1px;
+  opacity: 0.001;
 }
 
 #tabbrowser-tabs {
@@ -85,7 +86,7 @@
   -moz-box-pack: center;
 }
 
-#titlebar-buttonbox > .titlebar-button {
+.titlebar-button {
   display: none;
 }
 
@@ -118,7 +119,7 @@
 
 /** End titlebar **/
 
-#main-window[chromehidden~="toolbar"][chromehidden~="location"][chromehidden~="directories"] {
+:root[chromehidden~="toolbar"][chromehidden~="location"][chromehidden~="directories"] {
   border-top: 1px solid rgba(0,0,0,0.65);
 }
 
@@ -130,10 +131,10 @@
 
 /* Draw the bottom border of the tabs toolbar when it's not using
    -moz-appearance: toolbar. */
-#main-window:-moz-any([sizemode="fullscreen"],[customize-entered]) #nav-bar:not([tabs-hidden="true"]),
-#main-window:not([tabsintitlebar]) #nav-bar:not([tabs-hidden="true"]),
+:root:-moz-any([sizemode="fullscreen"],[customize-entered]) #nav-bar:not([tabs-hidden="true"]),
+:root:not([tabsintitlebar]) #nav-bar:not([tabs-hidden="true"]),
 #nav-bar:not([tabs-hidden="true"]):-moz-lwtheme {
-  box-shadow: 0 -@navbarTabsShadowSize@ 0 var(--tabs-border-color);
+  box-shadow: 0 calc(-1 * var(--tabs-navbar-shadow-size)) 0 var(--tabs-border-color);
 }
 
 /* Always draw a border on Yosemite to ensure the border is well-defined there
@@ -146,8 +147,8 @@
     --tabs-border-color: rgba(0,0,0,.05);
   }
 
-  #main-window[tabsintitlebar] #nav-bar:not([tabs-hidden="true"]):not(:-moz-lwtheme) {
-    box-shadow: 0 -@navbarTabsShadowSize@ 0 var(--tabs-border-color);
+  :root[tabsintitlebar] #nav-bar:not([tabs-hidden="true"]):not(:-moz-lwtheme) {
+    box-shadow: 0 calc(-1 * var(--tabs-navbar-shadow-size)) 0 var(--tabs-border-color);
   }
 }
 
@@ -227,7 +228,7 @@
 
 /* Inactive elements are faded out on OSX */
 .toolbarbutton-1:not(:hover):-moz-window-inactive,
-#main-window:not([customizing]) .toolbarbutton-1:-moz-window-inactive[disabled="true"] {
+:root:not([customizing]) .toolbarbutton-1:-moz-window-inactive[disabled="true"] {
   opacity: 0.5;
 }
 
@@ -248,7 +249,7 @@
 }
 
 #urlbar,
-.searchbar-textbox {
+#searchbar {
   font-size: 1.25em;
 }
 
@@ -258,8 +259,8 @@ html|input.urlbar-input {
   line-height: 1.745em;
 }
 
-#urlbar[focused="true"],
-.searchbar-textbox[focused="true"] {
+#urlbar:not(.hidden-focus)[focused="true"],
+#searchbar:focus-within {
   box-shadow: 0 0 0 1px var(--toolbar-field-focus-border-color) inset,
               0 0 0 1px var(--toolbar-field-focus-border-color);
 }
@@ -267,9 +268,7 @@ html|input.urlbar-input {
 %include ../shared/identity-block/identity-block.inc.css
 
 #identity-box:not(:active):-moz-focusring {
-  box-shadow: var(--focus-ring-box-shadow);
   border-inline-end-style: none;
-  padding-inline-end: 5px;
 }
 
 /* ::::: URL Bar Zoom Reset Button ::::: */
@@ -337,6 +336,12 @@ html|input.urlbar-input {
   --urlbar-popup-action-color: hsl(178, 100%, 28%);
 }
 
+/* Remove our custom border since we already get a native one that we can't
+ * seem to override. */
+#urlbar-results {
+  border-style: none;
+}
+
 /* Give an extra margin top to align the top of the awesomebar with the
  * bottom of the nav bar, OSX calculates the panel position with an missing
  * 1px - https://bugzilla.mozilla.org/show_bug.cgi?id=1406353
@@ -349,7 +354,8 @@ html|input.urlbar-input {
   border-top: 1px solid #C7C7C7;
 }
 
-.ac-title {
+.ac-title,
+#urlbarView-results {
   font-size: 14px;
 }
 
@@ -564,7 +570,7 @@ html|input.urlbar-input {
   text-shadow: none;
 }
 
-.browserContainer > findbar:-moz-lwtheme {
+:root:not([lwtheme-image]) .browserContainer > findbar:-moz-lwtheme {
   background-color: var(--lwt-accent-color);
   background-image: linear-gradient(var(--toolbar-bgcolor), var(--toolbar-bgcolor));
   border-top-color: var(--chrome-content-separator-color);
@@ -588,7 +594,7 @@ html|input.urlbar-input {
   margin-bottom: 0;
 }
 
-.tabbrowser-tab:not(:hover) > .tab-stack > .tab-content > .tab-icon-image:not([selected="true"]) {
+.tabbrowser-tab:not(:hover) > .tab-stack > .tab-content > .tab-icon-image:not([selected="true"]):not([multiselected]) {
   opacity: .9;
 }
 
@@ -600,7 +606,7 @@ html|input.urlbar-input {
   opacity: 0.9999;
 }
 
-.tab-label-container:not([selected="true"]) {
+.tab-label-container:not([selected="true"]):not([multiselected]) {
   opacity: .7;
 }
 
@@ -608,12 +614,13 @@ html|input.urlbar-input {
   font: message-box;
   border: none;
 }
-
+.tabbrowser-tab[multiselected]:not(:-moz-lwtheme),
 .tabbrowser-tab[visuallyselected=true]:not(:-moz-lwtheme) {
   /* overriding tabbox.css */
   color: hsl(240, 5%, 5%);
 }
 
+.tabbrowser-tab[multiselected],
 .tabbrowser-tab[visuallyselected=true] {
   /* overriding tabbox.css */
   text-shadow: inherit;
@@ -642,6 +649,7 @@ html|input.urlbar-input {
   text-shadow: none;
 }
 
+.tabbrowser-tab[multiselected]:not(:-moz-lwtheme),
 .tabbrowser-tab[visuallyselected=true]:not(:-moz-lwtheme) {
   -moz-font-smoothing-background-color: var(--toolbar-bgcolor);
 }
@@ -703,10 +711,6 @@ html|input.urlbar-input {
 }
 
 %include ../shared/notification-icons.inc.css
-
-.notification-anchor-icon:-moz-focusring {
-  box-shadow: var(--focus-ring-box-shadow);
-}
 
 /* Translation */
 
@@ -782,19 +786,11 @@ button.translate-infobar-element.options-menu-button {
 
 button.translate-infobar-element.options-menu-button > .button-box > .button-menu-dropmarker {
   display: -moz-box;
-  list-style-image: url("chrome://global/skin/icons/glyph-dropdown.png");
+  -moz-context-properties: fill;
+  fill: currentColor;
+  list-style-image: url("chrome://global/skin/icons/arrow-dropdown-12.svg");
   padding: 0;
   margin: 0;
-}
-
-@media (min-resolution: 2dppx) {
-  button.translate-infobar-element.options-menu-button > .button-box > .button-menu-dropmarker {
-    list-style-image: url("chrome://global/skin/icons/glyph-dropdown@2x.png");
-  }
-
-  button.translate-infobar-element.options-menu-button > .button-box > .button-menu-dropmarker > .dropmarker-icon {
-    width: 8px;
-  }
 }
 
 menulist.translate-infobar-element {
@@ -828,71 +824,10 @@ menulist.translate-infobar-element[open="true"] {
 
 menulist.translate-infobar-element > .menulist-dropmarker {
   display: -moz-box;
-  list-style-image: url("chrome://global/skin/icons/glyph-dropdown.png");
+  list-style-image: url("chrome://global/skin/icons/arrow-dropdown-12.svg");
 }
 
-@media (min-resolution: 2dppx) {
-  menulist.translate-infobar-element > .menulist-dropmarker {
-    list-style-image: url("chrome://global/skin/icons/glyph-dropdown@2x.png");
-  }
-
-  menulist.translate-infobar-element > .menulist-dropmarker > .dropmarker-icon {
-    width: 8px;
-  }
-}
-
-.popup-notification-body[popupid="addon-progress"],
-.popup-notification-body[popupid="addon-install-confirmation"] {
-  width: 28em;
-  max-width: 28em;
-}
-
-.addon-install-confirmation-name {
-  font-weight: bold;
-}
-
-html|*.addon-webext-perm-list {
-  margin-block-end: 0;
-  padding-inline-start: 10px;
-}
-
-.addon-webext-perm-text {
-  margin-inline-start: 0;
-}
-
-.popup-notification-description[popupid="addon-webext-permissions"],
-.popup-notification-description[popupid="addon-webext-permissions-notification"] {
-  margin-inline-start: -1px;
-}
-
-.addon-webext-perm-notification-content,
-.addon-installed-notification-content {
-  margin-top: 0;
-}
-
-.addon-webext-name {
-  display: inline;
-  font-weight: bold;
-  margin: 0;
-}
-
-.addon-addon-icon,
-.addon-toolbar-icon {
-  width: 14px;
-  height: 14px;
-  vertical-align: bottom;
-  margin-bottom: 1px;
-  -moz-context-properties: fill;
-  fill: currentColor;
-}
-
-.addon-addon-icon {
-  list-style-image: url("chrome://mozapps/skin/extensions/extensionGeneric-16.svg");
-}
-
-.addon-toolbar-icon {
-  list-style-image: url("chrome://browser/skin/menu.svg");
-}
+%include ../shared/addon-notification.inc.css
 
 /* Status panel */
 

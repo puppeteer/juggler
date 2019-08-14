@@ -2,12 +2,14 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 async function testSidebarKeyToggle(key, options, expectedSidebarId) {
-  EventUtils.synthesizeMouseAtCenter(gURLBar, {});
+  EventUtils.synthesizeMouseAtCenter(gURLBar.textbox, {});
   let promiseShown = BrowserTestUtils.waitForEvent(window, "SidebarShown");
   EventUtils.synthesizeKey(key, options);
   await promiseShown;
-  Assert.equal(document.getElementById("sidebar-box")
-                       .getAttribute("sidebarcommand"), expectedSidebarId);
+  Assert.equal(
+    document.getElementById("sidebar-box").getAttribute("sidebarcommand"),
+    expectedSidebarId
+  );
   EventUtils.synthesizeKey(key, options);
   Assert.ok(!SidebarUI.isOpen);
 }

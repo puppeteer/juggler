@@ -71,6 +71,14 @@ apt_packages+=('wget')
 apt_packages+=('xvfb')
 apt_packages+=('yasm')
 apt_packages+=('zip')
+apt_packages+=('libsecret-1-0:i386')
+
+# Make sure we have X libraries for 32-bit tests
+apt_packages+=('libxt6:i386')
+apt_packages+=('libpulse0:i386')
+apt_packages+=('libasound2:i386')
+apt_packages+=('libxtst6:i386')
+apt_packages+=('libgtk2.0-0:i386')
 
 # get xvinfo for test-linux.sh to monitor Xvfb startup
 apt_packages+=('x11-utils')
@@ -131,11 +139,8 @@ apt-get install -y libc6-dbg
 valgrind --version
 valgrind date
 
-# Fetch the minidump_stackwalk binary specified by the in-tree tooltool manifest.
-python /setup/tooltool.py fetch -m /tmp/minidump_stackwalk.manifest
-rm /tmp/minidump_stackwalk.manifest
-mv linux64-minidump_stackwalk /usr/local/bin/
-chmod +x /usr/local/bin/linux64-minidump_stackwalk
+# Until bug 1511527 is fixed, remove the file from the image to ensure it's not there.
+rm -f /usr/local/bin/linux64-minidump_stackwalk
 
 # adding multiverse to get 'ubuntu-restricted-extras' below
 apt-add-repository multiverse
@@ -164,8 +169,7 @@ apt-get update
 apt-get -q -y -f install \
     libavcodec-ffmpeg-extra56:i386 \
     libgtk-3-0:i386 \
-    libdbus-glib-1-2:i386 \
-    openjdk-8-jdk:i386
+    libdbus-glib-1-2:i386
 
 # use fc-cache:i386 to pre-build the font cache for i386 binaries
 apt-get -q -y -f install \
@@ -173,9 +177,43 @@ apt-get -q -y -f install \
 
 # revert the list of repos
 cp sources.list.orig /etc/apt/sources.list
+
+# Get some bionic packages
+sed 's/xenial/bionic/g' /etc/apt/sources.list > /etc/apt/sources.list.d/bionic.list
+cat <<EOF > /etc/apt/preferences.d/pinning
+Package: *
+Pin: release n=xenial
+Pin-Priority: 900
+
+Package: *
+Pin: release a=bionic
+Pin-Priority: 800
+EOF
 apt-get update
+apt-get -y -f -t bionic install libfreetype6
 
 # clean up
+# Purge unneeded stuff from the image
+apt-get -y purge cheese 'libcheese*'
+apt-get -y purge gnome-user-guide
+apt-get -y purge 'libreoffice*'
+#apt-get -y purge firefox thunderbird
+apt-get -y purge 'liboxideqt*'
+apt-get -y purge gnome-mahjongg
+apt-get -y purge ubuntu-docs
+apt-get -y purge llvm-3.8-dev libllvm3.8
+apt-get -y purge git
+apt-get -y purge lintian
+apt-get -y purge freepats
+apt-get -y purge ubuntu-mobile-icons
+apt-get -y purge hplip
+apt-get -y purge rhythmbox
+apt-get -y purge thunderbird
+apt-get -y autoremove
+
+# We don't need no docs!
+rm -rf /usr/share/help /usr/share/doc /usr/share/man
+
 cd /
 rm -rf /setup ~/.ccache ~/.cache ~/.npm
 apt-get clean

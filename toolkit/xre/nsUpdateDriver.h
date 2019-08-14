@@ -17,13 +17,13 @@
 class nsIFile;
 
 #if defined(XP_WIN)
-#include <windows.h>
+#  include <windows.h>
 typedef HANDLE ProcessType;
 #elif defined(XP_UNIX)
 typedef pid_t ProcessType;
 #else
-#include "prproces.h"
-typedef PRProcess *ProcessType;
+#  include "prproces.h"
+typedef PRProcess* ProcessType;
 #endif
 
 /**
@@ -46,9 +46,9 @@ typedef PRProcess *ProcessType;
  *
  * This function does not modify appDir.
  */
-nsresult ProcessUpdates(nsIFile *greDir, nsIFile *appDir, nsIFile *updRootDir,
-                        int argc, char **argv, const char *appVersion,
-                        bool restart = true, ProcessType *pid = nullptr);
+nsresult ProcessUpdates(nsIFile* greDir, nsIFile* appDir, nsIFile* updRootDir,
+                        int argc, char** argv, const char* appVersion,
+                        bool restart = true, ProcessType* pid = nullptr);
 
 // The implementation of the update processor handles the task of loading the
 // updater application for staging an update.
@@ -65,7 +65,7 @@ class nsUpdateProcessor final : public nsIUpdateProcessor {
   ~nsUpdateProcessor();
 
   struct StagedUpdateInfo {
-    StagedUpdateInfo() : mArgc(0), mArgv(nullptr), mIsOSUpdate(false) {}
+    StagedUpdateInfo() : mArgc(0), mArgv(nullptr) {}
     ~StagedUpdateInfo() {
       for (int i = 0; i < mArgc; ++i) {
         delete[] mArgv[i];
@@ -76,11 +76,9 @@ class nsUpdateProcessor final : public nsIUpdateProcessor {
     nsCOMPtr<nsIFile> mGREDir;
     nsCOMPtr<nsIFile> mAppDir;
     nsCOMPtr<nsIFile> mUpdateRoot;
-    nsCOMPtr<nsIFile> mOSApplyToDir;
     int mArgc;
-    char **mArgv;
+    char** mArgv;
     nsCString mAppVersion;
-    bool mIsOSUpdate;
   };
 
  private:

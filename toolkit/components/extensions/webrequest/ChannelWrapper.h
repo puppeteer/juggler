@@ -26,7 +26,7 @@
 #include "nsIChannel.h"
 #include "nsIHttpChannel.h"
 #include "nsIStreamListener.h"
-#include "nsITabParent.h"
+#include "nsIRemoteTab.h"
 #include "nsIThreadRetargetableStreamListener.h"
 #include "nsPointerHashKeys.h"
 #include "nsInterfaceHashtable.h"
@@ -45,7 +45,7 @@ class nsITraceableChannel;
 
 namespace mozilla {
 namespace dom {
-class nsIContentParent;
+class ContentParent;
 class Element;
 }  // namespace dom
 namespace extensions {
@@ -127,7 +127,7 @@ class ChannelWrapper final : public DOMEventTargetHelper,
       const dom::GlobalObject& global, nsIChannel* channel);
   static already_AddRefed<extensions::ChannelWrapper> GetRegisteredChannel(
       const dom::GlobalObject& global, uint64_t aChannelId,
-      const WebExtensionPolicy& aAddon, nsITabParent* aTabParent);
+      const WebExtensionPolicy& aAddon, nsIRemoteTab* aBrowserParent);
 
   uint64_t Id() const { return mId; }
 
@@ -148,10 +148,10 @@ class ChannelWrapper final : public DOMEventTargetHelper,
   void SetContentType(const nsACString& aContentType);
 
   void RegisterTraceableChannel(const WebExtensionPolicy& aAddon,
-                                nsITabParent* aTabParent);
+                                nsIRemoteTab* aBrowserParent);
 
   already_AddRefed<nsITraceableChannel> GetTraceableChannel(
-      nsAtom* aAddonId, dom::nsIContentParent* aContentParent) const;
+      nsAtom* aAddonId, dom::ContentParent* aContentParent) const;
 
   void GetMethod(nsCString& aRetVal) const;
 
@@ -180,7 +180,7 @@ class ChannelWrapper final : public DOMEventTargetHelper,
   already_AddRefed<nsILoadInfo> GetLoadInfo() const {
     nsCOMPtr<nsIChannel> chan = MaybeChannel();
     if (chan) {
-      return chan->GetLoadInfo();
+      return chan->LoadInfo();
     }
     return nullptr;
   }
@@ -305,7 +305,7 @@ class ChannelWrapper final : public DOMEventTargetHelper,
   bool mSuspended = false;
   bool mResponseStarted = false;
 
-  nsInterfaceHashtable<nsPtrHashKey<const nsAtom>, nsITabParent> mAddonEntries;
+  nsInterfaceHashtable<nsPtrHashKey<const nsAtom>, nsIRemoteTab> mAddonEntries;
 
   class RequestListener final : public nsIStreamListener,
                                 public nsIThreadRetargetableStreamListener {

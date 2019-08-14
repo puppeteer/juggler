@@ -17,37 +17,43 @@ function run_test() {
   gDebuggee = addTestGlobal("test-conditional-breakpoint");
   gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-conditional-breakpoint",
-                           function(response, targetFront, threadClient) {
-                             gThreadClient = threadClient;
-                             test_simple_breakpoint();
-                           });
+    attachTestTabAndResume(gClient, "test-conditional-breakpoint", function(
+      response,
+      targetFront,
+      threadClient
+    ) {
+      gThreadClient = threadClient;
+      test_simple_breakpoint();
+    });
   });
   do_test_pending();
 }
 
 function test_simple_breakpoint() {
-  gThreadClient.addOneTimeListener("paused", function(event, packet) {
-    const source = gThreadClient.source(packet.frame.where.source);
-    source.setBreakpoint({
-      line: 3,
-      condition: "a === 1",
-    }).then(function([response, bpClient]) {
-      gThreadClient.addOneTimeListener("paused", function(event, packet) {
-        // Check the return value.
-        Assert.equal(packet.why.type, "breakpoint");
-        Assert.equal(packet.frame.where.line, 3);
+  let hitBreakpoint = false;
 
-        // Remove the breakpoint.
-        bpClient.remove(function(response) {
-          gThreadClient.resume(function() {
-            finishClient(gClient);
-          });
-        });
+  gThreadClient.once("paused", async function(packet) {
+    const source = await getSourceById(gThreadClient, packet.frame.where.actor);
+    const location = { sourceUrl: source.url, line: 3 };
+    gThreadClient.setBreakpoint(location, { condition: "a === 1" });
+    gThreadClient.once("paused", function(packet) {
+      Assert.equal(hitBreakpoint, false);
+      hitBreakpoint = true;
+
+      // Check the return value.
+      Assert.equal(packet.why.type, "breakpoint");
+      Assert.equal(packet.frame.where.line, 3);
+
+      // Remove the breakpoint.
+      gThreadClient.removeBreakpoint(location);
+
+      gThreadClient.resume().then(function() {
+        finishClient(gClient);
       });
-      // Continue until the breakpoint is hit.
-      gThreadClient.resume();
     });
+
+    // Continue until the breakpoint is hit.
+    gThreadClient.resume();
   });
 
   /* eslint-disable */
@@ -59,4 +65,6 @@ function test_simple_breakpoint() {
                    "test.js",
                    1);
   /* eslint-enable */
+
+  Assert.equal(hitBreakpoint, true);
 }

@@ -21,8 +21,8 @@
  *       |            |             |        |      FilePath Query Ref
  *       |            |             |       Port       \            /
  *       |            |            Host      /          ------------
- *       |         UserPass                 /	              |
- *     Scheme                              /	             Path
+ *       |         UserPass                 /                |
+ *     Scheme                              /                Path
  *       \                                /
  *        --------------------------------
  *                       |
@@ -44,10 +44,14 @@
 
 namespace mozilla {
 class Encoding;
-}
+namespace ipc {
+class URIParams;
+}  // namespace ipc
+}  // namespace mozilla
 %}
 
 [ptr] native Encoding(const mozilla::Encoding);
+[ref] native URIParams(mozilla::ipc::URIParams);
 interface nsIURIMutator;
 
 /**
@@ -59,7 +63,7 @@ interface nsIURIMutator;
  * interface.
  *
  * AUTF8String attributes may also contain escaped characters.
- * 
+ *
  * Unescaping URI segments is unadvised unless there is intimate
  * knowledge of the underlying charset or there is no plan to display (or
  * otherwise enforce a charset on) the resulting URI substring.
@@ -181,9 +185,20 @@ interface nsIURI : nsISupports
      */
     boolean schemeIs(in string scheme);
 
+    /*
+     * Infallible version of SchemeIs for C++ callers.
+     */
+    %{C++
+     bool SchemeIs(const char* aScheme) {
+       bool ret;
+       mozilla::Unused << SchemeIs(aScheme, &ret);
+       return ret;
+     }
+    %}
+
     /**
      * This method resolves a relative string into an absolute URI string,
-     * using this URI as the base. 
+     * using this URI as the base.
      *
      * NOTE: some implementations may have no concept of a relative URI.
      */
@@ -301,4 +316,18 @@ interface nsIURI : nsISupports
      * properties.
      */
     nsIURIMutator mutate();
+
+    /**
+     * Serializes a URI object to a URIParams data structure in order for being
+     * passed over IPC.  For deserialization, see nsIURIMutator.
+     */
+    [noscript, notxpcom] void serialize(in URIParams aParams);
+
+    %{C++
+    // MOZ_DBG support
+    friend std::ostream& operator<<(std::ostream& aOut, const nsIURI& aURI) {
+      nsIURI* uri = const_cast<nsIURI*>(&aURI);
+      return aOut << "nsIURI { " << uri->GetSpecOrDefault() << " }";
+    }
+    %}
 };

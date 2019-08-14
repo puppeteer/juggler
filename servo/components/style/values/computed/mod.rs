@@ -7,10 +7,10 @@
 use self::transform::DirectionVector;
 use super::animated::ToAnimatedValue;
 use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
-use super::generics::grid::{GridLine as GenericGridLine, TrackBreadth as GenericTrackBreadth};
-use super::generics::grid::{TrackList as GenericTrackList, TrackSize as GenericTrackSize};
+use super::generics::grid::{GenericGridLine, GenericTrackBreadth};
+use super::generics::grid::{GenericTrackSize, TrackList as GenericTrackList};
 use super::generics::transform::IsParallelTo;
-use super::generics::{GreaterThanOrEqualToOne, NonNegative};
+use super::generics::{self, GreaterThanOrEqualToOne, NonNegative, ZeroToOne};
 use super::specified;
 use super::{CSSFloat, CSSInteger};
 use crate::context::QuirksMode;
@@ -27,9 +27,6 @@ use euclid::Size2D;
 use std::cell::RefCell;
 use std::cmp;
 use std::f32;
-use std::fmt::{self, Write};
-use style_traits::cursor::CursorKind;
-use style_traits::{CssWriter, ToCss};
 
 #[cfg(feature = "gecko")]
 pub use self::align::{AlignContent, AlignItems, JustifyContent, JustifyItems, SelfAlignment};
@@ -43,12 +40,13 @@ pub use self::border::{BorderImageRepeat, BorderImageSideWidth};
 pub use self::border::{BorderImageSlice, BorderImageWidth};
 pub use self::box_::{AnimationIterationCount, AnimationName, Contain};
 pub use self::box_::{Appearance, BreakBetween, BreakWithin, Clear, Float};
-pub use self::box_::{Display, TransitionProperty};
+pub use self::box_::{Display, Overflow, OverflowAnchor, TransitionProperty};
 pub use self::box_::{OverflowClipBox, OverscrollBehavior, Perspective, Resize};
-pub use self::box_::{ScrollSnapType, TouchAction, VerticalAlign, WillChange};
-pub use self::color::{Color, ColorPropertyValue, RGBAColor};
+pub use self::box_::{ScrollSnapAlign, ScrollSnapAxis, ScrollSnapStrictness, ScrollSnapType};
+pub use self::box_::{TouchAction, VerticalAlign, WillChange};
+pub use self::color::{Color, ColorOrAuto, ColorPropertyValue};
 pub use self::column::ColumnCount;
-pub use self::counters::{Content, ContentItem, CounterIncrement, CounterReset};
+pub use self::counters::{Content, ContentItem, CounterIncrement, CounterSetOrReset};
 pub use self::easing::TimingFunction;
 pub use self::effects::{BoxShadow, Filter, SimpleShadow};
 pub use self::flex::FlexBasis;
@@ -58,35 +56,36 @@ pub use self::font::{FontSize, FontSizeAdjust, FontStretch, FontSynthesis};
 pub use self::font::{FontVariantAlternates, FontWeight};
 pub use self::font::{FontVariantEastAsian, FontVariationSettings};
 pub use self::font::{MozScriptLevel, MozScriptMinSize, MozScriptSizeMultiplier, XLang, XTextZoom};
-#[cfg(feature = "gecko")]
-pub use self::gecko::ScrollSnapPoint;
 pub use self::image::{Gradient, GradientItem, Image, ImageLayer, LineDirection, MozImageRect};
 pub use self::length::{CSSPixelLength, ExtremumLength, NonNegativeLength};
-pub use self::length::{CalcLengthOrPercentage, Length, LengthOrNumber, LengthOrPercentage};
-pub use self::length::{LengthOrPercentageOrAuto, LengthOrPercentageOrNone, MaxLength, MozLength};
-pub use self::length::{NonNegativeLengthOrPercentage, NonNegativeLengthOrPercentageOrAuto};
+pub use self::length::{Length, LengthOrNumber, LengthPercentage, NonNegativeLengthOrNumber};
+pub use self::length::{LengthOrAuto, LengthPercentageOrAuto, MaxSize, Size};
+pub use self::length::{NonNegativeLengthPercentage, NonNegativeLengthPercentageOrAuto};
 #[cfg(feature = "gecko")]
 pub use self::list::ListStyleType;
+pub use self::list::MozListReversed;
 pub use self::list::{QuotePair, Quotes};
-pub use self::motion::OffsetPath;
+pub use self::motion::{OffsetPath, OffsetRotate};
 pub use self::outline::OutlineStyle;
 pub use self::percentage::{NonNegativePercentage, Percentage};
 pub use self::position::{GridAutoFlow, GridTemplateAreas, Position, ZIndex};
-pub use self::rect::LengthOrNumberRect;
+pub use self::rect::NonNegativeLengthOrNumberRect;
 pub use self::resolution::Resolution;
 pub use self::svg::MozContextProperties;
 pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind};
 pub use self::svg::{SVGPaintOrder, SVGStrokeDashArray, SVGWidth};
 pub use self::table::XSpan;
-pub use self::text::{InitialLetter, LetterSpacing, LineHeight, MozTabSize};
-pub use self::text::{OverflowWrap, TextOverflow, WordSpacing};
+pub use self::text::TextDecorationSkipInk;
+pub use self::text::{InitialLetter, LetterSpacing, LineBreak, LineHeight};
+pub use self::text::{OverflowWrap, TextOverflow, WordBreak, WordSpacing};
 pub use self::text::{TextAlign, TextEmphasisPosition, TextEmphasisStyle};
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, Transform, TransformOperation};
 pub use self::transform::{TransformOrigin, TransformStyle, Translate};
 #[cfg(feature = "gecko")]
 pub use self::ui::CursorImage;
-pub use self::ui::{ColorOrAuto, Cursor, MozForceBrokenImageIcon, UserSelect};
+pub use self::ui::{Cursor, MozForceBrokenImageIcon, UserSelect};
+pub use super::specified::TextTransform;
 pub use super::specified::{BorderStyle, TextDecorationLine};
 pub use super::{Auto, Either, None_};
 pub use app_units::Au;
@@ -106,8 +105,6 @@ pub mod easing;
 pub mod effects;
 pub mod flex;
 pub mod font;
-#[cfg(feature = "gecko")]
-pub mod gecko;
 pub mod image;
 pub mod length;
 pub mod list;
@@ -151,7 +148,7 @@ pub struct Context<'a> {
 
     /// A font metrics provider, used to access font metrics to implement
     /// font-relative units.
-    pub font_metrics_provider: &'a FontMetricsProvider,
+    pub font_metrics_provider: &'a dyn FontMetricsProvider,
 
     /// Whether or not we are computing the media list in a media query
     pub in_media_query: bool,
@@ -444,6 +441,25 @@ where
     }
 }
 
+impl<T> ToComputedValue for crate::OwnedSlice<T>
+where
+    T: ToComputedValue,
+{
+    type ComputedValue = crate::OwnedSlice<<T as ToComputedValue>::ComputedValue>;
+
+    #[inline]
+    fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
+        self.iter()
+            .map(|item| item.to_computed_value(context))
+            .collect()
+    }
+
+    #[inline]
+    fn from_computed_value(computed: &Self::ComputedValue) -> Self {
+        computed.iter().map(T::from_computed_value).collect()
+    }
+}
+
 trivial_to_computed_value!(());
 trivial_to_computed_value!(bool);
 trivial_to_computed_value!(f32);
@@ -452,7 +468,6 @@ trivial_to_computed_value!(u8);
 trivial_to_computed_value!(u16);
 trivial_to_computed_value!(u32);
 trivial_to_computed_value!(Atom);
-trivial_to_computed_value!(CursorKind);
 #[cfg(feature = "servo")]
 trivial_to_computed_value!(Prefix);
 trivial_to_computed_value!(String);
@@ -505,6 +520,30 @@ impl From<NonNegativeNumber> for CSSFloat {
     }
 }
 
+/// A wrapper of Number, but the value between 0 and 1
+pub type ZeroToOneNumber = ZeroToOne<CSSFloat>;
+
+impl ToAnimatedValue for ZeroToOneNumber {
+    type AnimatedValue = CSSFloat;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        self.0
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        Self(animated.max(0.).min(1.))
+    }
+}
+
+impl From<CSSFloat> for ZeroToOneNumber {
+    #[inline]
+    fn from(number: CSSFloat) -> Self {
+        Self(number)
+    }
+}
+
 /// A wrapper of Number, but the value >= 1.
 pub type GreaterThanOrEqualToOneNumber = GreaterThanOrEqualToOne<CSSFloat>;
 
@@ -537,10 +576,24 @@ impl From<GreaterThanOrEqualToOneNumber> for CSSFloat {
 }
 
 #[allow(missing_docs)]
-#[derive(Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf, PartialEq, ToCss)]
+#[derive(
+    Clone, ComputeSquaredDistance, Copy, Debug, MallocSizeOf, PartialEq, ToCss, ToResolvedValue,
+)]
+#[repr(C, u8)]
 pub enum NumberOrPercentage {
     Percentage(Percentage),
     Number(Number),
+}
+
+impl NumberOrPercentage {
+    fn clamp_to_non_negative(self) -> Self {
+        match self {
+            NumberOrPercentage::Percentage(p) => {
+                NumberOrPercentage::Percentage(p.clamp_to_non_negative())
+            },
+            NumberOrPercentage::Number(n) => NumberOrPercentage::Number(n.max(0.)),
+        }
+    }
 }
 
 impl ToComputedValue for specified::NumberOrPercentage {
@@ -569,6 +622,31 @@ impl ToComputedValue for specified::NumberOrPercentage {
                 specified::NumberOrPercentage::Number(ToComputedValue::from_computed_value(&number))
             },
         }
+    }
+}
+
+/// A non-negative <number-percentage>.
+pub type NonNegativeNumberOrPercentage = NonNegative<NumberOrPercentage>;
+
+impl NonNegativeNumberOrPercentage {
+    /// Returns the `100%` value.
+    #[inline]
+    pub fn hundred_percent() -> Self {
+        NonNegative(NumberOrPercentage::Percentage(Percentage::hundred()))
+    }
+}
+
+impl ToAnimatedValue for NonNegativeNumberOrPercentage {
+    type AnimatedValue = NumberOrPercentage;
+
+    #[inline]
+    fn to_animated_value(self) -> Self::AnimatedValue {
+        self.0
+    }
+
+    #[inline]
+    fn from_animated_value(animated: Self::AnimatedValue) -> Self {
+        NonNegative(animated.clamp_to_non_negative())
     }
 }
 
@@ -602,71 +680,30 @@ impl From<CSSInteger> for PositiveInteger {
     }
 }
 
-#[allow(missing_docs)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
-#[derive(Clone, ComputeSquaredDistance, Copy, Debug, PartialEq)]
-/// A computed cliprect for clip and image-region
-pub struct ClipRect {
-    pub top: Option<Length>,
-    pub right: Option<Length>,
-    pub bottom: Option<Length>,
-    pub left: Option<Length>,
-}
+/// A computed positive `<integer>` value or `none`.
+pub type PositiveIntegerOrNone = Either<PositiveInteger, None_>;
 
-impl ToCss for ClipRect {
-    fn to_css<W>(&self, dest: &mut CssWriter<W>) -> fmt::Result
-    where
-        W: Write,
-    {
-        dest.write_str("rect(")?;
-        if let Some(top) = self.top {
-            top.to_css(dest)?;
-            dest.write_str(", ")?;
-        } else {
-            dest.write_str("auto, ")?;
-        }
-
-        if let Some(right) = self.right {
-            right.to_css(dest)?;
-            dest.write_str(", ")?;
-        } else {
-            dest.write_str("auto, ")?;
-        }
-
-        if let Some(bottom) = self.bottom {
-            bottom.to_css(dest)?;
-            dest.write_str(", ")?;
-        } else {
-            dest.write_str("auto, ")?;
-        }
-
-        if let Some(left) = self.left {
-            left.to_css(dest)?;
-        } else {
-            dest.write_str("auto")?;
-        }
-        dest.write_str(")")
-    }
-}
+/// rect(...)
+pub type ClipRect = generics::ClipRect<LengthOrAuto>;
 
 /// rect(...) | auto
 pub type ClipRectOrAuto = Either<ClipRect, Auto>;
 
 /// The computed value of a grid `<track-breadth>`
-pub type TrackBreadth = GenericTrackBreadth<LengthOrPercentage>;
+pub type TrackBreadth = GenericTrackBreadth<LengthPercentage>;
 
 /// The computed value of a grid `<track-size>`
-pub type TrackSize = GenericTrackSize<LengthOrPercentage>;
+pub type TrackSize = GenericTrackSize<LengthPercentage>;
 
 /// The computed value of a grid `<track-list>`
 /// (could also be `<auto-track-list>` or `<explicit-track-list>`)
-pub type TrackList = GenericTrackList<LengthOrPercentage, Integer>;
+pub type TrackList = GenericTrackList<LengthPercentage, Integer>;
 
 /// The computed value of a `<grid-line>`.
 pub type GridLine = GenericGridLine<Integer>;
 
 /// `<grid-template-rows> | <grid-template-columns>`
-pub type GridTemplateComponent = GenericGridTemplateComponent<LengthOrPercentage, Integer>;
+pub type GridTemplateComponent = GenericGridTemplateComponent<LengthPercentage, Integer>;
 
 impl ClipRectOrAuto {
     /// Return an auto (default for clip-rect and image-region) value

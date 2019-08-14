@@ -24,8 +24,8 @@
 #include "nsHTMLParts.h"
 #include "nsString.h"
 #include "nsLeafFrame.h"
-#include "nsIPresShell.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "nsImageMap.h"
 #include "nsILinkHandler.h"
 #include "nsIURL.h"
@@ -50,13 +50,15 @@
 #include "mozilla/BasicEvents.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/PresShell.h"
 #include "SVGImageContext.h"
 #include "Units.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
-#undef LoadImage
+#  undef LoadImage
 #endif
 
 #define ONLOAD_CALLED_TOO_EARLY 1
@@ -118,11 +120,14 @@ static void FireImageDOMEvent(nsIContent* aContent, EventMessage aMessage) {
 //
 // Creates a new image frame and returns it
 //
-nsIFrame* NS_NewImageBoxFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsImageBoxFrame(aStyle);
+nsIFrame* NS_NewImageBoxFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell) nsImageBoxFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsImageBoxFrame)
+NS_QUERYFRAME_HEAD(nsImageBoxFrame)
+  NS_QUERYFRAME_ENTRY(nsImageBoxFrame)
+NS_QUERYFRAME_TAIL_INHERITING(nsLeafBoxFrame)
 
 nsresult nsImageBoxFrame::AttributeChanged(int32_t aNameSpaceID,
                                            nsAtom* aAttribute,
@@ -132,7 +137,7 @@ nsresult nsImageBoxFrame::AttributeChanged(int32_t aNameSpaceID,
 
   if (aAttribute == nsGkAtoms::src) {
     UpdateImage();
-    PresShell()->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
+    PresShell()->FrameNeedsReflow(this, IntrinsicDirty::StyleChange,
                                   NS_FRAME_IS_DIRTY);
   } else if (aAttribute == nsGkAtoms::validate)
     UpdateLoadFlags();
@@ -140,8 +145,9 @@ nsresult nsImageBoxFrame::AttributeChanged(int32_t aNameSpaceID,
   return rv;
 }
 
-nsImageBoxFrame::nsImageBoxFrame(ComputedStyle* aStyle)
-    : nsLeafBoxFrame(aStyle, kClassID),
+nsImageBoxFrame::nsImageBoxFrame(ComputedStyle* aStyle,
+                                 nsPresContext* aPresContext)
+    : nsLeafBoxFrame(aStyle, aPresContext, kClassID),
       mIntrinsicSize(0, 0),
       mLoadFlags(nsIRequest::LOAD_NORMAL),
       mRequestRegistered(false),
@@ -152,7 +158,8 @@ nsImageBoxFrame::nsImageBoxFrame(ComputedStyle* aStyle)
 
 nsImageBoxFrame::~nsImageBoxFrame() {}
 
-/* virtual */ void nsImageBoxFrame::MarkIntrinsicISizesDirty() {
+/* virtual */
+void nsImageBoxFrame::MarkIntrinsicISizesDirty() {
   SizeNeedsRecalc(mImageSize);
   nsLeafBoxFrame::MarkIntrinsicISizesDirty();
 }
@@ -192,6 +199,20 @@ void nsImageBoxFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   UpdateImage();
 }
 
+void nsImageBoxFrame::RestartAnimation() {
+  if (mImageRequest && !mRequestRegistered) {
+    nsLayoutUtils::RegisterImageRequestIfAnimated(PresContext(), mImageRequest,
+                                                  &mRequestRegistered);
+  }
+}
+
+void nsImageBoxFrame::StopAnimation() {
+  if (mImageRequest && mRequestRegistered) {
+    nsLayoutUtils::DeregisterImageRequest(PresContext(), mImageRequest,
+                                          &mRequestRegistered);
+  }
+}
+
 void nsImageBoxFrame::UpdateImage() {
   nsPresContext* presContext = PresContext();
 
@@ -209,7 +230,7 @@ void nsImageBoxFrame::UpdateImage() {
   mContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::src, src);
   mUseSrcAttr = !src.IsEmpty();
   if (mUseSrcAttr) {
-    nsIDocument* doc = mContent->GetComposedDoc();
+    Document* doc = mContent->GetComposedDoc();
     if (doc) {
       nsContentPolicyType contentPolicyType;
       nsCOMPtr<nsIPrincipal> triggeringPrincipal;
@@ -225,8 +246,8 @@ void nsImageBoxFrame::UpdateImage() {
       if (uri) {
         nsresult rv = nsContentUtils::LoadImage(
             uri, mContent, doc, triggeringPrincipal, requestContextID,
-            doc->GetDocumentURI(), doc->GetReferrerPolicy(), mListener,
-            mLoadFlags, EmptyString(), getter_AddRefs(mImageRequest),
+            doc->GetDocumentURIAsReferrer(), doc->GetReferrerPolicy(),
+            mListener, mLoadFlags, EmptyString(), getter_AddRefs(mImageRequest),
             contentPolicyType);
 
         if (NS_SUCCEEDED(rv) && mImageRequest) {
@@ -305,7 +326,7 @@ void nsImageBoxFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       aBuilder, this, clipFlags);
 
   nsDisplayList list;
-  list.AppendToTop(MakeDisplayItem<nsDisplayXULImage>(aBuilder, this));
+  list.AppendNewToTop<nsDisplayXULImage>(aBuilder, this);
 
   CreateOwnLayerIfNeeded(aBuilder, &list);
 
@@ -375,7 +396,7 @@ ImgDrawResult nsImageBoxFrame::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager, nsDisplayItem* aItem,
+    mozilla::layers::RenderRootStateManager* aManager, nsDisplayItem* aItem,
     nsPoint aPt, uint32_t aFlags) {
   ImgDrawResult result;
   Maybe<nsPoint> anchorPoint;
@@ -397,14 +418,16 @@ ImgDrawResult nsImageBoxFrame::CreateWebRenderCommands(
   const int32_t appUnitsPerDevPixel = PresContext()->AppUnitsPerDevPixel();
   LayoutDeviceRect fillRect =
       LayoutDeviceRect::FromAppUnits(dest, appUnitsPerDevPixel);
+  fillRect.Round();
+
   Maybe<SVGImageContext> svgContext;
   gfx::IntSize decodeSize =
       nsLayoutUtils::ComputeImageContainerDrawingParameters(
           imgCon, aItem->Frame(), fillRect, aSc, containerFlags, svgContext);
 
   RefPtr<layers::ImageContainer> container;
-  result = imgCon->GetImageContainerAtSize(aManager, decodeSize, svgContext,
-                                           containerFlags,
+  result = imgCon->GetImageContainerAtSize(aManager->LayerManager(), decodeSize,
+                                           svgContext, containerFlags,
                                            getter_AddRefs(container));
   if (!container) {
     NS_WARNING("Failed to get image container");
@@ -419,7 +442,7 @@ ImgDrawResult nsImageBoxFrame::CreateWebRenderCommands(
   if (key.isNothing()) {
     return result;
   }
-  wr::LayoutRect fill = wr::ToRoundedLayoutRect(fillRect);
+  wr::LayoutRect fill = wr::ToLayoutRect(fillRect);
 
   LayoutDeviceSize gapSize(0, 0);
   aBuilder.PushImage(fill, fill, !BackfaceIsHidden(),
@@ -451,16 +474,17 @@ nsRect nsImageBoxFrame::GetDestRect(const nsPoint& aOffset,
     // Determine dest rect based on intrinsic size & ratio, along with
     // 'object-fit' & 'object-position' properties:
     IntrinsicSize intrinsicSize;
-    nsSize intrinsicRatio;
+    AspectRatio intrinsicRatio;
     if (mIntrinsicSize.width > 0 && mIntrinsicSize.height > 0) {
       // Image has a valid size; use it as intrinsic size & ratio.
-      intrinsicSize.width.SetCoordValue(mIntrinsicSize.width);
-      intrinsicSize.height.SetCoordValue(mIntrinsicSize.height);
-      intrinsicRatio = mIntrinsicSize;
+      intrinsicSize =
+          IntrinsicSize(mIntrinsicSize.width, mIntrinsicSize.height);
+      intrinsicRatio =
+          AspectRatio::FromSize(mIntrinsicSize.width, mIntrinsicSize.height);
     } else {
       // Image doesn't have a (valid) intrinsic size.
       // Try to look up intrinsic ratio and use that at least.
-      imgCon->GetIntrinsicRatio(&intrinsicRatio);
+      intrinsicRatio = imgCon->GetIntrinsicRatio().valueOr(AspectRatio());
     }
     aAnchorPoint.emplace();
     dest = nsLayoutUtils::ComputeObjectDestRect(clientRect, intrinsicSize,
@@ -494,7 +518,7 @@ bool nsDisplayXULImage::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
-    mozilla::layers::WebRenderLayerManager* aManager,
+    mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   nsImageBoxFrame* imageFrame = static_cast<nsImageBoxFrame*>(mFrame);
   if (!imageFrame->CanOptimizeToImageLayer()) {
@@ -587,8 +611,8 @@ bool nsImageBoxFrame::CanOptimizeToImageLayer() {
 // When the ComputedStyle changes, make sure that all of our image is up to
 // date.
 //
-/* virtual */ void nsImageBoxFrame::DidSetComputedStyle(
-    ComputedStyle* aOldComputedStyle) {
+/* virtual */
+void nsImageBoxFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
   nsLeafBoxFrame::DidSetComputedStyle(aOldComputedStyle);
 
   // Fetch our subrect.
@@ -651,28 +675,28 @@ nsSize nsImageBoxFrame::GetXULPrefSize(nsBoxLayoutState& aState) {
   bool widthSet, heightSet;
   nsIFrame::AddXULPrefSize(this, size, widthSet, heightSet);
   NS_ASSERTION(
-      size.width != NS_INTRINSICSIZE && size.height != NS_INTRINSICSIZE,
+      size.width != NS_UNCONSTRAINEDSIZE && size.height != NS_UNCONSTRAINEDSIZE,
       "non-intrinsic size expected");
 
   nsSize minSize = GetXULMinSize(aState);
   nsSize maxSize = GetXULMaxSize(aState);
 
   if (!widthSet && !heightSet) {
-    if (minSize.width != NS_INTRINSICSIZE)
+    if (minSize.width != NS_UNCONSTRAINEDSIZE)
       minSize.width -= borderPadding.LeftRight();
-    if (minSize.height != NS_INTRINSICSIZE)
+    if (minSize.height != NS_UNCONSTRAINEDSIZE)
       minSize.height -= borderPadding.TopBottom();
-    if (maxSize.width != NS_INTRINSICSIZE)
+    if (maxSize.width != NS_UNCONSTRAINEDSIZE)
       maxSize.width -= borderPadding.LeftRight();
-    if (maxSize.height != NS_INTRINSICSIZE)
+    if (maxSize.height != NS_UNCONSTRAINEDSIZE)
       maxSize.height -= borderPadding.TopBottom();
 
     size = nsLayoutUtils::ComputeAutoSizeWithIntrinsicDimensions(
         minSize.width, minSize.height, maxSize.width, maxSize.height,
         intrinsicSize.width, intrinsicSize.height);
-    NS_ASSERTION(
-        size.width != NS_INTRINSICSIZE && size.height != NS_INTRINSICSIZE,
-        "non-intrinsic size expected");
+    NS_ASSERTION(size.width != NS_UNCONSTRAINEDSIZE &&
+                     size.height != NS_UNCONSTRAINEDSIZE,
+                 "non-intrinsic size expected");
     size.width += borderPadding.LeftRight();
     size.height += borderPadding.TopBottom();
     return size;
@@ -775,7 +799,7 @@ nsresult nsImageBoxFrame::OnSizeAvailable(imgIRequest* aRequest,
                         nsPresContext::CSSPixelsToAppUnits(h));
 
   if (!(GetStateBits() & NS_FRAME_FIRST_REFLOW)) {
-    PresShell()->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
+    PresShell()->FrameNeedsReflow(this, IntrinsicDirty::StyleChange,
                                   NS_FRAME_IS_DIRTY);
   }
 
@@ -796,7 +820,7 @@ nsresult nsImageBoxFrame::OnLoadComplete(imgIRequest* aRequest,
   } else {
     // Fire an onerror DOM event.
     mIntrinsicSize.SizeTo(0, 0);
-    PresShell()->FrameNeedsReflow(this, nsIPresShell::eStyleChange,
+    PresShell()->FrameNeedsReflow(this, IntrinsicDirty::StyleChange,
                                   NS_FRAME_IS_DIRTY);
     FireImageDOMEvent(mContent, eLoadError);
   }
@@ -820,7 +844,8 @@ nsresult nsImageBoxFrame::OnFrameUpdate(imgIRequest* aRequest) {
   // Check if WebRender has interacted with this frame. If it has
   // we need to let it know that things have changed.
   const auto type = DisplayItemType::TYPE_XUL_IMAGE;
-  if (WebRenderUserData::ProcessInvalidateForImage(this, type)) {
+  const auto producerId = aRequest->GetProducerId();
+  if (WebRenderUserData::ProcessInvalidateForImage(this, type, producerId)) {
     return NS_OK;
   }
 

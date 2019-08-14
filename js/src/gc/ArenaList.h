@@ -292,7 +292,7 @@ class ArenaLists {
   ZoneData<Arena*> gcScriptArenasToUpdate;
   ZoneData<Arena*> gcObjectGroupArenasToUpdate;
 
-  // The list of empty arenas which are collected during sweep phase and
+  // The list of empty arenas which are collected during the sweep phase and
   // released at the end of sweeping every sweep group.
   ZoneData<Arena*> savedEmptyArenas;
 
@@ -335,7 +335,7 @@ class ArenaLists {
 
   bool checkEmptyArenaList(AllocKind kind);
 
-  bool relocateArenas(Arena*& relocatedListOut, JS::gcreason::Reason reason,
+  bool relocateArenas(Arena*& relocatedListOut, JS::GCReason reason,
                       js::SliceBudget& sliceBudget, gcstats::Statistics& stats);
 
   void queueForegroundObjectsForSweep(FreeOp* fop);
@@ -349,10 +349,6 @@ class ArenaLists {
   static void backgroundFinalize(FreeOp* fop, Arena* listHead, Arena** empty);
 
   void setParallelAllocEnabled(bool enabled);
-
-  // When finalizing arenas, whether to keep empty arenas on the list or
-  // release them immediately.
-  enum KeepArenasEnum { RELEASE_ARENAS, KEEP_ARENAS };
 
  private:
   inline JSRuntime* runtime();

@@ -8,14 +8,9 @@
 
 "use strict";
 
-// Import helpers for the new debugger
-/* import-globals-from ../../../debugger/new/test/mochitest/helpers.js */
-Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers.js",
-  this);
-
-const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
-                 "test/mochitest/test-eval-in-stackframe.html";
+const TEST_URI =
+  "https://example.com/browser/devtools/client/webconsole/" +
+  "test/mochitest/test-eval-in-stackframe.html";
 
 add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
@@ -53,8 +48,10 @@ add_task(async function() {
   oi.querySelector(".arrow").click();
   await onOiExpanded;
 
-  ok(oi.querySelector(".arrow").classList.contains("expanded"),
-    "Object inspector expanded");
+  ok(
+    oi.querySelector(".arrow").classList.contains("expanded"),
+    "Object inspector expanded"
+  );
 
   // The object inspector now looks like:
   // {...}
@@ -68,11 +65,3 @@ add_task(async function() {
   ok(oiNodes[1].textContent.includes(`testProp2: "testValue2"`));
   ok(oiNodes[2].textContent.includes(`<prototype>: Object { \u2026 }`));
 });
-
-async function pauseDebugger(dbg) {
-  info("Waiting for debugger to pause");
-  ContentTask.spawn(gBrowser.selectedBrowser, {}, async function() {
-    content.wrappedJSObject.firstCall();
-  });
-  await waitForPaused(dbg);
-}

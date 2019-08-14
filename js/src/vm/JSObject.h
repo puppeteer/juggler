@@ -33,6 +33,10 @@ namespace gc {
 class RelocationOverlay;
 }  // namespace gc
 
+namespace jit {
+class CacheIRCompiler;
+}
+
 /****************************************************************************/
 
 class GlobalObject;
@@ -63,35 +67,24 @@ bool SetImmutablePrototype(JSContext* cx, JS::HandleObject obj,
  * - The |group_| member stores the group of the object, which contains its
  *   prototype object, its class and the possible types of its properties.
  *
- * - The |shapeOrExpando_| member points to (an optional) guard object that JIT
- *   may use to optimize. The pointed-to object dictates the constraints
- *   imposed on the JSObject:
- *      nullptr
- *          - Safe value if this field is not needed.
- *      js::Shape
- *          - All objects that might point |shapeOrExpando_| to a js::Shape
- *            must follow the rules specified on js::ShapedObject.
- *      JSObject
- *          - Implies nothing about the current object or target object. Either
- *            of which may mutate in place. Store a JSObject* only to save
- *            space, not to guard on.
+ * - The |shape_| member stores the current 'shape' of the object, which
+ *   describes the current layout and set of property keys of the object. The
+ *   |shape_| field must be non-null.
  *
- * NOTE: The JIT may check |shapeOrExpando_| pointer value without ever
- *       inspecting |group_| or the class.
+ * NOTE: shape()->getObjectClass() must equal getClass().
+ *
+ * NOTE: The JIT may check |shape_| pointer value without ever inspecting
+ *       |group_| or the class.
  *
  * NOTE: Some operations can change the contents of an object (including class)
  *       in-place so avoid assuming an object with same pointer has same class
  *       as before.
  *       - JSObject::swap()
- *       - UnboxedPlainObject::convertToNative()
- *
- * NOTE: UnboxedObjects may change class without changing |group_|.
- *       - js::TryConvertToUnboxedLayout
  */
 class JSObject : public js::gc::Cell {
  protected:
   js::GCPtrObjectGroup group_;
-  void* shapeOrExpando_;
+  js::GCPtrShape shape_;
 
  private:
   friend class js::Shape;
@@ -166,8 +159,23 @@ class JSObject : public js::gc::Cell {
   JS::Compartment* compartment() const { return group_->compartment(); }
   JS::Compartment* maybeCompartment() const { return compartment(); }
 
-  inline js::Shape* maybeShape() const;
-  inline js::Shape* ensureShape(JSContext* cx);
+  void initShape(js::Shape* shape) {
+    // Note: JSObject::zone() uses the group and we require it to be
+    // initialized before the shape.
+    MOZ_ASSERT(zone() == shape->zone());
+    shape_.init(shape);
+  }
+  void setShape(js::Shape* shape) {
+    MOZ_ASSERT(zone() == shape->zone());
+    shape_ = shape;
+  }
+  js::Shape* shape() const { return shape_; }
+
+  void traceShape(JSTracer* trc) { TraceEdge(trc, shapePtr(), "shape"); }
+
+  static JSObject* fromShapeFieldPointer(uintptr_t p) {
+    return reinterpret_cast<JSObject*>(p - JSObject::offsetOfShape());
+  }
 
   enum GenerateShape { GENERATE_NONE, GENERATE_SHAPE };
 
@@ -339,8 +347,6 @@ class JSObject : public js::gc::Cell {
 
   js::TaggedProto taggedProto() const { return group_->proto(); }
 
-  bool hasTenuredProto() const;
-
   bool uninlinedIsProxy() const;
 
   JSObject* staticPrototype() const {
@@ -392,14 +398,7 @@ class JSObject : public js::gc::Cell {
 
   /* Set a new prototype for an object with a singleton type. */
   static bool splicePrototype(JSContext* cx, js::HandleObject obj,
-                              const js::Class* clasp,
                               js::Handle<js::TaggedProto> proto);
-
-  /*
-   * For bootstrapping, whether to splice a prototype for Function.prototype
-   * or the global object.
-   */
-  bool shouldSplicePrototype();
 
   /*
    * Environment chains.
@@ -435,15 +434,12 @@ class JSObject : public js::gc::Cell {
     MOZ_ASSERT(!js::UninlinedIsCrossCompartmentWrapper(this));
     return group_->realm();
   }
+  bool hasSameRealmAs(JSContext* cx) const;
 
   // Returns the object's realm even if the object is a CCW (be careful, in
   // this case the realm is not very meaningful because wrappers are shared by
   // all realms in the compartment).
   JS::Realm* maybeCCWRealm() const { return group_->realm(); }
-
-  // Deprecated: call nonCCWRealm(), maybeCCWRealm(), or NativeObject::realm()
-  // instead!
-  JS::Realm* deprecatedRealm() const { return group_->realm(); }
 
   /*
    * ES5 meta-object properties and operations.
@@ -458,12 +454,6 @@ class JSObject : public js::gc::Cell {
   bool uninlinedNonProxyIsExtensible() const;
 
  public:
-  /*
-   * Iterator-specific getters and setters.
-   */
-
-  static const uint32_t ITER_CLASS_NFIXED_SLOTS = 1;
-
   /*
    * Back to generic stuff.
    */
@@ -490,8 +480,6 @@ class JSObject : public js::gc::Cell {
   void fixDictionaryShapeAfterSwap();
 
  public:
-  inline void initArrayClass();
-
   /*
    * In addition to the generic object interface provided by JSObject,
    * specific types of objects may provide additional operations. To access,
@@ -553,6 +541,22 @@ class JSObject : public js::gc::Cell {
   template <class T>
   T& unwrapAs();
 
+  /*
+   * Tries to unwrap and downcast to class T. Returns nullptr if (and only if) a
+   * wrapper with a security policy is involved. Crashes in all builds if the
+   * (possibly unwrapped) object is not of class T (for example because it's a
+   * dead wrapper).
+   */
+  template <class T>
+  T* maybeUnwrapAs();
+
+  /*
+   * Tries to unwrap and downcast to class T. Returns nullptr if a wrapper with
+   * a security policy is involved or if the object does not have class T.
+   */
+  template <class T>
+  T* maybeUnwrapIf();
+
 #if defined(DEBUG) || defined(JS_JITSPEW)
   void dump(js::GenericPrinter& fp) const;
   void dump() const;
@@ -563,16 +567,18 @@ class JSObject : public js::gc::Cell {
       4 * sizeof(void*) + 16 * sizeof(JS::Value);
 
  protected:
+  // Used for GC tracing and Shape::listp
+  MOZ_ALWAYS_INLINE js::GCPtrShape* shapePtr() { return &(this->shape_); }
+
   // JIT Accessors.
   //
   // To help avoid writing Spectre-unsafe code, we only allow MacroAssembler
   // to call the method below.
   friend class js::jit::MacroAssembler;
+  friend class js::jit::CacheIRCompiler;
 
   static constexpr size_t offsetOfGroup() { return offsetof(JSObject, group_); }
-  static constexpr size_t offsetOfShapeOrExpando() {
-    return offsetof(JSObject, shapeOrExpando_);
-  }
+  static constexpr size_t offsetOfShape() { return offsetof(JSObject, shape_); }
 
  private:
   JSObject() = delete;
@@ -614,7 +620,7 @@ bool JSObject::canUnwrapAs() {
   if (is<T>()) {
     return true;
   }
-  JSObject* obj = js::CheckedUnwrap(this);
+  JSObject* obj = js::CheckedUnwrapStatic(this);
   return obj && obj->is<T>();
 }
 
@@ -630,9 +636,43 @@ T& JSObject::unwrapAs() {
   // Since the caller just called canUnwrapAs<T>(), which does a
   // CheckedUnwrap, this does not need to repeat the security check.
   JSObject* unwrapped = js::UncheckedUnwrap(this);
-  MOZ_ASSERT(js::CheckedUnwrap(this) == unwrapped,
+  MOZ_ASSERT(js::CheckedUnwrapStatic(this) == unwrapped,
              "check that the security check we skipped really is redundant");
   return unwrapped->as<T>();
+}
+
+template <class T>
+T* JSObject::maybeUnwrapAs() {
+  static_assert(!std::is_convertible<T*, js::Wrapper*>::value,
+                "T can't be a Wrapper type; this function discards wrappers");
+
+  if (is<T>()) {
+    return &as<T>();
+  }
+
+  JSObject* unwrapped = js::CheckedUnwrapStatic(this);
+  if (!unwrapped) {
+    return nullptr;
+  }
+
+  if (MOZ_LIKELY(unwrapped->is<T>())) {
+    return &unwrapped->as<T>();
+  }
+
+  MOZ_CRASH("Invalid object. Dead wrapper?");
+}
+
+template <class T>
+T* JSObject::maybeUnwrapIf() {
+  static_assert(!std::is_convertible<T*, js::Wrapper*>::value,
+                "T can't be a Wrapper type; this function discards wrappers");
+
+  if (is<T>()) {
+    return &as<T>();
+  }
+
+  JSObject* unwrapped = js::CheckedUnwrapStatic(this);
+  return (unwrapped && unwrapped->is<T>()) ? &unwrapped->as<T>() : nullptr;
 }
 
 /*
@@ -702,14 +742,14 @@ struct JSObject_Slots16 : JSObject {
     if (prev && prev->storeBuffer()) {
       return;
     }
-    buffer->putCell(static_cast<js::gc::Cell**>(cellp));
+    buffer->putCell(static_cast<JSObject**>(cellp));
     return;
   }
 
   // Remove the prev entry if the new value does not need it. There will only
   // be a prev entry if the prev value was in the nursery.
   if (prev && (buffer = prev->storeBuffer())) {
-    buffer->unputCell(static_cast<js::gc::Cell**>(cellp));
+    buffer->unputCell(static_cast<JSObject**>(cellp));
   }
 }
 
@@ -772,23 +812,6 @@ using ClassInitializerOp = JSObject* (*)(JSContext* cx,
 
 namespace js {
 
-inline gc::InitialHeap GetInitialHeap(NewObjectKind newKind,
-                                      const Class* clasp) {
-  if (newKind == NurseryAllocatedProxy) {
-    MOZ_ASSERT(clasp->isProxy());
-    MOZ_ASSERT(clasp->hasFinalize());
-    MOZ_ASSERT(!CanNurseryAllocateFinalizedClass(clasp));
-    return gc::DefaultHeap;
-  }
-  if (newKind != GenericObject) {
-    return gc::TenuredHeap;
-  }
-  if (clasp->hasFinalize() && !CanNurseryAllocateFinalizedClass(clasp)) {
-    return gc::TenuredHeap;
-  }
-  return gc::DefaultHeap;
-}
-
 bool NewObjectWithTaggedProtoIsCachable(JSContext* cx,
                                         Handle<TaggedProto> proto,
                                         NewObjectKind newKind,
@@ -797,14 +820,35 @@ bool NewObjectWithTaggedProtoIsCachable(JSContext* cx,
 // ES6 9.1.15 GetPrototypeFromConstructor.
 extern bool GetPrototypeFromConstructor(JSContext* cx,
                                         js::HandleObject newTarget,
+                                        JSProtoKey intrinsicDefaultProto,
                                         js::MutableHandleObject proto);
 
+// https://tc39.github.io/ecma262/#sec-getprototypefromconstructor
+//
+// Determine which [[Prototype]] to use when creating a new object using a
+// builtin constructor.
+//
+// This sets `proto` to `nullptr` to mean "the builtin prototype object for
+// this type in the current realm", the common case.
+//
+// We could set it to `cx->global()->getOrCreatePrototype(protoKey)`, but
+// nullptr gets a fast path in e.g. js::NewObjectWithClassProtoCommon.
+//
+// intrinsicDefaultProto can be JSProto_Null if there's no appropriate
+// JSProtoKey enum; but we then select the wrong prototype object in a
+// multi-realm corner case (see bug 1515167).
 MOZ_ALWAYS_INLINE bool GetPrototypeFromBuiltinConstructor(
-    JSContext* cx, const CallArgs& args, js::MutableHandleObject proto) {
-  // When proto is set to nullptr, the caller is expected to select the
-  // correct default built-in prototype for this constructor.
+    JSContext* cx, const CallArgs& args, JSProtoKey intrinsicDefaultProto,
+    js::MutableHandleObject proto) {
+  // We can skip the "prototype" lookup in the two common cases:
+  // 1.  Builtin constructor called without `new`, as in `obj = Object();`.
+  // 2.  Builtin constructor called with `new`, as in `obj = new Object();`.
+  //
+  // Cases that can't take the fast path include `new MySubclassOfObject()`,
+  // `new otherGlobal.Object()`, and `Reflect.construct(Object, [], Date)`.
   if (!args.isConstructing() ||
       &args.newTarget().toObject() == &args.callee()) {
+    MOZ_ASSERT(args.callee().hasSameRealmAs(cx));
     proto.set(nullptr);
     return true;
   }
@@ -812,17 +856,18 @@ MOZ_ALWAYS_INLINE bool GetPrototypeFromBuiltinConstructor(
   // We're calling this constructor from a derived class, retrieve the
   // actual prototype from newTarget.
   RootedObject newTarget(cx, &args.newTarget().toObject());
-  return GetPrototypeFromConstructor(cx, newTarget, proto);
+  return GetPrototypeFromConstructor(cx, newTarget, intrinsicDefaultProto,
+                                     proto);
 }
 
 // Specialized call for constructing |this| with a known function callee,
 // and a known prototype.
 extern JSObject* CreateThisForFunctionWithProto(
-    JSContext* cx, js::HandleObject callee, HandleObject newTarget,
+    JSContext* cx, js::HandleFunction callee, HandleObject newTarget,
     HandleObject proto, NewObjectKind newKind = GenericObject);
 
 // Specialized call for constructing |this| with a known function callee.
-extern JSObject* CreateThisForFunction(JSContext* cx, js::HandleObject callee,
+extern JSObject* CreateThisForFunction(JSContext* cx, js::HandleFunction callee,
                                        js::HandleObject newTarget,
                                        NewObjectKind newKind);
 
@@ -856,8 +901,8 @@ void CompletePropertyDescriptor(MutableHandle<JS::PropertyDescriptor> desc);
  * ES5 15.2.3.7 steps 3-5.
  */
 extern bool ReadPropertyDescriptors(
-    JSContext* cx, HandleObject props, bool checkAccessors, AutoIdVector* ids,
-    MutableHandle<PropertyDescriptorVector> descs);
+    JSContext* cx, HandleObject props, bool checkAccessors,
+    MutableHandleIdVector ids, MutableHandle<PropertyDescriptorVector> descs);
 
 /* Read the name using a dynamic lookup on the scopeChain. */
 extern bool LookupName(JSContext* cx, HandlePropertyName name,
@@ -961,13 +1006,43 @@ XDRResult XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj);
  * Report a TypeError: "so-and-so is not an object".
  * Using NotNullObject is usually less code.
  */
-extern void ReportNotObject(JSContext* cx, HandleValue v);
+extern void ReportNotObject(JSContext* cx, const Value& v);
 
-inline JSObject* NonNullObject(JSContext* cx, HandleValue v) {
+inline JSObject* RequireObject(JSContext* cx, HandleValue v) {
   if (v.isObject()) {
     return &v.toObject();
   }
   ReportNotObject(cx, v);
+  return nullptr;
+}
+
+/*
+ * Report a TypeError: "SOMETHING must be an object, got VALUE".
+ * Using NotNullObject is usually less code.
+ *
+ * By default this function will attempt to report the expression which computed
+ * the value which given as argument. This can be disabled by using
+ * JSDVG_IGNORE_STACK.
+ */
+extern void ReportNotObject(JSContext* cx, JSErrNum err, int spindex,
+                            HandleValue v);
+
+inline JSObject* RequireObject(JSContext* cx, JSErrNum err, int spindex,
+                               HandleValue v) {
+  if (v.isObject()) {
+    return &v.toObject();
+  }
+  ReportNotObject(cx, err, spindex, v);
+  return nullptr;
+}
+
+extern void ReportNotObject(JSContext* cx, JSErrNum err, HandleValue v);
+
+inline JSObject* RequireObject(JSContext* cx, JSErrNum err, HandleValue v) {
+  if (v.isObject()) {
+    return &v.toObject();
+  }
+  ReportNotObject(cx, err, v);
   return nullptr;
 }
 
@@ -978,28 +1053,12 @@ inline JSObject* NonNullObject(JSContext* cx, HandleValue v) {
 extern void ReportNotObjectArg(JSContext* cx, const char* nth, const char* fun,
                                HandleValue v);
 
-inline JSObject* NonNullObjectArg(JSContext* cx, const char* nth,
+inline JSObject* RequireObjectArg(JSContext* cx, const char* nth,
                                   const char* fun, HandleValue v) {
   if (v.isObject()) {
     return &v.toObject();
   }
   ReportNotObjectArg(cx, nth, fun, v);
-  return nullptr;
-}
-
-/*
- * Report a TypeError: "SOMETHING must be an object, got VALUE".
- * Using NotNullObjectWithName is usually less code.
- */
-extern void ReportNotObjectWithName(JSContext* cx, const char* name,
-                                    HandleValue v);
-
-inline JSObject* NonNullObjectWithName(JSContext* cx, const char* name,
-                                       HandleValue v) {
-  if (v.isObject()) {
-    return &v.toObject();
-  }
-  ReportNotObjectWithName(cx, name, v);
   return nullptr;
 }
 

@@ -5,12 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined(WMFAudioOutputSource_h_)
-#define WMFAudioOutputSource_h_
+#  define WMFAudioOutputSource_h_
 
-#include "MFTDecoder.h"
-#include "WMF.h"
-#include "WMFMediaDataDecoder.h"
-#include "mozilla/RefPtr.h"
+#  include "MFTDecoder.h"
+#  include "WMF.h"
+#  include "WMFMediaDataDecoder.h"
+#  include "mozilla/RefPtr.h"
 
 namespace mozilla {
 
@@ -44,23 +44,13 @@ class WMFAudioMFTManager : public MFTManager {
   uint32_t mAudioRate;
   nsTArray<BYTE> mUserData;
 
-  // The offset, at which playback started since the
-  // last discontinuity.
-  media::TimeUnit mAudioTimeOffset;
-  // The number of audio frames that we've played since the last
-  // discontinuity.
-  int64_t mAudioFrameSum = 0;
-
   enum StreamType { Unknown, AAC, MP3 };
   StreamType mStreamType;
 
   const GUID& GetMFTGUID();
   const GUID& GetMediaSubtypeGUID();
 
-  // True if we need to re-initialize mAudioTimeOffset and mAudioFrameSum
-  // from the next audio packet we decode. This happens after a seek, since
-  // WMF doesn't mark a stream as having a discontinuity after a seek(0).
-  bool mMustRecaptureAudioPosition = true;
+  bool mFirstFrame = true;
 };
 
 }  // namespace mozilla

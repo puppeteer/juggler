@@ -8,9 +8,19 @@
  */
 
 const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
-const { MEMORY_SAMPLE_PROB_PREF, MEMORY_MAX_LOG_LEN_PREF, UI_ENABLE_ALLOCATIONS_PREF } = require("devtools/client/performance/test/helpers/prefs");
-const { initPerformanceInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
-const { startRecording, stopRecording } = require("devtools/client/performance/test/helpers/actions");
+const {
+  MEMORY_SAMPLE_PROB_PREF,
+  MEMORY_MAX_LOG_LEN_PREF,
+  UI_ENABLE_ALLOCATIONS_PREF,
+} = require("devtools/client/performance/test/helpers/prefs");
+const {
+  initPerformanceInNewTab,
+  teardownToolboxAndRemoveTab,
+} = require("devtools/client/performance/test/helpers/panel-utils");
+const {
+  startRecording,
+  stopRecording,
+} = require("devtools/client/performance/test/helpers/actions");
 
 add_task(async function() {
   const { panel, toolbox } = await initPerformanceInNewTab({
@@ -24,13 +34,23 @@ add_task(async function() {
   Services.prefs.setIntPref(MEMORY_MAX_LOG_LEN_PREF, 777777);
 
   await startRecording(panel);
-  const { probability, maxLogLength } = await toolbox.performance.getConfiguration();
+  const performanceFront = await toolbox.target.getFront("performance");
+  const {
+    probability,
+    maxLogLength,
+  } = await performanceFront.getConfiguration();
   await stopRecording(panel);
 
-  is(probability, 0.213,
-    "The allocations probability option is set on memory actor.");
-  is(maxLogLength, 777777,
-    "The allocations max log length option is set on memory actor.");
+  is(
+    probability,
+    0.213,
+    "The allocations probability option is set on memory actor."
+  );
+  is(
+    maxLogLength,
+    777777,
+    "The allocations max log length option is set on memory actor."
+  );
 
   await teardownToolboxAndRemoveTab(panel);
 });

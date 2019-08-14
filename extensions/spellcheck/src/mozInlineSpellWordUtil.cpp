@@ -44,6 +44,12 @@ inline bool IsConditionalPunctuation(char16_t ch) {
           ch == 0x00B7);                 // MIDDLE DOT
 }
 
+static bool IsAmbiguousDOMWordSeprator(char16_t ch) {
+  // This class may be CHAR_CLASS_SEPARATOR, but it depends on context.
+  return (ch == '@' || ch == ':' || ch == '.' || ch == '/' || ch == '-' ||
+          IsConditionalPunctuation(ch));
+}
+
 // mozInlineSpellWordUtil::Init
 
 nsresult mozInlineSpellWordUtil::Init(TextEditor* aTextEditor) {
@@ -330,6 +336,19 @@ nsresult mozInlineSpellWordUtil::MakeRange(NodeOffset aBegin, NodeOffset aEnd,
   return NS_OK;
 }
 
+// static
+already_AddRefed<nsRange> mozInlineSpellWordUtil::MakeRange(
+    const NodeOffsetRange& aRange) {
+  RefPtr<nsRange> range = new nsRange(aRange.Begin().Node());
+  nsresult rv =
+      range->SetStartAndEnd(aRange.Begin().Node(), aRange.Begin().Offset(),
+                            aRange.End().Node(), aRange.End().Offset());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
+  return range.forget();
+}
+
 /*********** Word Splitting ************/
 
 // classifies a given character in the DOM word
@@ -405,8 +424,10 @@ CharClass WordSplitState::ClassifyCharacter(int32_t aIndex,
     if (mDOMWordText[aIndex - 1] == '.') return CHAR_CLASS_SEPARATOR;
 
     // now we know left char is a word-char, check the right-hand character
-    if (aIndex == int32_t(mDOMWordText.Length()) - 1)
+    if (aIndex == int32_t(mDOMWordText.Length() - 1)) {
       return CHAR_CLASS_SEPARATOR;
+    }
+
     if (ClassifyCharacter(aIndex + 1, false) != CHAR_CLASS_WORD)
       return CHAR_CLASS_SEPARATOR;
     // If the next charatcer is a word-char, make sure that it's not a
@@ -608,11 +629,13 @@ static bool TextNodeContainsDOMWordSeparator(nsINode* aNode,
   WordSplitState state(nullptr, text, 0, end);
   for (int32_t i = end - 1; i >= 0; --i) {
     if (IsDOMWordSeparator(textFragment->CharAt(i)) ||
-        state.ClassifyCharacter(i, true) == CHAR_CLASS_SEPARATOR) {
+        (!IsAmbiguousDOMWordSeprator(textFragment->CharAt(i)) &&
+         state.ClassifyCharacter(i, true) == CHAR_CLASS_SEPARATOR)) {
       // Be greedy, find as many separators as we can
       for (int32_t j = i - 1; j >= 0; --j) {
         if (IsDOMWordSeparator(textFragment->CharAt(j)) ||
-            state.ClassifyCharacter(j, true) == CHAR_CLASS_SEPARATOR) {
+            (!IsAmbiguousDOMWordSeprator(textFragment->CharAt(j)) &&
+             state.ClassifyCharacter(j, true) == CHAR_CLASS_SEPARATOR)) {
           i = j;
         } else {
           break;

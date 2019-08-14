@@ -14,7 +14,7 @@ namespace TestCRT {
 
 // The return from strcmp etc is only defined to be postive, zero or
 // negative. The magnitude of a non-zero return is irrelevant.
-int sign(int val) {
+static int sign(int val) {
   if (val == 0) {
     return 0;
   } else {
@@ -26,12 +26,10 @@ int sign(int val) {
   }
 }
 
-
 // Verify that nsCRT versions of string comparison routines get the
 // same answers as the native non-unicode versions. We only pass in
 // iso-latin-1 strings, so the comparison must be valid.
-static void Check(const char* s1, const char* s2, size_t n)
-{
+static void Check(const char* s1, const char* s2, size_t n) {
   bool longerThanN = strlen(s1) > n || strlen(s2) > n;
 
   int clib = PL_strcmp(s1, s2);
@@ -41,7 +39,7 @@ static void Check(const char* s1, const char* s2, size_t n)
     EXPECT_EQ(sign(clib), sign(clib_n));
   }
 
-  nsAutoString t1,t2;
+  nsAutoString t1, t2;
   CopyASCIItoUTF16(mozilla::MakeStringSpan(s1), t1);
   CopyASCIItoUTF16(mozilla::MakeStringSpan(s2), t2);
   const char16_t* us1 = t1.get();
@@ -66,25 +64,18 @@ struct Test {
 };
 
 static Test tests[] = {
-  { "foo", "foo", 3 },
-  { "foo", "fo", 3 },
+    {"foo", "foo", 3},       {"foo", "fo", 3},
 
-  { "foo", "bar", 3 },
-  { "foo", "ba", 3 },
+    {"foo", "bar", 3},       {"foo", "ba", 3},
 
-  { "foo", "zap", 3 },
-  { "foo", "za", 3 },
+    {"foo", "zap", 3},       {"foo", "za", 3},
 
-  { "bar", "foo", 3 },
-  { "bar", "fo", 3 },
+    {"bar", "foo", 3},       {"bar", "fo", 3},
 
-  { "bar", "foo", 3 },
-  { "bar", "fo", 3 },
+    {"bar", "foo", 3},       {"bar", "fo", 3},
 
-  { "foo", "foobar", 3 },
-  { "foobar", "foo", 3 },
-  { "foobar", "foozap", 3 },
-  { "foozap", "foobar", 3 },
+    {"foo", "foobar", 3},    {"foobar", "foo", 3},
+    {"foobar", "foozap", 3}, {"foozap", "foobar", 3},
 };
 #define NUM_TESTS int((sizeof(tests) / sizeof(tests[0])))
 
@@ -96,4 +87,4 @@ TEST(CRT, main)
   }
 }
 
-} // namespace TestCRT
+}  // namespace TestCRT

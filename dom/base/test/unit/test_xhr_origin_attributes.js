@@ -1,9 +1,8 @@
-ChromeUtils.import("resource://testing-common/httpd.js");
-
 let server = new HttpServer();
 server.start(-1);
 
-let body = "<!DOCTYPE HTML><html><head><meta charset='utf-8'></head><body></body></html>";
+let body =
+  "<!DOCTYPE HTML><html><head><meta charset='utf-8'></head><body></body></html>";
 
 function handler(request, response) {
   response.setStatusLine(request.httpVersion, 200, "Ok");
@@ -24,7 +23,11 @@ function run_test() {
   server.registerPathHandler("/foo", handler);
 
   let xhr = new XMLHttpRequest();
-  xhr.open("GET", "http://localhost:" + server.identity.primaryPort + "/foo", true);
+  xhr.open(
+    "GET",
+    "http://localhost:" + server.identity.primaryPort + "/foo",
+    true
+  );
   xhr.send(null);
 
   xhr.onload = function() {
@@ -32,8 +35,12 @@ function run_test() {
     // specify with different origin attributes, which will make the XHR use a
     // different cookie-jar than the previous one.
     let xhr2 = new XMLHttpRequest();
-    xhr2.open("GET", "http://localhost:" + server.identity.primaryPort + "/foo", true);
-    xhr2.setOriginAttributes({userContextId: 1});
+    xhr2.open(
+      "GET",
+      "http://localhost:" + server.identity.primaryPort + "/foo",
+      true
+    );
+    xhr2.setOriginAttributes({ userContextId: 1 });
     xhr2.send(null);
 
     let loadInfo = xhr2.channel.loadInfo;
@@ -41,6 +48,6 @@ function run_test() {
 
     xhr2.onload = function() {
       server.stop(do_test_finished);
-    }
+    };
   };
 }

@@ -11,7 +11,7 @@
 #include "mozilla/dom/InspectorUtilsBinding.h"
 
 class nsAtom;
-class nsIDocument;
+class nsINode;
 class ComputedStyle;
 
 namespace mozilla {
@@ -34,12 +34,12 @@ namespace dom {
  */
 class InspectorUtils {
  public:
-  static void GetAllStyleSheets(GlobalObject& aGlobal, nsIDocument& aDocument,
+  static void GetAllStyleSheets(GlobalObject& aGlobal, Document& aDocument,
                                 bool aDocumentOnly,
                                 nsTArray<RefPtr<StyleSheet>>& aResult);
   static void GetCSSStyleRules(GlobalObject& aGlobal, Element& aElement,
                                const nsAString& aPseudo,
-                               nsTArray<RefPtr<css::Rule>>& aResult);
+                               nsTArray<RefPtr<BindingStyleRule>>& aResult);
 
   /**
    * Get the line number of a rule.
@@ -154,7 +154,7 @@ class InspectorUtils {
   // unknown types.
   static bool CssPropertySupportsType(GlobalObject& aGlobal,
                                       const nsAString& aProperty,
-                                      uint32_t aType, ErrorResult& aRv);
+                                      InspectorPropertyType, ErrorResult& aRv);
 
   static bool IsIgnorableWhitespace(GlobalObject& aGlobalObject,
                                     CharacterData& aDataNode) {
@@ -238,12 +238,6 @@ class InspectorUtils {
    */
   static void ParseStyleSheet(GlobalObject& aGlobal, StyleSheet& aSheet,
                               const nsAString& aInput, ErrorResult& aRv);
-
-  /**
-   * Scroll an element completely into view, if possible.
-   * This is similar to ensureElementIsVisible but for all ancestors.
-   */
-  static void ScrollElementIntoView(GlobalObject& aGlobal, Element& aElement);
 
   /**
    * Check if the provided name can be custom element name.

@@ -1,8 +1,7 @@
 <head>
   <meta charset="utf-8">
   <title>Plugin Crash, FullScreenElement Remains, iframe -> div[F]; iframe -> iframe -> plugin</title>
-  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <script type="application/javascript" src="plugin-utils.js"></script>
 </head>
 
@@ -32,6 +31,7 @@
         this.document.mozCancelFullScreen();
         return fullScreenChange;
       }
+      return Promise.resolve();
     });
 
     /**
@@ -54,10 +54,10 @@
       });
 
       add_task(async function() {
-        let fullScreenElement = document.getElementById('iframeA')
-        let plugin = document.getElementById('iframe1')
-          .contentDocument.getElementById('iframe2')
-          .contentDocument.getElementById('plugin1');
+        let fullScreenElement = document.getElementById("iframeA");
+        let plugin = document.getElementById("iframe1")
+          .contentDocument.getElementById("iframe2")
+          .contentDocument.getElementById("plugin1");
 
         let fullScreenChange = promiseFullScreenChange();
         fullScreenElement.mozRequestFullScreen();
@@ -86,7 +86,7 @@
             document.removeEventListener("fullscreenchange", onFullScreenChange);
             clearTimeout(timeoutId);
             reject();
-          }
+          };
           document.addEventListener("fullscreenchange", onFullScreenChange);
           timeoutId = setTimeout(() => {
             document.removeEventListener("fullscreenchange", onFullScreenChange);
@@ -100,8 +100,7 @@
           ok(false, "Element is still fullscreen");
         });
       });
-
-    }
+    };
   </script>
 
   <iframe id="iframeA" src="1028200-subpageC.html" allowfullscreen="true"></iframe>

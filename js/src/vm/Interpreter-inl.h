@@ -25,7 +25,6 @@
 #include "vm/ObjectOperations-inl.h"
 #include "vm/Stack-inl.h"
 #include "vm/StringType-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 namespace js {
 
@@ -58,9 +57,7 @@ static inline bool GuardFunApplyArgumentsOptimization(JSContext* cx,
   if (args.length() == 2 && IsOptimizedArguments(frame, args[1])) {
     if (!IsNativeFunction(args.calleev(), js::fun_apply)) {
       RootedScript script(cx, frame.script());
-      if (!JSScript::argumentsOptimizationFailed(cx, script)) {
-        return false;
-      }
+      JSScript::argumentsOptimizationFailed(cx, script);
       args[1].setObject(frame.argsObj());
     }
   }
@@ -304,15 +301,7 @@ inline void SetAliasedVarOperation(JSContext* cx, JSScript* script,
                                    EnvironmentCoordinate ec, const Value& val,
                                    MaybeCheckTDZ checkTDZ) {
   MOZ_ASSERT_IF(checkTDZ, !IsUninitializedLexical(obj.aliasedBinding(ec)));
-
-  // Avoid computing the name if no type updates are needed, as this may be
-  // expensive on scopes with large numbers of variables.
-  PropertyName* name =
-      obj.isSingleton() ? EnvironmentCoordinateName(
-                              cx->caches().envCoordinateNameCache, script, pc)
-                        : nullptr;
-
-  obj.setAliasedBinding(cx, ec, name, val);
+  obj.setAliasedBinding(cx, ec, val);
 }
 
 inline bool SetNameOperation(JSContext* cx, JSScript* script, jsbytecode* pc,
@@ -351,38 +340,6 @@ inline bool SetNameOperation(JSContext* cx, JSScript* script, jsbytecode* pc,
   return ok && result.checkStrictErrorOrWarning(cx, env, id, strict);
 }
 
-inline bool DefLexicalOperation(JSContext* cx,
-                                Handle<LexicalEnvironmentObject*> lexicalEnv,
-                                HandleObject varObj, HandlePropertyName name,
-                                unsigned attrs) {
-  // Redeclaration checks should have already been done.
-  MOZ_ASSERT(CheckLexicalNameConflict(cx, lexicalEnv, varObj, name));
-  RootedId id(cx, NameToId(name));
-  RootedValue uninitialized(cx, MagicValue(JS_UNINITIALIZED_LEXICAL));
-  return NativeDefineDataProperty(cx, lexicalEnv, id, uninitialized, attrs);
-}
-
-inline bool DefLexicalOperation(JSContext* cx,
-                                LexicalEnvironmentObject* lexicalEnvArg,
-                                JSObject* varObjArg, JSScript* script,
-                                jsbytecode* pc) {
-  MOZ_ASSERT(*pc == JSOP_DEFLET || *pc == JSOP_DEFCONST);
-  RootedPropertyName name(cx, script->getName(pc));
-
-  unsigned attrs = JSPROP_ENUMERATE | JSPROP_PERMANENT;
-  if (*pc == JSOP_DEFCONST) {
-    attrs |= JSPROP_READONLY;
-  }
-
-  Rooted<LexicalEnvironmentObject*> lexicalEnv(cx, lexicalEnvArg);
-  RootedObject varObj(cx, varObjArg);
-  MOZ_ASSERT_IF(!script->hasNonSyntacticScope(),
-                lexicalEnv == &cx->global()->lexicalEnvironment() &&
-                    varObj == cx->global());
-
-  return DefLexicalOperation(cx, lexicalEnv, varObj, name, attrs);
-}
-
 inline void InitGlobalLexicalOperation(JSContext* cx,
                                        LexicalEnvironmentObject* lexicalEnvArg,
                                        JSScript* script, jsbytecode* pc,
@@ -393,57 +350,16 @@ inline void InitGlobalLexicalOperation(JSContext* cx,
   Rooted<LexicalEnvironmentObject*> lexicalEnv(cx, lexicalEnvArg);
   RootedShape shape(cx, lexicalEnv->lookup(cx, script->getName(pc)));
   MOZ_ASSERT(shape);
-  lexicalEnv->setSlotWithType(cx, shape, value);
+  MOZ_ASSERT(IsUninitializedLexical(lexicalEnv->getSlot(shape->slot())));
+
+  // Don't treat the initial assignment to global lexicals as overwrites.
+  lexicalEnv->setSlotWithType(cx, shape, value, /* overwriting = */ false);
 }
 
 inline bool InitPropertyOperation(JSContext* cx, JSOp op, HandleObject obj,
                                   HandlePropertyName name, HandleValue rhs) {
-  if (obj->is<PlainObject>() || obj->is<JSFunction>()) {
-    unsigned propAttrs = GetInitDataPropAttrs(op);
-    return NativeDefineDataProperty(cx, obj.as<NativeObject>(), name, rhs,
-                                    propAttrs);
-  }
-
-  MOZ_ASSERT(obj->as<UnboxedPlainObject>().layout().lookup(name));
-  RootedId id(cx, NameToId(name));
-  return PutProperty(cx, obj, id, rhs, false);
-}
-
-inline bool DefVarOperation(JSContext* cx, HandleObject varobj,
-                            HandlePropertyName dn, unsigned attrs) {
-  MOZ_ASSERT(varobj->isQualifiedVarObj());
-
-#ifdef DEBUG
-  // Per spec, it is an error to redeclare a lexical binding. This should
-  // have already been checked.
-  if (JS_HasExtensibleLexicalEnvironment(varobj)) {
-    Rooted<LexicalEnvironmentObject*> lexicalEnv(cx);
-    lexicalEnv = &JS_ExtensibleLexicalEnvironment(varobj)
-                      ->as<LexicalEnvironmentObject>();
-    MOZ_ASSERT(CheckVarNameConflict(cx, lexicalEnv, dn));
-  }
-#endif
-
-  Rooted<PropertyResult> prop(cx);
-  RootedObject obj2(cx);
-  if (!LookupProperty(cx, varobj, dn, &obj2, &prop)) {
-    return false;
-  }
-
-  /* Steps 8c, 8d. */
-  if (!prop || (obj2 != varobj && varobj->is<GlobalObject>())) {
-    if (!DefineDataProperty(cx, varobj, dn, UndefinedHandleValue, attrs)) {
-      return false;
-    }
-  }
-
-  if (varobj->is<GlobalObject>()) {
-    if (!varobj->as<GlobalObject>().realm()->addToVarNames(cx, dn)) {
-      return false;
-    }
-  }
-
-  return true;
+  unsigned propAttrs = GetInitDataPropAttrs(op);
+  return DefineDataProperty(cx, obj, name, rhs, propAttrs);
 }
 
 static MOZ_ALWAYS_INLINE bool NegOperation(JSContext* cx,
@@ -464,14 +380,48 @@ static MOZ_ALWAYS_INLINE bool NegOperation(JSContext* cx,
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (val.isBigInt()) {
     return BigInt::neg(cx, val, res);
   }
-#endif
 
   res.setNumber(-val.toNumber());
   return true;
+}
+
+static MOZ_ALWAYS_INLINE bool IncOperation(JSContext* cx,
+                                           MutableHandleValue val,
+                                           MutableHandleValue res) {
+  int32_t i;
+  if (val.isInt32() && (i = val.toInt32()) != INT32_MAX) {
+    res.setInt32(i + 1);
+    return true;
+  }
+
+  if (val.isNumber()) {
+    res.setNumber(val.toNumber() + 1);
+    return true;
+  }
+
+  MOZ_ASSERT(val.isBigInt(), "+1 only callable on result of JSOP_TONUMERIC");
+  return BigInt::inc(cx, val, res);
+}
+
+static MOZ_ALWAYS_INLINE bool DecOperation(JSContext* cx,
+                                           MutableHandleValue val,
+                                           MutableHandleValue res) {
+  int32_t i;
+  if (val.isInt32() && (i = val.toInt32()) != INT32_MIN) {
+    res.setInt32(i - 1);
+    return true;
+  }
+
+  if (val.isNumber()) {
+    res.setNumber(val.toNumber() - 1);
+    return true;
+  }
+
+  MOZ_ASSERT(val.isBigInt(), "-1 only callable on result of JSOP_TONUMERIC");
+  return BigInt::dec(cx, val, res);
 }
 
 static MOZ_ALWAYS_INLINE bool ToIdOperation(JSContext* cx, HandleValue idval,
@@ -613,9 +563,7 @@ static MOZ_ALWAYS_INLINE bool GetElemOptimizedArguments(
     }
 
     RootedScript script(cx, frame.script());
-    if (!JSScript::argumentsOptimizationFailed(cx, script)) {
-      return false;
-    }
+    JSScript::argumentsOptimizationFailed(cx, script);
 
     lref.set(ObjectValue(frame.argsObj()));
   }
@@ -716,25 +664,30 @@ static MOZ_ALWAYS_INLINE bool InitArrayElemOperation(JSContext* cx,
   return true;
 }
 
-static MOZ_ALWAYS_INLINE bool ProcessCallSiteObjOperation(JSContext* cx,
-                                                          HandleObject cso,
-                                                          HandleObject raw) {
-  MOZ_ASSERT(cso->is<ArrayObject>());
-  MOZ_ASSERT(raw->is<ArrayObject>());
+static inline ArrayObject* ProcessCallSiteObjOperation(JSContext* cx,
+                                                       HandleScript script,
+                                                       jsbytecode* pc) {
+  MOZ_ASSERT(*pc == JSOP_CALLSITEOBJ);
 
-  if (cso->nonProxyIsExtensible()) {
+  RootedArrayObject cso(cx, &script->getObject(pc)->as<ArrayObject>());
+
+  if (cso->isExtensible()) {
+    RootedObject raw(cx, script->getObject(GET_UINT32_INDEX(pc) + 1));
+    MOZ_ASSERT(raw->is<ArrayObject>());
+
     RootedValue rawValue(cx, ObjectValue(*raw));
     if (!DefineDataProperty(cx, cso, cx->names().raw, rawValue, 0)) {
-      return false;
+      return nullptr;
     }
     if (!FreezeObject(cx, raw)) {
-      return false;
+      return nullptr;
     }
     if (!FreezeObject(cx, cso)) {
-      return false;
+      return nullptr;
     }
   }
-  return true;
+
+  return cso;
 }
 
 // BigInt proposal 3.2.4 Abstract Relational Comparison
@@ -762,7 +715,6 @@ static MOZ_ALWAYS_INLINE bool LessThanImpl(JSContext* cx,
     return true;
   }
 
-#ifdef ENABLE_BIGINT
   // Step 4a.
   if (lhs.isBigInt() && rhs.isString()) {
     return BigInt::lessThan(cx, lhs, rhs, res);
@@ -772,19 +724,16 @@ static MOZ_ALWAYS_INLINE bool LessThanImpl(JSContext* cx,
   if (lhs.isString() && rhs.isBigInt()) {
     return BigInt::lessThan(cx, lhs, rhs, res);
   }
-#endif
 
   // Steps 4c and 4d.
   if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs)) {
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   // Steps 4e-j.
   if (lhs.isBigInt() || rhs.isBigInt()) {
     return BigInt::lessThan(cx, lhs, rhs, res);
   }
-#endif
 
   // Step 4e for Number operands.
   MOZ_ASSERT(lhs.isNumber() && rhs.isNumber());
@@ -904,11 +853,9 @@ static MOZ_ALWAYS_INLINE bool BitNot(JSContext* cx, MutableHandleValue in,
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (in.isBigInt()) {
     return BigInt::bitNot(cx, in, out);
   }
-#endif
 
   out.setInt32(~in.toInt32());
   return true;
@@ -921,11 +868,9 @@ static MOZ_ALWAYS_INLINE bool BitXor(JSContext* cx, MutableHandleValue lhs,
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (lhs.isBigInt() || rhs.isBigInt()) {
     return BigInt::bitXor(cx, lhs, rhs, out);
   }
-#endif
 
   out.setInt32(lhs.toInt32() ^ rhs.toInt32());
   return true;
@@ -938,11 +883,9 @@ static MOZ_ALWAYS_INLINE bool BitOr(JSContext* cx, MutableHandleValue lhs,
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (lhs.isBigInt() || rhs.isBigInt()) {
     return BigInt::bitOr(cx, lhs, rhs, out);
   }
-#endif
 
   out.setInt32(lhs.toInt32() | rhs.toInt32());
   return true;
@@ -955,11 +898,9 @@ static MOZ_ALWAYS_INLINE bool BitAnd(JSContext* cx, MutableHandleValue lhs,
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (lhs.isBigInt() || rhs.isBigInt()) {
     return BigInt::bitAnd(cx, lhs, rhs, out);
   }
-#endif
 
   out.setInt32(lhs.toInt32() & rhs.toInt32());
   return true;
@@ -972,11 +913,9 @@ static MOZ_ALWAYS_INLINE bool BitLsh(JSContext* cx, MutableHandleValue lhs,
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (lhs.isBigInt() || rhs.isBigInt()) {
     return BigInt::lsh(cx, lhs, rhs, out);
   }
-#endif
 
   out.setInt32(lhs.toInt32() << (rhs.toInt32() & 31));
   return true;
@@ -989,11 +928,9 @@ static MOZ_ALWAYS_INLINE bool BitRsh(JSContext* cx, MutableHandleValue lhs,
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (lhs.isBigInt() || rhs.isBigInt()) {
     return BigInt::rsh(cx, lhs, rhs, out);
   }
-#endif
 
   out.setInt32(lhs.toInt32() >> (rhs.toInt32() & 31));
   return true;
@@ -1003,7 +940,6 @@ static MOZ_ALWAYS_INLINE bool UrshOperation(JSContext* cx,
                                             MutableHandleValue lhs,
                                             MutableHandleValue rhs,
                                             MutableHandleValue out) {
-#ifdef ENABLE_BIGINT
   if (!ToNumeric(cx, lhs) || !ToNumeric(cx, rhs)) {
     return false;
   }
@@ -1013,7 +949,6 @@ static MOZ_ALWAYS_INLINE bool UrshOperation(JSContext* cx,
                               JSMSG_BIGINT_TO_NUMBER);
     return false;
   }
-#endif
 
   uint32_t left;
   int32_t right;

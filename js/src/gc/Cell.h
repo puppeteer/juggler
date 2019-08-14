@@ -83,6 +83,8 @@ struct alignas(gc::CellAlignBytes) Cell {
   MOZ_ALWAYS_INLINE bool isMarkedAny() const;
   MOZ_ALWAYS_INLINE bool isMarkedBlack() const;
   MOZ_ALWAYS_INLINE bool isMarkedGray() const;
+  MOZ_ALWAYS_INLINE bool isMarked(gc::MarkColor color) const;
+  MOZ_ALWAYS_INLINE bool isMarkedAtLeast(gc::MarkColor color) const;
 
   inline JSRuntime* runtimeFromMainThread() const;
 
@@ -134,7 +136,7 @@ struct alignas(gc::CellAlignBytes) Cell {
   }
 
 #ifdef DEBUG
-  static inline bool thingIsNotGray(Cell* cell);
+  static inline void assertThingIsNotGray(Cell* cell);
   inline bool isAligned() const;
   void dump(GenericPrinter& out) const;
   void dump() const;
@@ -152,6 +154,11 @@ class TenuredCell : public Cell {
   // Construct a TenuredCell from a void*, making various sanity assertions.
   static MOZ_ALWAYS_INLINE TenuredCell* fromPointer(void* ptr);
   static MOZ_ALWAYS_INLINE const TenuredCell* fromPointer(const void* ptr);
+
+  MOZ_ALWAYS_INLINE bool isTenured() const {
+    MOZ_ASSERT(!IsInsideNursery(this));
+    return true;
+  }
 
   // Mark bit management.
   MOZ_ALWAYS_INLINE bool isMarkedAny() const;
@@ -236,6 +243,14 @@ MOZ_ALWAYS_INLINE bool Cell::isMarkedBlack() const {
 
 MOZ_ALWAYS_INLINE bool Cell::isMarkedGray() const {
   return isTenured() && asTenured().isMarkedGray();
+}
+
+MOZ_ALWAYS_INLINE bool Cell::isMarked(gc::MarkColor color) const {
+  return color == MarkColor::Gray ? isMarkedGray() : isMarkedBlack();
+}
+
+MOZ_ALWAYS_INLINE bool Cell::isMarkedAtLeast(gc::MarkColor color) const {
+  return color == MarkColor::Gray ? isMarkedAny() : isMarkedBlack();
 }
 
 inline JSRuntime* Cell::runtimeFromMainThread() const {
@@ -351,13 +366,9 @@ bool TenuredCell::isInsideZone(JS::Zone* zone) const {
   MOZ_ASSERT(!CurrentThreadIsIonCompiling());
   MOZ_ASSERT(thing);
   MOZ_ASSERT(CurrentThreadCanAccessZone(thing->zoneFromAnyThread()));
-
-  // It would be good if barriers were never triggered during collection, but
-  // at the moment this can happen e.g. when rekeying tables containing
-  // read-barriered GC things after a moving GC.
-  //
-  // TODO: Fix this and assert we're not collecting if we're on the active
-  // thread.
+  // Barriers should not be triggered on main thread while collecting.
+  MOZ_ASSERT_IF(CurrentThreadCanAccessRuntime(thing->runtimeFromAnyThread()),
+                !JS::RuntimeHeapIsCollecting());
 
   JS::shadow::Zone* shadowZone = thing->shadowZoneFromAnyThread();
   if (shadowZone->needsIncrementalBarrier()) {
@@ -371,7 +382,7 @@ bool TenuredCell::isInsideZone(JS::Zone* zone) const {
   }
 
   if (thing->isMarkedGray()) {
-    // There shouldn't be anything marked grey unless we're on the main thread.
+    // There shouldn't be anything marked gray unless we're on the main thread.
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(thing->runtimeFromAnyThread()));
     if (!JS::RuntimeHeapIsCollecting()) {
       JS::UnmarkGrayGCThingRecursively(
@@ -430,8 +441,8 @@ static MOZ_ALWAYS_INLINE void AssertValidToSkipBarrier(TenuredCell* thing) {
 
 #ifdef DEBUG
 
-/* static */ bool Cell::thingIsNotGray(Cell* cell) {
-  return JS::CellIsNotGray(cell);
+/* static */ void Cell::assertThingIsNotGray(Cell* cell) {
+  JS::AssertCellIsNotGray(cell);
 }
 
 bool Cell::isAligned() const {

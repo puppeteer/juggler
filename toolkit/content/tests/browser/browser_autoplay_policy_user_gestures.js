@@ -1,61 +1,124 @@
 /* eslint-disable mozilla/no-arbitrary-setTimeout */
 
-const VIDEO_PAGE = "https://example.com/browser/toolkit/content/tests/browser/file_video.html";
+const VIDEO_PAGE =
+  "https://example.com/browser/toolkit/content/tests/browser/file_video.html";
 
-var UserGestures = {
+const UserGestures = {
   MOUSE_CLICK: "mouse-click",
   MOUSE_MOVE: "mouse-move",
   KEYBOARD_PRESS: "keyboard-press",
 };
 
-var UserGestureTests = [
-  {type: UserGestures.MOUSE_CLICK, isActivationGesture: true},
-  {type: UserGestures.MOUSE_MOVE, isActivationGesture: false},
-  {type: UserGestures.KEYBOARD_PRESS, isActivationGesture: true},
+const UserGestureTests = [
+  { type: UserGestures.MOUSE_CLICK, isActivationGesture: true },
+  { type: UserGestures.MOUSE_MOVE, isActivationGesture: false },
+  // test different keycode here. printable key, non-printable key and other
+  // special keys.
+  {
+    type: UserGestures.KEYBOARD_PRESS,
+    isActivationGesture: true,
+    keyCode: "a",
+  },
+  {
+    type: UserGestures.KEYBOARD_PRESS,
+    isActivationGesture: false,
+    keyCode: "VK_ESCAPE",
+  },
+  {
+    type: UserGestures.KEYBOARD_PRESS,
+    isActivationGesture: true,
+    keyCode: "VK_RETURN",
+  },
+  {
+    type: UserGestures.KEYBOARD_PRESS,
+    isActivationGesture: true,
+    keyCode: "VK_SPACE",
+  },
 ];
 
-function setup_test_preference() {
-  return SpecialPowers.pushPrefEnv({"set": [
-    ["media.autoplay.default", SpecialPowers.Ci.nsIAutoplay.BLOCKED],
-    ["media.autoplay.enabled.user-gestures-needed", true],
-    ["media.autoplay.block-webaudio", true],
-    ["media.navigator.permission.fake", true],
-  ]});
+/**
+ * This test is used to ensure we would stop blocking autoplay after document
+ * has been activated by user gestures. We would treat mouse clicking, key board
+ * pressing (printable keys or carriage return) as valid user gesture input.
+ */
+add_task(async function startTestUserGestureInput() {
+  info("- setup test preference -");
+  await setupTestPreferences();
+
+  info("- test play when page doesn't be activated -");
+  await testPlayWithoutUserGesture();
+
+  info("- test play after page got user gesture -");
+  for (let idx = 0; idx < UserGestureTests.length; idx++) {
+    info("- test play after page got user gesture -");
+    await testPlayWithUserGesture(UserGestureTests[idx]);
+
+    info("- test web audio with user gesture -");
+    await testWebAudioWithUserGesture(UserGestureTests[idx]);
+  }
+});
+
+/**
+ * testing helper functions
+ */
+function setupTestPreferences() {
+  return SpecialPowers.pushPrefEnv({
+    set: [
+      ["media.autoplay.default", SpecialPowers.Ci.nsIAutoplay.BLOCKED],
+      ["media.autoplay.enabled.user-gestures-needed", true],
+      ["media.autoplay.block-event.enabled", true],
+      ["media.autoplay.block-webaudio", true],
+      ["media.navigator.permission.fake", true],
+    ],
+  });
 }
 
 function simulateUserGesture(gesture, targetBrowser) {
   info(`- simulate ${gesture.type} event -`);
   switch (gesture.type) {
     case UserGestures.MOUSE_CLICK:
-      return BrowserTestUtils.synthesizeMouseAtCenter("body", {button: 0},
-                                                      targetBrowser);
+      return BrowserTestUtils.synthesizeMouseAtCenter(
+        "body",
+        { button: 0 },
+        targetBrowser
+      );
     case UserGestures.MOUSE_MOVE:
-      return BrowserTestUtils.synthesizeMouseAtCenter("body", {type: "mousemove"},
-                                                      targetBrowser);
+      return BrowserTestUtils.synthesizeMouseAtCenter(
+        "body",
+        { type: "mousemove" },
+        targetBrowser
+      );
     case UserGestures.KEYBOARD_PRESS:
-      return BrowserTestUtils.sendChar("a", targetBrowser);
+      info(`- keycode=${gesture.keyCode} -`);
+      return BrowserTestUtils.synthesizeKey(gesture.keyCode, {}, targetBrowser);
     default:
       ok(false, "undefined user gesture");
       return false;
   }
 }
 
-async function test_play_without_user_gesture() {
+async function testPlayWithoutUserGesture() {
   info("- open new tab -");
-  let tab = await BrowserTestUtils.openNewForegroundTab(window.gBrowser,
-                                                        "about:blank");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    window.gBrowser,
+    "about:blank"
+  );
   BrowserTestUtils.loadURI(tab.linkedBrowser, VIDEO_PAGE);
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
 
-  async function check_autoplay_keyword() {
+  async function checkAutoplayKeyword() {
     info("- create an new autoplay video -");
     let video = content.document.createElement("video");
     video.src = "gizmo.mp4";
     video.autoplay = true;
     let canplayPromise = new Promise(function(resolve) {
-      video.addEventListener("canplaythrough", function() {
-        resolve();
-      }, {once: true});
+      video.addEventListener(
+        "canplaythrough",
+        function() {
+          resolve();
+        },
+        { once: true }
+      );
     });
     content.document.body.appendChild(video);
 
@@ -63,25 +126,27 @@ async function test_play_without_user_gesture() {
     await canplayPromise;
     ok(video.paused, "video can't start without user input.");
   }
-  await ContentTask.spawn(tab.linkedBrowser, null, check_autoplay_keyword);
+  await ContentTask.spawn(tab.linkedBrowser, null, checkAutoplayKeyword);
 
-  async function play_video() {
+  async function playVideo() {
     let video = content.document.getElementById("v");
     info("- call play() without user activation -");
     await video.play().catch(function() {
       ok(video.paused, "video can't start play without user input.");
     });
   }
-  await ContentTask.spawn(tab.linkedBrowser, null, play_video);
+  await ContentTask.spawn(tab.linkedBrowser, null, playVideo);
 
   info("- remove tab -");
   BrowserTestUtils.removeTab(tab);
 }
 
-async function test_play_with_user_gesture(gesture) {
+async function testPlayWithUserGesture(gesture) {
   info("- open new tab -");
-  let tab = await BrowserTestUtils.openNewForegroundTab(window.gBrowser,
-                                                        "about:blank");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    window.gBrowser,
+    "about:blank"
+  );
   BrowserTestUtils.loadURI(tab.linkedBrowser, VIDEO_PAGE);
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
 
@@ -89,19 +154,22 @@ async function test_play_with_user_gesture(gesture) {
   await simulateUserGesture(gesture, tab.linkedBrowser);
 
   info("- call play() -");
-  async function play_video(gesture) {
+  async function playVideo(gesture) {
     let video = content.document.getElementById("v");
     try {
       await video.play();
       ok(gesture.isActivationGesture, "user gesture can activate the page");
       ok(!video.paused, "video starts playing.");
     } catch (e) {
-      ok(!gesture.isActivationGesture, "user gesture can not activate the page");
+      ok(
+        !gesture.isActivationGesture,
+        "user gesture can not activate the page"
+      );
       ok(video.paused, "video can not start playing.");
     }
   }
 
-  await ContentTask.spawn(tab.linkedBrowser, gesture, play_video);
+  await ContentTask.spawn(tab.linkedBrowser, gesture, playVideo);
 
   info("- remove tab -");
   BrowserTestUtils.removeTab(tab);
@@ -112,19 +180,32 @@ function createAudioContext() {
   let ac = content.ac;
   ac.resumePromises = [];
   ac.stateChangePromise = new Promise(resolve => {
-    ac.addEventListener("statechange", function() {
-      resolve();
-    }, {once: true});
+    ac.addEventListener(
+      "statechange",
+      function() {
+        resolve();
+      },
+      { once: true }
+    );
+  });
+  ac.notAllowedToStart = new Promise(resolve => {
+    ac.addEventListener(
+      "blocked",
+      function() {
+        resolve();
+      },
+      { once: true }
+    );
   });
 }
 
-async function checking_audio_context_running_state() {
+async function checkingAudioContextRunningState() {
   let ac = content.ac;
-  await new Promise(r => setTimeout(r, 2000));
-  is(ac.state, "suspended", "audio context is still suspended");
+  await ac.notAllowedToStart;
+  ok(ac.state === "suspended", `AudioContext is not started yet.`);
 }
 
-function resume_without_expected_success() {
+function resumeWithoutExpectedSuccess() {
   let ac = content.ac;
   let promise = ac.resume();
   ac.resumePromises.push(promise);
@@ -140,7 +221,7 @@ function resume_without_expected_success() {
   });
 }
 
-function resume_with_expected_success() {
+function resumeWithExpectedSuccess() {
   let ac = content.ac;
   ac.resumePromises.push(ac.resume());
   return Promise.all(ac.resumePromises).then(() => {
@@ -148,51 +229,36 @@ function resume_with_expected_success() {
   });
 }
 
-function callGUM(testParameters) {
-  info("- calling gum with " + JSON.stringify(testParameters.constraints));
-  if (testParameters.shouldAllowStartingContext) {
-    // Because of the prefs we've set and passed, this is going to allow the
-    // window to start an AudioContext synchronously.
-    testParameters.constraints.fake = true;
-    return content.navigator.mediaDevices.getUserMedia(testParameters.constraints);
-  }
-
-  // Call gUM, without sucess: we've made it so that only fake requests
-  // succeed without permission, and this is requesting non-fake-devices. Return
-  // a resolved promise so that the test continues, but the getUserMedia Promise
-  // will never be resolved.
-  // We do this to check that it's not merely calling gUM that allows starting
-  // an AudioContext, it's having the Promise it return resolved successfuly,
-  // because of saved permissions for an origin or explicit user consent using
-  // the prompt.
-  content.navigator.mediaDevices.getUserMedia(testParameters.constraints);
-  return Promise.resolve();
-}
-
-
-async function test_webaudio_with_user_gesture(gesture) {
+async function testWebAudioWithUserGesture(gesture) {
   info("- open new tab -");
-  let tab = await BrowserTestUtils.openNewForegroundTab(window.gBrowser,
-                                                        "about:blank");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    window.gBrowser,
+    "about:blank"
+  );
   info("- create audio context -");
   // We want the same audio context to be used across different content
   // tasks, so it needs to be loaded by a frame script.
-  let frameScript = createAudioContext;
-  let mm = tab.linkedBrowser.messageManager;
-  mm.loadFrameScript("data:,(" + frameScript.toString() + ")();", false);
+  const mm = tab.linkedBrowser.messageManager;
+  mm.loadFrameScript("data:,(" + createAudioContext.toString() + ")();", false);
 
   info("- check whether audio context starts running -");
   try {
-    await ContentTask.spawn(tab.linkedBrowser, null,
-                            checking_audio_context_running_state);
+    await ContentTask.spawn(
+      tab.linkedBrowser,
+      null,
+      checkingAudioContextRunningState
+    );
   } catch (error) {
     ok(false, error.toString());
   }
 
   info("- calling resume() -");
   try {
-    await ContentTask.spawn(tab.linkedBrowser, null,
-                            resume_without_expected_success);
+    await ContentTask.spawn(
+      tab.linkedBrowser,
+      null,
+      resumeWithoutExpectedSuccess
+    );
   } catch (error) {
     ok(false, error.toString());
   }
@@ -202,9 +268,9 @@ async function test_webaudio_with_user_gesture(gesture) {
 
   info("- calling resume() again");
   try {
-    let resumeFunc = gesture.isActivationGesture ?
-      resume_with_expected_success :
-      resume_without_expected_success;
+    let resumeFunc = gesture.isActivationGesture
+      ? resumeWithExpectedSuccess
+      : resumeWithoutExpectedSuccess;
     await ContentTask.spawn(tab.linkedBrowser, null, resumeFunc);
   } catch (error) {
     ok(false, error.toString());
@@ -213,82 +279,3 @@ async function test_webaudio_with_user_gesture(gesture) {
   info("- remove tab -");
   await BrowserTestUtils.removeTab(tab);
 }
-
-async function test_webaudio_with_gum(testParameters) {
-  info("- open new tab -");
-  let tab = await BrowserTestUtils.openNewForegroundTab(window.gBrowser,
-                                                        "about:blank");
-  info("- create audio context -");
-  // We want the same audio context be used between different content
-  // tasks, so it *must* be loaded by frame script.
-  let frameScript = createAudioContext;
-  let mm = tab.linkedBrowser.messageManager;
-  mm.loadFrameScript("data:,(" + frameScript.toString() + ")();", false);
-
-  info("- check whether audio context starts running -");
-  try {
-    await ContentTask.spawn(tab.linkedBrowser, null,
-                            checking_audio_context_running_state);
-  } catch (error) {
-    ok(false, error.toString());
-  }
-
-  try {
-    await ContentTask.spawn(tab.linkedBrowser, testParameters, callGUM);
-  } catch (error) {
-    ok(false, error.toString());
-  }
-
-  info("- calling resume() again");
-  try {
-    let resumeFunc = testParameters.shouldAllowStartingContext ?
-      resume_with_expected_success :
-      resume_without_expected_success;
-    await ContentTask.spawn(tab.linkedBrowser, null, resumeFunc);
-  } catch (error) {
-    ok(false, error.toString());
-  }
-
-  info("- remove tab -");
-  await BrowserTestUtils.removeTab(tab);
-}
-
-add_task(async function start_test() {
-  info("- setup test preference -");
-  await setup_test_preference();
-
-  info("- test play when page doesn't be activated -");
-  await test_play_without_user_gesture();
-
-  info("- test play after page got user gesture -");
-  for (let idx = 0; idx < UserGestureTests.length; idx++) {
-    info("- test play after page got user gesture -");
-    await test_play_with_user_gesture(UserGestureTests[idx]);
-
-    info("- test web audio with user gesture -");
-    await test_webaudio_with_user_gesture(UserGestureTests[idx]);
-  }
-
-  info("- test web audio with gUM success -");
-
-  await test_webaudio_with_gum({constraints: { audio: true },
-                                shouldAllowStartingContext: true});
-  await test_webaudio_with_gum({constraints: { video: true },
-                                shouldAllowStartingContext: true});
-  await test_webaudio_with_gum({constraints: { video: true,
-                                               audio: true },
-                                shouldAllowStartingContext: true});
-
-  await SpecialPowers.pushPrefEnv({"set": [
-    ["media.navigator.permission.force", true],
-  ]}).then(async function() {
-    info("- test web audio with gUM denied -");
-    await test_webaudio_with_gum({constraints: { video: true },
-                                  shouldAllowStartingContext: false});
-    await test_webaudio_with_gum({constraints: { audio: true },
-                                  shouldAllowStartingContext: false});
-    await test_webaudio_with_gum({constraints: { video: true,
-                                                 audio: true },
-                                  shouldAllowStartingContext: false});
-  });
-});

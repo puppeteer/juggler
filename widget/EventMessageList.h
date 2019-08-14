@@ -23,8 +23,8 @@
  */
 
 #ifndef NS_EVENT_MESSAGE_FIRST_LAST
-#define UNDEF_NS_EVENT_MESSAGE_FIRST_LAST 1
-#define NS_EVENT_MESSAGE_FIRST_LAST(aMessage, aFirst, aLast)
+#  define UNDEF_NS_EVENT_MESSAGE_FIRST_LAST 1
+#  define NS_EVENT_MESSAGE_FIRST_LAST(aMessage, aFirst, aLast)
 #endif
 
 NS_EVENT_MESSAGE(eVoidEvent)
@@ -55,6 +55,8 @@ NS_EVENT_MESSAGE(eAccessKeyNotFound)
 
 NS_EVENT_MESSAGE(eResize)
 NS_EVENT_MESSAGE(eScroll)
+NS_EVENT_MESSAGE(eMozVisualResize)
+NS_EVENT_MESSAGE(eMozVisualScroll)
 
 // Application installation
 NS_EVENT_MESSAGE(eInstall)
@@ -106,6 +108,8 @@ NS_EVENT_MESSAGE_FIRST_LAST(ePointerEvent, ePointerMove, ePointerLostCapture)
 
 NS_EVENT_MESSAGE(eContextMenu)
 
+NS_EVENT_MESSAGE(eCueChange)
+
 NS_EVENT_MESSAGE(eLoad)
 NS_EVENT_MESSAGE(eUnload)
 NS_EVENT_MESSAGE(eHashChange)
@@ -113,7 +117,9 @@ NS_EVENT_MESSAGE(eImageAbort)
 NS_EVENT_MESSAGE(eLoadError)
 NS_EVENT_MESSAGE(eLoadEnd)
 NS_EVENT_MESSAGE(ePopState)
+NS_EVENT_MESSAGE(eRejectionHandled)
 NS_EVENT_MESSAGE(eStorage)
+NS_EVENT_MESSAGE(eUnhandledRejection)
 NS_EVENT_MESSAGE(eBeforeUnload)
 NS_EVENT_MESSAGE(eReadyStateChange)
 
@@ -200,11 +206,11 @@ NS_EVENT_MESSAGE(eCompositionCommitAsIs)
 NS_EVENT_MESSAGE(eCompositionCommit)
 // eCompositionCommitRequestHandled is NOT used with any Widget*Event.
 // This is used only by PBrowser.OnEventNeedingAckHandled().  If active IME
-// commits composition synchronously, TabParent returns the commit string
-// to the remote process synchronously.  Then, TabChild dispatches
+// commits composition synchronously, BrowserParent returns the commit string
+// to the remote process synchronously.  Then, BrowserChild dispatches
 // eCompositionCommit in the remote process.  Finally, this message is sent
-// to TabParent.  (If IME commits composition asynchronously, this message is
-// not used.)
+// to BrowserParent.  (If IME commits composition asynchronously, this message
+// is not used.)
 NS_EVENT_MESSAGE(eCompositionCommitRequestHandled)
 
 // Following events are defined for deprecated DOM events which are using
@@ -471,6 +477,6 @@ NS_EVENT_MESSAGE(eMarqueeStart)
 NS_EVENT_MESSAGE(eMarqueeFinish)
 
 #ifdef UNDEF_NS_EVENT_MESSAGE_FIRST_LAST
-#undef UNDEF_NS_EVENT_MESSAGE_FIRST_LAST
-#undef NS_EVENT_MESSAGE_FIRST_LAST
+#  undef UNDEF_NS_EVENT_MESSAGE_FIRST_LAST
+#  undef NS_EVENT_MESSAGE_FIRST_LAST
 #endif

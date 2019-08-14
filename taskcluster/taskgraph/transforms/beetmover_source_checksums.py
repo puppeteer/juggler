@@ -18,15 +18,7 @@ from taskgraph.util.scriptworker import (generate_beetmover_artifact_map,
                                          get_worker_type_for_scope,
                                          should_use_artifact_map)
 from taskgraph.transforms.task import task_description_schema
-from voluptuous import Any, Required, Optional
-
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
-
-taskref_or_string = Any(
-    basestring,
-    {Required('task-reference'): basestring})
+from voluptuous import Required, Optional
 
 beetmover_checksums_description_schema = schema.extend({
     Required('depname', default='build'): basestring,
@@ -70,8 +62,7 @@ def make_beetmover_checksums_description(config, jobs):
         else:
             extra['product'] = 'firefox'
 
-        dependent_kind = str(dep_job.kind)
-        dependencies = {dependent_kind: dep_job.label}
+        dependencies = {dep_job.kind: dep_job.label}
         for k, v in dep_job.dependencies.items():
             if k.startswith('beetmover'):
                 dependencies[k] = v
@@ -146,8 +137,9 @@ def make_beetmover_checksums_worker(config, jobs):
             raise NotImplementedError(
                 "Beetmover checksums must have a beetmover and signing dependency!")
 
-        if should_use_artifact_map(platform, config.params['project']):
-            upstream_artifacts = generate_beetmover_upstream_artifacts(job, platform, locale)
+        if should_use_artifact_map(platform):
+            upstream_artifacts = generate_beetmover_upstream_artifacts(config,
+                                                                       job, platform, locale)
         else:
             upstream_artifacts = generate_upstream_artifacts(refs, platform, locale)
 
@@ -157,7 +149,7 @@ def make_beetmover_checksums_worker(config, jobs):
             'upstream-artifacts': upstream_artifacts,
         }
 
-        if should_use_artifact_map(platform, config.params['project']):
+        if should_use_artifact_map(platform):
             worker['artifact-map'] = generate_beetmover_artifact_map(
                 config, job, platform=platform)
 

@@ -52,6 +52,7 @@ class imgRequestProxy : public imgIRequest,
   virtual ~imgRequestProxy();
 
  public:
+  typedef mozilla::dom::Document Document;
   typedef mozilla::image::Image Image;
   typedef mozilla::image::ProgressTracker ProgressTracker;
 
@@ -67,7 +68,7 @@ class imgRequestProxy : public imgIRequest,
   // Callers to Init or ChangeOwner are required to call NotifyListener after
   // (although not immediately after) doing so.
   nsresult Init(imgRequest* aOwner, nsILoadGroup* aLoadGroup,
-                nsIDocument* aLoadingDocument, nsIURI* aURI,
+                Document* aLoadingDocument, nsIURI* aURI,
                 imgINotificationObserver* aObserver);
 
   nsresult ChangeOwner(imgRequest* aNewOwner);  // this will change mOwner.
@@ -121,10 +122,10 @@ class imgRequestProxy : public imgIRequest,
   void ClearAnimationConsumers();
 
   nsresult SyncClone(imgINotificationObserver* aObserver,
-                     nsIDocument* aLoadingDocument, imgRequestProxy** aClone);
+                     Document* aLoadingDocument, imgRequestProxy** aClone);
   nsresult Clone(imgINotificationObserver* aObserver,
-                 nsIDocument* aLoadingDocument, imgRequestProxy** aClone);
-  nsresult GetStaticRequest(nsIDocument* aLoadingDocument,
+                 Document* aLoadingDocument, imgRequestProxy** aClone);
+  nsresult GetStaticRequest(Document* aLoadingDocument,
                             imgRequestProxy** aReturn);
 
  protected:
@@ -180,7 +181,7 @@ class imgRequestProxy : public imgIRequest,
   imgCacheValidator* GetValidator() const;
 
   nsresult PerformClone(imgINotificationObserver* aObserver,
-                        nsIDocument* aLoadingDocument, bool aSyncNotify,
+                        Document* aLoadingDocument, bool aSyncNotify,
                         imgRequestProxy** aClone);
 
   virtual imgRequestProxy* NewClonedProxy();
@@ -194,7 +195,7 @@ class imgRequestProxy : public imgIRequest,
  private:
   friend class imgCacheValidator;
 
-  void AddToOwner(nsIDocument* aLoadingDocument);
+  void AddToOwner(Document* aLoadingDocument);
   void RemoveFromOwner(nsresult aStatus);
 
   nsresult DispatchWithTargetIfAvailable(already_AddRefed<nsIRunnable> aEvent);
@@ -236,9 +237,13 @@ class imgRequestProxy : public imgIRequest,
 // certain behaviours must be overridden to compensate.
 class imgRequestProxyStatic : public imgRequestProxy {
  public:
-  imgRequestProxyStatic(Image* aImage, nsIPrincipal* aPrincipal);
+  imgRequestProxyStatic(Image* aImage, nsIPrincipal* aPrincipal,
+                        bool hadCrossOriginRedirects);
 
   NS_IMETHOD GetImagePrincipal(nsIPrincipal** aPrincipal) override;
+
+  NS_IMETHOD GetHadCrossOriginRedirects(
+      bool* aHadCrossOriginRedirects) override;
 
  protected:
   imgRequestProxy* NewClonedProxy() override;
@@ -246,6 +251,7 @@ class imgRequestProxyStatic : public imgRequestProxy {
   // Our principal. We have to cache it, rather than accessing the underlying
   // request on-demand, because static proxies don't have an underlying request.
   nsCOMPtr<nsIPrincipal> mPrincipal;
+  const bool mHadCrossOriginRedirects;
 };
 
 #endif  // mozilla_image_imgRequestProxy_h

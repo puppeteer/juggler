@@ -9,8 +9,6 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { getFormattedProtocol } = require("../utils/request-utils");
 
-const { div } = dom;
-
 class RequestListColumnProtocol extends Component {
   static get propTypes() {
     return {
@@ -19,20 +17,21 @@ class RequestListColumnProtocol extends Component {
   }
 
   shouldComponentUpdate(nextProps) {
-    return getFormattedProtocol(this.props.item) !==
-      getFormattedProtocol(nextProps.item);
+    return (
+      getFormattedProtocol(this.props.item) !==
+      getFormattedProtocol(nextProps.item)
+    );
   }
 
   render() {
     const protocol = getFormattedProtocol(this.props.item);
 
-    return (
-      div({
+    return dom.td(
+      {
         className: "requests-list-column requests-list-protocol",
         title: protocol,
       },
-        protocol
-      )
+      protocol
     );
   }
 }

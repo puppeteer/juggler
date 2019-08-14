@@ -3,8 +3,7 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-async function testSteps()
-{
+async function testSteps() {
   const globalLimitKB = 5 * 1024;
 
   const data = {};
@@ -41,6 +40,7 @@ async function testSteps()
 
   for (let i = 0; i < data.urlCount; i++) {
     storages[i].setItem(data.key, data.value);
+    await returnToEventLoop();
   }
 
   info("Verifying no more data can be written");
@@ -49,7 +49,7 @@ async function testSteps()
     try {
       storages[i].setItem("B", "");
       ok(false, "Should have thrown");
-    } catch(ex) {
+    } catch (ex) {
       ok(true, "Did throw");
       ok(ex instanceof DOMException, "Threw DOMException");
       is(ex.name, "QuotaExceededError", "Threw right DOMException");

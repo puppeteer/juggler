@@ -10,17 +10,16 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/IDBTransactionBinding.h"
 #include "mozilla/dom/StorageTypeBinding.h"
-#include "mozilla/dom/IDBWrapperCache.h"
 #include "mozilla/dom/quota/PersistenceType.h"
+#include "mozilla/DOMEventTargetHelper.h"
 #include "nsAutoPtr.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 #include "nsString.h"
 #include "nsTHashtable.h"
 
-class nsIDocument;
 class nsIEventTarget;
-class nsPIDOMWindowInner;
+class nsIGlobalObject;
 
 namespace mozilla {
 
@@ -48,7 +47,7 @@ class DatabaseSpec;
 class PBackgroundIDBDatabaseFileChild;
 }  // namespace indexedDB
 
-class IDBDatabase final : public IDBWrapperCache {
+class IDBDatabase final : public DOMEventTargetHelper {
   typedef mozilla::dom::indexedDB::DatabaseSpec DatabaseSpec;
   typedef mozilla::dom::StorageType StorageType;
   typedef mozilla::dom::quota::PersistenceType PersistenceType;
@@ -113,7 +112,7 @@ class IDBDatabase final : public IDBWrapperCache {
 
   uint64_t Version() const;
 
-  already_AddRefed<nsIDocument> GetOwnerDocument() const;
+  already_AddRefed<Document> GetOwnerDocument() const;
 
   void Close() {
     AssertIsOnOwningThread();
@@ -179,8 +178,6 @@ class IDBDatabase final : public IDBWrapperCache {
 
   void NoteFinishedMutableFile(IDBMutableFile* aMutableFile);
 
-  nsPIDOMWindowInner* GetParentObject() const;
-
   already_AddRefed<DOMStringList> ObjectStoreNames() const;
 
   already_AddRefed<IDBObjectStore> CreateObjectStore(
@@ -229,7 +226,7 @@ class IDBDatabase final : public IDBWrapperCache {
   const DatabaseSpec* Spec() const { return mSpec; }
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, IDBWrapperCache)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IDBDatabase, DOMEventTargetHelper)
 
   // DOMEventTargetHelper
   void DisconnectFromOwner() override;

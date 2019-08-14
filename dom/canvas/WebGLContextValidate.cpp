@@ -8,11 +8,11 @@
 #include <algorithm>
 #include "GLSLANG/ShaderLang.h"
 #include "CanvasUtils.h"
-#include "gfxPrefs.h"
 #include "GLContext.h"
 #include "jsfriendapi.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsIObserverService.h"
 #include "nsPrintfCString.h"
 #include "WebGLActiveInfo.h"
@@ -30,7 +30,7 @@
 #include "WebGLVertexAttribData.h"
 
 #if defined(MOZ_WIDGET_COCOA)
-#include "nsCocoaFeatures.h"
+#  include "nsCocoaFeatures.h"
 #endif
 
 ////////////////////
@@ -288,9 +288,11 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
     return false;
   }
 
-  mDisableExtensions = gfxPrefs::WebGLDisableExtensions();
-  mLoseContextOnMemoryPressure = gfxPrefs::WebGLLoseContextOnMemoryPressure();
-  mCanLoseContextInForeground = gfxPrefs::WebGLCanLoseContextInForeground();
+  mDisableExtensions = StaticPrefs::webgl_disable_extensions();
+  mLoseContextOnMemoryPressure =
+      StaticPrefs::webgl_lose_context_on_memory_pressure();
+  mCanLoseContextInForeground =
+      StaticPrefs::webgl_can_lose_context_in_foreground();
 
   // These are the default values, see 6.2 State tables in the
   // OpenGL ES 2.0.25 spec.
@@ -411,6 +413,9 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
                                (GLint*)&mGLMaxArrayTextureLayers))
     mGLMaxArrayTextureLayers = 0;
 
+  (void)gl->GetPotentialInteger(LOCAL_GL_MAX_VIEWS_OVR,
+                                (GLint*)&mGLMaxMultiviewViews);
+
   gl->GetUIntegerv(LOCAL_GL_MAX_TEXTURE_IMAGE_UNITS,
                    &mGLMaxFragmentTextureImageUnits);
   gl->GetUIntegerv(LOCAL_GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS,
@@ -427,44 +432,37 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
 
   ////////////////
 
-  if (gl->IsSupported(gl::GLFeature::ES2_compatibility)) {
-    gl->GetUIntegerv(LOCAL_GL_MAX_FRAGMENT_UNIFORM_VECTORS,
-                     &mGLMaxFragmentUniformVectors);
-    gl->GetUIntegerv(LOCAL_GL_MAX_VERTEX_UNIFORM_VECTORS,
-                     &mGLMaxVertexUniformVectors);
-    gl->GetUIntegerv(LOCAL_GL_MAX_VARYING_VECTORS, &mGLMaxVaryingVectors);
-  } else {
-    gl->GetUIntegerv(LOCAL_GL_MAX_FRAGMENT_UNIFORM_COMPONENTS,
-                     &mGLMaxFragmentUniformVectors);
-    mGLMaxFragmentUniformVectors /= 4;
-    gl->GetUIntegerv(LOCAL_GL_MAX_VERTEX_UNIFORM_COMPONENTS,
-                     &mGLMaxVertexUniformVectors);
-    mGLMaxVertexUniformVectors /= 4;
-
-    /* We are now going to try to read GL_MAX_VERTEX_OUTPUT_COMPONENTS
-     * and GL_MAX_FRAGMENT_INPUT_COMPONENTS, however these constants
-     * only entered the OpenGL standard at OpenGL 3.2. So we will try
-     * reading, and check OpenGL error for INVALID_ENUM.
-     *
-     * On the public_webgl list, "problematic GetParameter pnames"
-     * thread, the following formula was given:
-     *   maxVaryingVectors = min(GL_MAX_VERTEX_OUTPUT_COMPONENTS,
-     *                           GL_MAX_FRAGMENT_INPUT_COMPONENTS) / 4
-     */
-    uint32_t maxVertexOutputComponents = 0;
-    uint32_t maxFragmentInputComponents = 0;
-    bool ok = true;
-    ok &= gl->GetPotentialInteger(LOCAL_GL_MAX_VERTEX_OUTPUT_COMPONENTS,
-                                  (GLint*)&maxVertexOutputComponents);
-    ok &= gl->GetPotentialInteger(LOCAL_GL_MAX_FRAGMENT_INPUT_COMPONENTS,
-                                  (GLint*)&maxFragmentInputComponents);
-    if (ok) {
-      mGLMaxVaryingVectors =
-          std::min(maxVertexOutputComponents, maxFragmentInputComponents) / 4;
+  if (gl->IsGLES()) {
+    mGLMaxFragmentUniformVectors =
+        gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_FRAGMENT_UNIFORM_VECTORS);
+    mGLMaxVertexUniformVectors =
+        gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_VERTEX_UNIFORM_VECTORS);
+    if (gl->Version() >= 300) {
+      mGLMaxVertexOutputVectors =
+          gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_VERTEX_OUTPUT_COMPONENTS) / 4;
+      mGLMaxFragmentInputVectors =
+          gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_FRAGMENT_INPUT_COMPONENTS) / 4;
     } else {
-      mGLMaxVaryingVectors = 16;
-      // 16 = 64/4, and 64 is the min value for
-      // maxVertexOutputComponents in the OpenGL 3.2 spec.
+      mGLMaxFragmentInputVectors =
+          gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_VARYING_VECTORS);
+      mGLMaxVertexOutputVectors = mGLMaxFragmentInputVectors;
+    }
+  } else {
+    mGLMaxFragmentUniformVectors =
+        gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_FRAGMENT_UNIFORM_COMPONENTS) / 4;
+    mGLMaxVertexUniformVectors =
+        gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_VERTEX_UNIFORM_COMPONENTS) / 4;
+
+    if (gl->Version() >= 320) {
+      mGLMaxVertexOutputVectors =
+          gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_VERTEX_OUTPUT_COMPONENTS) / 4;
+      mGLMaxFragmentInputVectors =
+          gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_FRAGMENT_INPUT_COMPONENTS) / 4;
+    } else {
+      // Same enum val as GL2's GL_MAX_VARYING_FLOATS.
+      mGLMaxFragmentInputVectors =
+          gl->GetIntAs<uint32_t>(LOCAL_GL_MAX_VARYING_COMPONENTS) / 4;
+      mGLMaxVertexOutputVectors = mGLMaxFragmentInputVectors;
     }
   }
 
@@ -479,7 +477,7 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
 
   ////////////////
 
-  if (gfxPrefs::WebGLMinCapabilityMode()) {
+  if (StaticPrefs::webgl_min_capability_mode()) {
     bool ok = true;
 
     ok &= RestrictCap(&mGLMaxVertexTextureImageUnits,
@@ -493,7 +491,8 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
     ok &= RestrictCap(&mGLMaxVertexUniformVectors, kMinMaxVertexUniformVectors);
     ok &= RestrictCap(&mGLMaxFragmentUniformVectors,
                       kMinMaxFragmentUniformVectors);
-    ok &= RestrictCap(&mGLMaxVaryingVectors, kMinMaxVaryingVectors);
+    ok &= RestrictCap(&mGLMaxVertexOutputVectors, kMinMaxVaryingVectors);
+    ok &= RestrictCap(&mGLMaxFragmentInputVectors, kMinMaxVaryingVectors);
 
     ok &= RestrictCap(&mGLMaxColorAttachments, kMinMaxColorAttachments);
     ok &= RestrictCap(&mGLMaxDrawBuffers, kMinMaxDrawBuffers);
@@ -511,7 +510,7 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
     }
 
     mDisableFragHighP = true;
-  } else if (nsContentUtils::ShouldResistFingerprinting()) {
+  } else if (ShouldResistFingerprinting()) {
     bool ok = true;
 
     ok &= RestrictCap(&mGLMaxTextureSize, kCommonMaxTextureSize);
@@ -530,7 +529,8 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
                       kCommonMaxVertexUniformVectors);
     ok &= RestrictCap(&mGLMaxFragmentUniformVectors,
                       kCommonMaxFragmentUniformVectors);
-    ok &= RestrictCap(&mGLMaxVaryingVectors, kCommonMaxVaryingVectors);
+    ok &= RestrictCap(&mGLMaxVertexOutputVectors, kCommonMaxVaryingVectors);
+    ok &= RestrictCap(&mGLMaxFragmentInputVectors, kCommonMaxVaryingVectors);
 
     ok &= RestrictCap(&mGLAliasedLineWidthRange[0],
                       kCommonAliasedLineWidthRangeMin);
@@ -574,9 +574,6 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
   if (gl->IsSupported(gl::GLFeature::seamless_cube_map_opt_in)) {
     gl->fEnable(LOCAL_GL_TEXTURE_CUBE_MAP_SEAMLESS);
   }
-
-  // Check the shader validator pref
-  mBypassShaderValidation = gfxPrefs::WebGLBypassShaderValidator();
 
   // initialize shader translator
   if (!sh::Initialize()) {
@@ -624,7 +621,7 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
   // vertex array object (the name zero) is also deprecated. [...]"
   mDefaultVertexArray = WebGLVertexArray::Create(this);
   mDefaultVertexArray->BindVertexArray();
-  mDefaultVertexArray->mAttribs.SetLength(mGLMaxVertexAttribs);
+  mDefaultVertexArray->mAttribs.resize(mGLMaxVertexAttribs);
 
   mPixelStore_FlipY = false;
   mPixelStore_PremultiplyAlpha = false;
@@ -657,7 +654,7 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
 
   mNeedsIndexValidation =
       !gl->IsSupported(gl::GLFeature::robust_buffer_access_behavior);
-  switch (gfxPrefs::WebGLForceIndexValidation()) {
+  switch (StaticPrefs::webgl_force_index_validation()) {
     case -1:
       mNeedsIndexValidation = false;
       break;
@@ -665,14 +662,14 @@ bool WebGLContext::InitAndValidateGL(FailureReason* const out_failReason) {
       mNeedsIndexValidation = true;
       break;
     default:
-      MOZ_ASSERT(gfxPrefs::WebGLForceIndexValidation() == 0);
+      MOZ_ASSERT(StaticPrefs::webgl_force_index_validation() == 0);
       break;
   }
 
   return true;
 }
 
-bool WebGLContext::ValidateFramebufferTarget(GLenum target) {
+bool WebGLContext::ValidateFramebufferTarget(GLenum target) const {
   bool isValid = true;
   switch (target) {
     case LOCAL_GL_FRAMEBUFFER:

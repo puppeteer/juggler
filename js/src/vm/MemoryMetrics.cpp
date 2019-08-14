@@ -13,9 +13,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "vm/ArrayObject.h"
-#ifdef ENABLE_BIGINT
 #include "vm/BigIntType.h"
-#endif
 #include "vm/HelperThreads.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
@@ -60,8 +58,8 @@ static uint32_t HashStringChars(JSString* s) {
   return hash;
 }
 
-/* static */ HashNumber InefficientNonFlatteningStringHashPolicy::hash(
-    const Lookup& l) {
+/* static */
+HashNumber InefficientNonFlatteningStringHashPolicy::hash(const Lookup& l) {
   return l->hasLatin1Chars() ? HashStringChars<Latin1Char>(l)
                              : HashStringChars<char16_t>(l);
 }
@@ -78,7 +76,8 @@ static bool EqualStringsPure(JSString* s1, JSString* s2) {
   if (s1->isLinear()) {
     c1 = s1->asLinear().chars<Char1>(nogc);
   } else {
-    ownedChars1 = s1->asRope().copyChars<Char1>(/* tcx */ nullptr);
+    ownedChars1 =
+        s1->asRope().copyChars<Char1>(/* tcx */ nullptr, js::MallocArena);
     if (!ownedChars1) {
       MOZ_CRASH("oom");
     }
@@ -90,7 +89,8 @@ static bool EqualStringsPure(JSString* s1, JSString* s2) {
   if (s2->isLinear()) {
     c2 = s2->asLinear().chars<Char2>(nogc);
   } else {
-    ownedChars2 = s2->asRope().copyChars<Char2>(/* tcx */ nullptr);
+    ownedChars2 =
+        s2->asRope().copyChars<Char2>(/* tcx */ nullptr, js::MallocArena);
     if (!ownedChars2) {
       MOZ_CRASH("oom");
     }
@@ -100,8 +100,9 @@ static bool EqualStringsPure(JSString* s1, JSString* s2) {
   return EqualChars(c1, c2, s1->length());
 }
 
-/* static */ bool InefficientNonFlatteningStringHashPolicy::match(
-    const JSString* const& k, const Lookup& l) {
+/* static */
+bool InefficientNonFlatteningStringHashPolicy::match(const JSString* const& k,
+                                                     const Lookup& l) {
   // We can't use js::EqualStrings, because that flattens our strings.
   JSString* s1 = const_cast<JSString*>(k);
   if (k->hasLatin1Chars()) {
@@ -127,7 +128,8 @@ static void StoreStringChars(char* buffer, size_t bufferSize, JSString* str) {
   if (str->isLinear()) {
     chars = str->asLinear().chars<CharT>(nogc);
   } else {
-    ownedChars = str->asRope().copyChars<CharT>(/* tcx */ nullptr);
+    ownedChars =
+        str->asRope().copyChars<CharT>(/* tcx */ nullptr, js::MallocArena);
     if (!ownedChars) {
       MOZ_CRASH("oom");
     }
@@ -443,11 +445,10 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
       realmStats.scriptsGCHeap += thingSize;
       realmStats.scriptsMallocHeapData +=
           script->sizeOfData(rtStats->mallocSizeOf_);
-      realmStats.typeInferenceTypeScripts +=
-          script->sizeOfTypeScript(rtStats->mallocSizeOf_);
-      jit::AddSizeOfBaselineData(script, rtStats->mallocSizeOf_,
-                                 &realmStats.baselineData,
+      script->addSizeOfJitScript(rtStats->mallocSizeOf_, &realmStats.jitScripts,
                                  &realmStats.baselineStubsFallback);
+      jit::AddSizeOfBaselineData(script, rtStats->mallocSizeOf_,
+                                 &realmStats.baselineData);
       realmStats.ionData += jit::SizeOfIonData(script, rtStats->mallocSizeOf_);
       CollectScriptSourceStats<granularity>(closure, script->scriptSource());
       break;
@@ -495,7 +496,6 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
       zStats->symbolsGCHeap += thingSize;
       break;
 
-#ifdef ENABLE_BIGINT
     case JS::TraceKind::BigInt: {
       JS::BigInt* bi = static_cast<BigInt*>(thing);
       zStats->bigIntsGCHeap += thingSize;
@@ -503,7 +503,6 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
           bi->sizeOfExcludingThis(rtStats->mallocSizeOf_);
       break;
     }
-#endif
 
     case JS::TraceKind::BaseShape: {
       JS::ShapeInfo info;  // This zeroes all the sizes.
@@ -699,6 +698,11 @@ static bool FindNotableScriptSources(JS::RuntimeSizes& runtime) {
 static bool CollectRuntimeStatsHelper(JSContext* cx, RuntimeStats* rtStats,
                                       ObjectPrivateVisitor* opv, bool anonymize,
                                       IterateCellCallback statsCellCallback) {
+  // Finish any ongoing incremental GC that may change the data we're gathering
+  // and ensure that we don't do anything that could start another one.
+  gc::FinishGC(cx);
+  JS::AutoAssertNoGC nogc(cx);
+
   JSRuntime* rt = cx->runtime();
   if (!rtStats->realmStatsVector.reserve(rt->numRealms)) {
     return false;
@@ -819,6 +823,26 @@ JS_PUBLIC_API bool JS::CollectRuntimeStats(JSContext* cx, RuntimeStats* rtStats,
                                    StatsCellCallback<FineGrained>);
 }
 
+JS_PUBLIC_API size_t JS::SystemCompartmentCount(JSContext* cx) {
+  size_t n = 0;
+  for (CompartmentsIter comp(cx->runtime()); !comp.done(); comp.next()) {
+    if (IsSystemCompartment(comp)) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+JS_PUBLIC_API size_t JS::UserCompartmentCount(JSContext* cx) {
+  size_t n = 0;
+  for (CompartmentsIter comp(cx->runtime()); !comp.done(); comp.next()) {
+    if (!IsSystemCompartment(comp)) {
+      ++n;
+    }
+  }
+  return n;
+}
+
 JS_PUBLIC_API size_t JS::SystemRealmCount(JSContext* cx) {
   size_t n = 0;
   for (RealmsIter realm(cx->runtime()); !realm.done(); realm.next()) {
@@ -864,7 +888,12 @@ JS_PUBLIC_API bool AddSizeOfTab(JSContext* cx, HandleObject obj,
 
   JS::Zone* zone = GetObjectZone(obj);
 
-  if (!rtStats.realmStatsVector.reserve(zone->compartments().length())) {
+  size_t numRealms = 0;
+  for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
+    numRealms += comp->realms().length();
+  }
+
+  if (!rtStats.realmStatsVector.reserve(numRealms)) {
     return false;
   }
 

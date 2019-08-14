@@ -4,11 +4,12 @@
 
 "use strict";
 
-/* import-globals-from ../../debugger/new/test/mochitest/helpers.js */
-/* import-globals-from ../../debugger/new/test/mochitest/helpers/context.js */
+/* import-globals-from ../../debugger/test/mochitest/helpers.js */
+/* import-globals-from ../../debugger/test/mochitest/helpers/context.js */
 Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/debugger/new/test/mochitest/helpers.js",
-  this);
+  "chrome://mochitests/content/browser/devtools/client/debugger/test/mochitest/helpers.js",
+  this
+);
 
 var { DebuggerServer } = require("devtools/server/main");
 var { DebuggerClient } = require("devtools/shared/client/debugger-client");
@@ -38,7 +39,9 @@ function jsonrpc(tab, method, params) {
       id: currentId,
     });
     messageManager.addMessageListener("jsonrpc", function listener(res) {
-      const { data: { result, error, id } } = res;
+      const {
+        data: { result, error, id },
+      } = res;
       if (id !== currentId) {
         return;
       }
@@ -101,7 +104,7 @@ function close(client) {
 
 function listTabs(client) {
   info("Listing tabs.");
-  return client.listTabs();
+  return client.mainRoot.listTabs();
 }
 
 function findTab(tabs, url) {
@@ -112,11 +115,6 @@ function findTab(tabs, url) {
     }
   }
   return null;
-}
-
-function attachTarget(client, tab) {
-  info("Attaching to tab with url '" + tab.url + "'.");
-  return client.attachTarget(tab);
 }
 
 function listWorkers(targetFront) {
@@ -176,16 +174,17 @@ async function initWorkerDebugger(TAB_URL, WORKER_URL) {
   const target = await TargetFactory.forTab(tab);
   await target.attach();
   const { client } = target;
-  const targetFront = target.activeTab;
 
   await createWorkerInTab(tab, WORKER_URL);
 
-  const { workers } = await listWorkers(targetFront);
+  const { workers } = await listWorkers(target);
   const workerTargetFront = findWorker(workers, WORKER_URL);
 
-  const toolbox = await gDevTools.showToolbox(TargetFactory.forWorker(workerTargetFront),
-                                            "jsdebugger",
-                                            Toolbox.HostType.WINDOW);
+  const toolbox = await gDevTools.showToolbox(
+    workerTargetFront,
+    "jsdebugger",
+    Toolbox.HostType.WINDOW
+  );
 
   const debuggerPanel = toolbox.getCurrentPanel();
 
@@ -193,7 +192,15 @@ async function initWorkerDebugger(TAB_URL, WORKER_URL) {
 
   const context = createDebuggerContext(toolbox);
 
-  return { ...context, client, tab, targetFront, workerTargetFront, toolbox, gDebugger};
+  return {
+    ...context,
+    client,
+    tab,
+    target,
+    workerTargetFront,
+    toolbox,
+    gDebugger,
+  };
 }
 
 // Override addTab/removeTab as defined by shared-head, since these have
@@ -206,17 +213,19 @@ this.addTab = function addTab(url, win) {
   const targetBrowser = targetWindow.gBrowser;
 
   targetWindow.focus();
-  const tab = targetBrowser.selectedTab = BrowserTestUtils.addTab(targetBrowser, url);
+  const tab = (targetBrowser.selectedTab = BrowserTestUtils.addTab(
+    targetBrowser,
+    url
+  ));
   const linkedBrowser = tab.linkedBrowser;
 
   info("Loading frame script with url " + FRAME_SCRIPT_URL + ".");
   linkedBrowser.messageManager.loadFrameScript(FRAME_SCRIPT_URL, false);
 
-  BrowserTestUtils.browserLoaded(linkedBrowser)
-    .then(function() {
-      info("Tab added and finished loading: " + url);
-      deferred.resolve(tab);
-    });
+  BrowserTestUtils.browserLoaded(linkedBrowser).then(function() {
+    info("Tab added and finished loading: " + url);
+    deferred.resolve(tab);
+  });
 
   return deferred.promise;
 };
@@ -229,10 +238,14 @@ this.removeTab = function removeTab(tab, win) {
   const targetBrowser = targetWindow.gBrowser;
   const tabContainer = targetBrowser.tabContainer;
 
-  tabContainer.addEventListener("TabClose", function() {
-    info("Tab removed and finished closing.");
-    deferred.resolve();
-  }, {once: true});
+  tabContainer.addEventListener(
+    "TabClose",
+    function() {
+      info("Tab removed and finished closing.");
+      deferred.resolve();
+    },
+    { once: true }
+  );
 
   targetBrowser.removeTab(tab);
   return deferred.promise;
@@ -241,15 +254,14 @@ this.removeTab = function removeTab(tab, win) {
 async function attachThreadActorForTab(tab) {
   const target = await TargetFactory.forTab(tab);
   await target.attach();
-  const targetFront = target.activeTab;
-  const [, threadClient] = await targetFront.attachThread();
+  const [, threadClient] = await target.attachThread();
   await threadClient.resume();
   return { client: target.client, threadClient };
 }
 
 function pushPrefs(...aPrefs) {
   const deferred = getDeferredPromise().defer();
-  SpecialPowers.pushPrefEnv({"set": aPrefs}, deferred.resolve);
+  SpecialPowers.pushPrefEnv({ set: aPrefs }, deferred.resolve);
   return deferred.promise;
 }
 

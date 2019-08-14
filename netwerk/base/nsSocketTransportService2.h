@@ -69,7 +69,7 @@ static const int32_t kDefaultTCPKeepCount =
 class LinkedRunnableEvent final
     : public LinkedListElement<LinkedRunnableEvent> {
  public:
-  explicit LinkedRunnableEvent(nsIRunnable *event) : mEvent(event) {}
+  explicit LinkedRunnableEvent(nsIRunnable* event) : mEvent(event) {}
   ~LinkedRunnableEvent() = default;
 
   already_AddRefed<nsIRunnable> TakeEvent() { return mEvent.forget(); }
@@ -107,16 +107,14 @@ class nsSocketTransportService final : public nsPISocketTransportService,
 
   // Called by the networking dashboard on the socket thread only
   // Fills the passed array with socket information
-  void GetSocketConnections(nsTArray<SocketInfo> *);
+  void GetSocketConnections(nsTArray<SocketInfo>*);
   uint64_t GetSentBytes() { return mSentBytesCount; }
   uint64_t GetReceivedBytes() { return mReceivedBytesCount; }
 
   // Returns true if keepalives are enabled in prefs.
   bool IsKeepaliveEnabled() { return mKeepaliveEnabledPref; }
 
-  bool IsTelemetryEnabledAndNotSleepPhase() {
-    return mTelemetryEnabledPref && !mSleepPhase;
-  }
+  bool IsTelemetryEnabledAndNotSleepPhase();
   PRIntervalTime MaxTimeForPrClosePref() { return mMaxTimeForPrClosePref; }
 
   bool IsEsniEnabled() {
@@ -168,8 +166,8 @@ class nsSocketTransportService final : public nsPISocketTransportService,
   //-------------------------------------------------------------------------
 
   struct SocketContext {
-    PRFileDesc *mFD;
-    nsASocketHandler *mHandler;
+    PRFileDesc* mFD;
+    nsASocketHandler* mHandler;
     PRIntervalTime mPollStartEpoch;  // time we started to poll this socket
 
    public:
@@ -193,22 +191,22 @@ class nsSocketTransportService final : public nsPISocketTransportService,
     void MaybeResetEpoch();
   };
 
-  SocketContext *mActiveList; /* mListSize entries */
-  SocketContext *mIdleList;   /* mListSize entries */
-  nsIThread *mRawThread;
+  SocketContext* mActiveList; /* mListSize entries */
+  SocketContext* mIdleList;   /* mListSize entries */
+  nsIThread* mRawThread;
 
   uint32_t mActiveListSize;
   uint32_t mIdleListSize;
   uint32_t mActiveCount;
   uint32_t mIdleCount;
 
-  nsresult DetachSocket(SocketContext *, SocketContext *);
-  nsresult AddToIdleList(SocketContext *);
-  nsresult AddToPollList(SocketContext *);
-  void RemoveFromIdleList(SocketContext *);
-  void RemoveFromPollList(SocketContext *);
-  void MoveToIdleList(SocketContext *sock);
-  void MoveToPollList(SocketContext *sock);
+  nsresult DetachSocket(SocketContext*, SocketContext*);
+  nsresult AddToIdleList(SocketContext*);
+  nsresult AddToPollList(SocketContext*);
+  void RemoveFromIdleList(SocketContext*);
+  void RemoveFromPollList(SocketContext*);
+  void MoveToIdleList(SocketContext* sock);
+  void MoveToPollList(SocketContext* sock);
 
   bool GrowActiveList();
   bool GrowIdleList();
@@ -224,13 +222,13 @@ class nsSocketTransportService final : public nsPISocketTransportService,
   // event cannot be created).
   //-------------------------------------------------------------------------
 
-  PRPollDesc *mPollList; /* mListSize + 1 entries */
+  PRPollDesc* mPollList; /* mListSize + 1 entries */
 
   PRIntervalTime PollTimeout(
       PRIntervalTime now);  // computes ideal poll timeout
-  nsresult DoPollIteration(TimeDuration *pollDuration);
+  nsresult DoPollIteration(TimeDuration* pollDuration);
   // perfoms a single poll iteration
-  int32_t Poll(TimeDuration *pollDuration, PRIntervalTime now);
+  int32_t Poll(TimeDuration* pollDuration, PRIntervalTime now);
   // calls PR_Poll.  the out param
   // interval indicates the poll
   // duration in seconds.
@@ -244,7 +242,7 @@ class nsSocketTransportService final : public nsPISocketTransportService,
 
   // Preference Monitor for SendBufferSize and Keepalive prefs.
   nsresult UpdatePrefs();
-  static void PrefCallback(const char *aPref, nsSocketTransportService *aSelf);
+  static void PrefCallback(const char* aPref, nsSocketTransportService* aSelf);
   void UpdateSendBufferPref();
   int32_t mSendBufferSize;
   // Number of seconds of connection is idle before first keepalive ping.
@@ -260,7 +258,6 @@ class nsSocketTransportService final : public nsPISocketTransportService,
 
   Atomic<bool> mServingPendingQueue;
   Atomic<int32_t, Relaxed> mMaxTimePerPollIter;
-  Atomic<bool, Relaxed> mTelemetryEnabledPref;
   Atomic<PRIntervalTime, Relaxed> mMaxTimeForPrClosePref;
   // Timestamp of the last network link change event, tracked
   // also on child processes.
@@ -278,7 +275,7 @@ class nsSocketTransportService final : public nsPISocketTransportService,
   nsCOMPtr<nsITimer> mAfterWakeUpTimer;
 
   void OnKeepaliveEnabledPrefChange();
-  void NotifyKeepaliveEnabledPrefChange(SocketContext *sock);
+  void NotifyKeepaliveEnabledPrefChange(SocketContext* sock);
 
   // Socket thread only for dynamically adjusting max socket size
 #if defined(XP_WIN)
@@ -286,11 +283,11 @@ class nsSocketTransportService final : public nsPISocketTransportService,
 #endif
   bool mProbedMaxCount;
 
-  void AnalyzeConnection(nsTArray<SocketInfo> *data, SocketContext *context,
+  void AnalyzeConnection(nsTArray<SocketInfo>* data, SocketContext* context,
                          bool aActive);
 
   void ClosePrivateConnections();
-  void DetachSocketWithGuard(bool aGuardLocals, SocketContext *socketList,
+  void DetachSocketWithGuard(bool aGuardLocals, SocketContext* socketList,
                              int32_t index);
 
   void MarkTheLastElementOfPendingQueue();
@@ -311,7 +308,7 @@ class nsSocketTransportService final : public nsPISocketTransportService,
   bool mNotTrustedMitmDetected;
 };
 
-extern nsSocketTransportService *gSocketTransportService;
+extern nsSocketTransportService* gSocketTransportService;
 bool OnSocketThread();
 
 }  // namespace net

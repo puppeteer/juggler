@@ -1,6 +1,6 @@
 const { validate } = WebAssembly;
 
-assertErrorMessage(() => validate(), Error, /requires more than 0 arguments/);
+assertErrorMessage(() => validate(), Error, /requires at least 1 argument/);
 
 const argError = /first argument must be an ArrayBuffer or typed array object/;
 assertErrorMessage(() => validate(null), Error, argError);
@@ -19,5 +19,5 @@ assertEq(validate(wasmTextToBinary(`(module (export "run" 0))`)), false);
 assertEq(validate(wasmTextToBinary(`(module (func) (export "run" 0))`)), true);
 
 // Feature-testing proof-of-concept.
-assertEq(validate(wasmTextToBinary(`(module (memory 1) (func (result i32) (current_memory)))`)), true);
-assertEq(validate(wasmTextToBinary(`(module (memory 1) (func (result i32) (grow_memory (i32.const 42))))`)), true);
+assertEq(validate(wasmTextToBinary(`(module (memory 1) (func (result i32) (memory.size)))`)), true);
+assertEq(validate(wasmTextToBinary(`(module (memory 1) (func (result i32) (memory.grow (i32.const 42))))`)), true);

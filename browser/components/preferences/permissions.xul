@@ -10,6 +10,7 @@
 
 <window id="PermissionsDialog"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
         data-l10n-id="permissions-window"
         data-l10n-attrs="title, style"
         onload="gPermissionManager.onLoad();"
@@ -18,7 +19,7 @@
         onkeypress="gPermissionManager.onWindowKeyPress(event);">
 
   <linkset>
-    <link rel="localization" href="browser/preferences/permissions.ftl"/>
+    <html:link rel="localization" href="browser/preferences/permissions.ftl"/>
   </linkset>
 
   <script src="chrome://browser/content/preferences/permissions.js"/>
@@ -35,9 +36,10 @@
     <separator class="thin"/>
     <label id="urlLabel" control="url" data-l10n-id="permissions-address"/>
     <hbox align="start">
-      <textbox id="url" flex="1"
-               oninput="gPermissionManager.onHostInput(event.target);"
-               onkeypress="gPermissionManager.onHostKeyPress(event);"/>
+      <html:input id="url" type="text"
+                  style="-moz-box-flex: 1;"
+                  oninput="gPermissionManager.onHostInput(event.target);"
+                  onkeypress="gPermissionManager.onHostKeyPress(event);"/>
     </hbox>
     <hbox pack="end">
       <button id="btnBlock" disabled="true" data-l10n-id="permissions-block"
@@ -48,17 +50,16 @@
               oncommand="gPermissionManager.addPermission(Ci.nsIPermissionManager.ALLOW_ACTION);"/>
     </hbox>
     <separator class="thin"/>
+    <listheader>
+      <treecol id="siteCol" data-l10n-id="permissions-site-name" flex="3" width="0"
+               onclick="gPermissionManager.buildPermissionsList(event.target)"/>
+      <treecol id="statusCol" data-l10n-id="permissions-status" flex="1" width="0"
+               data-isCurrentSortCol="true"
+               onclick="gPermissionManager.buildPermissionsList(event.target);"/>
+    </listheader>
     <richlistbox id="permissionsBox" flex="1" selected="false"
                  onkeypress="gPermissionManager.onPermissionKeyPress(event);"
-                 onselect="gPermissionManager.onPermissionSelect();">
-      <listheader>
-        <treecol id="siteCol" data-l10n-id="permissions-site-name" flex="3" width="0"
-                 onclick="gPermissionManager.buildPermissionsList(event.target)"/>
-        <treecol id="statusCol" data-l10n-id="permissions-status" flex="1" width="0"
-                 data-isCurrentSortCol="true"
-                 onclick="gPermissionManager.buildPermissionsList(event.target);"/>
-      </listheader>
-    </richlistbox>
+                 onselect="gPermissionManager.onPermissionSelect();"/>
   </vbox>
 
   <hbox class="actionButtons" align="left" flex="1">
@@ -73,7 +74,7 @@
   </hbox>
   <spacer flex="1"/>
   <hbox class="actionButtons" align="right" flex="1">
-    <button oncommand="close();" icon="close"
+    <button oncommand="window.close();" icon="close"
             data-l10n-id="permissions-button-cancel" />
     <button id="btnApplyChanges" oncommand="gPermissionManager.onApplyChanges();" icon="save"
             data-l10n-id="permissions-button-ok" />

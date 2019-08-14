@@ -15,6 +15,7 @@
 #include "WebGLBuffer.h"
 #include "WebGLContext.h"
 #include "WebGLShader.h"
+#include "WebGLShaderValidator.h"
 #include "WebGLTransformFeedback.h"
 #include "WebGLUniformLocation.h"
 #include "WebGLValidateStrings.h"
@@ -77,7 +78,8 @@ static void AssembleName(const nsCString& baseName, bool isArray,
 
 ////
 
-/*static*/ const webgl::UniformInfo::TexListT* webgl::UniformInfo::GetTexList(
+/*static*/
+const webgl::UniformInfo::TexListT* webgl::UniformInfo::GetTexList(
     WebGLActiveInfo* activeInfo) {
   const auto& webgl = activeInfo->mWebGL;
 
@@ -161,9 +163,41 @@ webgl::UniformInfo::UniformInfo(WebGLActiveInfo* activeInfo)
 
 //////////
 
+static webgl::TextureBaseType FragOutputBaseType(const GLenum type) {
+  switch (type) {
+    case LOCAL_GL_FLOAT:
+    case LOCAL_GL_FLOAT_VEC2:
+    case LOCAL_GL_FLOAT_VEC3:
+    case LOCAL_GL_FLOAT_VEC4:
+      return webgl::TextureBaseType::Float;
+
+    case LOCAL_GL_INT:
+    case LOCAL_GL_INT_VEC2:
+    case LOCAL_GL_INT_VEC3:
+    case LOCAL_GL_INT_VEC4:
+      return webgl::TextureBaseType::Int;
+
+    case LOCAL_GL_UNSIGNED_INT:
+    case LOCAL_GL_UNSIGNED_INT_VEC2:
+    case LOCAL_GL_UNSIGNED_INT_VEC3:
+    case LOCAL_GL_UNSIGNED_INT_VEC4:
+      return webgl::TextureBaseType::UInt;
+
+    default:
+      break;
+  }
+
+  const auto& str = EnumString(type);
+  gfxCriticalError() << "Unhandled enum for FragOutputBaseType: "
+                     << str.c_str();
+  return webgl::TextureBaseType::Float;
+}
+
+// -
+
 //#define DUMP_SHADERVAR_MAPPINGS
 
-static already_AddRefed<const webgl::LinkedProgramInfo> QueryProgramInfo(
+static RefPtr<const webgl::LinkedProgramInfo> QueryProgramInfo(
     WebGLProgram* prog, gl::GLContext* gl) {
   WebGLContext* const webgl = prog->mContext;
 
@@ -212,9 +246,12 @@ static already_AddRefed<const webgl::LinkedProgramInfo> QueryProgramInfo(
     gl->fGetActiveAttrib(prog->mGLName, i, mappedName.Length() + 1,
                          &lengthWithoutNull, &elemCount, &elemType,
                          mappedName.BeginWriting());
-    GLenum error = gl->fGetError();
-    if (error != LOCAL_GL_NO_ERROR) {
-      gfxCriticalNote << "Failed to do glGetActiveAttrib: " << error;
+    if (!elemType) {
+      const auto error = gl->fGetError();
+      if (error != LOCAL_GL_CONTEXT_LOST) {
+        gfxCriticalError() << "Failed to do glGetActiveAttrib: " << error;
+      }
+      return nullptr;
     }
 
     mappedName.SetLength(lengthWithoutNull);
@@ -272,6 +309,13 @@ static already_AddRefed<const webgl::LinkedProgramInfo> QueryProgramInfo(
     gl->fGetActiveUniform(prog->mGLName, i, mappedName.Length() + 1,
                           &lengthWithoutNull, &elemCount, &elemType,
                           mappedName.BeginWriting());
+    if (!elemType) {
+      const auto error = gl->fGetError();
+      if (error != LOCAL_GL_CONTEXT_LOST) {
+        gfxCriticalError() << "Failed to do glGetActiveAttrib: " << error;
+      }
+      return nullptr;
+    }
 
     mappedName.SetLength(lengthWithoutNull);
 
@@ -388,6 +432,15 @@ static already_AddRefed<const webgl::LinkedProgramInfo> QueryProgramInfo(
       gl->fGetTransformFeedbackVarying(
           prog->mGLName, i, maxTransformFeedbackVaryingLenWithNull,
           &lengthWithoutNull, &elemCount, &elemType, mappedName.BeginWriting());
+
+      if (!elemType) {
+        const auto error = gl->fGetError();
+        if (error != LOCAL_GL_CONTEXT_LOST) {
+          gfxCriticalError() << "Failed to do glGetActiveAttrib: " << error;
+        }
+        return nullptr;
+      }
+
       mappedName.SetLength(lengthWithoutNull);
 
       ////
@@ -419,9 +472,72 @@ static already_AddRefed<const webgl::LinkedProgramInfo> QueryProgramInfo(
 
   // Frag outputs
 
-  prog->EnumerateFragOutputs(info->fragDataMap);
+  {
+    const auto& fragShader = prog->FragShader();
+    const auto& compileResults = fragShader->CompileResults();
+    const auto version = compileResults->mShaderVersion;
 
-  return info.forget();
+    const auto fnAddInfo = [&](const webgl::FragOutputInfo& x) {
+      info->fragOutputs.insert({x.loc, x});
+    };
+
+    if (version == 300) {
+      for (const auto& cur : compileResults->mOutputVariables) {
+        auto loc = cur.location;
+        if (loc == -1) loc = 0;
+
+        const auto info = webgl::FragOutputInfo{
+            uint8_t(loc), nsCString(cur.name.c_str()),
+            nsCString(cur.mappedName.c_str()), FragOutputBaseType(cur.type)};
+        if (!cur.isArray()) {
+          fnAddInfo(info);
+          continue;
+        }
+        MOZ_ASSERT(cur.arraySizes.size() == 1);
+        for (uint32_t i = 0; i < cur.arraySizes[0]; ++i) {
+          const auto indexStr = nsPrintfCString("[%u]", i);
+
+          auto userName = info.userName;
+          userName.Append(indexStr);
+          auto mappedName = info.mappedName;
+          mappedName.Append(indexStr);
+
+          const auto indexedInfo = webgl::FragOutputInfo{
+              uint8_t(info.loc + i), userName, mappedName, info.baseType};
+          fnAddInfo(indexedInfo);
+        }
+      }
+    } else {
+      // ANGLE's translator doesn't tell us about non-user frag outputs. :(
+
+      const auto& translatedSource = compileResults->mObjectCode;
+      uint32_t drawBuffers = 1;
+      if (translatedSource.find("(gl_FragData[1]") != std::string::npos ||
+          translatedSource.find("(webgl_FragData[1]") != std::string::npos) {
+        // The matching with the leading '(' prevents cleverly-named user vars
+        // breaking this. Since ANGLE initializes all outputs, if this is an MRT
+        // shader, FragData[1] will be present. FragData[0] is valid for non-MRT
+        // shaders.
+        drawBuffers = webgl->GLMaxDrawBuffers();
+      }
+
+      for (uint32_t i = 0; i < drawBuffers; ++i) {
+        const auto& name = nsPrintfCString("gl_FragData[%u]", i);
+        const auto info = webgl::FragOutputInfo{uint8_t(i), name, name,
+                                                webgl::TextureBaseType::Float};
+        fnAddInfo(info);
+      }
+    }
+  }
+
+  const auto& vertShader = prog->VertShader();
+  const auto& vertCompileResults = vertShader->CompileResults();
+  const auto numViews = vertCompileResults->mVertexShaderNumViews;
+  if (numViews != -1) {
+    info->zLayerCount = AssertedCast<uint8_t>(numViews);
+  }
+
+  return info;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -485,6 +601,7 @@ webgl::LinkedProgramInfo::GetDrawFetchLimits() const {
   bool hasActiveAttrib = false;
   bool hasActiveDivisor0 = false;
   webgl::CachedDrawFetchLimits fetchLimits = {UINT64_MAX, UINT64_MAX};
+  fetchLimits.usedBuffers.reserve(this->attribs.size());
 
   for (const auto& progAttrib : this->attribs) {
     const auto& loc = progAttrib.mLoc;
@@ -497,13 +614,9 @@ webgl::LinkedProgramInfo::GetDrawFetchLimits() const {
     webgl::AttribBaseType attribDataBaseType;
     if (attribData.mEnabled) {
       MOZ_ASSERT(attribData.mBuf);
-      if (attribData.mBuf->IsBoundForTF()) {
-        webgl->ErrorInvalidOperation(
-            "Vertex attrib %u's buffer is bound for"
-            " transform feedback.",
-            loc);
-        return nullptr;
-      }
+      fetchLimits.usedBuffers.push_back(
+          {attribData.mBuf.get(), static_cast<uint32_t>(loc)});
+
       cacheDeps.push_back(&attribData.mBuf->mFetchInvalidator);
 
       attribDataBaseType = attribData.BaseType();
@@ -629,13 +742,14 @@ void WebGLProgram::BindAttribLocation(GLuint loc, const nsAString& name) {
     return;
   }
 
-  NS_LossyConvertUTF16toASCII asciiName(name);
+  const NS_LossyConvertUTF16toASCII asciiName(name);
+  const std::string asciiNameStr(asciiName.BeginReading());
 
-  auto res = mNextLink_BoundAttribLocs.insert({asciiName, loc});
+  auto res = mNextLink_BoundAttribLocs.insert({asciiNameStr, loc});
 
-  const bool wasInserted = res.second;
+  const auto& wasInserted = res.second;
   if (!wasInserted) {
-    auto itr = res.first;
+    const auto& itr = res.first;
     itr->second = loc;
   }
 }
@@ -730,15 +844,6 @@ GLint WebGLProgram::GetAttribLocation(const nsAString& userName_wide) const {
   return GLint(info->mLoc);
 }
 
-static GLint GetFragDataByUserName(const WebGLProgram* prog,
-                                   const nsCString& userName) {
-  nsCString mappedName;
-  if (!prog->LinkInfo()->MapFragDataName(userName, &mappedName)) return -1;
-
-  return prog->mContext->gl->fGetFragDataLocation(prog->mGLName,
-                                                  mappedName.BeginReading());
-}
-
 GLint WebGLProgram::GetFragDataLocation(const nsAString& userName_wide) const {
   if (!ValidateGLSLVariableName(userName_wide, mContext)) return -1;
 
@@ -748,25 +853,16 @@ GLint WebGLProgram::GetFragDataLocation(const nsAString& userName_wide) const {
   }
 
   const NS_LossyConvertUTF16toASCII userName(userName_wide);
-#ifdef XP_MACOSX
-  const auto& gl = mContext->gl;
-  if (gl->WorkAroundDriverBugs()) {
-    // OSX doesn't return locs for indexed names, just the base names.
-    // Indicated by failure in:
-    // conformance2/programs/gl-get-frag-data-location.html
-    bool isArray;
-    size_t arrayIndex;
-    nsCString baseUserName;
-    if (!ParseName(userName, &baseUserName, &isArray, &arrayIndex)) return -1;
-
-    if (arrayIndex >= mContext->mGLMaxDrawBuffers) return -1;
-
-    const auto baseLoc = GetFragDataByUserName(this, baseUserName);
-    const auto loc = baseLoc + GLint(arrayIndex);
-    return loc;
+  auto userNameId0 = nsCString(userName);
+  userNameId0.AppendLiteral("[0]");
+  const auto& fragOutputs = LinkInfo()->fragOutputs;
+  for (const auto& pair : fragOutputs) {
+    const auto& info = pair.second;
+    if (info.userName == userName || info.userName == userNameId0) {
+      return info.loc;
+    }
   }
-#endif
-  return GetFragDataByUserName(this, userName);
+  return -1;
 }
 
 void WebGLProgram::GetProgramInfoLog(nsAString* const out) const {
@@ -1047,13 +1143,15 @@ bool WebGLProgram::ValidateForLink() {
     mLinkLog.AssignLiteral("Must have a compiled vertex shader attached.");
     return false;
   }
+  const auto& vertInfo = *mVertShader->CompileResults();
 
   if (!mFragShader || !mFragShader->IsCompiled()) {
     mLinkLog.AssignLiteral("Must have an compiled fragment shader attached.");
     return false;
   }
+  const auto& fragInfo = *mFragShader->CompileResults();
 
-  if (!mFragShader->CanLinkTo(mVertShader, &mLinkLog)) return false;
+  if (!fragInfo.CanLinkTo(vertInfo, &mLinkLog)) return false;
 
   const auto& gl = mContext->gl;
 
@@ -1420,9 +1518,8 @@ void WebGLProgram::LinkAndUpdate() {
   gl->fGetProgramiv(mGLName, LOCAL_GL_LINK_STATUS, &ok);
   if (!ok) return;
 
-  mMostRecentLinkInfo = QueryProgramInfo(this, gl);
-  MOZ_RELEASE_ASSERT(mMostRecentLinkInfo,
-                     "GFX: most recent link info not set.");
+  mMostRecentLinkInfo =
+      QueryProgramInfo(this, gl);  // Fallible after context loss.
 }
 
 bool WebGLProgram::FindAttribUserNameByMappedName(
@@ -1526,13 +1623,6 @@ bool WebGLProgram::UnmapUniformBlockName(const nsCString& mappedName,
   return true;
 }
 
-void WebGLProgram::EnumerateFragOutputs(
-    std::map<nsCString, const nsCString>& out_FragOutputs) const {
-  MOZ_ASSERT(mFragShader);
-
-  mFragShader->EnumerateFragOutputs(out_FragOutputs);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 
 bool IsBaseName(const nsCString& name) {
@@ -1577,29 +1667,6 @@ bool webgl::LinkedProgramInfo::FindUniform(
 
   *out_arrayIndex = arrayIndex;
   *out_info = info;
-  return true;
-}
-
-bool webgl::LinkedProgramInfo::MapFragDataName(
-    const nsCString& userName, nsCString* const out_mappedName) const {
-  // FS outputs can be arrays, but not structures.
-
-  if (fragDataMap.empty()) {
-    // No mappings map from validation, so just forward it.
-    *out_mappedName = userName;
-    return true;
-  }
-
-  nsCString baseUserName;
-  bool isArray;
-  size_t arrayIndex;
-  if (!ParseName(userName, &baseUserName, &isArray, &arrayIndex)) return false;
-
-  const auto itr = fragDataMap.find(baseUserName);
-  if (itr == fragDataMap.end()) return false;
-
-  const auto& baseMappedName = itr->second;
-  AssembleName(baseMappedName, isArray, arrayIndex, out_mappedName);
   return true;
 }
 

@@ -21,7 +21,7 @@
 #include "nsTStringRepr.h"
 
 #ifndef MOZILLA_INTERNAL_API
-#error "Using XPCOM strings is limited to code linked into libxul."
+#  error "Using XPCOM strings is limited to code linked into libxul."
 #endif
 
 // The max number of logically uninitialized code units to
@@ -656,37 +656,58 @@ class nsTSubstring : public mozilla::detail::nsTStringRepr<T> {
    */
   void AppendPrintf(const char* aFormat, ...) MOZ_FORMAT_PRINTF(2, 3);
   void AppendPrintf(const char* aFormat, va_list aAp) MOZ_FORMAT_PRINTF(2, 0);
-  void AppendInt(int32_t aInteger) { AppendPrintf("%" PRId32, aInteger); }
+  void AppendInt(int32_t aInteger) { AppendIntDec(aInteger); }
   void AppendInt(int32_t aInteger, int aRadix) {
     if (aRadix == 10) {
-      AppendPrintf("%" PRId32, aInteger);
+      AppendIntDec(aInteger);
+    } else if (aRadix == 8) {
+      AppendIntOct(static_cast<uint32_t>(aInteger));
     } else {
-      AppendPrintf(aRadix == 8 ? "%" PRIo32 : "%" PRIx32,
-                   static_cast<uint32_t>(aInteger));
+      AppendIntHex(static_cast<uint32_t>(aInteger));
     }
   }
-  void AppendInt(uint32_t aInteger) { AppendPrintf("%" PRIu32, aInteger); }
+  void AppendInt(uint32_t aInteger) { AppendIntDec(aInteger); }
   void AppendInt(uint32_t aInteger, int aRadix) {
-    AppendPrintf(
-        aRadix == 10 ? "%" PRIu32 : aRadix == 8 ? "%" PRIo32 : "%" PRIx32,
-        aInteger);
+    if (aRadix == 10) {
+      AppendIntDec(aInteger);
+    } else if (aRadix == 8) {
+      AppendIntOct(aInteger);
+    } else {
+      AppendIntHex(aInteger);
+    }
   }
-  void AppendInt(int64_t aInteger) { AppendPrintf("%" PRId64, aInteger); }
+  void AppendInt(int64_t aInteger) { AppendIntDec(aInteger); }
   void AppendInt(int64_t aInteger, int aRadix) {
     if (aRadix == 10) {
-      AppendPrintf("%" PRId64, aInteger);
+      AppendIntDec(aInteger);
+    } else if (aRadix == 8) {
+      AppendIntOct(static_cast<uint64_t>(aInteger));
     } else {
-      AppendPrintf(aRadix == 8 ? "%" PRIo64 : "%" PRIx64,
-                   static_cast<uint64_t>(aInteger));
+      AppendIntHex(static_cast<uint64_t>(aInteger));
     }
   }
-  void AppendInt(uint64_t aInteger) { AppendPrintf("%" PRIu64, aInteger); }
+  void AppendInt(uint64_t aInteger) { AppendIntDec(aInteger); }
   void AppendInt(uint64_t aInteger, int aRadix) {
-    AppendPrintf(
-        aRadix == 10 ? "%" PRIu64 : aRadix == 8 ? "%" PRIo64 : "%" PRIx64,
-        aInteger);
+    if (aRadix == 10) {
+      AppendIntDec(aInteger);
+    } else if (aRadix == 8) {
+      AppendIntOct(aInteger);
+    } else {
+      AppendIntHex(aInteger);
+    }
   }
 
+ private:
+  void AppendIntDec(int32_t);
+  void AppendIntDec(uint32_t);
+  void AppendIntOct(uint32_t);
+  void AppendIntHex(uint32_t);
+  void AppendIntDec(int64_t);
+  void AppendIntDec(uint64_t);
+  void AppendIntOct(uint64_t);
+  void AppendIntHex(uint64_t);
+
+ public:
   /**
    * Append the given float to this string
    */
@@ -1118,10 +1139,10 @@ class nsTSubstring : public mozilla::detail::nsTStringRepr<T> {
                ClassFlags aClassFlags)
 // XXXbz or can I just include nscore.h and use NS_BUILD_REFCNT_LOGGING?
 #if defined(DEBUG) || defined(FORCE_BUILD_REFCNT_LOGGING)
-#define XPCOM_STRING_CONSTRUCTOR_OUT_OF_LINE
+#  define XPCOM_STRING_CONSTRUCTOR_OUT_OF_LINE
       ;
 #else
-#undef XPCOM_STRING_CONSTRUCTOR_OUT_OF_LINE
+#  undef XPCOM_STRING_CONSTRUCTOR_OUT_OF_LINE
       : base_string_type(aData, aLength, aDataFlags, aClassFlags) {
     AssertValid();
     MOZ_RELEASE_ASSERT(CheckCapacity(aLength), "String is too large.");

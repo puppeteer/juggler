@@ -9,7 +9,7 @@
 
 #include "mozilla/a11y/COMPtrTypes.h"
 #include "mozilla/a11y/DocAccessibleChildBase.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/mscom/Ptr.h"
 
 namespace mozilla {
@@ -54,7 +54,7 @@ class DocAccessibleChild : public DocAccessibleChildBase {
   bool SendTextChangeEvent(const uint64_t& aID, const nsString& aStr,
                            const int32_t& aStart, const uint32_t& aLen,
                            const bool& aIsInsert, const bool& aFromUser,
-                           const bool aDoSyncCheck = true);
+                           const bool aDoSync = false);
   bool SendSelectionEvent(const uint64_t& aID, const uint64_t& aWidgetID,
                           const uint32_t& aType);
   bool SendRoleChangedEvent(const a11y::role& aRole);
@@ -289,9 +289,10 @@ class DocAccessibleChild : public DocAccessibleChildBase {
           mMsaaID(aMsaaID) {}
 
     void Dispatch(DocAccessibleChild* aParentIPCDoc) override {
-      auto tabChild = static_cast<dom::TabChild*>(aParentIPCDoc->Manager());
-      MOZ_ASSERT(tabChild);
-      Unused << tabChild->SendPDocAccessibleConstructor(
+      auto browserChild =
+          static_cast<dom::BrowserChild*>(aParentIPCDoc->Manager());
+      MOZ_ASSERT(browserChild);
+      Unused << browserChild->SendPDocAccessibleConstructor(
           mIPCDoc, aParentIPCDoc, mUniqueID, mMsaaID, IAccessibleHolder());
       mIPCDoc->SetConstructedInParentProcess();
     }

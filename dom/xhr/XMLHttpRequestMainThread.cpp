@@ -8,7 +8,7 @@
 
 #include <algorithm>
 #ifndef XP_WIN
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/CheckedInt.h"
@@ -24,7 +24,9 @@
 #include "mozilla/dom/MutableBlobStorage.h"
 #include "mozilla/dom/XMLDocument.h"
 #include "mozilla/dom/URLSearchParams.h"
+#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
+#include "mozilla/dom/WorkerError.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
@@ -65,7 +67,6 @@
 #include "nsContentUtils.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsError.h"
-#include "nsIHTMLDocument.h"
 #include "nsIStorageStream.h"
 #include "nsIPromptFactory.h"
 #include "nsIWindowWatcher.h"
@@ -75,9 +76,12 @@
 #include "nsStringBuffer.h"
 #include "nsIFileChannel.h"
 #include "mozilla/Telemetry.h"
-#include "js/JSON.h"
+#include "js/ArrayBuffer.h"  // JS::{Create,Release}MappedArrayBufferContents,New{,Mapped}ArrayBufferWithContents
+#include "js/JSON.h"         // JS_ParseJSON
 #include "js/MemoryFunctions.h"
-#include "jsfriendapi.h"
+#include "js/RootingAPI.h"  // JS::{{,Mutable}Handle,Rooted}
+#include "js/Value.h"       // JS::{,Undefined}Value
+#include "jsapi.h"          // JS_ClearPendingException
 #include "GeckoProfiler.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "mozilla/Attributes.h"
@@ -88,7 +92,6 @@
 #include "nsIClassOfService.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsStreamListenerWrapper.h"
-#include "xpcjsid.h"
 #include "nsITimedChannel.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsZipArchive.h"
@@ -99,7 +102,7 @@
 // Undefine the macro of CreateFile to avoid FileCreatorHelper#CreateFile being
 // replaced by FileCreatorHelper#CreateFileW.
 #ifdef CreateFile
-#undef CreateFile
+#  undef CreateFile
 #endif
 
 using namespace mozilla::net;
@@ -227,11 +230,16 @@ XMLHttpRequestMainThread::XMLHttpRequestMainThread()
       mIsMappedArrayBuffer(false),
       mXPCOMifier(nullptr),
       mEventDispatchingSuspended(false),
-      mEofDecoded(false) {
+      mEofDecoded(false),
+      mDelayedDoneNotifier(nullptr) {
   mozilla::HoldJSObjects(this);
 }
 
 XMLHttpRequestMainThread::~XMLHttpRequestMainThread() {
+  MOZ_ASSERT(
+      !mDelayedDoneNotifier,
+      "How can we have mDelayedDoneNotifier, which owns us, in destructor?");
+
   mFlagDeleted = true;
 
   if ((mState == XMLHttpRequest_Binding::OPENED && mFlagSend) ||
@@ -280,8 +288,8 @@ void XMLHttpRequestMainThread::InitParameters(bool aAnon, bool aSystem) {
     }
 
     uint32_t permission;
-    nsresult rv = permMgr->TestPermissionFromPrincipal(principal, "systemXHR",
-                                                       &permission);
+    nsresult rv = permMgr->TestPermissionFromPrincipal(
+        principal, NS_LITERAL_CSTRING("systemXHR"), &permission);
     if (NS_FAILED(rv) || permission != nsIPermissionManager::ALLOW_ACTION) {
       SetParameters(aAnon, false);
       return;
@@ -411,19 +419,19 @@ size_t XMLHttpRequestMainThread::SizeOfEventTargetIncludingThis(
   // - lots
 }
 
-static void LogMessage(const char* aWarning, nsPIDOMWindowInner* aWindow,
-                       const char16_t** aParams = nullptr,
-                       uint32_t aParamCount = 0) {
-  nsCOMPtr<nsIDocument> doc;
+static void LogMessage(
+    const char* aWarning, nsPIDOMWindowInner* aWindow,
+    const nsTArray<nsString>& aParams = nsTArray<nsString>()) {
+  nsCOMPtr<Document> doc;
   if (aWindow) {
     doc = aWindow->GetExtantDoc();
   }
   nsContentUtils::ReportToConsole(
       nsIScriptError::warningFlag, NS_LITERAL_CSTRING("DOM"), doc,
-      nsContentUtils::eDOM_PROPERTIES, aWarning, aParams, aParamCount);
+      nsContentUtils::eDOM_PROPERTIES, aWarning, aParams);
 }
 
-nsIDocument* XMLHttpRequestMainThread::GetResponseXML(ErrorResult& aRv) {
+Document* XMLHttpRequestMainThread::GetResponseXML(ErrorResult& aRv) {
   if (mResponseType != XMLHttpRequestResponseType::_empty &&
       mResponseType != XMLHttpRequestResponseType::Document) {
     aRv.Throw(
@@ -637,20 +645,8 @@ void XMLHttpRequestMainThread::SetResponseType(
     return;
   }
 
-  if (mFlagSynchronous &&
-      aResponseType == XMLHttpRequestResponseType::Moz_chunked_arraybuffer) {
-    aRv.Throw(
-        NS_ERROR_DOM_INVALID_STATE_XHR_CHUNKED_RESPONSETYPES_UNSUPPORTED_FOR_SYNC);
-    return;
-  }
-
-  // We want to get rid of this moz-only types. Bug 1335365.
-  if (aResponseType == XMLHttpRequestResponseType::Moz_chunked_arraybuffer) {
-    Telemetry::Accumulate(Telemetry::MOZ_CHUNKED_ARRAYBUFFER_IN_XHR, 1);
-  }
-
   // Set the responseType attribute's value to the given value.
-  mResponseType = aResponseType;
+  SetResponseTypeRaw(aResponseType);
 }
 
 void XMLHttpRequestMainThread::GetResponse(
@@ -669,13 +665,8 @@ void XMLHttpRequestMainThread::GetResponse(
       return;
     }
 
-    case XMLHttpRequestResponseType::Arraybuffer:
-    case XMLHttpRequestResponseType::Moz_chunked_arraybuffer: {
-      if (!(mResponseType == XMLHttpRequestResponseType::Arraybuffer &&
-            mState == XMLHttpRequest_Binding::DONE) &&
-          !(mResponseType ==
-                XMLHttpRequestResponseType::Moz_chunked_arraybuffer &&
-            mInLoadProgressEvent)) {
+    case XMLHttpRequestResponseType::Arraybuffer: {
+      if (mState != XMLHttpRequest_Binding::DONE) {
         aResponse.setNull();
         return;
       }
@@ -710,7 +701,8 @@ void XMLHttpRequestMainThread::GetResponse(
         return;
       }
 
-      aRv = nsContentUtils::WrapNative(aCx, mResponseXML, aResponse);
+      aRv =
+          nsContentUtils::WrapNative(aCx, ToSupports(mResponseXML), aResponse);
       return;
     }
     case XMLHttpRequestResponseType::Json: {
@@ -746,13 +738,7 @@ bool XMLHttpRequestMainThread::IsCrossSiteCORSRequest() const {
     return false;
   }
 
-  nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-  MOZ_ASSERT(loadInfo);
-
-  if (!loadInfo) {
-    return false;
-  }
-
+  nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
   return loadInfo->GetTainting() == LoadTainting::CORS;
 }
 
@@ -783,9 +769,7 @@ void XMLHttpRequestMainThread::GetResponseURL(nsAString& aUrl) {
   }
 
   nsCOMPtr<nsIURI> responseUrl;
-  mChannel->GetURI(getter_AddRefs(responseUrl));
-
-  if (!responseUrl) {
+  if (NS_FAILED(NS_GetFinalChannelURI(mChannel, getter_AddRefs(responseUrl)))) {
     return;
   }
 
@@ -977,6 +961,7 @@ void XMLHttpRequestMainThread::Abort(ErrorResult& aRv) {
 
 void XMLHttpRequestMainThread::AbortInternal(ErrorResult& aRv) {
   mFlagAborted = true;
+  DisconnectDoneNotifier();
 
   // Step 1
   TerminateOngoingFetch();
@@ -1043,10 +1028,14 @@ bool XMLHttpRequestMainThread::IsSafeHeader(
     if (!NS_IsValidHTTPToken(token)) {
       return false;
     }
-    if (aHeader.Equals(token, nsCaseInsensitiveCStringComparator())) {
+
+    if (token.EqualsLiteral("*") && !mFlagACwithCredentials) {
+      isSafe = true;
+    } else if (aHeader.Equals(token, nsCaseInsensitiveCStringComparator())) {
       isSafe = true;
     }
   }
+
   return isSafe;
 }
 
@@ -1184,7 +1173,7 @@ already_AddRefed<nsILoadGroup> XMLHttpRequestMainThread::GetLoadGroup() const {
     return ref.forget();
   }
 
-  nsIDocument* doc = GetDocumentIfCurrent();
+  Document* doc = GetDocumentIfCurrent();
   if (doc) {
     return doc->GetDocumentLoadGroup();
   }
@@ -1207,7 +1196,7 @@ void XMLHttpRequestMainThread::DispatchProgressEvent(
     int64_t aLoaded, int64_t aTotal) {
   NS_ASSERTION(aTarget, "null target");
 
-  if (NS_FAILED(CheckInnerWindowCorrectness()) ||
+  if (NS_FAILED(CheckCurrentGlobalCorrectness()) ||
       (!AllowUploadProgress() && aTarget == mUpload)) {
     return;
   }
@@ -1243,14 +1232,6 @@ void XMLHttpRequestMainThread::DispatchProgressEvent(
 
   if (aType == ProgressEventType::progress) {
     mInLoadProgressEvent = false;
-
-    // clear chunked responses after every progress event
-    if (mResponseType == XMLHttpRequestResponseType::Moz_chunked_arraybuffer) {
-      mResponseBody.Truncate();
-      TruncateResponseText();
-      mResultArrayBuffer = nullptr;
-      mArrayBufferBuilder.reset();
-    }
   }
 
   // If we're sending a load, error, timeout or abort event, then
@@ -1267,7 +1248,7 @@ void XMLHttpRequestMainThread::DispatchOrStoreEvent(
   MOZ_ASSERT(aTarget);
   MOZ_ASSERT(aEvent);
 
-  if (NS_FAILED(CheckInnerWindowCorrectness())) {
+  if (NS_FAILED(CheckCurrentGlobalCorrectness())) {
     return;
   }
 
@@ -1293,7 +1274,7 @@ void XMLHttpRequestMainThread::ResumeEventDispatching() {
   nsTArray<PendingEvent> pendingEvents;
   pendingEvents.SwapElements(mPendingEvents);
 
-  if (NS_FAILED(CheckInnerWindowCorrectness())) {
+  if (NS_FAILED(CheckCurrentGlobalCorrectness())) {
     return;
   }
 
@@ -1354,23 +1335,38 @@ nsresult XMLHttpRequestMainThread::Open(const nsACString& aMethod,
   // Gecko-specific
   if (!aAsync && !DontWarnAboutSyncXHR() && GetOwner() &&
       GetOwner()->GetExtantDoc()) {
-    GetOwner()->GetExtantDoc()->WarnOnceAbout(nsIDocument::eSyncXMLHttpRequest);
+    GetOwner()->GetExtantDoc()->WarnOnceAbout(Document::eSyncXMLHttpRequest);
   }
 
   Telemetry::Accumulate(Telemetry::XMLHTTPREQUEST_ASYNC_OR_SYNC,
                         aAsync ? 0 : 1);
 
   // Step 1
-  nsCOMPtr<nsIDocument> responsibleDocument = GetDocumentIfCurrent();
+  nsCOMPtr<Document> responsibleDocument = GetDocumentIfCurrent();
   if (!responsibleDocument) {
     // This could be because we're no longer current or because we're in some
     // non-window context...
-    nsresult rv = CheckInnerWindowCorrectness();
+    nsresult rv = CheckCurrentGlobalCorrectness();
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT;
     }
   }
   NS_ENSURE_TRUE(mPrincipal, NS_ERROR_NOT_INITIALIZED);
+
+  // Gecko-specific
+  if (!aAsync && responsibleDocument && GetOwner()) {
+    // We have no extant document during unload, so the above general
+    // syncXHR warning will not display. But we do want to display a
+    // recommendation to use sendBeacon instead of syncXHR during unload.
+    nsCOMPtr<nsIDocShell> shell = responsibleDocument->GetDocShell();
+    if (shell) {
+      bool inUnload = false;
+      shell->GetIsInUnload(&inUnload);
+      if (inUnload) {
+        LogMessage("UseSendBeaconDuringUnloadAndPagehideWarning", GetOwner());
+      }
+    }
+  }
 
   // Steps 2-4
   nsAutoCString method;
@@ -1403,7 +1399,7 @@ nsresult XMLHttpRequestMainThread::Open(const nsACString& aMethod,
     }
     return rv;
   }
-  if (NS_WARN_IF(NS_FAILED(CheckInnerWindowCorrectness()))) {
+  if (NS_WARN_IF(NS_FAILED(CheckCurrentGlobalCorrectness()))) {
     return NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT;
   }
 
@@ -1443,6 +1439,7 @@ nsresult XMLHttpRequestMainThread::Open(const nsACString& aMethod,
 
   // Step 11
   // timeouts are handled without a flag
+  DisconnectDoneNotifier();
   mFlagSend = false;
   mRequestMethod.Assign(method);
   mRequestURL = parsedURL;
@@ -1477,11 +1474,8 @@ void XMLHttpRequestMainThread::SetOriginAttributes(
 
   OriginAttributes attrs(aAttrs);
 
-  nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-  MOZ_ASSERT(loadInfo);
-  if (loadInfo) {
-    loadInfo->SetOriginAttributes(attrs);
-  }
+  nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
+  loadInfo->SetOriginAttributes(attrs);
 }
 
 /*
@@ -1503,11 +1497,9 @@ nsresult XMLHttpRequestMainThread::StreamReaderFunc(
   if (xmlHttpRequest->mResponseType == XMLHttpRequestResponseType::Blob) {
     xmlHttpRequest->MaybeCreateBlobStorage();
     rv = xmlHttpRequest->mBlobStorage->Append(fromRawSegment, count);
-  } else if ((xmlHttpRequest->mResponseType ==
-                  XMLHttpRequestResponseType::Arraybuffer &&
-              !xmlHttpRequest->mIsMappedArrayBuffer) ||
-             xmlHttpRequest->mResponseType ==
-                 XMLHttpRequestResponseType::Moz_chunked_arraybuffer) {
+  } else if (xmlHttpRequest->mResponseType ==
+                 XMLHttpRequestResponseType::Arraybuffer &&
+             !xmlHttpRequest->mIsMappedArrayBuffer) {
     // get the initial capacity to something reasonable to avoid a bunch of
     // reallocs right at the start
     if (xmlHttpRequest->mArrayBufferBuilder.capacity() == 0)
@@ -1550,15 +1542,15 @@ nsresult XMLHttpRequestMainThread::StreamReaderFunc(
     // to the parser, because calling ReadSegments() recursively on the same
     // stream is not supported.
     nsCOMPtr<nsIInputStream> copyStream;
-    rv = NS_NewByteInputStream(getter_AddRefs(copyStream), fromRawSegment,
-                               count);
+    rv = NS_NewByteInputStream(getter_AddRefs(copyStream),
+                               MakeSpan(fromRawSegment, count),
+                               NS_ASSIGNMENT_DEPEND);
 
     if (NS_SUCCEEDED(rv) && xmlHttpRequest->mXMLParserStreamListener) {
       NS_ASSERTION(copyStream, "NS_NewByteInputStream lied");
       nsresult parsingResult =
           xmlHttpRequest->mXMLParserStreamListener->OnDataAvailable(
-              xmlHttpRequest->mChannel, xmlHttpRequest->mContext, copyStream,
-              toOffset, count);
+              xmlHttpRequest->mChannel, copyStream, toOffset, count);
 
       // No use to continue parsing if we failed here, but we
       // should still finish reading the stream
@@ -1682,19 +1674,15 @@ void XMLHttpRequestMainThread::LocalFileToBlobCompleted(Blob* aBlob) {
   mBlobStorage = nullptr;
   NS_ASSERTION(mResponseBody.IsEmpty(), "mResponseBody should be empty");
 
-  ChangeStateToDone();
+  ChangeStateToDone(mFlagSyncLooping);
 }
 
 NS_IMETHODIMP
 XMLHttpRequestMainThread::OnDataAvailable(nsIRequest* request,
-                                          nsISupports* ctxt,
                                           nsIInputStream* inStr,
                                           uint64_t sourceOffset,
                                           uint32_t count) {
   NS_ENSURE_ARG_POINTER(inStr);
-
-  MOZ_ASSERT(mContext.get() == ctxt,
-             "start context different from OnDataAvailable context");
 
   mProgressSinceLastProgressEvent = true;
   XMLHttpRequest_Binding::ClearCachedResponseTextValue(this);
@@ -1766,14 +1754,13 @@ XMLHttpRequestMainThread::OnDataAvailable(nsIRequest* request,
 }
 
 NS_IMETHODIMP
-XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
-                                         nsISupports* ctxt) {
+XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request) {
   AUTO_PROFILER_LABEL("XMLHttpRequestMainThread::OnStartRequest", NETWORK);
 
   nsresult rv = NS_OK;
   if (!mFirstStartRequestSeen && mRequestObserver) {
     mFirstStartRequestSeen = true;
-    mRequestObserver->OnStartRequest(request, ctxt);
+    mRequestObserver->OnStartRequest(request);
   }
 
   if (request != mChannel) {
@@ -1826,9 +1813,10 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
                           mUploadTotal);
   }
 
-  mContext = ctxt;
   mFlagParseBody = true;
-  ChangeState(XMLHttpRequest_Binding::HEADERS_RECEIVED);
+  if (mErrorLoad == ErrorType::eOK) {
+    ChangeState(XMLHttpRequest_Binding::HEADERS_RECEIVED);
+  }
 
   ResetResponse();
 
@@ -1900,6 +1888,15 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
                    !(mRequestMethod.EqualsLiteral("HEAD") ||
                      mRequestMethod.EqualsLiteral("CONNECT"));
 
+  if (parseBody) {
+    // Do not try to parse documents if content-length = 0
+    int64_t contentLength;
+    if (NS_SUCCEEDED(mChannel->GetContentLength(&contentLength)) &&
+        contentLength == 0) {
+      parseBody = false;
+    }
+  }
+
   mIsHtml = false;
   mWarnAboutSyncHtml = false;
   if (parseBody && NS_SUCCEEDED(status)) {
@@ -1944,7 +1941,7 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
     NS_ENSURE_SUCCESS(rv, rv);
     baseURI = docURI;
 
-    nsCOMPtr<nsIDocument> doc = GetDocumentIfCurrent();
+    nsCOMPtr<Document> doc = GetDocumentIfCurrent();
     nsCOMPtr<nsIURI> chromeXHRDocURI, chromeXHRDocBaseURI;
     if (doc) {
       chromeXHRDocURI = doc->GetDocumentURI();
@@ -1952,7 +1949,7 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
     } else {
       // If we're no longer current, just kill the load, though it really should
       // have been killed already.
-      if (NS_WARN_IF(NS_FAILED(CheckInnerWindowCorrectness()))) {
+      if (NS_WARN_IF(NS_FAILED(CheckCurrentGlobalCorrectness()))) {
         return NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT;
       }
     }
@@ -1988,18 +1985,12 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
       mResponseXML->ForceEnableXULXBL();
     }
 
-    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-    MOZ_ASSERT(loadInfo);
+    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
     bool isCrossSite = false;
-    if (loadInfo) {
-      isCrossSite = loadInfo->GetTainting() != LoadTainting::Basic;
-    }
+    isCrossSite = loadInfo->GetTainting() != LoadTainting::Basic;
 
     if (isCrossSite) {
-      nsCOMPtr<nsIHTMLDocument> htmlDoc = do_QueryInterface(mResponseXML);
-      if (htmlDoc) {
-        htmlDoc->DisableCookieAccess();
-      }
+      mResponseXML->DisableCookieAccess();
     }
 
     nsCOMPtr<nsIStreamListener> listener;
@@ -2018,10 +2009,12 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
     NS_ENSURE_SUCCESS(rv, rv);
 
     // the spec requires the response document.referrer to be the empty string
-    mResponseXML->SetReferrer(NS_LITERAL_CSTRING(""));
+    nsCOMPtr<nsIReferrerInfo> referrerInfo =
+        new ReferrerInfo(nullptr, true, mResponseXML->GetReferrerPolicy());
+    mResponseXML->SetReferrerInfo(referrerInfo);
 
     mXMLParserStreamListener = listener;
-    rv = mXMLParserStreamListener->OnStartRequest(request, ctxt);
+    rv = mXMLParserStreamListener->OnStartRequest(request);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -2034,8 +2027,7 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request,
 }
 
 NS_IMETHODIMP
-XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
-                                        nsresult status) {
+XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsresult status) {
   AUTO_PROFILER_LABEL("XMLHttpRequestMainThread::OnStopRequest", NETWORK);
 
   if (request != mChannel) {
@@ -2057,7 +2049,7 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
   if (mRequestObserver) {
     NS_ASSERTION(mFirstStartRequestSeen, "Inconsistent state!");
     mFirstStartRequestSeen = false;
-    mRequestObserver->OnStopRequest(request, ctxt, status);
+    mRequestObserver->OnStopRequest(request, status);
   }
 
   // make sure to notify the listener if we were aborted
@@ -2065,13 +2057,13 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
   // UNSENT is for abort calls.  See OnStartRequest above.
   if (mState == XMLHttpRequest_Binding::UNSENT || mFlagTimedOut) {
     if (mXMLParserStreamListener)
-      (void)mXMLParserStreamListener->OnStopRequest(request, ctxt, status);
+      (void)mXMLParserStreamListener->OnStopRequest(request, status);
     return NS_OK;
   }
 
   // Is this good enough here?
   if (mXMLParserStreamListener && mFlagParseBody) {
-    mXMLParserStreamListener->OnStopRequest(request, ctxt, status);
+    mXMLParserStreamListener->OnStopRequest(request, status);
   }
 
   mXMLParserStreamListener = nullptr;
@@ -2082,12 +2074,13 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
     mFlagParseBody = false;
     IgnoredErrorResult rv;
     RequestErrorSteps(ProgressEventType::abort, NS_OK, rv);
+    ChangeState(XMLHttpRequest_Binding::UNSENT, false);
     return NS_OK;
   }
 
   // If we were just reading a blob URL, we're already done
   if (status == NS_ERROR_FILE_ALREADY_EXISTS && mResponseBlob) {
-    ChangeStateToDone();
+    ChangeStateToDone(mFlagSyncLooping);
     return NS_OK;
   }
 
@@ -2152,11 +2145,8 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
 
     NS_ASSERTION(mResponseBody.IsEmpty(), "mResponseBody should be empty");
     NS_ASSERTION(mResponseText.IsEmpty(), "mResponseText should be empty");
-  } else if (NS_SUCCEEDED(status) &&
-             ((mResponseType == XMLHttpRequestResponseType::Arraybuffer &&
-               !mIsMappedArrayBuffer) ||
-              mResponseType ==
-                  XMLHttpRequestResponseType::Moz_chunked_arraybuffer)) {
+  } else if (NS_SUCCEEDED(status) && !mIsMappedArrayBuffer &&
+             mResponseType == XMLHttpRequestResponseType::Arraybuffer) {
     // set the capacity down to the actual length, to realloc back
     // down to the actual size
     if (!mArrayBufferBuilder.setCapacity(mArrayBufferBuilder.length())) {
@@ -2173,6 +2163,7 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
   mChannelEventSink = nullptr;
   mProgressEventSink = nullptr;
 
+  bool wasSync = mFlagSyncLooping;
   mFlagSyncLooping = false;
   mRequestSentTime = 0;
 
@@ -2201,7 +2192,7 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
 
     // We postpone the 'done' until the creation of the Blob is completed.
     if (!waitingForBlobCreation) {
-      ChangeStateToDone();
+      ChangeStateToDone(wasSync);
     }
 
     return NS_OK;
@@ -2211,7 +2202,7 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
     NS_ASSERTION(!mFlagSyncLooping,
                  "We weren't supposed to support HTML parsing with XHR!");
     mParseEndListener = new nsXHRParseEndListener(this);
-    nsCOMPtr<EventTarget> eventTarget = mResponseXML;
+    RefPtr<EventTarget> eventTarget = mResponseXML;
     EventListenerManager* manager = eventTarget->GetOrCreateListenerManager();
     manager->AddEventListenerByType(mParseEndListener,
                                     kLiteralString_DOMContentLoaded,
@@ -2229,14 +2220,14 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest* request, nsISupports* ctxt,
     mErrorParsingXML = true;
     mResponseXML = nullptr;
   }
-  ChangeStateToDone();
+  ChangeStateToDone(wasSync);
   return NS_OK;
 }
 
 void XMLHttpRequestMainThread::OnBodyParseEnd() {
   mFlagParseBody = false;
   mParseEndListener = nullptr;
-  ChangeStateToDone();
+  ChangeStateToDone(mFlagSyncLooping);
 }
 
 void XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument() {
@@ -2249,8 +2240,43 @@ void XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument() {
     mDecoder = mResponseXML->GetDocumentCharacterSet()->NewDecoder();
   }
 }
+void XMLHttpRequestMainThread::DisconnectDoneNotifier() {
+  if (mDelayedDoneNotifier) {
+    // Disconnect may release the last reference to 'this'.
+    RefPtr<XMLHttpRequestMainThread> kungfuDeathGrip = this;
+    mDelayedDoneNotifier->Disconnect();
+    mDelayedDoneNotifier = nullptr;
+  }
+}
 
-void XMLHttpRequestMainThread::ChangeStateToDone() {
+void XMLHttpRequestMainThread::ChangeStateToDone(bool aWasSync) {
+  DisconnectDoneNotifier();
+
+  if (!mForWorker && !aWasSync && mChannel) {
+    // If the top level page is loading, try to postpone the handling of the
+    // final events.
+    nsLoadFlags loadFlags = 0;
+    mChannel->GetLoadFlags(&loadFlags);
+    if (loadFlags & nsIRequest::LOAD_BACKGROUND) {
+      nsPIDOMWindowInner* owner = GetOwner();
+      nsPIDOMWindowInner* topWin =
+          owner ? owner->GetWindowForDeprioritizedLoadRunner() : nullptr;
+      if (topWin) {
+        MOZ_ASSERT(!mDelayedDoneNotifier);
+        RefPtr<XMLHttpRequestDoneNotifier> notifier =
+            new XMLHttpRequestDoneNotifier(this);
+        mDelayedDoneNotifier = notifier;
+        topWin->AddDeprioritizedLoadRunner(notifier);
+        return;
+      }
+    }
+  }
+
+  ChangeStateToDoneInternal();
+}
+
+void XMLHttpRequestMainThread::ChangeStateToDoneInternal() {
+  DisconnectDoneNotifier();
   StopProgressEventTimer();
 
   MOZ_ASSERT(!mFlagParseBody,
@@ -2306,8 +2332,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
   nsCOMPtr<nsILoadGroup> loadGroup = GetLoadGroup();
 
   nsSecurityFlags secFlags;
-  nsLoadFlags loadFlags =
-      nsIRequest::LOAD_BACKGROUND | nsIChannel::LOAD_CLASSIFY_URI;
+  nsLoadFlags loadFlags = nsIRequest::LOAD_BACKGROUND;
   if (nsContentUtils::IsSystemPrincipal(mPrincipal)) {
     // When chrome is loading we want to make sure to sandbox any potential
     // result document. We also want to allow cross-origin loads.
@@ -2334,7 +2359,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
   // Use the responsibleDocument if we have it, except for dedicated workers
   // where it will be the parent document, which is not the one we want to use.
   nsresult rv;
-  nsCOMPtr<nsIDocument> responsibleDocument = GetDocumentIfCurrent();
+  nsCOMPtr<Document> responsibleDocument = GetDocumentIfCurrent();
   if (responsibleDocument &&
       responsibleDocument->NodePrincipal() == mPrincipal) {
     rv = NS_NewChannel(getter_AddRefs(mChannel), mRequestURL,
@@ -2348,6 +2373,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
     rv = NS_NewChannel(getter_AddRefs(mChannel), mRequestURL, mPrincipal,
                        mClientInfo.ref(), mController, secFlags,
                        nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST,
+                       mCookieSettings,
                        mPerformanceStorage,  // aPerformanceStorage
                        loadGroup,
                        nullptr,  // aCallbacks
@@ -2356,6 +2382,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
     // Otherwise use the principal.
     rv = NS_NewChannel(getter_AddRefs(mChannel), mRequestURL, mPrincipal,
                        secFlags, nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST,
+                       mCookieSettings,
                        mPerformanceStorage,  // aPerformanceStorage
                        loadGroup,
                        nullptr,  // aCallbacks
@@ -2364,11 +2391,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (mCSPEventListener) {
-    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-    if (NS_WARN_IF(!loadInfo)) {
-      return NS_ERROR_UNEXPECTED;
-    }
-
+    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
     rv = loadInfo->SetCspEventListener(mCSPEventListener);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -2389,7 +2412,7 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
 }
 
 void XMLHttpRequestMainThread::MaybeLowerChannelPriority() {
-  nsCOMPtr<nsIDocument> doc = GetDocumentIfCurrent();
+  nsCOMPtr<Document> doc = GetDocumentIfCurrent();
   if (!doc) {
     return;
   }
@@ -2409,7 +2432,7 @@ void XMLHttpRequestMainThread::MaybeLowerChannelPriority() {
     return;
   }
 
-  if (nsContentUtils::IsTailingEnabled()) {
+  if (StaticPrefs::network_http_tailing_enabled()) {
     nsCOMPtr<nsIClassOfService> cos = do_QueryInterface(mChannel);
     if (cos) {
       // Adding TailAllowed to overrule the Unblocked flag, but to preserve
@@ -2456,11 +2479,10 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
 
     if (!IsSystemXHR()) {
       nsCOMPtr<nsPIDOMWindowInner> owner = GetOwner();
-      nsCOMPtr<nsIDocument> doc = owner ? owner->GetExtantDoc() : nullptr;
-      mozilla::net::ReferrerPolicy referrerPolicy =
-          doc ? doc->GetReferrerPolicy() : mozilla::net::RP_Unset;
-      nsContentUtils::SetFetchReferrerURIWithPolicy(
-          mPrincipal, doc, httpChannel, referrerPolicy);
+      nsCOMPtr<Document> doc = owner ? owner->GetExtantDoc() : nullptr;
+      nsCOMPtr<nsIReferrerInfo> referrerInfo =
+          ReferrerInfo::CreateForFetch(mPrincipal, doc);
+      Unused << httpChannel->SetReferrerInfoWithoutClone(referrerInfo);
     }
 
     // Some extensions override the http protocol handler and provide their own
@@ -2524,10 +2546,8 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
   // .withCredentials can be called after open() is called.
   // Not doing this for privileged system XHRs since those don't use CORS.
   if (!IsSystemXHR() && !mIsAnon && mFlagACwithCredentials) {
-    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-    if (loadInfo) {
-      static_cast<net::LoadInfo*>(loadInfo.get())->SetIncludeCookiesSecFlag();
-    }
+    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
+    static_cast<net::LoadInfo*>(loadInfo.get())->SetIncludeCookiesSecFlag();
   }
 
   // We never let XHR be blocked by head CSS/JS loads to avoid potential
@@ -2590,11 +2610,9 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
   if (!IsSystemXHR()) {
     nsTArray<nsCString> CORSUnsafeHeaders;
     mAuthorRequestHeaders.GetCORSUnsafeHeaders(CORSUnsafeHeaders);
-    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-    if (loadInfo) {
-      loadInfo->SetCorsPreflightInfo(CORSUnsafeHeaders,
-                                     mFlagHadUploadListenersOnSend);
-    }
+    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->LoadInfo();
+    loadInfo->SetCorsPreflightInfo(CORSUnsafeHeaders,
+                                   mFlagHadUploadListenersOnSend);
   }
 
   // Hook us up to listen to redirects and the like. Only do this very late
@@ -2614,12 +2632,15 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
 
   // Check if this XHR is created from a tracking script.
   // If yes, lower the channel's priority.
-  if (nsContentUtils::IsLowerNetworkPriority()) {
+  if (StaticPrefs::privacy_trackingprotection_lower_network_priority()) {
     MaybeLowerChannelPriority();
   }
 
+  // Associate any originating stack with the channel.
+  NotifyNetworkMonitorAlternateStack(mChannel, std::move(mOriginStack));
+
   // Start reading from the channel
-  rv = mChannel->AsyncOpen2(listener);
+  rv = mChannel->AsyncOpen(listener);
   listener = nullptr;
   if (NS_WARN_IF(NS_FAILED(rv))) {
     // Drop our ref to the channel to avoid cycles. Also drop channel's
@@ -2668,7 +2689,7 @@ void XMLHttpRequestMainThread::Send(
   }
 
   if (aData.Value().IsDocument()) {
-    BodyExtractor<nsIDocument> body(&aData.Value().GetAsDocument());
+    BodyExtractor<Document> body(&aData.Value().GetAsDocument());
     aRv = SendInternal(&body, true);
     return;
   }
@@ -2745,7 +2766,7 @@ nsresult XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
     return NS_ERROR_DOM_INVALID_STATE_XHR_MUST_NOT_BE_SENDING;
   }
 
-  nsresult rv = CheckInnerWindowCorrectness();
+  nsresult rv = CheckCurrentGlobalCorrectness();
   if (NS_FAILED(rv)) {
     return NS_ERROR_DOM_INVALID_STATE_XHR_HAS_INVALID_CONTEXT;
   }
@@ -2797,16 +2818,19 @@ nsresult XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
         uploadContentType = defaultContentType;
       } else if (aBodyIsDocumentOrString &&
                  StaticPrefs::dom_xhr_standard_content_type_normalization()) {
-        UniquePtr<CMimeType> parsed = CMimeType::Parse(uploadContentType);
-        if (parsed && parsed->HasParameter(kLiteralString_charset)) {
-          parsed->SetParameterValue(kLiteralString_charset,
-                                    kLiteralString_UTF_8);
-          parsed->Serialize(uploadContentType);
+        UniquePtr<CMimeType> contentTypeRecord =
+            CMimeType::Parse(uploadContentType);
+        nsAutoCString charset;
+        if (contentTypeRecord &&
+            contentTypeRecord->GetParameterValue(kLiteralString_charset,
+                                                 charset) &&
+            !charset.EqualsIgnoreCase("utf-8")) {
+          contentTypeRecord->SetParameterValue(kLiteralString_charset,
+                                               kLiteralString_UTF_8);
+          contentTypeRecord->Serialize(uploadContentType);
         }
-      }
-
-      // We don't want to set a charset for streams.
-      if (!charset.IsEmpty()) {
+      } else if (!charset.IsEmpty()) {
+        // We don't want to set a charset for streams.
         // Replace all case-insensitive matches of the charset in the
         // content-type with the correct case.
         RequestHeaders::CharsetIterator iter(uploadContentType);
@@ -2987,10 +3011,9 @@ void XMLHttpRequestMainThread::SetRequestHeader(const nsACString& aName,
   bool isPrivilegedCaller = IsSystemXHR();
   bool isForbiddenHeader = nsContentUtils::IsForbiddenRequestHeader(aName);
   if (!isPrivilegedCaller && isForbiddenHeader) {
-    NS_ConvertUTF8toUTF16 name(aName);
-    const char16_t* params[] = {name.get()};
-    LogMessage("ForbiddenHeaderWarning", GetOwner(), params,
-               ArrayLength(params));
+    AutoTArray<nsString, 1> params;
+    CopyUTF8toUTF16(aName, *params.AppendElement());
+    LogMessage("ForbiddenHeaderWarning", GetOwner(), params);
     return;
   }
 
@@ -3118,6 +3141,11 @@ void XMLHttpRequestMainThread::SetMozBackgroundRequest(
     bool aMozBackgroundRequest, ErrorResult& aRv) {
   // No errors for this webIDL method on main-thread.
   SetMozBackgroundRequest(aMozBackgroundRequest);
+}
+
+void XMLHttpRequestMainThread::SetOriginStack(
+    UniquePtr<SerializedStackHolder> aOriginStack) {
+  mOriginStack = std::move(aOriginStack);
 }
 
 bool XMLHttpRequestMainThread::WithCredentials() const {
@@ -3344,8 +3372,8 @@ XMLHttpRequestMainThread::GetInterface(const nsIID& aIID, void** aResult) {
 }
 
 void XMLHttpRequestMainThread::GetInterface(
-    JSContext* aCx, nsIJSID* aIID, JS::MutableHandle<JS::Value> aRetval,
-    ErrorResult& aRv) {
+    JSContext* aCx, JS::Handle<JS::Value> aIID,
+    JS::MutableHandle<JS::Value> aRetval, ErrorResult& aRv) {
   dom::GetInterface(aCx, this, aIID, aRetval, aRv);
 }
 
@@ -3447,7 +3475,7 @@ XMLHttpRequestMainThread::SyncTimeoutType
 XMLHttpRequestMainThread::MaybeStartSyncTimeoutTimer() {
   MOZ_ASSERT(mFlagSynchronous);
 
-  nsIDocument* doc = GetDocumentIfCurrent();
+  Document* doc = GetDocumentIfCurrent();
   if (!doc || !doc->GetPageUnloadingEventTimeStamp()) {
     return eNoTimerNeeded;
   }
@@ -3589,7 +3617,7 @@ void XMLHttpRequestMainThread::BlobStoreCompleted(
   mResponseBlob = aBlob;
   mBlobStorage = nullptr;
 
-  ChangeStateToDone();
+  ChangeStateToDone(mFlagSyncLooping);
 }
 
 NS_IMETHODIMP
@@ -3654,7 +3682,7 @@ void ArrayBufferBuilder::reset() {
   }
 
   if (mMapPtr) {
-    JS_ReleaseMappedArrayBufferContents(mMapPtr, mLength);
+    JS::ReleaseMappedArrayBufferContents(mMapPtr, mLength);
     mMapPtr = nullptr;
   }
 
@@ -3730,9 +3758,9 @@ bool ArrayBufferBuilder::append(const uint8_t* aNewData, uint32_t aDataLen,
 
 JSObject* ArrayBufferBuilder::getArrayBuffer(JSContext* aCx) {
   if (mMapPtr) {
-    JSObject* obj = JS_NewMappedArrayBufferWithContents(aCx, mLength, mMapPtr);
+    JSObject* obj = JS::NewMappedArrayBufferWithContents(aCx, mLength, mMapPtr);
     if (!obj) {
-      JS_ReleaseMappedArrayBufferContents(mMapPtr, mLength);
+      JS::ReleaseMappedArrayBufferContents(mMapPtr, mLength);
     }
     mMapPtr = nullptr;
 
@@ -3749,7 +3777,7 @@ JSObject* ArrayBufferBuilder::getArrayBuffer(JSContext* aCx) {
     }
   }
 
-  JSObject* obj = JS_NewArrayBufferWithContents(aCx, mLength, mDataPtr);
+  JSObject* obj = JS::NewArrayBufferWithContents(aCx, mLength, mDataPtr);
   mLength = mCapacity = 0;
   if (!obj) {
     js_free(mDataPtr);
@@ -3783,7 +3811,7 @@ nsresult ArrayBufferBuilder::mapToFileInPackage(const nsCString& aFile,
     if (NS_FAILED(rv)) {
       return rv;
     }
-    mMapPtr = JS_CreateMappedArrayBufferContents(
+    mMapPtr = JS::CreateMappedArrayBufferContents(
         PR_FileDesc2NativeHandle(pr_fd), offset, size);
     if (mMapPtr) {
       mLength = size;
@@ -3793,9 +3821,11 @@ nsresult ArrayBufferBuilder::mapToFileInPackage(const nsCString& aFile,
   return NS_ERROR_FAILURE;
 }
 
-/* static */ bool ArrayBufferBuilder::areOverlappingRegions(
-    const uint8_t* aStart1, uint32_t aLength1, const uint8_t* aStart2,
-    uint32_t aLength2) {
+/* static */
+bool ArrayBufferBuilder::areOverlappingRegions(const uint8_t* aStart1,
+                                               uint32_t aLength1,
+                                               const uint8_t* aStart2,
+                                               uint32_t aLength2) {
   const uint8_t* end1 = aStart1 + aLength1;
   const uint8_t* end2 = aStart2 + aLength2;
 
@@ -3881,20 +3911,9 @@ void RequestHeaders::ApplyToChannel(nsIHttpChannel* aHttpChannel) const {
 }
 
 void RequestHeaders::GetCORSUnsafeHeaders(nsTArray<nsCString>& aArray) const {
-  static const char* kCrossOriginSafeHeaders[] = {
-      "accept", "accept-language", "content-language", "content-type",
-      "last-event-id"};
-  const uint32_t kCrossOriginSafeHeadersLength =
-      ArrayLength(kCrossOriginSafeHeaders);
   for (const RequestHeader& header : mHeaders) {
-    bool safe = false;
-    for (uint32_t i = 0; i < kCrossOriginSafeHeadersLength; ++i) {
-      if (header.mName.LowerCaseEqualsASCII(kCrossOriginSafeHeaders[i])) {
-        safe = true;
-        break;
-      }
-    }
-    if (!safe) {
+    if (!nsContentUtils::IsCORSSafelistedRequestHeader(header.mName,
+                                                       header.mValue)) {
       aArray.AppendElement(header.mName);
     }
   }

@@ -1,7 +1,10 @@
 "use strict";
 
+var LabelUtils;
 add_task(async function() {
-  ChromeUtils.import("resource://formautofill/FormAutofillHeuristics.jsm");
+  ({ LabelUtils } = ChromeUtils.import(
+    "resource://formautofill/FormAutofillHeuristics.jsm"
+  ));
 });
 
 const TESTCASES = [
@@ -34,7 +37,8 @@ const TESTCASES = [
     expectedStrings: ["label type B", "inner div"],
   },
   {
-    description: "A label element with inner prefix/postfix strings contains span elements.",
+    description:
+      "A label element with inner prefix/postfix strings contains span elements.",
     document: `<label id="typeC"> label type C
                  <!-- This comment should not be extracted. -->
                  <script>FOO</script>
@@ -48,8 +52,13 @@ const TESTCASES = [
                  </div>
                </label>`,
     inputId: "typeC",
-    expectedStrings: ["label type C", "inner div prefix", "test C-1",
-      "test C-2", "inner div postfix"],
+    expectedStrings: [
+      "label type C",
+      "inner div prefix",
+      "test C-1",
+      "test C-2",
+      "inner div postfix",
+    ],
   },
 ];
 
@@ -59,7 +68,9 @@ TESTCASES.forEach(testcase => {
     LabelUtils._labelStrings = new WeakMap();
 
     let doc = MockDocument.createTestDocument(
-      "http://localhost:8080/test/", testcase.document);
+      "http://localhost:8080/test/",
+      testcase.document
+    );
 
     let element = doc.getElementById(testcase.inputId);
     let strings = LabelUtils.extractLabelStrings(element);

@@ -25,15 +25,12 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DAV1D_SRC_FILM_GRAIN_H__
-#define __DAV1D_SRC_FILM_GRAIN_H__
+#ifndef DAV1D_SRC_FILM_GRAIN_H
+#define DAV1D_SRC_FILM_GRAIN_H
 
 #include "dav1d/dav1d.h"
 
-void dav1d_apply_grain_8bpc(Dav1dPicture *const out,
-                            const Dav1dPicture *const in);
+bitfn_decls(void dav1d_apply_grain, Dav1dPicture *const out,
+                                    const Dav1dPicture *const in);
 
-void dav1d_apply_grain_10bpc(Dav1dPicture *const out,
-                             const Dav1dPicture *const in);
-
-#endif /* __DAV1D_SRC_FILM_GRAIN_H__ */
+#endif /* DAV1D_SRC_FILM_GRAIN_H */

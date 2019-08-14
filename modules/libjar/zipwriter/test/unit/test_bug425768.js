@@ -6,8 +6,7 @@
 const DIRNAME = "test/";
 const time = Date.now();
 
-function run_test()
-{
+function run_test() {
   // Copy in the test file.
   var source = do_get_file("data/test.zip");
   source.copyTo(tmpFile.parent, tmpFile.leafName);
@@ -24,8 +23,11 @@ function run_test()
 
   // Adding the directory would have added a fixed amount to the file size.
   // Any difference suggests the CDS was written out incorrectly.
-  var extra = ZIP_FILE_HEADER_SIZE + ZIP_CDS_HEADER_SIZE +
-              (DIRNAME.length * 2) + (ZIP_EXTENDED_TIMESTAMP_SIZE * 2);
+  var extra =
+    ZIP_FILE_HEADER_SIZE +
+    ZIP_CDS_HEADER_SIZE +
+    DIRNAME.length * 2 +
+    ZIP_EXTENDED_TIMESTAMP_SIZE * 2;
 
   Assert.equal(source.fileSize + extra, tmpFile.fileSize);
 }

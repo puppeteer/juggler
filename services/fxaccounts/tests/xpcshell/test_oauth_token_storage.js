@@ -3,13 +3,18 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/FxAccounts.jsm");
-ChromeUtils.import("resource://gre/modules/FxAccountsClient.jsm");
-ChromeUtils.import("resource://gre/modules/FxAccountsCommon.js");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const { FxAccounts } = ChromeUtils.import(
+  "resource://gre/modules/FxAccounts.jsm"
+);
+const { FxAccountsClient } = ChromeUtils.import(
+  "resource://gre/modules/FxAccountsClient.jsm"
+);
 
 // We grab some additional stuff via backstage passes.
-var {AccountState} = ChromeUtils.import("resource://gre/modules/FxAccounts.jsm", {});
+var { AccountState } = ChromeUtils.import(
+  "resource://gre/modules/FxAccounts.jsm",
+  null
+);
 
 function promiseNotification(topic) {
   return new Promise(resolve => {
@@ -22,8 +27,7 @@ function promiseNotification(topic) {
 }
 
 // A storage manager that doesn't actually write anywhere.
-function MockStorageManager() {
-}
+function MockStorageManager() {}
 
 MockStorageManager.prototype = {
   promiseInitialized: Promise.resolve(),
@@ -57,21 +61,30 @@ MockStorageManager.prototype = {
   },
 };
 
-
 // Just enough mocks so we can avoid hawk etc.
 function MockFxAccountsClient() {
   this._email = "nobody@example.com";
   this._verified = false;
 
   this.accountStatus = function(uid) {
-    return Promise.resolve(!!uid && (!this._deletedOnServer));
+    return Promise.resolve(!!uid && !this._deletedOnServer);
   };
 
-  this.signOut = function() { return Promise.resolve(); };
-  this.registerDevice = function() { return Promise.resolve(); };
-  this.updateDevice = function() { return Promise.resolve(); };
-  this.signOutAndDestroyDevice = function() { return Promise.resolve(); };
-  this.getDeviceList = function() { return Promise.resolve(); };
+  this.signOut = function() {
+    return Promise.resolve();
+  };
+  this.registerDevice = function() {
+    return Promise.resolve();
+  };
+  this.updateDevice = function() {
+    return Promise.resolve();
+  };
+  this.signOutAndDestroyDevice = function() {
+    return Promise.resolve();
+  };
+  this.getDeviceList = function() {
+    return Promise.resolve();
+  };
 
   FxAccountsClient.apply(this);
 }
@@ -94,7 +107,7 @@ function MockFxAccounts(device = {}) {
     },
     fxaPushService: {
       registerPushEndpoint() {
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
           resolve({
             endpoint: "http://mochi.test:8888",
           });
@@ -136,17 +149,19 @@ add_task(async function testCacheStorage() {
   };
 
   let promiseWritten = promiseNotification("testhelper-fxa-cache-persist-done");
-  let tokenData = {token: "token1", somethingelse: "something else"};
+  let tokenData = { token: "token1", somethingelse: "something else" };
   let scopeArray = ["foo", "bar"];
   cas.setCachedToken(scopeArray, tokenData);
   deepEqual(cas.getCachedToken(scopeArray), tokenData);
 
-  deepEqual(cas.oauthTokens, {"bar|foo": tokenData});
+  deepEqual(cas.oauthTokens, { "bar|foo": tokenData });
   // wait for background write to complete.
   await promiseWritten;
 
   // Check the token cache made it to our mocked storage.
-  deepEqual(cas.storageManager.accountData.oauthTokens, {"bar|foo": tokenData});
+  deepEqual(cas.storageManager.accountData.oauthTokens, {
+    "bar|foo": tokenData,
+  });
 
   // Drop the token from the cache and ensure it is removed from the json.
   promiseWritten = promiseNotification("testhelper-fxa-cache-persist-done");
@@ -157,6 +172,6 @@ add_task(async function testCacheStorage() {
 
   // sign out and the token storage should end up with null.
   let storageManager = cas.storageManager; // .signOut() removes the attribute.
-  await fxa.signOut( /* localOnly = */ true);
+  await fxa.signOut(/* localOnly = */ true);
   deepEqual(storageManager.accountData, null);
 });

@@ -185,9 +185,9 @@ class Registers {
       (1 << Registers::x3) | (1 << Registers::x4) | (1 << Registers::x5) |
       (1 << Registers::x6) | (1 << Registers::x7) | (1 << Registers::x8) |
       (1 << Registers::x9) | (1 << Registers::x10) | (1 << Registers::x11) |
-      (1 << Registers::x11) | (1 << Registers::x12) | (1 << Registers::x13) |
-      (1 << Registers::x14) | (1 << Registers::x14) | (1 << Registers::x15) |
-      (1 << Registers::x16) | (1 << Registers::x17) | (1 << Registers::x18);
+      (1 << Registers::x12) | (1 << Registers::x13) | (1 << Registers::x14) |
+      (1 << Registers::x15) | (1 << Registers::x16) | (1 << Registers::x17) |
+      (1 << Registers::x18);
 
   static const SetType NonVolatileMask =
       (1 << Registers::x19) | (1 << Registers::x20) | (1 << Registers::x21) |
@@ -394,10 +394,12 @@ static const uint32_t ION_FRAME_SLACK_SIZE = 24;
 
 static const uint32_t ShadowStackSpace = 0;
 
-// TODO:
-// This constant needs to be updated to account for whatever near/far branching
-// strategy is used by ARM64.
-static const uint32_t JumpImmediateRange = UINT32_MAX;
+// When our only strategy for far jumps is to encode the offset directly, and
+// not insert any jump islands during assembly for even further jumps, then the
+// architecture restricts us to -2^27 .. 2^27-4, to fit into a signed 28-bit
+// value.  We further reduce this range to allow the far-jump inserting code to
+// have some breathing room.
+static const uint32_t JumpImmediateRange = ((1 << 27) - (20 * 1024 * 1024));
 
 static const uint32_t ABIStackAlignment = 16;
 static const uint32_t CodeAlignment = 16;

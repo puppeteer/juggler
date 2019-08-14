@@ -10,9 +10,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/ServoBindingTypes.h"
 #include "nsIContentInlines.h"
-#include "nsIDocument.h"
-#include "nsIPresShell.h"
-#include "nsIPresShellInlines.h"
+#include "mozilla/dom/Document.h"
 
 namespace mozilla {
 namespace dom {

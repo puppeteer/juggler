@@ -217,26 +217,27 @@ class ShadowLayerForwarder final : public LayersIPCActor,
   bool DestroyInTransaction(PTextureChild* aTexture) override;
   bool DestroyInTransaction(const CompositableHandle& aHandle);
 
-  virtual void RemoveTextureFromCompositable(CompositableClient* aCompositable,
-                                             TextureClient* aTexture) override;
+  void RemoveTextureFromCompositable(
+      CompositableClient* aCompositable, TextureClient* aTexture,
+      const Maybe<wr::RenderRoot>& aRenderRoot) override;
 
   /**
    * Communicate to the compositor that aRegion in the texture identified by
    * aLayer and aIdentifier has been updated to aThebesBuffer.
    */
-  virtual void UpdateTextureRegion(CompositableClient* aCompositable,
-                                   const ThebesBufferData& aThebesBufferData,
-                                   const nsIntRegion& aUpdatedRegion) override;
+  void UpdateTextureRegion(CompositableClient* aCompositable,
+                           const ThebesBufferData& aThebesBufferData,
+                           const nsIntRegion& aUpdatedRegion) override;
 
   /**
    * See CompositableForwarder::UseTextures
    */
-  virtual void UseTextures(
-      CompositableClient* aCompositable,
-      const nsTArray<TimedTextureClient>& aTextures) override;
-  virtual void UseComponentAlphaTextures(
-      CompositableClient* aCompositable, TextureClient* aClientOnBlack,
-      TextureClient* aClientOnWhite) override;
+  void UseTextures(CompositableClient* aCompositable,
+                   const nsTArray<TimedTextureClient>& aTextures,
+                   const Maybe<wr::RenderRoot>& aRenderRoot) override;
+  void UseComponentAlphaTextures(CompositableClient* aCompositable,
+                                 TextureClient* aClientOnBlack,
+                                 TextureClient* aClientOnWhite) override;
 
   /**
    * Used for debugging to tell the compositor how long this frame took to
@@ -253,9 +254,12 @@ class ShadowLayerForwarder final : public LayersIPCActor,
                       bool aScheduleComposite, uint32_t aPaintSequenceNumber,
                       bool aIsRepeatTransaction,
                       const mozilla::VsyncId& aVsyncId,
+                      const mozilla::TimeStamp& aVsyncTime,
                       const mozilla::TimeStamp& aRefreshStart,
                       const mozilla::TimeStamp& aTransactionStart,
-                      const nsCString& aURL, bool* aSent);
+                      bool aContainsSVG, const nsCString& aURL, bool* aSent,
+                      const InfallibleTArray<CompositionPayload>& aPayload =
+                          InfallibleTArray<CompositionPayload>());
 
   /**
    * Set an actor through which layer updates will be pushed.
@@ -323,7 +327,7 @@ class ShadowLayerForwarder final : public LayersIPCActor,
    *   buffer, and the double-buffer pair is gone.
    */
 
-  virtual bool IPCOpen() const override;
+  bool IPCOpen() const override;
 
   /**
    * Construct a shadow of |aLayer| on the "other side", at the
@@ -335,6 +339,7 @@ class ShadowLayerForwarder final : public LayersIPCActor,
    * Flag the next paint as the first for a document.
    */
   void SetIsFirstPaint() { mIsFirstPaint = true; }
+  bool GetIsFirstPaint() const { return mIsFirstPaint; }
 
   /**
    * Set the current focus target to be sent with the next paint.
@@ -347,18 +352,18 @@ class ShadowLayerForwarder final : public LayersIPCActor,
 
   static void PlatformSyncBeforeUpdate();
 
-  virtual bool AllocSurfaceDescriptor(const gfx::IntSize& aSize,
-                                      gfxContentType aContent,
+  bool AllocSurfaceDescriptor(const gfx::IntSize& aSize,
+                              gfxContentType aContent,
+                              SurfaceDescriptor* aBuffer) override;
+
+  bool AllocSurfaceDescriptorWithCaps(const gfx::IntSize& aSize,
+                                      gfxContentType aContent, uint32_t aCaps,
                                       SurfaceDescriptor* aBuffer) override;
 
-  virtual bool AllocSurfaceDescriptorWithCaps(
-      const gfx::IntSize& aSize, gfxContentType aContent, uint32_t aCaps,
-      SurfaceDescriptor* aBuffer) override;
+  void DestroySurfaceDescriptor(SurfaceDescriptor* aSurface) override;
 
-  virtual void DestroySurfaceDescriptor(SurfaceDescriptor* aSurface) override;
-
-  virtual void UpdateFwdTransactionId() override;
-  virtual uint64_t GetFwdTransactionId() override;
+  void UpdateFwdTransactionId() override;
+  uint64_t GetFwdTransactionId() override;
 
   void UpdateTextureLocks();
   void SyncTextures(const nsTArray<uint64_t>& aSerials);
@@ -389,9 +394,9 @@ class ShadowLayerForwarder final : public LayersIPCActor,
 
   nsIEventTarget* GetEventTarget() { return mEventTarget; };
 
-  virtual bool IsThreadSafe() const override { return false; }
+  bool IsThreadSafe() const override { return false; }
 
-  virtual RefPtr<KnowsCompositor> GetForMedia() override;
+  RefPtr<KnowsCompositor> GetForMedia() override;
 
  protected:
   virtual ~ShadowLayerForwarder();
@@ -427,8 +432,8 @@ class ShadowLayerForwarder final : public LayersIPCActor,
   PaintTiming mPaintTiming;
   /**
    * ShadowLayerForwarder might dispatch tasks to main while puppet widget and
-   * tabChild don't exist anymore; therefore we hold the event target since its
-   *  lifecycle is independent of these objects.
+   * browserChild don't exist anymore; therefore we hold the event target since
+   * its lifecycle is independent of these objects.
    */
   nsCOMPtr<nsIEventTarget> mEventTarget;
 };

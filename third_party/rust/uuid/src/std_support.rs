@@ -9,11 +9,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std;
-use ParseError;
+use std::error;
 
-impl std::error::Error for ParseError {
+impl error::Error for super::BytesError {
     fn description(&self) -> &str {
-        "UUID parse error"
+        "invalid number of uuid bytes"
+    }
+}
+
+impl error::Error for super::Error {
+    fn description(&self) -> &str {
+        match *self {
+            super::Error::Bytes(ref err) => error::Error::description(err),
+            super::Error::Parse(ref err) => error::Error::description(err),
+        }
     }
 }

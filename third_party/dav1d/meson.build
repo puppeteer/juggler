@@ -1,4 +1,4 @@
-# Copyright © 2018, VideoLAN and dav1d authors
+# Copyright © 2018-2019, VideoLAN and dav1d authors
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -23,17 +23,18 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 project('dav1d', ['c'],
-    version: '0.0.1',
+    version: '0.3.1',
     default_options: ['c_std=c99',
                       'warning_level=2',
                       'buildtype=release',
                       'b_ndebug=if-release'],
     meson_version: '>= 0.47.0')
 
-dav1d_version_array    = meson.project_version().split('.')
-dav1d_version_major    = dav1d_version_array[0]
-dav1d_version_minor    = dav1d_version_array[1]
-dav1d_version_revision = dav1d_version_array[2]
+dav1d_soname_version       = '2.0.0'
+dav1d_api_version_array    = dav1d_soname_version.split('.')
+dav1d_api_version_major    = dav1d_api_version_array[0]
+dav1d_api_version_minor    = dav1d_api_version_array[1]
+dav1d_api_version_revision = dav1d_api_version_array[2]
 
 dav1d_src_root = meson.current_source_dir()
 cc = meson.get_compiler('c')
@@ -45,7 +46,7 @@ cdata = configuration_data()
 cdata_asm = configuration_data()
 
 # Include directories
-dav1d_inc_dirs = include_directories(['.', 'include', 'include/dav1d'])
+dav1d_inc_dirs = include_directories(['.', 'include/dav1d', 'include'])
 
 
 
@@ -55,7 +56,7 @@ dav1d_inc_dirs = include_directories(['.', 'include', 'include/dav1d'])
 
 # Bitdepth option
 dav1d_bitdepths = get_option('bitdepths')
-foreach bitdepth : ['8', '10']
+foreach bitdepth : ['8', '16']
     cdata.set10('CONFIG_@0@BPC'.format(bitdepth), dav1d_bitdepths.contains(bitdepth))
 endforeach
 
@@ -70,6 +71,8 @@ if is_asm_enabled and get_option('b_sanitize') == 'memory'
     error('asm causes false positive with memory sanitizer. Use \'-Dbuild_asm=false\'.')
 endif
 
+# Logging option
+cdata.set10('CONFIG_LOG', get_option('logging'))
 
 #
 # OS/Compiler checks and defines
@@ -77,6 +80,8 @@ endif
 
 # Arguments in test_args will be used even on feature tests
 test_args = []
+
+optional_arguments = []
 
 # Define _POSIX_C_SOURCE to POSIX.1–2001 (IEEE Std 1003.1-2001)
 test_args  += '-D_POSIX_C_SOURCE=200112L'
@@ -87,10 +92,18 @@ if host_machine.system() == 'windows'
     cdata.set('UNICODE',                1) # Define to 1 for Unicode (Wide Chars) APIs
     cdata.set('_UNICODE',               1) # Define to 1 for Unicode (Wide Chars) APIs
     cdata.set('__USE_MINGW_ANSI_STDIO', 1) # Define to force use of MinGW printf
-endif
+    if cc.has_function('fseeko', prefix : '#include <stdio.h>', args : test_args)
+        cdata.set('_FILE_OFFSET_BITS', 64) # Not set by default by Meson on Windows
+    else
+        cdata.set('fseeko', '_fseeki64')
+        cdata.set('ftello', '_ftelli64')
+    endif
 
-# On Windows, we use a compatibility layer to emulate pthread
-if host_machine.system() == 'windows'
+    if (host_machine.cpu_family() == 'x86_64' and cc.get_id() == 'gcc')
+        optional_arguments += '-mcmodel=small'
+    endif
+
+    # On Windows, we use a compatibility layer to emulate pthread
     thread_dependency = []
     thread_compat_dep = declare_dependency(sources : files('src/win32/thread.c'))
 else
@@ -122,6 +135,10 @@ if cc.check_header('unistd.h')
     cdata.set('HAVE_UNISTD_H', 1)
 endif
 
+if cc.check_header('io.h')
+    cdata.set('HAVE_IO_H', 1)
+endif
+
 
 # Function checks
 
@@ -147,6 +164,9 @@ if (host_machine.cpu_family() == 'aarch64' or
     if cc.has_function('getauxval', prefix : '#include <sys/auxv.h>', args : test_args)
         cdata.set('HAVE_GETAUXVAL', 1)
     endif
+    if cc.has_function('elf_aux_info', prefix : '#include <sys/auxv.h>', args : test_args)
+        cdata.set('HAVE_ELF_AUX_INFO', 1)
+    endif
 endif
 
 # Compiler flag tests
@@ -160,13 +180,28 @@ endif
 # Compiler flags that should be set
 # But when the compiler does not supports them
 # it is not an error and silently tolerated
-optional_arguments = [
-  '-Wundef',
-  '-Werror=vla',
-  '-Wno-maybe-uninitialized',
-  '-Wno-unused-parameter',
-  '-Werror=missing-prototypes',
-]
+if cc.get_id() != 'msvc'
+    optional_arguments += [
+      '-Wundef',
+      '-Werror=vla',
+      '-Wno-maybe-uninitialized',
+      '-Wno-missing-field-initializers',
+      '-Wno-unused-parameter',
+      '-Werror=missing-prototypes',
+      '-Wshorten-64-to-32',
+    ]
+    if host_machine.cpu_family() == 'x86'
+        optional_arguments += [
+          '-msse2',
+          '-mfpmath=sse',
+        ]
+    endif
+else
+    optional_arguments += [
+      '-wd4028', # parameter different from declaration
+      '-wd4996'  # use of POSIX functions
+    ]
+endif
 
 if (get_option('buildtype') != 'debug' and get_option('buildtype') != 'plain')
     optional_arguments += '-fomit-frame-pointer'
@@ -190,31 +225,40 @@ endif
 stackalign_flag = []
 stackrealign_flag = []
 
+cdata.set10('ENDIANNESS_BIG', host_machine.endian() == 'big')
+
 if host_machine.cpu_family().startswith('x86')
-    if cc.has_argument('-mpreferred-stack-boundary=5')
-        stackalign_flag = ['-mpreferred-stack-boundary=5']
-        stackrealign_flag = ['-mincoming-stack-boundary=4']
-        cdata_asm.set('STACK_ALIGNMENT', 32)
-        cdata.set('STACK_ALIGNMENT', 32)
-    elif cc.has_argument('-mpreferred-stack-boundary=4')
-        stackalign_flag = ['-mpreferred-stack-boundary=4']
-        stackrealign_flag = ['-mincoming-stack-boundary=4']
-        cdata_asm.set('STACK_ALIGNMENT', 16)
-        cdata.set('STACK_ALIGNMENT', 16)
-    elif cc.has_argument('-mstack-alignment=32')
-        stackalign_flag = ['-mstack-alignment=32']
-        stackrealign_flag = ['-mstackrealign']
-        cdata_asm.set('STACK_ALIGNMENT', 32)
-        cdata.set('STACK_ALIGNMENT', 32)
-    else
-        if host_machine.cpu_family() == 'x86_64'
-            cdata_asm.set('STACK_ALIGNMENT', 16)
-            cdata.set('STACK_ALIGNMENT', 16)
+    if get_option('stack_alignment') > 0
+        stack_alignment = get_option('stack_alignment')
+    elif host_machine.cpu_family() == 'x86_64'
+        if cc.has_argument('-mpreferred-stack-boundary=5')
+            stackalign_flag = ['-mpreferred-stack-boundary=5']
+            stackrealign_flag = ['-mincoming-stack-boundary=4']
+            stack_alignment = 32
+        elif cc.has_argument('-mstack-alignment=32')
+            stackalign_flag = ['-mstack-alignment=32']
+            stackrealign_flag = ['-mstackrealign']
+            stack_alignment = 32
         else
-            cdata_asm.set('STACK_ALIGNMENT', 4)
-            cdata.set('STACK_ALIGNMENT', 4)
+            stack_alignment = 16
+        endif
+    else
+        if host_machine.system() == 'linux' or host_machine.system() == 'darwin'
+            stack_alignment = 16
+        elif cc.has_argument('-mpreferred-stack-boundary=4')
+            stackalign_flag = ['-mpreferred-stack-boundary=4']
+            stackrealign_flag = ['-mincoming-stack-boundary=2']
+            stack_alignment = 16
+        elif cc.has_argument('-mstack-alignment=16')
+            stackalign_flag = ['-mstack-alignment=16']
+            stackrealign_flag = ['-mstackrealign']
+            stack_alignment = 16
+        else
+            stack_alignment = 4
         endif
     endif
+    cdata_asm.set('STACK_ALIGNMENT', stack_alignment)
+    cdata.set('STACK_ALIGNMENT', stack_alignment)
 endif
 
 cdata.set10('ARCH_AARCH64', host_machine.cpu_family() == 'aarch64')
@@ -230,6 +274,23 @@ if (is_asm_enabled and
 '''
     have_as_func = cc.compiles(as_func_code)
     cdata.set10('HAVE_AS_FUNC', have_as_func)
+
+    # fedora package build infrastructure uses a gcc specs file to enable
+    # '-fPIE' by default. The chosen way only adds '-fPIE' to the C compiler
+    # with integrated preprocessor. It is not added to the standalone
+    # preprocessor or the preprocessing stage of '.S' files. So we have to
+    # compile code to check if we have to define PIC for the arm asm to
+    # avoid absolute relocations when building for example checkasm.
+    check_pic_code = '''
+#if defined(PIC)
+#error "PIC already defined"
+#elif !(defined(__PIC__) || defined(__pic__))
+#error "no pic"
+#endif
+'''
+    if cc.compiles(check_pic_code)
+        cdata.set('PIC', '3')
+    endif
 endif
 
 if host_machine.cpu_family().startswith('x86')
@@ -239,13 +300,12 @@ if host_machine.cpu_family().startswith('x86')
         cdata.set10('ARCH_X86_64', true)
         cdata_asm.set10('ARCH_X86_32', false)
         cdata.set10('ARCH_X86_32', false)
-
-        cdata_asm.set10('PIC', true)
     else
         cdata_asm.set10('ARCH_X86_64', false)
         cdata.set10('ARCH_X86_64', false)
         cdata_asm.set10('ARCH_X86_32', true)
         cdata.set10('ARCH_X86_32', true)
+        cdata_asm.set10('PIC', true)
     endif
 else
     cdata.set10('ARCH_X86', false)
@@ -279,10 +339,15 @@ if is_asm_enabled and host_machine.cpu_family().startswith('x86')
     # check NASM version
     if nasm.found()
         nasm_r = run_command(nasm, '-v')
+
+        if nasm_r.returncode() != 0
+            error('failed running nasm to obtain its version')
+        endif
+
         out = nasm_r.stdout().strip().split()
         if out[1].to_lower() == 'version'
-            if out[2].version_compare('<2.13')
-                error('nasm 2.13 or later is required, found nasm @0@'.format(out[2]))
+            if out[2].version_compare('<2.13.02')
+                error('nasm 2.13.02 or later is required, found nasm @0@'.format(out[2]))
             endif
         else
             error('unexpected nasm version string: @0@'.format(nasm_r.stdout()))

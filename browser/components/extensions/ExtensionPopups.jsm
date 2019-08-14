@@ -6,30 +6,44 @@
 
 var EXPORTED_SYMBOLS = ["BasePopup", "PanelPopup", "ViewPopup"];
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
-ChromeUtils.defineModuleGetter(this, "CustomizableUI",
-                               "resource:///modules/CustomizableUI.jsm");
-ChromeUtils.defineModuleGetter(this, "E10SUtils",
-                               "resource://gre/modules/E10SUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "ExtensionParent",
-                               "resource://gre/modules/ExtensionParent.jsm");
-ChromeUtils.defineModuleGetter(this, "setTimeout",
-                               "resource://gre/modules/Timer.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "CustomizableUI",
+  "resource:///modules/CustomizableUI.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "E10SUtils",
+  "resource://gre/modules/E10SUtils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "ExtensionParent",
+  "resource://gre/modules/ExtensionParent.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "setTimeout",
+  "resource://gre/modules/Timer.jsm"
+);
 
-ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionCommon.jsm");
-ChromeUtils.import("resource://gre/modules/ExtensionUtils.jsm");
+const { AppConstants } = ChromeUtils.import(
+  "resource://gre/modules/AppConstants.jsm"
+);
+const { ExtensionCommon } = ChromeUtils.import(
+  "resource://gre/modules/ExtensionCommon.jsm"
+);
+const { ExtensionUtils } = ChromeUtils.import(
+  "resource://gre/modules/ExtensionUtils.jsm"
+);
 
-var {
-  DefaultWeakMap,
-  promiseEvent,
-} = ExtensionUtils;
+var { DefaultWeakMap, promiseEvent } = ExtensionUtils;
 
-const {
-  makeWidgetId,
-} = ExtensionCommon;
-
+const { makeWidgetId } = ExtensionCommon;
 
 const POPUP_LOAD_TIMEOUT_MS = 200;
 
@@ -38,9 +52,13 @@ function promisePopupShown(popup) {
     if (popup.state == "open") {
       resolve();
     } else {
-      popup.addEventListener("popupshown", function(event) {
-        resolve();
-      }, {once: true});
+      popup.addEventListener(
+        "popupshown",
+        function(event) {
+          resolve();
+        },
+        { once: true }
+      );
     }
   });
 }
@@ -60,7 +78,14 @@ XPCOMUtils.defineLazyGetter(this, "standaloneStylesheets", () => {
 const REMOTE_PANEL_ID = "webextension-remote-preload-panel";
 
 class BasePopup {
-  constructor(extension, viewNode, popupURL, browserStyle, fixedWidth = false, blockParser = false) {
+  constructor(
+    extension,
+    viewNode,
+    popupURL,
+    browserStyle,
+    fixedWidth = false,
+    blockParser = false
+  ) {
     this.extension = extension;
     this.popupURL = popupURL;
     this.viewNode = viewNode;
@@ -78,11 +103,14 @@ class BasePopup {
 
     this.window.addEventListener("unload", this);
     this.viewNode.addEventListener(this.DESTROY_EVENT, this);
-    this.panel.addEventListener("popuppositioned", this, {once: true, capture: true});
+    this.panel.addEventListener("popuppositioned", this, {
+      once: true,
+      capture: true,
+    });
 
     this.browser = null;
     this.browserLoaded = new Promise((resolve, reject) => {
-      this.browserLoadedDeferred = {resolve, reject};
+      this.browserLoadedDeferred = { resolve, reject };
     });
     this.browserReady = this.createBrowser(viewNode, popupURL);
 
@@ -123,9 +151,9 @@ class BasePopup {
         delete this.viewNode.customRectGetter;
       }
 
-      let {panel} = this;
+      let { panel } = this;
       if (panel) {
-        panel.removeEventListener("popuppositioned", this, {capture: true});
+        panel.removeEventListener("popuppositioned", this, { capture: true });
       }
       if (panel && panel.id !== REMOTE_PANEL_ID) {
         panel.style.removeProperty("--arrowpanel-background");
@@ -182,7 +210,7 @@ class BasePopup {
     return panel;
   }
 
-  receiveMessage({name, data}) {
+  receiveMessage({ name, data }) {
     switch (name) {
       case "DOMTitleChanged":
         this.viewNode.setAttribute("aria-label", this.browser.contentTitle);
@@ -221,14 +249,19 @@ class BasePopup {
         break;
       case "popuppositioned":
         if (!this.destroyed) {
-          this.browserLoaded.then(() => {
-            if (this.destroyed) {
-              return;
-            }
-            this.browser.messageManager.sendAsyncMessage("Extension:GrabFocus", {});
-          }).catch(() => {
-            // If the panel closes too fast an exception is raised here and tests will fail.
-          });
+          this.browserLoaded
+            .then(() => {
+              if (this.destroyed) {
+                return;
+              }
+              this.browser.messageManager.sendAsyncMessage(
+                "Extension:GrabFocus",
+                {}
+              );
+            })
+            .catch(() => {
+              // If the panel closes too fast an exception is raised here and tests will fail.
+            });
         }
         break;
     }
@@ -256,6 +289,7 @@ class BasePopup {
     if (this.extension.remote) {
       browser.setAttribute("remote", "true");
       browser.setAttribute("remoteType", E10SUtils.EXTENSION_REMOTE_TYPE);
+      browser.setAttribute("renderroot", "content");
     }
 
     // We only need flex sizing for the sake of the slide-in sub-views of the
@@ -318,7 +352,10 @@ class BasePopup {
       mm.loadFrameScript("chrome://browser/content/content.js", true, true);
 
       mm.loadFrameScript(
-        "chrome://extensions/content/ext-browser-content.js", false, true);
+        "chrome://extensions/content/ext-browser-content.js",
+        false,
+        true
+      );
 
       mm.sendAsyncMessage("Extension:InitBrowser", {
         allowScriptsToClose: true,
@@ -329,17 +366,22 @@ class BasePopup {
         stylesheets: this.STYLESHEETS,
       });
 
-      browser.loadURI(popupURL, {triggeringPrincipal: this.extension.principal});
+      browser.loadURI(popupURL, {
+        triggeringPrincipal: this.extension.principal,
+      });
     });
   }
 
   unblockParser() {
     this.browserReady.then(browser => {
+      if (this.destroyed) {
+        return;
+      }
       this.browser.messageManager.sendAsyncMessage("Extension:UnblockParser");
     });
   }
 
-  resizeBrowser({width, height, detail}) {
+  resizeBrowser({ width, height, detail }) {
     if (this.fixedWidth) {
       // Figure out how much extra space we have on the side of the panel
       // opposite the arrow.
@@ -359,7 +401,7 @@ class BasePopup {
       this.browser.style.minHeight = `${height}px`;
     }
 
-    let event = new this.window.CustomEvent("WebExtPopupResized", {detail});
+    let event = new this.window.CustomEvent("WebExtPopupResized", { detail });
     this.browser.dispatchEvent(event);
   }
 
@@ -377,7 +419,10 @@ class BasePopup {
     }
     if (background == "#fff") {
       // Set a usable default color that work with the default background-color.
-      this.panel.style.setProperty("--arrowpanel-border-color", "hsla(210,4%,10%,.15)");
+      this.panel.style.setProperty(
+        "--arrowpanel-border-color",
+        "hsla(210,4%,10%,.15)"
+      );
     }
     this.background = background;
   }
@@ -404,13 +449,17 @@ class PanelPopup extends BasePopup {
 
     document.getElementById("mainPopupSet").appendChild(panel);
 
-    panel.addEventListener("popupshowing", () => {
-      let event = new this.window.CustomEvent("WebExtPopupLoaded", {
-        bubbles: true,
-        detail: {extension},
-      });
-      this.browser.dispatchEvent(event);
-    }, {once: true});
+    panel.addEventListener(
+      "popupshowing",
+      () => {
+        let event = new this.window.CustomEvent("WebExtPopupLoaded", {
+          bubbles: true,
+          detail: { extension },
+        });
+        this.browser.dispatchEvent(event);
+      },
+      { once: true }
+    );
 
     super(extension, panel, popupURL, browserStyle);
   }
@@ -436,7 +485,14 @@ class PanelPopup extends BasePopup {
 }
 
 class ViewPopup extends BasePopup {
-  constructor(extension, window, popupURL, browserStyle, fixedWidth, blockParser) {
+  constructor(
+    extension,
+    window,
+    popupURL,
+    browserStyle,
+    fixedWidth,
+    blockParser
+  ) {
     let document = window.document;
 
     let createPanel = remote => {
@@ -489,14 +545,23 @@ class ViewPopup extends BasePopup {
    *        should be closed, or `true` otherwise.
    */
   async attach(viewNode) {
+    if (this.destroyed) {
+      return false;
+    }
     this.viewNode.removeEventListener(this.DESTROY_EVENT, this);
-    this.panel.removeEventListener("popuppositioned", this, {once: true, capture: true});
+    this.panel.removeEventListener("popuppositioned", this, {
+      once: true,
+      capture: true,
+    });
 
     this.viewNode = viewNode;
     this.viewNode.addEventListener(this.DESTROY_EVENT, this);
     this.viewNode.setAttribute("closemenu", "none");
 
-    this.panel.addEventListener("popuppositioned", this, {once: true, capture: true});
+    this.panel.addEventListener("popuppositioned", this, {
+      once: true,
+      capture: true,
+    });
     if (this.extension.remote) {
       this.panel.setAttribute("remote", "true");
     }
@@ -516,7 +581,9 @@ class ViewPopup extends BasePopup {
       ]),
     ]);
 
-    if (!this.destroyed && !this.panel) {
+    const { panel } = this;
+
+    if (!this.destroyed && !panel) {
       this.destroy();
     }
 
@@ -527,35 +594,44 @@ class ViewPopup extends BasePopup {
 
     this.attached = true;
 
-
-    // Store the initial height of the view, so that we never resize menu panel
-    // sub-views smaller than the initial height of the menu.
-    this.viewHeight = this.viewNode.boxObject.height;
-
-    // Calculate the extra height available on the screen above and below the
-    // menu panel. Use that to calculate the how much the sub-view may grow.
-    let popupRect = this.panel.getBoundingClientRect();
-
     this.setBackground(this.background);
 
-    let win = this.window;
-    let popupBottom = win.mozInnerScreenY + popupRect.bottom;
-    let popupTop = win.mozInnerScreenY + popupRect.top;
+    let flushPromise = this.window.promiseDocumentFlushed(() => {
+      let win = this.window;
 
-    let screenBottom = win.screen.availTop + win.screen.availHeight;
-    this.extraHeight = {
-      bottom: Math.max(0, screenBottom - popupBottom),
-      top:  Math.max(0, popupTop - win.screen.availTop),
-    };
+      // Calculate the extra height available on the screen above and below the
+      // menu panel. Use that to calculate the how much the sub-view may grow.
+      let popupRect = panel.getBoundingClientRect();
+      let screenBottom = win.screen.availTop + win.screen.availHeight;
+      let popupBottom = win.mozInnerScreenY + popupRect.bottom;
+      let popupTop = win.mozInnerScreenY + popupRect.top;
+
+      // Store the initial height of the view, so that we never resize menu panel
+      // sub-views smaller than the initial height of the menu.
+      this.viewHeight = viewNode.getBoundingClientRect().height;
+
+      this.extraHeight = {
+        bottom: Math.max(0, screenBottom - popupBottom),
+        top: Math.max(0, popupTop - win.screen.availTop),
+      };
+    });
 
     // Create a new browser in the real popup.
     let browser = this.browser;
     await this.createBrowser(this.viewNode);
 
-    this.ignoreResizes = false;
-
     this.browser.swapDocShells(browser);
     this.destroyBrowser(browser);
+
+    await flushPromise;
+
+    // Check if the popup has been destroyed while we were waiting for the
+    // document flush promise to be resolve.
+    if (this.destroyed) {
+      this.closePopup();
+      this.destroy();
+      return false;
+    }
 
     if (this.dimensions) {
       if (this.fixedWidth) {
@@ -564,8 +640,10 @@ class ViewPopup extends BasePopup {
       this.resizeBrowser(this.dimensions);
     }
 
+    this.ignoreResizes = false;
+
     this.viewNode.customRectGetter = () => {
-      return {height: this.lastCalculatedInViewHeight || this.viewHeight};
+      return { height: this.lastCalculatedInViewHeight || this.viewHeight };
     };
 
     this.removeTempPanel();
@@ -580,7 +658,7 @@ class ViewPopup extends BasePopup {
 
     let event = new this.window.CustomEvent("WebExtPopupLoaded", {
       bubbles: true,
-      detail: {extension: this.extension},
+      detail: { extension: this.extension },
     });
     this.browser.dispatchEvent(event);
 

@@ -9,18 +9,29 @@
 
 let sandbox;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 XPCOMUtils.defineLazyModuleGetters(this, {
-  Services: "resource://gre/modules/Services.jsm",
-  QueryContext: "resource:///modules/UrlbarController.jsm",
+  AppConstants: "resource://gre/modules/AppConstants.jsm",
+  PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
+  TelemetryTestUtils: "resource://testing-common/TelemetryTestUtils.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
-  UrlbarMatch: "resource:///modules/UrlbarMatch.jsm",
+  UrlbarResult: "resource:///modules/UrlbarResult.jsm",
+  UrlbarQueryContext: "resource:///modules/UrlbarUtils.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
 
-/* global sinon */
-Services.scriptloader.loadSubScript("resource://testing-common/sinon-2.3.2.js");
+/* import-globals-from head-common.js */
+Services.scriptloader.loadSubScript(
+  "chrome://mochitests/content/browser/browser/components/urlbar/tests/browser/head-common.js",
+  this
+);
 
-registerCleanupFunction(function() {
-  delete window.sinon;
+const { sinon } = ChromeUtils.import("resource://testing-common/Sinon.jsm");
+
+registerCleanupFunction(async () => {
+  // Ensure the Urlbar popup is always closed at the end of a test, to save having
+  // to do it within each test.
+  await UrlbarTestUtils.promisePopupClose(window);
 });

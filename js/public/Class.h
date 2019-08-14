@@ -419,7 +419,7 @@ typedef bool (*JSDeletePropertyOp)(JSContext* cx, JS::HandleObject obj,
  * add enumerable properties.
  */
 typedef bool (*JSNewEnumerateOp)(JSContext* cx, JS::HandleObject obj,
-                                 JS::AutoIdVector& properties,
+                                 JS::MutableHandleIdVector properties,
                                  bool enumerableOnly);
 
 /**
@@ -492,8 +492,6 @@ typedef bool (*JSHasInstanceOp)(JSContext* cx, JS::HandleObject obj,
  * marking its native structures.
  */
 typedef void (*JSTraceOp)(JSTracer* trc, JSObject* obj);
-
-typedef JSObject* (*JSWeakmapKeyDelegateOp)(JSObject* obj);
 
 typedef size_t (*JSObjectMovedOp)(JSObject* obj, JSObject* old);
 
@@ -688,19 +686,6 @@ struct MOZ_STATIC_CLASS ClassSpec {
 
 struct MOZ_STATIC_CLASS ClassExtension {
   /**
-   * If an object is used as a key in a weakmap, it may be desirable for the
-   * garbage collector to keep that object around longer than it otherwise
-   * would. A common case is when the key is a wrapper around an object in
-   * another compartment, and we want to avoid collecting the wrapper (and
-   * removing the weakmap entry) as long as the wrapped object is alive. In
-   * that case, the wrapped object is returned by the wrapper's
-   * weakmapKeyDelegateOp hook. As long as the wrapper is used as a weakmap
-   * key, it will not be collected (and remain in the weakmap) until the
-   * wrapped object is collected.
-   */
-  JSWeakmapKeyDelegateOp weakmapKeyDelegateOp;
-
-  /**
    * Optional hook called when an object is moved by generational or
    * compacting GC.
    *
@@ -816,8 +801,8 @@ static const uint32_t JSCLASS_RESERVED_SLOTS_MASK =
 #define JSCLASS_HIGH_FLAGS_SHIFT \
   (JSCLASS_RESERVED_SLOTS_SHIFT + JSCLASS_RESERVED_SLOTS_WIDTH)
 
-static const uint32_t JSCLASS_IS_ANONYMOUS = 1
-                                             << (JSCLASS_HIGH_FLAGS_SHIFT + 0);
+static const uint32_t JSCLASS_INTERNAL_FLAG1 =
+    1 << (JSCLASS_HIGH_FLAGS_SHIFT + 0);
 static const uint32_t JSCLASS_IS_GLOBAL = 1 << (JSCLASS_HIGH_FLAGS_SHIFT + 1);
 static const uint32_t JSCLASS_INTERNAL_FLAG2 =
     1 << (JSCLASS_HIGH_FLAGS_SHIFT + 2);
@@ -952,9 +937,6 @@ struct MOZ_STATIC_CLASS Class {
     return spec ? spec->finishInit : nullptr;
   }
 
-  JSWeakmapKeyDelegateOp extWeakmapKeyDelegateOp() const {
-    return ext ? ext->weakmapKeyDelegateOp : nullptr;
-  }
   JSObjectMovedOp extObjectMovedOp() const {
     return ext ? ext->objectMovedOp : nullptr;
   }
@@ -1056,9 +1038,7 @@ enum class ESClass {
   SetIterator,
   Arguments,
   Error,
-#ifdef ENABLE_BIGINT
   BigInt,
-#endif
 
   /** None of the above. */
   Other

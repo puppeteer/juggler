@@ -42,7 +42,7 @@ void PrintEvent(UINT msg, bool aShowAllEvents, bool aShowMouseMoves) {
 }
 
 #ifdef DEBUG
-void DDError(const char *msg, HRESULT hr) {
+void DDError(const char* msg, HRESULT hr) {
   /*XXX make nicer */
   MOZ_LOG(gWindowsLog, LogLevel::Error,
           ("direct draw error %s: 0x%08lx\n", msg, hr));
@@ -52,9 +52,9 @@ void DDError(const char *msg, HRESULT hr) {
 #ifdef DEBUG_VK
 bool is_vk_down(int vk) {
   SHORT st = GetKeyState(vk);
-#ifdef DEBUG
+#  ifdef DEBUG
   MOZ_LOG(gWindowsLog, LogLevel::Info, ("is_vk_down vk=%x st=%x\n", vk, st));
-#endif
+#  endif
   return (st < 0);
 }
 #endif

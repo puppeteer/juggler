@@ -108,6 +108,7 @@ class TsBase(Test):
         'tpmozafterpaint',
         'fnbpaint',
         'tphero',
+        'tpmanifest',
         'profile',
         'firstpaint',
         'userready',
@@ -166,6 +167,14 @@ class ts_paint_heavy(ts_paint):
 @register_test()
 class ts_paint_flex(ts_paint):
     preferences = {'layout.css.emulate-moz-box-with-flex': True}
+
+
+@register_test()
+class startup_about_home_paint(ts_paint):
+    url = None
+    cycles = 20
+    extensions = ['${talos}/startup_test/startup_about_home_paint/addon']
+    tpmanifest = '${talos}/startup_test/startup_about_home_paint/startup_about_home_paint.manifest'
 
 
 @register_test()
@@ -262,15 +271,15 @@ class QuantumPageloadTest(PageloaderTest):
 
 
 @register_test()
-class tpaint(PageloaderTest):
+class twinopen(PageloaderTest):
     """
-    Tests the amount of time it takes the open a new window. This test does
-    not include startup time. Multiple test windows are opened in succession,
-    results reported are the average amount of time required to create and
-    display a window in the running instance of the browser.
+    Tests the amount of time it takes an open browser to open a new browser
+    window and paint the browser chrome. This test does not include startup
+    time. Multiple test windows are opened in succession.
     (Measures ctrl-n performance.)
     """
-    tpmanifest = '${talos}/tests/tpaint/tpaint.manifest'
+    extensions = ['${talos}/pageloader', '${talos}/tests/twinopen']
+    tpmanifest = '${talos}/tests/twinopen/twinopen.manifest'
     tppagecycles = 20
     timeout = 300
     gecko_profile_interval = 1
@@ -278,7 +287,9 @@ class tpaint(PageloaderTest):
     tpmozafterpaint = True
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     unit = 'ms'
-    preferences = {'security.data_uri.block_toplevel_data_uri_navigations': False}
+    preferences = {
+        'browser.startup.homepage': 'about:blank'
+    }
 
 
 @register_test()
@@ -330,12 +341,12 @@ class tabpaint(PageloaderTest):
 
 
 @register_test()
-class tps(PageloaderTest):
+class tabswitch(PageloaderTest):
     """
     Tests the amount of time it takes to switch between tabs
     """
     extensions = ['${talos}/tests/tabswitch', '${talos}/pageloader']
-    tpmanifest = '${talos}/tests/tabswitch/tps.manifest'
+    tpmanifest = '${talos}/tests/tabswitch/tabswitch.manifest'
     tppagecycles = 5
     gecko_profile_entries = 5000000
     tploadnocache = True
@@ -883,72 +894,6 @@ class perf_reftest_singletons(PageloaderTest):
     unit = 'ms'
     lower_is_better = True
     alert_threshold = 5.0
-
-
-@register_test()
-class tp6_google(QuantumPageloadTest):
-    """
-    Quantum Pageload Test - Google
-    """
-    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_google.manifest'
-    fnbpaint = False
-    tphero = True
-
-
-@register_test()
-class tp6_google_heavy(tp6_google):
-    """
-    tp6_google test ran against a heavy-user profile
-    """
-    profile = 'simple'
-
-
-@register_test()
-class tp6_youtube(QuantumPageloadTest):
-    """
-    Quantum Pageload Test - YouTube
-    """
-    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_youtube.manifest'
-
-
-@register_test()
-class tp6_youtube_heavy(tp6_youtube):
-    """
-    tp6_youtube test ran against a heavy-user profile
-    """
-    profile = 'simple'
-
-
-@register_test()
-class tp6_amazon(QuantumPageloadTest):
-    """
-    Quantum Pageload Test - Amazon
-    """
-    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_amazon.manifest'
-
-
-@register_test()
-class tp6_amazon_heavy(tp6_amazon):
-    """
-    tp6_amazon test ran against a heavy-user profile
-    """
-    profile = 'simple'
-
-
-@register_test()
-class tp6_facebook(QuantumPageloadTest):
-    """
-    Quantum Pageload Test - Facebook
-    """
-    tpmanifest = '${talos}/tests/quantum_pageload/quantum_pageload_facebook.manifest'
-
-
-@register_test()
-class tp6_facebook_heavy(tp6_facebook):
-    """
-    tp6_facebook test ran against a heavy-user profile
-    """
-    profile = 'simple'
 
 
 @register_test()

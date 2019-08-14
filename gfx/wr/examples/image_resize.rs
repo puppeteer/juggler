@@ -12,8 +12,9 @@ mod boilerplate;
 #[path = "common/image_helper.rs"]
 mod image_helper;
 
-use boilerplate::{Example, HandyDandyRectBuilder};
+use crate::boilerplate::{Example, HandyDandyRectBuilder};
 use webrender::api::*;
+use webrender::api::units::*;
 
 struct App {
     image_key: ImageKey,
@@ -25,8 +26,8 @@ impl Example for App {
         _api: &RenderApi,
         builder: &mut DisplayListBuilder,
         txn: &mut Transaction,
-        _framebuffer_size: DeviceIntSize,
-        _pipeline_id: PipelineId,
+        _device_size: DeviceIntSize,
+        pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
         let (image_descriptor, image_data) = image_helper::make_checkerboard(32, 32);
@@ -38,24 +39,22 @@ impl Example for App {
         );
 
         let bounds = (0, 0).to(512, 512);
-        let info = LayoutPrimitiveInfo::new(bounds);
-        builder.push_stacking_context(
-            &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+
+        builder.push_simple_stacking_context(
+            bounds.origin,
+            space_and_clip.spatial_id,
+            true,
         );
 
         let image_size = LayoutSize::new(100.0, 100.0);
 
-        let info = LayoutPrimitiveInfo::with_clip_rect(
-            LayoutRect::new(LayoutPoint::new(100.0, 100.0), image_size),
-            bounds,
-        );
         builder.push_image(
-            &info,
+            &CommonItemProperties::new(
+                LayoutRect::new(LayoutPoint::new(100.0, 100.0), image_size),
+                space_and_clip,
+            ),
+            bounds,
             image_size,
             LayoutSize::zero(),
             ImageRendering::Auto,
@@ -64,12 +63,12 @@ impl Example for App {
             ColorF::WHITE,
         );
 
-        let info = LayoutPrimitiveInfo::with_clip_rect(
-            LayoutRect::new(LayoutPoint::new(250.0, 100.0), image_size),
-            bounds,
-        );
         builder.push_image(
-            &info,
+            &CommonItemProperties::new(
+                LayoutRect::new(LayoutPoint::new(250.0, 100.0), image_size),
+                space_and_clip,
+            ),
+            bounds,
             image_size,
             LayoutSize::zero(),
             ImageRendering::Pixelated,

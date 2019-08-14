@@ -19,18 +19,24 @@
 #include "nsITimer.h"
 #include "nsRepeatService.h"
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 class nsScrollbarButtonFrame final : public nsButtonBoxFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsScrollbarButtonFrame)
 
-  explicit nsScrollbarButtonFrame(ComputedStyle* aStyle)
-      : nsButtonBoxFrame(aStyle, kClassID), mCursorOnThis(false) {}
+  explicit nsScrollbarButtonFrame(ComputedStyle* aStyle,
+                                  nsPresContext* aPresContext)
+      : nsButtonBoxFrame(aStyle, aPresContext, kClassID),
+        mCursorOnThis(false) {}
 
   // Overrides
   virtual void DestroyFrom(nsIFrame* aDestructRoot,
                            PostDestroyData& aPostDestroyData) override;
 
-  friend nsIFrame* NS_NewScrollbarButtonFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewScrollbarButtonFrame(mozilla::PresShell* aPresShell,
                                               ComputedStyle* aStyle);
 
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
@@ -53,6 +59,7 @@ class nsScrollbarButtonFrame final : public nsButtonBoxFrame {
     return NS_OK;
   }
 
+  MOZ_CAN_RUN_SCRIPT
   NS_IMETHOD HandleDrag(nsPresContext* aPresContext,
                         mozilla::WidgetGUIEvent* aEvent,
                         nsEventStatus* aEventStatus) override {

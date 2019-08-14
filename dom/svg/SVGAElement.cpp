@@ -9,15 +9,16 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStates.h"
+#include "mozilla/dom/BindContext.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/SVGAElementBinding.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsGkAtoms.h"
-#include "nsSVGString.h"
 #include "nsIContentInlines.h"
 #include "nsIURI.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(A)
+NS_IMPL_NS_NEW_SVG_ELEMENT(A)
 
 namespace mozilla {
 namespace dom {
@@ -27,7 +28,7 @@ JSObject* SVGAElement::WrapNode(JSContext* aCx,
   return SVGAElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::StringInfo SVGAElement::sStringInfo[3] = {
+SVGElement::StringInfo SVGAElement::sStringInfo[3] = {
     {nsGkAtoms::href, kNameSpaceID_None, true},
     {nsGkAtoms::href, kNameSpaceID_XLink, true},
     {nsGkAtoms::target, kNameSpaceID_None, true}};
@@ -54,9 +55,7 @@ NS_IMPL_RELEASE_INHERITED(SVGAElement, SVGAElementBase)
 SVGAElement::SVGAElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
     : SVGAElementBase(std::move(aNodeInfo)), Link(this) {}
 
-SVGAElement::~SVGAElement() {}
-
-already_AddRefed<SVGAnimatedString> SVGAElement::Href() {
+already_AddRefed<DOMSVGAnimatedString> SVGAElement::Href() {
   return mStringAttributes[HREF].IsExplicitlySet()
              ? mStringAttributes[HREF].ToDOMAnimatedString(this)
              : mStringAttributes[XLINK_HREF].ToDOMAnimatedString(this);
@@ -87,7 +86,7 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGAElement)
 
 //----------------------------------------------------------------------
 
-already_AddRefed<SVGAnimatedString> SVGAElement::Target() {
+already_AddRefed<DOMSVGAnimatedString> SVGAElement::Target() {
   return mStringAttributes[TARGET].ToDOMAnimatedString(this);
 }
 
@@ -156,27 +155,25 @@ void SVGAElement::SetText(const nsAString& aText, mozilla::ErrorResult& rv) {
 //----------------------------------------------------------------------
 // nsIContent methods
 
-nsresult SVGAElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                                 nsIContent* aBindingParent) {
+nsresult SVGAElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   Link::ResetLinkState(false, Link::ElementHasHref());
 
-  nsresult rv = SVGAElementBase::BindToTree(aDocument, aParent, aBindingParent);
+  nsresult rv = SVGAElementBase::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsIDocument* doc = GetComposedDoc();
-  if (doc) {
+  if (Document* doc = aContext.GetComposedDoc()) {
     doc->RegisterPendingLinkUpdate(this);
   }
 
   return NS_OK;
 }
 
-void SVGAElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  // If this link is ever reinserted into a document, it might
-  // be under a different xml:base, so forget the cached state now.
+void SVGAElement::UnbindFromTree(bool aNullParent) {
+  // Without removing the link state we risk a dangling pointer
+  // in the mStyledLinks hashtable
   Link::ResetLinkState(false, Link::ElementHasHref());
 
-  SVGAElementBase::UnbindFromTree(aDeep, aNullParent);
+  SVGAElementBase::UnbindFromTree(aNullParent);
 }
 
 already_AddRefed<nsIURI> SVGAElement::GetHrefURI() const {
@@ -211,17 +208,17 @@ static bool IsNodeInEditableRegion(nsINode* aNode) {
   return false;
 }
 
-bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
-  if (nsSVGElement::IsSVGFocusable(aIsFocusable, aTabIndex)) {
-    return true;
+bool SVGAElement::IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse) {
+  bool isFocusable = false;
+  if (IsSVGFocusable(&isFocusable, aTabIndex)) {
+    return isFocusable;
   }
 
   // cannot focus links if there is no link handler
-  nsIDocument* doc = GetComposedDoc();
+  Document* doc = GetComposedDoc();
   if (doc) {
     nsPresContext* presContext = doc->GetPresContext();
     if (presContext && !presContext->GetLinkHandler()) {
-      *aIsFocusable = false;
       return false;
     }
   }
@@ -232,10 +229,7 @@ bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
     if (aTabIndex) {
       *aTabIndex = -1;
     }
-
-    *aIsFocusable = false;
-
-    return true;
+    return false;
   }
 
   if (!HasAttr(kNameSpaceID_None, nsGkAtoms::tabindex)) {
@@ -246,9 +240,6 @@ bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
       if (aTabIndex) {
         *aTabIndex = -1;
       }
-
-      *aIsFocusable = false;
-
       return false;
     }
   }
@@ -257,9 +248,7 @@ bool SVGAElement::IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex) {
     *aTabIndex = -1;
   }
 
-  *aIsFocusable = true;
-
-  return false;
+  return true;
 }
 
 bool SVGAElement::IsLink(nsIURI** aURI) const {
@@ -320,7 +309,7 @@ void SVGAElement::GetLinkTarget(nsAString& aTarget) {
       case 1:
         return;
     }
-    nsIDocument* ownerDoc = OwnerDoc();
+    Document* ownerDoc = OwnerDoc();
     if (ownerDoc) {
       ownerDoc->GetBaseTarget(aTarget);
     }
@@ -349,9 +338,9 @@ nsresult SVGAElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-nsSVGElement::StringAttributesInfo SVGAElement::GetStringInfo() {
+SVGElement::StringAttributesInfo SVGAElement::GetStringInfo() {
   return StringAttributesInfo(mStringAttributes, sStringInfo,
                               ArrayLength(sStringInfo));
 }

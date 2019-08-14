@@ -15,6 +15,46 @@
 namespace mozilla {
 namespace gfx {
 
+struct PathOp {
+  PathOp() {}
+  ~PathOp() {}
+
+  enum OpType {
+    OP_MOVETO = 0,
+    OP_LINETO,
+    OP_BEZIERTO,
+    OP_QUADRATICBEZIERTO,
+    OP_ARC,
+    OP_CLOSE
+  };
+
+  OpType mType;
+  Point mP1;
+#if (!defined(__GNUC__) || __GNUC__ >= 7) && defined(__clang__)
+  union {
+    struct {
+      Point mP2;
+      Point mP3;
+    };
+    struct {
+      float mRadius;
+      float mStartAngle;
+      float mEndAngle;
+      bool mAntiClockwise;
+    };
+  };
+#else
+  Point mP2;
+  Point mP3;
+  float mRadius;
+  float mStartAngle;
+  float mEndAngle;
+  bool mAntiClockwise;
+#endif
+};
+
+const int32_t sPointCount[] = {1, 1, 3, 2, 0, 0};
+
 // Kappa constant for 90-degree angle
 const Float kKappaFactor = 0.55191497064665766025f;
 
@@ -83,7 +123,7 @@ inline void AcuteArcToBezier(T* aSink, const Point& aOrigin,
 template <typename T>
 void ArcToBezier(T* aSink, const Point& aOrigin, const Size& aRadius,
                  float aStartAngle, float aEndAngle, bool aAntiClockwise,
-                 float aRotation = 0.0f) {
+                 float aRotation = 0.0f, const Matrix& aTransform = Matrix()) {
   Float sweepDirection = aAntiClockwise ? -1.0f : 1.0f;
 
   // Calculate the total arc we're going to sweep.
@@ -108,6 +148,7 @@ void ArcToBezier(T* aSink, const Point& aOrigin, const Size& aRadius,
     transform *= Matrix::Rotation(aRotation);
   }
   transform.PostTranslate(aOrigin);
+  transform *= aTransform;
   aSink->LineTo(transform.TransformPoint(currentStartOffset));
 
   while (arcSweepLeft > 0) {

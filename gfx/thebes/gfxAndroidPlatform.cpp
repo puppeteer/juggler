@@ -12,6 +12,7 @@
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/intl/OSPreferences.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs.h"
 
 #include "gfx2DGlue.h"
 #include "gfxFT2FontList.h"
@@ -22,7 +23,6 @@
 #include "nsIScreenManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsUnicodeProperties.h"
-#include "gfxPrefs.h"
 #include "cairo.h"
 #include "VsyncSource.h"
 
@@ -93,7 +93,7 @@ gfxAndroidPlatform::gfxAndroidPlatform() {
   mOffscreenFormat = GetScreenDepth() == 16 ? SurfaceFormat::R5G6B5_UINT16
                                             : SurfaceFormat::X8R8G8B8_UINT32;
 
-  if (gfxPrefs::AndroidRGB16Force()) {
+  if (StaticPrefs::gfx_android_rgb16_force()) {
     mOffscreenFormat = SurfaceFormat::R5G6B5_UINT16;
   }
 }
@@ -165,10 +165,13 @@ void gfxAndroidPlatform::GetCommonFallbackFonts(
     uint8_t block = (aCh >> 8) & 0xff;
     switch (block) {
       case 0x05:
+        aFontList.AppendElement("Noto Sans Hebrew");
         aFontList.AppendElement("Droid Sans Hebrew");
+        aFontList.AppendElement("Noto Sans Armenian");
         aFontList.AppendElement("Droid Sans Armenian");
         break;
       case 0x06:
+        aFontList.AppendElement("Noto Sans Arabic");
         aFontList.AppendElement("Droid Sans Arabic");
         break;
       case 0x09:
@@ -185,11 +188,21 @@ void gfxAndroidPlatform::GetCommonFallbackFonts(
         break;
       case 0x10:
       case 0x2d:
+        aFontList.AppendElement("Noto Sans Georgian");
         aFontList.AppendElement("Droid Sans Georgian");
         break;
       case 0x12:
       case 0x13:
+        aFontList.AppendElement("Noto Sans Ethiopic");
         aFontList.AppendElement("Droid Sans Ethiopic");
+        break;
+      case 0x21:
+      case 0x23:
+      case 0x24:
+      case 0x26:
+      case 0x27:
+      case 0x29:
+        aFontList.AppendElement("Noto Sans Symbols");
         break;
       case 0xf9:
       case 0xfa:
@@ -343,7 +356,7 @@ class AndroidVsyncSource final : public VsyncSource {
   Display& GetGlobalDisplay() final { return GetDisplayInstance(); }
 
  private:
-  virtual ~AndroidVsyncSource() {}
+  virtual ~AndroidVsyncSource() = default;
 
   static Display& GetDisplayInstance() {
     static Display globalDisplay;

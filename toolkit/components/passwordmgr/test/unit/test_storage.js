@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -13,8 +11,7 @@
 
 // Globals
 
-async function reloadAndCheckLoginsGen(aExpectedLogins)
-{
+async function reloadAndCheckLoginsGen(aExpectedLogins) {
   await LoginTestUtils.reloadData();
   LoginTestUtils.checkLogins(aExpectedLogins);
   LoginTestUtils.clearData();
@@ -25,14 +22,13 @@ async function reloadAndCheckLoginsGen(aExpectedLogins)
 /**
  * Tests addLogin with valid non-ASCII characters.
  */
-add_task(async function test_storage_addLogin_nonascii()
-{
-  let hostname = "http://" + String.fromCharCode(355) + ".example.com";
+add_task(async function test_storage_addLogin_nonascii() {
+  let origin = "http://" + String.fromCharCode(355) + ".example.com";
 
   // Store the strings "user" and "pass" using similarly looking glyphs.
   let loginInfo = TestData.formLogin({
-    hostname,
-    formSubmitURL: hostname,
+    origin,
+    formActionOrigin: origin,
     username: String.fromCharCode(533, 537, 7570, 345),
     password: String.fromCharCode(421, 259, 349, 537),
     usernameField: "field_" + String.fromCharCode(533, 537, 7570, 345),
@@ -52,8 +48,7 @@ add_task(async function test_storage_addLogin_nonascii()
 /**
  * Tests addLogin with newline characters in the username and password.
  */
-add_task(async function test_storage_addLogin_newlines()
-{
+add_task(async function test_storage_addLogin_newlines() {
   let loginInfo = TestData.formLogin({
     username: "user\r\nname",
     password: "password\r\n",
@@ -67,9 +62,8 @@ add_task(async function test_storage_addLogin_newlines()
  *
  * These tests exist to verify the legacy "signons.txt" storage format.
  */
-add_task(async function test_storage_addLogin_dot()
-{
-  let loginInfo = TestData.formLogin({ hostname: ".", passwordField: "." });
+add_task(async function test_storage_addLogin_dot() {
+  let loginInfo = TestData.formLogin({ origin: ".", passwordField: "." });
   Services.logins.addLogin(loginInfo);
   await reloadAndCheckLoginsGen([loginInfo]);
 
@@ -79,21 +73,20 @@ add_task(async function test_storage_addLogin_dot()
 });
 
 /**
- * Tests addLogin with parentheses in hostnames.
+ * Tests addLogin with parentheses in origins.
  *
  * These tests exist to verify the legacy "signons.txt" storage format.
  */
-add_task(async function test_storage_addLogin_parentheses()
-{
+add_task(async function test_storage_addLogin_parentheses() {
   let loginList = [
     TestData.authLogin({ httpRealm: "(realm" }),
     TestData.authLogin({ httpRealm: "realm)" }),
     TestData.authLogin({ httpRealm: "(realm)" }),
     TestData.authLogin({ httpRealm: ")realm(" }),
-    TestData.authLogin({ hostname: "http://parens(.example.com" }),
-    TestData.authLogin({ hostname: "http://parens).example.com" }),
-    TestData.authLogin({ hostname: "http://parens(example).example.com" }),
-    TestData.authLogin({ hostname: "http://parens)example(.example.com" }),
+    TestData.authLogin({ origin: "http://parens(.example.com" }),
+    TestData.authLogin({ origin: "http://parens).example.com" }),
+    TestData.authLogin({ origin: "http://parens(example).example.com" }),
+    TestData.authLogin({ origin: "http://parens)example(.example.com" }),
   ];
   for (let loginInfo of loginList) {
     Services.logins.addLogin(loginInfo);

@@ -2,11 +2,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, unicode_literals
 
 from mozpack.chrome.manifest import (
     Manifest,
-    ManifestEntryWithRelPath,
     ManifestInterfaces,
     ManifestChrome,
     ManifestBinaryComponent,
@@ -14,7 +13,7 @@ from mozpack.chrome.manifest import (
     ManifestMultiContent,
 )
 from mozpack.errors import errors
-from urlparse import urlparse
+from six.moves.urllib.parse import urlparse
 import mozpack.path as mozpath
 from mozpack.files import ManifestFile
 from mozpack.copier import (
@@ -44,6 +43,8 @@ The base interface provides the following methods:
         The optional addon argument tells whether the base directory
         is that of a packed addon (True), unpacked addon ('unpacked') or
         otherwise (False).
+        The method may only be called in sorted order of `path` (alphanumeric
+        order, parents before children).
     - add(path, content)
         Add the given content (BaseFile instance) at the given virtual path
     - add_interfaces(path, content)
@@ -67,6 +68,7 @@ class PiecemealFormatter(object):
     Generic formatter that dispatches across different sub-formatters
     according to paths.
     '''
+
     def __init__(self, copier):
         assert isinstance(copier, (FileRegistry, FileRegistrySubtree))
         self.copier = copier
@@ -77,6 +79,7 @@ class PiecemealFormatter(object):
         # Only allow to add a base directory before calls to _get_base()
         assert not self._frozen_bases
         assert base not in self._sub_formatter
+        assert all(base > b for b in self._sub_formatter)
         self._add_base(base, addon)
 
     def _get_base(self, path):
@@ -116,6 +119,7 @@ class FlatFormatter(PiecemealFormatter):
     '''
     Formatter for the flat package format.
     '''
+
     def _add_base(self, base, addon=False):
         self._sub_formatter[base] = FlatSubFormatter(
             FileRegistrySubtree(base, self.copier))
@@ -125,6 +129,7 @@ class FlatSubFormatter(object):
     '''
     Sub-formatter for the flat package format.
     '''
+
     def __init__(self, copier):
         assert isinstance(copier, (FileRegistry, FileRegistrySubtree))
         self.copier = copier
@@ -149,7 +154,7 @@ class FlatSubFormatter(object):
                 parent = mozpath.dirname(entry.base)
                 relbase = mozpath.basename(entry.base)
                 relpath = mozpath.join(relbase,
-                                            mozpath.basename(path))
+                                       mozpath.basename(path))
                 self.add_manifest(Manifest(parent, relpath))
             self.copier.add(path, ManifestFile(entry.base))
 
@@ -190,20 +195,20 @@ class JarFormatter(PiecemealFormatter):
     manifest entries for resources are registered after chrome manifest
     entries.
     '''
-    def __init__(self, copier, compress=True, optimize=True):
+
+    def __init__(self, copier, compress=True):
         PiecemealFormatter.__init__(self, copier)
-        self._compress=compress
-        self._optimize=optimize
+        self._compress = compress
 
     def _add_base(self, base, addon=False):
         if addon is True:
-            jarrer = Jarrer(self._compress, self._optimize)
+            jarrer = Jarrer(self._compress)
             self.copier.add(base + '.xpi', jarrer)
             self._sub_formatter[base] = FlatSubFormatter(jarrer)
         else:
             self._sub_formatter[base] = JarSubFormatter(
                 FileRegistrySubtree(base, self.copier),
-                self._compress, self._optimize)
+                self._compress)
 
 
 class JarSubFormatter(PiecemealFormatter):
@@ -213,11 +218,11 @@ class JarSubFormatter(PiecemealFormatter):
     dispatches the chrome data to, and a FlatSubFormatter for the non-chrome
     files.
     '''
-    def __init__(self, copier, compress=True, optimize=True):
+
+    def __init__(self, copier, compress=True):
         PiecemealFormatter.__init__(self, copier)
         self._frozen_chrome = False
         self._compress = compress
-        self._optimize = optimize
         self._sub_formatter[''] = FlatSubFormatter(copier)
 
     def _jarize(self, entry, relpath):
@@ -239,7 +244,7 @@ class JarSubFormatter(PiecemealFormatter):
             chromepath, entry = self._jarize(entry, entry.relpath)
             assert not self._frozen_chrome
             if chromepath not in self._sub_formatter:
-                jarrer = Jarrer(self._compress, self._optimize)
+                jarrer = Jarrer(self._compress)
                 self.copier.add(chromepath + '.jar', jarrer)
                 self._sub_formatter[chromepath] = FlatSubFormatter(jarrer)
         elif isinstance(entry, ManifestResource) and \
@@ -254,14 +259,28 @@ class OmniJarFormatter(JarFormatter):
     '''
     Formatter for the omnijar package format.
     '''
-    def __init__(self, copier, omnijar_name, compress=True, optimize=True,
-                 non_resources=()):
-        JarFormatter.__init__(self, copier, compress, optimize)
+
+    def __init__(self, copier, omnijar_name, compress=True, non_resources=()):
+        JarFormatter.__init__(self, copier, compress)
         self._omnijar_name = omnijar_name
         self._non_resources = non_resources
 
     def _add_base(self, base, addon=False):
         if addon:
+            # Because add_base is always called with parents before children,
+            # all the possible ancestry of `base` is already present in
+            # `_sub_formatter`.
+            parent_base = mozpath.basedir(base, self._sub_formatter.keys())
+            rel_base = mozpath.relpath(base, parent_base)
+            # If the addon is under a resource directory, package it in the
+            # omnijar.
+            parent_sub_formatter = self._sub_formatter[parent_base]
+            if parent_sub_formatter.is_resource(rel_base):
+                omnijar_sub_formatter = \
+                    parent_sub_formatter._sub_formatter[self._omnijar_name]
+                self._sub_formatter[base] = FlatSubFormatter(
+                    FileRegistrySubtree(rel_base, omnijar_sub_formatter.copier))
+                return
             JarFormatter._add_base(self, base, addon)
         else:
             # Initialize a chrome.manifest next to the omnijar file so that
@@ -271,7 +290,7 @@ class OmniJarFormatter(JarFormatter):
                 self.copier.add(path, ManifestFile(''))
             self._sub_formatter[base] = OmniJarSubFormatter(
                 FileRegistrySubtree(base, self.copier), self._omnijar_name,
-                self._compress, self._optimize, self._non_resources)
+                self._compress, self._non_resources)
 
 
 class OmniJarSubFormatter(PiecemealFormatter):
@@ -280,15 +299,14 @@ class OmniJarSubFormatter(PiecemealFormatter):
     that dispatches between a FlatSubFormatter for the resources data and
     another FlatSubFormatter for the other files.
     '''
-    def __init__(self, copier, omnijar_name, compress=True, optimize=True,
-                 non_resources=()):
+
+    def __init__(self, copier, omnijar_name, compress=True, non_resources=()):
         PiecemealFormatter.__init__(self, copier)
         self._omnijar_name = omnijar_name
         self._compress = compress
-        self._optimize = optimize
         self._non_resources = non_resources
         self._sub_formatter[''] = FlatSubFormatter(copier)
-        jarrer = Jarrer(self._compress, self._optimize)
+        jarrer = Jarrer(self._compress)
         self._sub_formatter[omnijar_name] = FlatSubFormatter(jarrer)
 
     def _get_base(self, path):
@@ -320,16 +338,20 @@ class OmniJarSubFormatter(PiecemealFormatter):
             return path[-1].endswith(('.js', '.xpt'))
         if path[0] == 'res':
             return len(path) == 1 or \
-                (path[1] != 'cursors' and path[1] != 'MainMenu.nib')
+                (path[1] != 'cursors' and
+                 path[1] != 'touchbar' and
+                 path[1] != 'MainMenu.nib')
         if path[0] == 'defaults':
             return len(path) != 3 or \
                 not (path[2] == 'channel-prefs.js' and
                      path[1] in ['pref', 'preferences'])
+        if len(path) <= 2 and path[-1] == 'greprefs.js':
+            # Accommodate `greprefs.js` and `$ANDROID_CPU_ARCH/greprefs.js`.
+            return True
         return path[0] in [
             'modules',
             'actors',
             'dictionaries',
-            'greprefs.js',
             'hyphenation',
             'localization',
             'update.locale',

@@ -43,7 +43,7 @@
 
 /* Android headers don't define RUSAGE_THREAD */
 #ifndef RUSAGE_THREAD
-#define RUSAGE_THREAD 1
+#  define RUSAGE_THREAD 1
 #endif
 
 #ifndef RELEASE_OR_BETA
@@ -143,9 +143,9 @@ static void* sqlite_handle = nullptr;
 static void* nspr_handle = nullptr;
 static void* plc_handle = nullptr;
 #else
-#define sqlite_handle nss_handle
-#define nspr_handle nss_handle
-#define plc_handle nss_handle
+#  define sqlite_handle nss_handle
+#  define nspr_handle nss_handle
+#  define plc_handle nss_handle
 #endif
 static void* nss_handle = nullptr;
 
@@ -196,7 +196,8 @@ static mozglueresult loadGeckoLibs() {
   getrusage(RUSAGE_THREAD, &usage1_thread);
   getrusage(RUSAGE_SELF, &usage1);
 
-  gBootstrap = GetBootstrap(getUnpackedLibraryName("libxul.so").get());
+  gBootstrap = GetBootstrap(getUnpackedLibraryName("libxul.so").get(),
+                            LibLoadingStrategy::ReadAhead);
   if (!gBootstrap) {
     __android_log_print(ANDROID_LOG_ERROR, "GeckoLibLoad",
                         "Couldn't get a handle to libxul!");
@@ -379,6 +380,11 @@ Java_org_mozilla_gecko_mozglue_GeckoLoader_nativeRun(JNIEnv* jenv, jclass jc,
     gBootstrap->XRE_InitChildProcess(argc - 1, argv, &childData);
   }
 
+#ifdef MOZ_WIDGET_ANDROID
+#  ifdef MOZ_PROFILE_GENERATE
+  gBootstrap->XRE_WriteLLVMProfData();
+#  endif
+#endif
   gBootstrap.reset();
   FreeArgv(argv, argc);
 }
@@ -432,7 +438,7 @@ static bool IsMediaProcess() {
 }
 
 #ifndef SYS_rt_tgsigqueueinfo
-#define SYS_rt_tgsigqueueinfo __NR_rt_tgsigqueueinfo
+#  define SYS_rt_tgsigqueueinfo __NR_rt_tgsigqueueinfo
 #endif
 /* Copy of http://androidxref.com/7.1.1_r6/xref/bionic/linker/debugger.cpp#262,
  * with debuggerd related code stripped.

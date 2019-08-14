@@ -5,8 +5,6 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 import concurrent.futures as futures
-import requests
-import requests.adapters
 import json
 import os
 import sys
@@ -15,28 +13,16 @@ import logging
 from slugid import nice as slugid
 from taskgraph.util.parameterization import resolve_timestamps
 from taskgraph.util.time import current_json_time
+from taskgraph.util.taskcluster import get_session, CONCURRENCY
 
 logger = logging.getLogger(__name__)
-
-# the maximum number of parallel createTask calls to make
-CONCURRENCY = 50
 
 # this is set to true for `mach taskgraph action-callback --test`
 testing = False
 
 
-def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
+def create_tasks(graph_config, taskgraph, label_to_taskid, params, decision_task_id=None):
     taskid_to_label = {t: l for l, t in label_to_taskid.iteritems()}
-
-    session = requests.Session()
-
-    # Default HTTPAdapter uses 10 connections. Mount custom adapter to increase
-    # that limit. Connections are established as needed, so using a large value
-    # should not negatively impact performance.
-    http_adapter = requests.adapters.HTTPAdapter(pool_connections=CONCURRENCY,
-                                                 pool_maxsize=CONCURRENCY)
-    session.mount('https://', http_adapter)
-    session.mount('http://', http_adapter)
 
     decision_task_id = decision_task_id or os.environ.get('TASK_ID')
 
@@ -45,7 +31,7 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
     # helpfully placed it in this same taskGroup.  If there is no $TASK_ID,
     # fall back to a slugid
     task_group_id = decision_task_id or slugid()
-    scheduler_id = 'gecko-level-{}'.format(params['level'])
+    scheduler_id = '{}-level-{}'.format(graph_config['trust-domain'], params['level'])
 
     # Add the taskGroupId, schedulerId and optionally the decision task
     # dependency
@@ -66,6 +52,7 @@ def create_tasks(taskgraph, label_to_taskid, params, decision_task_id=None):
 
     # If `testing` is True, then run without parallelization
     concurrency = CONCURRENCY if not testing else 1
+    session = get_session()
     with futures.ThreadPoolExecutor(concurrency) as e:
         fs = {}
 

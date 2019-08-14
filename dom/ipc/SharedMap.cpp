@@ -14,6 +14,7 @@
 #include "mozilla/dom/ContentProcessMessageManager.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/ScriptPreloader.h"
 
 using namespace mozilla::loader;
 
@@ -44,6 +45,7 @@ SharedMap::SharedMap(nsIGlobalObject* aGlobal, const FileDescriptor& aMapFile,
 }
 
 bool SharedMap::Has(const nsACString& aName) {
+  Unused << MaybeRebuild();
   return mEntries.Contains(aName);
 }
 
@@ -414,8 +416,10 @@ nsresult WritableSharedMap::KeyChanged(const nsACString& aName) {
   mEntryArray.reset();
 
   if (!mPendingFlush) {
-    MOZ_TRY(NS_IdleDispatchToCurrentThread(NewRunnableMethod(
-        "WritableSharedMap::IdleFlush", this, &WritableSharedMap::IdleFlush)));
+    MOZ_TRY(NS_DispatchToCurrentThreadQueue(
+        NewRunnableMethod("WritableSharedMap::IdleFlush", this,
+                          &WritableSharedMap::IdleFlush),
+        EventQueuePriority::Idle));
     mPendingFlush = true;
   }
   return NS_OK;
@@ -430,10 +434,10 @@ JSObject* WritableSharedMap::WrapObject(JSContext* aCx,
   return MozWritableSharedMap_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-/* static */ already_AddRefed<SharedMapChangeEvent>
-SharedMapChangeEvent::Constructor(EventTarget* aEventTarget,
-                                  const nsAString& aType,
-                                  const MozSharedMapChangeEventInit& aInit) {
+/* static */
+already_AddRefed<SharedMapChangeEvent> SharedMapChangeEvent::Constructor(
+    EventTarget* aEventTarget, const nsAString& aType,
+    const MozSharedMapChangeEventInit& aInit) {
   RefPtr<SharedMapChangeEvent> event = new SharedMapChangeEvent(aEventTarget);
 
   bool trusted = event->Init(aEventTarget);

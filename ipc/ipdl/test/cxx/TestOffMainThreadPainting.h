@@ -16,9 +16,8 @@ class TestPaintThreadChild;
 class TestPaintThreadParent;
 
 // Analagous to LayerTransactionParent.
-class TestOffMainThreadPaintingParent final : public PTestLayoutThreadParent
-{
-public:
+class TestOffMainThreadPaintingParent final : public PTestLayoutThreadParent {
+ public:
   static bool RunTestInThreads() { return false; }
   static bool RunTestInProcesses() { return true; }
 
@@ -27,15 +26,15 @@ public:
   MOZ_IMPLICIT TestOffMainThreadPaintingParent();
   ~TestOffMainThreadPaintingParent() override;
 
-  ipc::IPCResult RecvFinishedLayout(const uint64_t& aTxnId) override;
-  ipc::IPCResult RecvAsyncMessage(const uint64_t& aTxnId) override;
-  ipc::IPCResult RecvSyncMessage(const uint64_t& aTxnId) override;
-  ipc::IPCResult RecvEndTest() override;
+  ipc::IPCResult RecvFinishedLayout(const uint64_t& aTxnId);
+  ipc::IPCResult RecvAsyncMessage(const uint64_t& aTxnId);
+  ipc::IPCResult RecvSyncMessage(const uint64_t& aTxnId);
+  ipc::IPCResult RecvEndTest();
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
   void NotifyFinishedPaint(const uint64_t& aTxnId);
 
-private:
+ private:
   RefPtr<TestPaintThreadParent> mPaintActor;
   Maybe<uint64_t> mCompletedTxn;
   Maybe<uint64_t> mPaintedTxn;
@@ -44,20 +43,20 @@ private:
 };
 
 // Analagous to LayerTransactionChild.
-class TestOffMainThreadPaintingChild final : public PTestLayoutThreadChild
-{
-public:
+class TestOffMainThreadPaintingChild final : public PTestLayoutThreadChild {
+ public:
   TestOffMainThreadPaintingChild();
   ~TestOffMainThreadPaintingChild() override;
 
-  ipc::IPCResult RecvStartTest(ipc::Endpoint<PTestPaintThreadChild>&& aEndpoint) override;
+  ipc::IPCResult RecvStartTest(
+      ipc::Endpoint<PTestPaintThreadChild>&& aEndpoint);
   void ActorDestroy(ActorDestroyReason aWhy) override;
   void ProcessingError(Result aCode, const char* aReason) override;
 
-private:
+ private:
   void IssueTransaction();
 
-private:
+ private:
   UniquePtr<base::Thread> mPaintThread;
   RefPtr<TestPaintThreadChild> mPaintActor;
   uint64_t mNextTxnId;
@@ -67,28 +66,26 @@ private:
  * Paint Actors *
  ****************/
 
-class TestPaintThreadParent final : public PTestPaintThreadParent
-{
-public:
+class TestPaintThreadParent final : public PTestPaintThreadParent {
+ public:
   explicit TestPaintThreadParent(TestOffMainThreadPaintingParent* aMainBridge);
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TestPaintThreadParent);
 
   bool Bind(ipc::Endpoint<PTestPaintThreadParent>&& aEndpoint);
-  ipc::IPCResult RecvFinishedPaint(const uint64_t& aTxnId) override;
+  ipc::IPCResult RecvFinishedPaint(const uint64_t& aTxnId);
   void ActorDestroy(ActorDestroyReason aWhy) override;
   void DeallocPTestPaintThreadParent() override;
 
-private:
+ private:
   ~TestPaintThreadParent() override;
 
-private:
+ private:
   TestOffMainThreadPaintingParent* mMainBridge;
 };
 
-class TestPaintThreadChild final : public PTestPaintThreadChild
-{
-public:
+class TestPaintThreadChild final : public PTestPaintThreadChild {
+ public:
   explicit TestPaintThreadChild(MessageChannel* aOtherChannel);
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TestPaintThreadChild);
@@ -99,14 +96,14 @@ public:
   void DeallocPTestPaintThreadChild() override;
   void Close();
 
-private:
+ private:
   ~TestPaintThreadChild() override;
 
   bool mCanSend;
   MessageChannel* mMainChannel;
 };
 
-} // namespace _ipdltest
-} // namespace mozilla
+}  // namespace _ipdltest
+}  // namespace mozilla
 
-#endif // ifndef mozilla__ipdltest_TestOffMainThreadPainting_h
+#endif  // ifndef mozilla__ipdltest_TestOffMainThreadPainting_h

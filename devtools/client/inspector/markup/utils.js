@@ -10,11 +10,17 @@
  *
  * @param  {Node} backgroundElt
  *         The element to set the highlighted background color on.
- * @param  {Node} foregroundElt
- *         The element to set the matching foreground color on.
- *         Optional.  This will equal backgroundElt if not set.
+ * @param  {Object} options
+ * @param  {Node} options.foregroundElt
+ *         The element to set the matching foreground color on. This will equal
+ *         backgroundElt if not set.
+ * @param  {String} options.backgroundClass
+ *         The background highlight color class to set on the element.
  */
-function flashElementOn(backgroundElt, foregroundElt = backgroundElt) {
+function flashElementOn(
+  backgroundElt,
+  { foregroundElt = backgroundElt, backgroundClass = "theme-bg-contrast" } = {}
+) {
   if (!backgroundElt || !foregroundElt) {
     return;
   }
@@ -23,7 +29,7 @@ function flashElementOn(backgroundElt, foregroundElt = backgroundElt) {
   backgroundElt.classList.remove("flash-out");
 
   // Change the background
-  backgroundElt.classList.add("theme-bg-contrast");
+  backgroundElt.classList.add(backgroundClass);
 
   foregroundElt.classList.add("theme-fg-contrast");
   [].forEach.call(
@@ -38,11 +44,17 @@ function flashElementOn(backgroundElt, foregroundElt = backgroundElt) {
  *
  * @param  {Node} backgroundElt
  *         The element to remove the highlighted background color on.
- * @param  {Node} foregroundElt
- *         The element to remove the matching foreground color on.
- *         Optional.  This will equal backgroundElt if not set.
+ * @param  {Object} options
+ * @param  {Node} options.foregroundElt
+ *         The element to remove the matching foreground color on. This will equal
+ *         backgroundElt if not set.
+ * @param  {String} options.backgroundClass
+ *         The background highlight color class to remove on the element.
  */
-function flashElementOff(backgroundElt, foregroundElt = backgroundElt) {
+function flashElementOff(
+  backgroundElt,
+  { foregroundElt = backgroundElt, backgroundClass = "theme-bg-contrast" } = {}
+) {
   if (!backgroundElt || !foregroundElt) {
     return;
   }
@@ -51,7 +63,7 @@ function flashElementOff(backgroundElt, foregroundElt = backgroundElt) {
   backgroundElt.classList.add("flash-out");
 
   // Remove the background
-  backgroundElt.classList.remove("theme-bg-contrast");
+  backgroundElt.classList.remove(backgroundClass);
 
   foregroundElt.classList.remove("theme-fg-contrast");
   [].forEach.call(
@@ -91,13 +103,14 @@ function parseAttributeValues(attr, doc) {
   // Handle bad user inputs by appending a " or ' if it fails to parse without
   // them. Also note that a SVG tag is used to make sure the HTML parser
   // preserves mixed-case attributes
-  const el = parseAndGetNode("<svg " + attr + "></svg>") ||
-           parseAndGetNode("<svg " + attr + "\"></svg>") ||
-           parseAndGetNode("<svg " + attr + "'></svg>");
+  const el =
+    parseAndGetNode("<svg " + attr + "></svg>") ||
+    parseAndGetNode("<svg " + attr + '"></svg>') ||
+    parseAndGetNode("<svg " + attr + "'></svg>");
 
   const div = doc.createElement("div");
   const attributes = [];
-  for (const {name, value} of el.attributes) {
+  for (const { name, value } of el.attributes) {
     // Try to set on an element in the document, throws exception on bad input.
     // Prevents InvalidCharacterError - "String contains an invalid character".
     try {

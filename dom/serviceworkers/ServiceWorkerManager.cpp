@@ -40,7 +40,6 @@
 #include "mozilla/dom/ClientSource.h"
 #include "mozilla/dom/ConsoleUtils.h"
 #include "mozilla/dom/ContentParent.h"
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/ErrorEvent.h"
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/InternalHeaders.h"
@@ -84,7 +83,7 @@
 #include "ServiceWorkerUtils.h"
 
 #ifdef PostMessage
-#undef PostMessage
+#  undef PostMessage
 #endif
 
 using namespace mozilla;
@@ -329,7 +328,7 @@ RefPtr<GenericPromise> ServiceWorkerManager::StartControllingClient(
     bool aControlClientHandle) {
   MOZ_DIAGNOSTIC_ASSERT(aRegistrationInfo->GetActive());
 
-  RefPtr<GenericPromise> ref;
+  RefPtr<GenericPromise> promise;
   RefPtr<ServiceWorkerManager> self(this);
 
   const ServiceWorkerDescriptor& active =
@@ -341,9 +340,9 @@ RefPtr<GenericPromise> ServiceWorkerManager::StartControllingClient(
         entry.Data()->mRegistrationInfo.forget();
 
     if (aControlClientHandle) {
-      ref = entry.Data()->mClientHandle->Control(active);
+      promise = entry.Data()->mClientHandle->Control(active);
     } else {
-      ref = GenericPromise::CreateAndResolve(false, __func__);
+      promise = GenericPromise::CreateAndResolve(false, __func__);
     }
 
     entry.Data()->mRegistrationInfo = aRegistrationInfo;
@@ -357,25 +356,26 @@ RefPtr<GenericPromise> ServiceWorkerManager::StartControllingClient(
 
     // Always check to see if we failed to actually control the client.  In
     // that case removed the client from our list of controlled clients.
-    ref->Then(SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
-              [](bool) {
-                // do nothing on success
-              },
-              [self, aClientInfo](nsresult aRv) {
-                // failed to control, forget about this client
-                self->StopControllingClient(aClientInfo);
-              });
-
-    return ref;
+    return promise->Then(
+        SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+        [](bool) {
+          // do nothing on success
+          return GenericPromise::CreateAndResolve(true, __func__);
+        },
+        [self, aClientInfo](nsresult aRv) {
+          // failed to control, forget about this client
+          self->StopControllingClient(aClientInfo);
+          return GenericPromise::CreateAndReject(aRv, __func__);
+        });
   }
 
   RefPtr<ClientHandle> clientHandle = ClientManager::CreateHandle(
       aClientInfo, SystemGroup::EventTargetFor(TaskCategory::Other));
 
   if (aControlClientHandle) {
-    ref = clientHandle->Control(active);
+    promise = clientHandle->Control(active);
   } else {
-    ref = GenericPromise::CreateAndResolve(false, __func__);
+    promise = GenericPromise::CreateAndResolve(false, __func__);
   }
 
   aRegistrationInfo->StartControllingClient();
@@ -392,16 +392,17 @@ RefPtr<GenericPromise> ServiceWorkerManager::StartControllingClient(
 
   // Always check to see if we failed to actually control the client.  In
   // that case removed the client from our list of controlled clients.
-  ref->Then(SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
-            [](bool) {
-              // do nothing on success
-            },
-            [self, aClientInfo](nsresult aRv) {
-              // failed to control, forget about this client
-              self->StopControllingClient(aClientInfo);
-            });
-
-  return ref;
+  return promise->Then(
+      SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+      [](bool) {
+        // do nothing on success
+        return GenericPromise::CreateAndResolve(true, __func__);
+      },
+      [self, aClientInfo](nsresult aRv) {
+        // failed to control, forget about this client
+        self->StopControllingClient(aClientInfo);
+        return GenericPromise::CreateAndReject(aRv, __func__);
+      });
 }
 
 void ServiceWorkerManager::StopControllingClient(
@@ -442,6 +443,12 @@ void ServiceWorkerManager::MaybeStartShutdown() {
       queue->CancelAll();
     }
     it1.UserData()->mJobQueues.Clear();
+
+    for (auto it2 = it1.UserData()->mInfos.Iter(); !it2.Done(); it2.Next()) {
+      RefPtr<ServiceWorkerRegistrationInfo> regInfo = it2.UserData();
+      regInfo->Clear();
+    }
+    it1.UserData()->mInfos.Clear();
   }
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -770,9 +777,8 @@ RefPtr<ServiceWorkerRegistrationPromise> ServiceWorkerManager::Register(
   RefPtr<ServiceWorkerResolveWindowPromiseOnRegisterCallback> cb =
       new ServiceWorkerResolveWindowPromiseOnRegisterCallback();
 
-  nsCOMPtr<nsILoadGroup> loadGroup = do_CreateInstance(NS_LOADGROUP_CONTRACTID);
   RefPtr<ServiceWorkerRegisterJob> job = new ServiceWorkerRegisterJob(
-      principal, aScopeURL, aScriptURL, loadGroup,
+      principal, aScopeURL, aScriptURL,
       static_cast<ServiceWorkerUpdateViaCache>(aUpdateViaCache));
 
   job->AppendResultCallback(cb);
@@ -950,14 +956,18 @@ RefPtr<ServiceWorkerRegistrationPromise> ServiceWorkerManager::GetRegistration(
 NS_IMETHODIMP
 ServiceWorkerManager::SendPushEvent(const nsACString& aOriginAttributes,
                                     const nsACString& aScope,
-                                    uint32_t aDataLength, uint8_t* aDataBytes,
+                                    const nsTArray<uint8_t>& aDataBytes,
                                     uint8_t optional_argc) {
-  if (optional_argc == 2) {
-    nsTArray<uint8_t> data;
-    if (!data.InsertElementsAt(0, aDataBytes, aDataLength, fallible)) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    return SendPushEvent(aOriginAttributes, aScope, EmptyString(), Some(data));
+  if (optional_argc == 1) {
+    // This does one copy here (while constructing the Maybe) and another when
+    // we end up copying into the SendPushEventRunnable.  We could fix that to
+    // only do one copy by making things between here and there take
+    // Maybe<nsTArray<uint8_t>>&&, but then we'd need to copy before we know
+    // whether we really need to in PushMessageDispatcher::NotifyWorkers.  Since
+    // in practice this only affects JS callers that pass data, and we don't
+    // have any right now, let's not worry about it.
+    return SendPushEvent(aOriginAttributes, aScope, EmptyString(),
+                         Some(aDataBytes));
   }
   MOZ_ASSERT(optional_argc == 0);
   return SendPushEvent(aOriginAttributes, aScope, EmptyString(), Nothing());
@@ -1503,12 +1513,6 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(nsIPrincipal* aPrincipal,
   MOZ_ASSERT(aPrincipal);
   MOZ_ASSERT(aURI);
 
-  // XXXnsm Temporary fix until Bug 1171432 is fixed.
-  if (NS_WARN_IF(BasePrincipal::Cast(aPrincipal)->AppId() ==
-                 nsIScriptSecurityManager::UNKNOWN_APP_ID)) {
-    return nullptr;
-  }
-
   nsAutoCString scopeKey;
   nsresult rv = PrincipalToScopeKey(aPrincipal, scopeKey);
   if (NS_FAILED(rv)) {
@@ -1555,8 +1559,9 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(
   return registration.forget();
 }
 
-/* static */ nsresult ServiceWorkerManager::PrincipalToScopeKey(
-    nsIPrincipal* aPrincipal, nsACString& aKey) {
+/* static */
+nsresult ServiceWorkerManager::PrincipalToScopeKey(nsIPrincipal* aPrincipal,
+                                                   nsACString& aKey) {
   MOZ_ASSERT(aPrincipal);
 
   if (!BasePrincipal::Cast(aPrincipal)->IsCodebasePrincipal()) {
@@ -1571,7 +1576,8 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(
   return NS_OK;
 }
 
-/* static */ nsresult ServiceWorkerManager::PrincipalInfoToScopeKey(
+/* static */
+nsresult ServiceWorkerManager::PrincipalInfoToScopeKey(
     const PrincipalInfo& aPrincipalInfo, nsACString& aKey) {
   if (aPrincipalInfo.type() != PrincipalInfo::TContentPrincipalInfo) {
     return NS_ERROR_FAILURE;
@@ -1588,7 +1594,8 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(
   return NS_OK;
 }
 
-/* static */ void ServiceWorkerManager::AddScopeAndRegistration(
+/* static */
+void ServiceWorkerManager::AddScopeAndRegistration(
     const nsACString& aScope, ServiceWorkerRegistrationInfo* aInfo) {
   MOZ_ASSERT(aInfo);
   MOZ_ASSERT(aInfo->Principal());
@@ -1637,7 +1644,8 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(
   swm->NotifyListenersOnRegister(aInfo);
 }
 
-/* static */ bool ServiceWorkerManager::FindScopeForPath(
+/* static */
+bool ServiceWorkerManager::FindScopeForPath(
     const nsACString& aScopeKey, const nsACString& aPath,
     RegistrationDataPerPrincipal** aData, nsACString& aMatch) {
   MOZ_ASSERT(aData);
@@ -1659,8 +1667,9 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(
   return false;
 }
 
-/* static */ bool ServiceWorkerManager::HasScope(nsIPrincipal* aPrincipal,
-                                                 const nsACString& aScope) {
+/* static */
+bool ServiceWorkerManager::HasScope(nsIPrincipal* aPrincipal,
+                                    const nsACString& aScope) {
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
     return false;
@@ -1680,7 +1689,8 @@ ServiceWorkerManager::GetServiceWorkerRegistrationInfo(
   return data->mOrderedScopes.Contains(aScope);
 }
 
-/* static */ void ServiceWorkerManager::RemoveScopeAndRegistration(
+/* static */
+void ServiceWorkerManager::RemoveScopeAndRegistration(
     ServiceWorkerRegistrationInfo* aRegistration) {
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
@@ -1872,38 +1882,36 @@ class ContinueDispatchFetchEventRunnable : public Runnable {
 
     nsString clientId;
     nsString resultingClientId;
-    nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
-    if (loadInfo) {
-      char buf[NSID_LENGTH];
-      Maybe<ClientInfo> clientInfo = loadInfo->GetClientInfo();
-      if (clientInfo.isSome()) {
-        clientInfo.ref().Id().ToProvidedString(buf);
-        NS_ConvertASCIItoUTF16 uuid(buf);
+    nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+    char buf[NSID_LENGTH];
+    Maybe<ClientInfo> clientInfo = loadInfo->GetClientInfo();
+    if (clientInfo.isSome()) {
+      clientInfo.ref().Id().ToProvidedString(buf);
+      NS_ConvertASCIItoUTF16 uuid(buf);
 
-        // Remove {} and the null terminator
-        clientId.Assign(Substring(uuid, 1, NSID_LENGTH - 3));
-      }
+      // Remove {} and the null terminator
+      clientId.Assign(Substring(uuid, 1, NSID_LENGTH - 3));
+    }
 
-      // Having an initial or reserved client are mutually exclusive events:
-      // either an initial client is used upon navigating an about:blank
-      // iframe, or a new, reserved environment/client is created (e.g.
-      // upon a top-level navigation). See step 4 of
-      // https://html.spec.whatwg.org/#process-a-navigate-fetch as well as
-      // https://github.com/w3c/ServiceWorker/issues/1228#issuecomment-345132444
-      Maybe<ClientInfo> resulting = loadInfo->GetInitialClientInfo();
+    // Having an initial or reserved client are mutually exclusive events:
+    // either an initial client is used upon navigating an about:blank
+    // iframe, or a new, reserved environment/client is created (e.g.
+    // upon a top-level navigation). See step 4 of
+    // https://html.spec.whatwg.org/#process-a-navigate-fetch as well as
+    // https://github.com/w3c/ServiceWorker/issues/1228#issuecomment-345132444
+    Maybe<ClientInfo> resulting = loadInfo->GetInitialClientInfo();
 
-      if (resulting.isNothing()) {
-        resulting = loadInfo->GetReservedClientInfo();
-      } else {
-        MOZ_ASSERT(loadInfo->GetReservedClientInfo().isNothing());
-      }
+    if (resulting.isNothing()) {
+      resulting = loadInfo->GetReservedClientInfo();
+    } else {
+      MOZ_ASSERT(loadInfo->GetReservedClientInfo().isNothing());
+    }
 
-      if (resulting.isSome()) {
-        resulting.ref().Id().ToProvidedString(buf);
-        NS_ConvertASCIItoUTF16 uuid(buf);
+    if (resulting.isSome()) {
+      resulting.ref().Id().ToProvidedString(buf);
+      NS_ConvertASCIItoUTF16 uuid(buf);
 
-        resultingClientId.Assign(Substring(uuid, 1, NSID_LENGTH - 3));
-      }
+      resultingClientId.Assign(Substring(uuid, 1, NSID_LENGTH - 3));
     }
 
     rv = mServiceWorkerPrivate->SendFetchEvent(mChannel, mLoadGroup, clientId,
@@ -1935,12 +1943,7 @@ void ServiceWorkerManager::DispatchFetchEvent(nsIInterceptedChannel* aChannel,
     return;
   }
 
-  nsCOMPtr<nsILoadInfo> loadInfo = internalChannel->GetLoadInfo();
-  if (NS_WARN_IF(!loadInfo)) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return;
-  }
-
+  nsCOMPtr<nsILoadInfo> loadInfo = internalChannel->LoadInfo();
   RefPtr<ServiceWorkerInfo> serviceWorker;
 
   if (!nsContentUtils::IsNonSubresourceRequest(internalChannel)) {
@@ -2253,7 +2256,7 @@ void ServiceWorkerManager::SoftUpdateInternal(
   RefPtr<ServiceWorkerJobQueue> queue = GetOrCreateJobQueue(scopeKey, aScope);
 
   RefPtr<ServiceWorkerUpdateJob> job = new ServiceWorkerUpdateJob(
-      principal, registration->Scope(), newest->ScriptSpec(), nullptr,
+      principal, registration->Scope(), newest->ScriptSpec(),
       registration->GetUpdateViaCache());
 
   if (aCallback) {
@@ -2340,7 +2343,7 @@ void ServiceWorkerManager::UpdateInternal(
   // "Invoke Update algorithm, or its equivalent, with client, registration as
   // its argument."
   RefPtr<ServiceWorkerUpdateJob> job = new ServiceWorkerUpdateJob(
-      aPrincipal, registration->Scope(), newest->ScriptSpec(), nullptr,
+      aPrincipal, registration->Scope(), newest->ScriptSpec(),
       registration->GetUpdateViaCache());
 
   RefPtr<UpdateJobCallback> cb = new UpdateJobCallback(aCallback);
@@ -2349,24 +2352,20 @@ void ServiceWorkerManager::UpdateInternal(
   queue->ScheduleJob(job);
 }
 
-already_AddRefed<GenericPromise> ServiceWorkerManager::MaybeClaimClient(
+RefPtr<GenericPromise> ServiceWorkerManager::MaybeClaimClient(
     const ClientInfo& aClientInfo,
     ServiceWorkerRegistrationInfo* aWorkerRegistration) {
   MOZ_DIAGNOSTIC_ASSERT(aWorkerRegistration);
 
-  RefPtr<GenericPromise> ref;
-
   if (!aWorkerRegistration->GetActive()) {
-    ref = GenericPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
-                                          __func__);
-    return ref.forget();
+    return GenericPromise::CreateAndReject(NS_ERROR_DOM_INVALID_STATE_ERR,
+                                           __func__);
   }
 
   // Same origin check
   nsCOMPtr<nsIPrincipal> principal(aClientInfo.GetPrincipal());
   if (!aWorkerRegistration->Principal()->Equals(principal)) {
-    ref = GenericPromise::CreateAndReject(NS_ERROR_DOM_SECURITY_ERR, __func__);
-    return ref.forget();
+    return GenericPromise::CreateAndReject(NS_ERROR_DOM_SECURITY_ERR, __func__);
   }
 
   // The registration that should be controlling the client
@@ -2379,23 +2378,18 @@ already_AddRefed<GenericPromise> ServiceWorkerManager::MaybeClaimClient(
 
   if (aWorkerRegistration != matchingRegistration ||
       aWorkerRegistration == controllingRegistration) {
-    ref = GenericPromise::CreateAndResolve(true, __func__);
-    return ref.forget();
+    return GenericPromise::CreateAndResolve(true, __func__);
   }
 
-  ref = StartControllingClient(aClientInfo, aWorkerRegistration);
-  return ref.forget();
+  return StartControllingClient(aClientInfo, aWorkerRegistration);
 }
 
-already_AddRefed<GenericPromise> ServiceWorkerManager::MaybeClaimClient(
+RefPtr<GenericPromise> ServiceWorkerManager::MaybeClaimClient(
     const ClientInfo& aClientInfo,
     const ServiceWorkerDescriptor& aServiceWorker) {
-  RefPtr<GenericPromise> ref;
-
   nsCOMPtr<nsIPrincipal> principal = aServiceWorker.GetPrincipal();
   if (!principal) {
-    ref = GenericPromise::CreateAndResolve(false, __func__);
-    return ref.forget();
+    return GenericPromise::CreateAndResolve(false, __func__);
   }
 
   RefPtr<ServiceWorkerRegistrationInfo> registration =
@@ -2407,12 +2401,10 @@ already_AddRefed<GenericPromise> ServiceWorkerManager::MaybeClaimClient(
   // are done.  The fix for this is to move the SWM to the parent process
   // so there are no consistency errors.
   if (NS_WARN_IF(!registration) || NS_WARN_IF(!registration->GetActive())) {
-    ref = GenericPromise::CreateAndResolve(false, __func__);
-    return ref.forget();
+    return GenericPromise::CreateAndResolve(false, __func__);
   }
 
-  ref = MaybeClaimClient(aClientInfo, registration);
-  return ref.forget();
+  return MaybeClaimClient(aClientInfo, registration);
 }
 
 void ServiceWorkerManager::SetSkipWaitingFlag(nsIPrincipal* aPrincipal,
@@ -2463,14 +2455,15 @@ void ServiceWorkerManager::UpdateClientControllers(
 
     // If we fail to control the client, then automatically remove it
     // from our list of controlled clients.
-    p->Then(SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
-            [](bool) {
-              // do nothing on success
-            },
-            [self, clientInfo = handle->Info()](nsresult aRv) {
-              // failed to control, forget about this client
-              self->StopControllingClient(clientInfo);
-            });
+    p->Then(
+        SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+        [](bool) {
+          // do nothing on success
+        },
+        [self, clientInfo = handle->Info()](nsresult aRv) {
+          // failed to control, forget about this client
+          self->StopControllingClient(clientInfo);
+        });
   }
 }
 
@@ -3017,6 +3010,13 @@ void ServiceWorkerManager::MaybeSendUnregister(nsIPrincipal* aPrincipal,
 
   Unused << mActor->SendUnregister(principalInfo,
                                    NS_ConvertUTF8toUTF16(aScope));
+}
+
+NS_IMETHODIMP
+ServiceWorkerManager::IsParentInterceptEnabled(bool* aIsEnabled) {
+  MOZ_ASSERT(NS_IsMainThread());
+  *aIsEnabled = ServiceWorkerParentInterceptEnabled();
+  return NS_OK;
 }
 
 }  // namespace dom

@@ -4,26 +4,27 @@
  */
 
 var gExpectedStatus = null;
-var gNextTestFunc   = null;
+var gNextTestFunc = null;
 
-var prefs = Cc["@mozilla.org/preferences-service;1"].
-    getService(Ci.nsIPrefBranch);
+var prefs = Services.prefs;
 
 var asyncXHR = {
-  load: function() {
+  load() {
     var request = new XMLHttpRequest();
     request.open("GET", "http://localhost:4444/test_error_code.xml", true);
 
     var self = this;
-    request.addEventListener("error", function(event) { self.onError(event); });
+    request.addEventListener("error", function(event) {
+      self.onError(event);
+    });
     request.send(null);
   },
   onError: function doAsyncRequest_onError(event) {
     var request = event.target.channel.QueryInterface(Ci.nsIRequest);
     Assert.equal(request.status, gExpectedStatus);
     gNextTestFunc();
-  }
-}
+  },
+};
 
 function run_test() {
   do_test_pending();
@@ -32,15 +33,10 @@ function run_test() {
 
 // network offline
 function run_test_pt1() {
-  var ioService = Cc["@mozilla.org/network/io-service;1"]
-                    .getService(Ci.nsIIOService);
-
   try {
-    ioService.manageOfflineStatus = false;
-  }
-  catch (e) {
-  }
-  ioService.offline = true;
+    Services.io.manageOfflineStatus = false;
+  } catch (e) {}
+  Services.io.offline = true;
   prefs.setBoolPref("network.dns.offline-localhost", false);
 
   gExpectedStatus = Cr.NS_ERROR_OFFLINE;
@@ -51,9 +47,7 @@ function run_test_pt1() {
 
 // connection refused
 function run_test_pt2() {
-  var ioService = Cc["@mozilla.org/network/io-service;1"]
-                    .getService(Ci.nsIIOService);
-  ioService.offline = false;
+  Services.io.offline = false;
   prefs.clearUserPref("network.dns.offline-localhost");
 
   gExpectedStatus = Cr.NS_ERROR_CONNECTION_REFUSED;

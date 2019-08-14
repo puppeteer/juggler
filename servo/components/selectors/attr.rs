@@ -6,11 +6,15 @@ use crate::parser::SelectorImpl;
 use cssparser::ToCss;
 use std::fmt;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, ToShmem)]
+#[shmem(no_bounds)]
 pub struct AttrSelectorWithOptionalNamespace<Impl: SelectorImpl> {
+    #[shmem(field_bound)]
     pub namespace: Option<NamespaceConstraint<(Impl::NamespacePrefix, Impl::NamespaceUrl)>>,
+    #[shmem(field_bound)]
     pub local_name: Impl::LocalName,
     pub local_name_lower: Impl::LocalName,
+    #[shmem(field_bound)]
     pub operation: ParsedAttrSelectorOperation<Impl::AttrValue>,
     pub never_matches: bool,
 }
@@ -24,7 +28,7 @@ impl<Impl: SelectorImpl> AttrSelectorWithOptionalNamespace<Impl> {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, ToShmem)]
 pub enum NamespaceConstraint<NamespaceUrl> {
     Any,
 
@@ -32,7 +36,7 @@ pub enum NamespaceConstraint<NamespaceUrl> {
     Specific(NamespaceUrl),
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, ToShmem)]
 pub enum ParsedAttrSelectorOperation<AttrValue> {
     Exists,
     WithValue {
@@ -72,7 +76,7 @@ impl<AttrValue> AttrSelectorOperation<AttrValue> {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, ToShmem)]
 pub enum AttrSelectorOperator {
     Equal,
     Includes,
@@ -132,10 +136,15 @@ impl AttrSelectorOperator {
 /// The definition of whitespace per CSS Selectors Level 3 § 4.
 pub static SELECTOR_WHITESPACE: &'static [char] = &[' ', '\t', '\n', '\r', '\x0C'];
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ToShmem)]
 pub enum ParsedCaseSensitivity {
-    CaseSensitive,
+    // 's' was specified.
+    ExplicitCaseSensitive,
+    // 'i' was specified.
     AsciiCaseInsensitive,
+    // No flags were specified and HTML says this is a case-sensitive attribute.
+    CaseSensitive,
+    // No flags were specified and HTML says this is a case-insensitive attribute.
     AsciiCaseInsensitiveIfInHtmlElementInHtmlDocument,
 }
 
@@ -150,7 +159,9 @@ impl ParsedCaseSensitivity {
             ParsedCaseSensitivity::AsciiCaseInsensitiveIfInHtmlElementInHtmlDocument => {
                 CaseSensitivity::CaseSensitive
             },
-            ParsedCaseSensitivity::CaseSensitive => CaseSensitivity::CaseSensitive,
+            ParsedCaseSensitivity::CaseSensitive | ParsedCaseSensitivity::ExplicitCaseSensitive => {
+                CaseSensitivity::CaseSensitive
+            },
             ParsedCaseSensitivity::AsciiCaseInsensitive => CaseSensitivity::AsciiCaseInsensitive,
         }
     }

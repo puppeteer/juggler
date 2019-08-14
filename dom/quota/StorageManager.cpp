@@ -6,7 +6,6 @@
 
 #include "StorageManager.h"
 
-#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/StorageManagerBinding.h"
@@ -142,9 +141,8 @@ class PersistentStoragePermissionRequest final
  public:
   PersistentStoragePermissionRequest(nsIPrincipal* aPrincipal,
                                      nsPIDOMWindowInner* aWindow,
-                                     bool aIsHandlingUserInput,
                                      Promise* aPromise)
-      : ContentPermissionRequestBase(aPrincipal, aIsHandlingUserInput, aWindow,
+      : ContentPermissionRequestBase(aPrincipal, aWindow,
                                      NS_LITERAL_CSTRING("dom.storageManager"),
                                      NS_LITERAL_CSTRING("persistent-storage")),
         mPromise(aPromise) {
@@ -232,7 +230,7 @@ already_AddRefed<Promise> ExecuteOpOnMainOrWorkerThread(
       return nullptr;
     }
 
-    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+    nsCOMPtr<Document> doc = window->GetExtantDoc();
     if (NS_WARN_IF(!doc)) {
       aRv.Throw(NS_ERROR_FAILURE);
       return nullptr;
@@ -261,9 +259,7 @@ already_AddRefed<Promise> ExecuteOpOnMainOrWorkerThread(
 
       case RequestResolver::Type::Persist: {
         RefPtr<PersistentStoragePermissionRequest> request =
-            new PersistentStoragePermissionRequest(
-                principal, window, EventStateManager::IsHandlingUserInput(),
-                promise);
+            new PersistentStoragePermissionRequest(principal, window, promise);
 
         // In private browsing mode, no permission prompt.
         if (nsContentUtils::IsInPrivateBrowsing(doc)) {
@@ -612,10 +608,19 @@ nsresult PersistentStoragePermissionRequest::Start() {
   MOZ_ASSERT(NS_IsMainThread());
 
   PromptResult pr;
+#ifdef MOZ_WIDGET_ANDROID
+  // on Android calling `ShowPrompt` here calls
+  // `nsContentPermissionUtils::AskPermission` once, and a response of
+  // `PromptResult::Pending` calls it again. This results in multiple requests
+  // for storage access, so we check the prompt prefs only to ensure we only
+  // request it once.
+  pr = CheckPromptPrefs();
+#else
   nsresult rv = ShowPrompt(pr);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
+#endif
   if (pr == PromptResult::Granted) {
     return Allow(JS::UndefinedHandleValue);
   }

@@ -3,16 +3,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-use app_units::Au;
-use blob;
+use crate::blob;
 use crossbeam::sync::chase_lev;
 #[cfg(windows)]
 use dwrote;
 #[cfg(all(unix, not(target_os = "android")))]
 use font_loader::system_fonts;
 use winit::EventsLoopProxy;
-use json_frame_writer::JsonFrameWriter;
-use ron_frame_writer::RonFrameWriter;
+use crate::json_frame_writer::JsonFrameWriter;
+use crate::ron_frame_writer::RonFrameWriter;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -20,9 +19,10 @@ use std::sync::mpsc::Receiver;
 use time;
 use webrender;
 use webrender::api::*;
-use webrender::{DebugFlags, RendererStats, ShaderPrecacheFlags};
-use yaml_frame_writer::YamlFrameWriterReceiver;
-use {WindowWrapper, NotifierEvent};
+use webrender::api::units::*;
+use webrender::{DebugFlags, RenderResults, ShaderPrecacheFlags};
+use crate::yaml_frame_writer::YamlFrameWriterReceiver;
+use crate::{WindowWrapper, NotifierEvent};
 
 // TODO(gw): This descriptor matches what we currently support for fonts
 //           but is quite a mess. We should at least document and
@@ -93,15 +93,15 @@ impl Notifier {
             }
         }
 
-        if let Some(ref elp) = data.events_loop_proxy {
+        if let Some(ref _elp) = data.events_loop_proxy {
             #[cfg(not(target_os = "android"))]
-            let _ = elp.wakeup();
+            let _ = _elp.wakeup();
         }
     }
 }
 
 impl RenderNotifier for Notifier {
-    fn clone(&self) -> Box<RenderNotifier> {
+    fn clone(&self) -> Box<dyn RenderNotifier> {
         Box::new(Notifier(self.0.clone()))
     }
 
@@ -120,10 +120,7 @@ impl RenderNotifier for Notifier {
 pub trait WrenchThing {
     fn next_frame(&mut self);
     fn prev_frame(&mut self);
-    fn do_frame(&mut self, &mut Wrench) -> u32;
-    fn queue_frames(&self) -> u32 {
-        0
-    }
+    fn do_frame(&mut self, _: &mut Wrench) -> u32;
 }
 
 impl WrenchThing for CapturedDocument {
@@ -177,6 +174,7 @@ impl Wrench {
         size: DeviceIntSize,
         do_rebuild: bool,
         no_subpixel_aa: bool,
+        no_picture_caching: bool,
         verbose: bool,
         no_scissor: bool,
         no_batch: bool,
@@ -184,21 +182,22 @@ impl Wrench {
         disable_dual_source_blending: bool,
         zoom_factor: f32,
         chase_primitive: webrender::ChasePrimitive,
-        notifier: Option<Box<RenderNotifier>>,
+        dump_shader_source: Option<String>,
+        notifier: Option<Box<dyn RenderNotifier>>,
     ) -> Self {
         println!("Shader override path: {:?}", shader_override_path);
 
         let recorder = save_type.map(|save_type| match save_type {
             SaveType::Yaml => Box::new(
                 YamlFrameWriterReceiver::new(&PathBuf::from("yaml_frames")),
-            ) as Box<webrender::ApiRecordingReceiver>,
+            ) as Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Json => Box::new(JsonFrameWriter::new(&PathBuf::from("json_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Ron => Box::new(RonFrameWriter::new(&PathBuf::from("ron_frames"))) as
-                Box<webrender::ApiRecordingReceiver>,
+                Box<dyn webrender::ApiRecordingReceiver>,
             SaveType::Binary => Box::new(webrender::BinaryRecorder::new(
                 &PathBuf::from("wr-record.bin"),
-            )) as Box<webrender::ApiRecordingReceiver>,
+            )) as Box<dyn webrender::ApiRecordingReceiver>,
         });
 
         let mut debug_flags = DebugFlags::ECHO_DRIVER_MESSAGES;
@@ -221,15 +220,20 @@ impl Wrench {
             max_recorded_profiles: 16,
             precache_flags,
             blob_image_handler: Some(Box::new(blob::CheckerboardRenderer::new(callbacks.clone()))),
-            disable_dual_source_blending,
             chase_primitive,
+            enable_picture_caching: !no_picture_caching,
+            testing: true,
+            max_texture_size: Some(8196), // Needed for rawtest::test_resize_image.
+            allow_dual_source_blending: !disable_dual_source_blending,
+            allow_advanced_blend_equation: true,
+            dump_shader_source,
             ..Default::default()
         };
 
         // put an Awakened event into the queue to kick off the first frame
-        if let Some(ref elp) = proxy {
+        if let Some(ref _elp) = proxy {
             #[cfg(not(target_os = "android"))]
-            let _ = elp.wakeup();
+            let _ = _elp.wakeup();
         }
 
         let (timing_sender, timing_receiver) = chase_lev::deque();
@@ -238,7 +242,13 @@ impl Wrench {
             Box::new(Notifier(data))
         });
 
-        let (renderer, sender) = webrender::Renderer::new(window.clone_gl(), notifier, opts, None).unwrap();
+        let (renderer, sender) = webrender::Renderer::new(
+            window.clone_gl(),
+            notifier,
+            opts,
+            None,
+            size,
+        ).unwrap();
         let api = sender.create_api();
         let document_id = api.add_document(size, 0);
 
@@ -256,7 +266,7 @@ impl Wrench {
             rebuild_display_lists: do_rebuild,
             verbose,
             device_pixel_ratio: dp_ratio,
-            page_zoom_factor: zoom_factor,
+            page_zoom_factor: ZoomFactor::new(0.0),
 
             root_pipeline_id: PipelineId(0, 0),
 
@@ -280,11 +290,13 @@ impl Wrench {
     }
 
     pub fn set_page_zoom(&mut self, zoom_factor: ZoomFactor) {
-        self.page_zoom_factor = zoom_factor;
-        let mut txn = Transaction::new();
-        txn.set_page_zoom(self.page_zoom_factor);
-        self.api.send_transaction(self.document_id, txn);
-        self.set_title("");
+        if self.page_zoom_factor.get() != zoom_factor.get() {
+            self.page_zoom_factor = zoom_factor;
+            let mut txn = Transaction::new();
+            txn.set_page_zoom(self.page_zoom_factor);
+            self.api.send_transaction(self.document_id, txn);
+            self.set_title("");
+        }
     }
 
     pub fn layout_simple_ascii(
@@ -391,15 +403,12 @@ impl Wrench {
 
     #[cfg(target_os = "windows")]
     pub fn font_key_from_name(&mut self, font_name: &str) -> FontKey {
-        let system_fc = dwrote::FontCollection::system();
-        let family = system_fc.get_font_family_by_name(font_name).unwrap();
-        let font = family.get_first_matching_font(
-            dwrote::FontWeight::Regular,
-            dwrote::FontStretch::Normal,
-            dwrote::FontStyle::Normal,
-        );
-        let descriptor = font.to_descriptor();
-        self.font_key_from_native_handle(&descriptor)
+        self.font_key_from_properties(
+            font_name,
+            dwrote::FontWeight::Regular.to_u32(),
+            dwrote::FontStyle::Normal.to_u32(),
+            dwrote::FontStretch::Normal.to_u32(),
+        )
     }
 
     #[cfg(target_os = "windows")]
@@ -413,14 +422,26 @@ impl Wrench {
         let weight = dwrote::FontWeight::from_u32(weight);
         let style = dwrote::FontStyle::from_u32(style);
         let stretch = dwrote::FontStretch::from_u32(stretch);
-
         let desc = dwrote::FontDescriptor {
             family_name: family.to_owned(),
             weight,
             style,
             stretch,
         };
-        self.font_key_from_native_handle(&desc)
+        let system_fc = dwrote::FontCollection::system();
+        if let Some(font) = system_fc.get_font_from_descriptor(&desc) {
+            let face = font.create_font_face();
+            let files = face.get_files();
+            if files.len() == 1 {
+                if let Some(path) = files[0].get_font_file_path() {
+                    return self.font_key_from_native_handle(&NativeFontHandle {
+                        path,
+                        index: face.get_index(),
+                    });
+                }
+            }
+        }
+        panic!("failed loading font from properties {:?}", desc)
     }
 
     #[cfg(all(unix, not(target_os = "android")))]
@@ -441,7 +462,7 @@ impl Wrench {
     #[cfg(target_os = "android")]
     pub fn font_key_from_properties(
         &mut self,
-        family: &str,
+        _family: &str,
         _weight: u32,
         _style: u32,
         _stretch: u32,
@@ -459,7 +480,7 @@ impl Wrench {
     }
 
     #[cfg(target_os = "android")]
-    pub fn font_key_from_name(&mut self, font_name: &str) -> FontKey {
+    pub fn font_key_from_name(&mut self, _font_name: &str) -> FontKey {
         unimplemented!()
     }
 
@@ -545,7 +566,7 @@ impl Wrench {
         self.renderer.get_frame_profiles()
     }
 
-    pub fn render(&mut self) -> RendererStats {
+    pub fn render(&mut self) -> RenderResults {
         self.renderer.update();
         let _ = self.renderer.flush_pipeline_info();
         self.renderer
@@ -577,6 +598,7 @@ impl Wrench {
             "T - Save CPU profile to a file",
             "C - Save a capture to captures/wrench/",
             "X - Do a hit test at the current cursor position",
+            "Y - Clear all caches",
         ];
 
         let color_and_offset = [(ColorF::BLACK, 2.0), (ColorF::WHITE, 0.0)];

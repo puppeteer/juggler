@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, unicode_literals
 
 '''
 Replace localized parts of a packaged directory with data from a langpack
@@ -11,6 +11,7 @@ directory.
 
 import json
 import os
+import six
 import mozpack.path as mozpath
 from mozpack.packager.formats import (
     FlatFormatter,
@@ -94,6 +95,37 @@ class LocaleManifestFinder(object):
                                 if isinstance(e, ManifestLocale)))
 
 
+class L10NRepackFormatterMixin(object):
+    def __init__(self, *args, **kwargs):
+        super(L10NRepackFormatterMixin, self).__init__(*args, **kwargs)
+        self._dictionaries = {}
+
+    def add(self, path, file):
+        if path.endswith('.dic'):
+            base, relpath = self._get_base(path)
+            if relpath.startswith('dictionaries/'):
+                root, ext = mozpath.splitext(mozpath.basename(path))
+                self._dictionaries[root] = path
+        elif path.endswith('/built_in_addons.json'):
+            data = json.load(file.open())
+            data['dictionaries'] = self._dictionaries
+            # The GeneratedFile content is only really generated after
+            # all calls to formatter.add.
+            file = GeneratedFile(lambda: json.dumps(data))
+        super(L10NRepackFormatterMixin, self).add(path, file)
+
+
+def L10NRepackFormatter(klass):
+    class L10NRepackFormatter(L10NRepackFormatterMixin, klass):
+        pass
+    return L10NRepackFormatter
+
+
+FlatFormatter = L10NRepackFormatter(FlatFormatter)
+JarFormatter = L10NRepackFormatter(JarFormatter)
+OmniJarFormatter = L10NRepackFormatter(OmniJarFormatter)
+
+
 def _repack(app_finder, l10n_finder, copier, formatter, non_chrome=set()):
     app = LocaleManifestFinder(app_finder)
     l10n = LocaleManifestFinder(l10n_finder)
@@ -144,7 +176,7 @@ def _repack(app_finder, l10n_finder, copier, formatter, non_chrome=set()):
                 continue
             if key(e) not in l10n_paths[base]:
                 errors.fatal("Locale doesn't have a manifest entry for '%s'" %
-                    e.name)
+                             e.name)
                 # Allow errors to accumulate
                 continue
             paths[e.path] = l10n_paths[base][key(e)]
@@ -162,7 +194,6 @@ def _repack(app_finder, l10n_finder, copier, formatter, non_chrome=set()):
     # Create a new package, with non localized bits coming from the original
     # package, and localized bits coming from the langpack.
     packager = SimplePackager(formatter)
-    built_in_addons = None
     for p, f in app_finder:
         if is_manifest(p):
             # Remove localized manifest entries.
@@ -193,8 +224,6 @@ def _repack(app_finder, l10n_finder, copier, formatter, non_chrome=set()):
                                  os.path.join(finderBase, path))
             else:
                 packager.add(path, files[0])
-        elif p.endswith('built_in_addons.json'):
-            built_in_addons = (p, f)
         else:
             packager.add(p, f)
 
@@ -215,24 +244,12 @@ def _repack(app_finder, l10n_finder, copier, formatter, non_chrome=set()):
 
     packager.close()
 
-    dictionaries = {}
     # Add any remaining non chrome files.
     for pattern in non_chrome:
         for base in bases:
             for p, f in l10n_finder.find(mozpath.join(base, pattern)):
                 if not formatter.contains(p):
-                    if p.startswith('dictionaries/') and p.endswith('.dic'):
-                        base, ext = os.path.splitext(os.path.basename(p))
-                        dictionaries[base] = p
-
                     formatter.add(p, f)
-
-    # Update the built-in add-ons manifest with the new list of dictionaries
-    # from the langpack.
-    if built_in_addons:
-        data = json.load(built_in_addons[1].open())
-        data['dictionaries'] = dictionaries
-        formatter.add(built_in_addons[0], GeneratedFile(json.dumps(data)))
 
     # Resources in `localization` directories are packaged from the source and then
     # if localized versions are present in the l10n dir, we package them as well
@@ -242,7 +259,7 @@ def _repack(app_finder, l10n_finder, copier, formatter, non_chrome=set()):
             formatter.add(p, f)
 
     # Transplant jar preloading information.
-    for path, log in app_finder.jarlogs.iteritems():
+    for path, log in six.iteritems(app_finder.jarlogs):
         assert isinstance(copier[path], Jarrer)
         copier[path].preload([l.replace(locale, l10n_locale) for l in log])
 
@@ -273,7 +290,7 @@ def repack(source, l10n, extra_l10n={}, non_resources=[], non_chrome=set()):
         finders = {
             '': l10n_finder,
         }
-        for base, path in extra_l10n.iteritems():
+        for base, path in six.iteritems(extra_l10n):
             finders[base] = UnpackFinder(path)
         l10n_finder = ComposedFinder(finders)
     copier = FileCopier()
@@ -282,11 +299,9 @@ def repack(source, l10n, extra_l10n={}, non_resources=[], non_chrome=set()):
         formatter = FlatFormatter(copier)
     elif app_finder.kind == 'jar':
         formatter = JarFormatter(copier,
-                                 optimize=app_finder.optimizedjars,
                                  compress=compress)
     elif app_finder.kind == 'omni':
         formatter = OmniJarFormatter(copier, app_finder.omnijar,
-                                     optimize=app_finder.optimizedjars,
                                      compress=compress,
                                      non_resources=non_resources)
 

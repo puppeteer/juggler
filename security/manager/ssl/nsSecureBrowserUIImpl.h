@@ -8,11 +8,18 @@
 
 #include "nsCOMPtr.h"
 #include "nsISecureBrowserUI.h"
+#include "nsITransportSecurityInfo.h"
 #include "nsIWebProgressListener.h"
 #include "nsWeakReference.h"
 
 class nsITransportSecurityInfo;
 class nsIChannel;
+
+namespace mozilla {
+namespace dom {
+class Document;
+}
+}  // namespace mozilla
 
 #define NS_SECURE_BROWSER_UI_CID                     \
   {                                                  \
@@ -34,13 +41,17 @@ class nsSecureBrowserUIImpl : public nsISecureBrowserUI,
  protected:
   virtual ~nsSecureBrowserUIImpl(){};
 
-  // Do mixed content and tracking protection checks. May update mState.
-  void CheckForBlockedContent();
+  already_AddRefed<mozilla::dom::Document> PrepareForContentChecks();
+  // Do mixed content checks. May update mState.
+  void CheckForMixedContent();
+  // Do Content Blocking checks. May update mEvent.
+  void CheckForContentBlockingEvents();
   // Given some information about a request from an OnLocationChange event,
   // update mState and mTopLevelSecurityInfo.
   nsresult UpdateStateAndSecurityInfo(nsIChannel* channel, nsIURI* uri);
 
   uint32_t mState;
+  uint32_t mEvent;
   nsWeakPtr mDocShell;
   nsWeakPtr mWebProgress;
   nsCOMPtr<nsITransportSecurityInfo> mTopLevelSecurityInfo;

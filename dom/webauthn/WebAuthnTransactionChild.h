@@ -25,16 +25,25 @@ class WebAuthnTransactionChild final : public PWebAuthnTransactionChild {
   NS_INLINE_DECL_REFCOUNTING(WebAuthnTransactionChild);
   explicit WebAuthnTransactionChild(WebAuthnManagerBase* aManager);
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY until we can do MOZ_CAN_RUN_SCRIPT in
+  // IPDL-generated things.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvConfirmRegister(
       const uint64_t& aTransactionId,
-      const WebAuthnMakeCredentialResult& aResult) override;
+      const WebAuthnMakeCredentialResult& aResult);
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY until we can do MOZ_CAN_RUN_SCRIPT in
+  // IPDL-generated things.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvConfirmSign(
       const uint64_t& aTransactionId,
-      const WebAuthnGetAssertionResult& aResult) override;
+      const WebAuthnGetAssertionResult& aResult);
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY until we can do MOZ_CAN_RUN_SCRIPT in
+  // IPDL-generated things.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvAbort(const uint64_t& aTransactionId,
-                                    const nsresult& aError) override;
+                                    const nsresult& aError);
 
   void ActorDestroy(ActorDestroyReason why) override;
 

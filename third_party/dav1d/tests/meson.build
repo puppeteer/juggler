@@ -31,8 +31,13 @@ if not get_option('build_tests')
     subdir_done()
 endif
 
+libdav1d_nasm_objs_if_needed = []
+
 if is_asm_enabled
-    checkasm_sources = files('checkasm/checkasm.c')
+    checkasm_sources = files(
+        'checkasm/checkasm.c',
+        'checkasm/msac.c',
+    )
 
     checkasm_tmpl_sources = files(
         'checkasm/cdef.c',
@@ -67,7 +72,6 @@ if is_asm_enabled
 
     m_lib = cc.find_library('m', required: false)
 
-    libdav1d_nasm_objs_if_needed = []
     if meson.version().version_compare('< 0.48.999')
         libdav1d_nasm_objs_if_needed = libdav1d_nasm_objs
     endif
@@ -94,13 +98,17 @@ endif
 dav1d_fuzzer_sources =  files('libfuzzer/dav1d_fuzzer.c')
 fuzzer_ldflags = []
 
+if get_option('fuzzer_ldflags') != ''
+    fuzzer_ldflags += [get_option('fuzzer_ldflags')]
+endif
+
 if fuzzing_engine == 'none'
     dav1d_fuzzer_sources += files('libfuzzer/main.c')
 elif fuzzing_engine == 'libfuzzer'
     fuzzer_ldflags += ['-fsanitize=fuzzer']
 elif fuzzing_engine == 'oss-fuzz'
     # libFuzzingEngine needs libc++
-    fuzzer_ldflags += ['-lFuzzingEngine', '-lc++']
+    fuzzer_ldflags += ['-lc++']
 endif
 
 dav1d_fuzzer = executable('dav1d_fuzzer',
@@ -122,6 +130,36 @@ dav1d_fuzzer_mt = executable('dav1d_fuzzer_mt',
     build_by_default: true,
     dependencies : [thread_dependency],
     )
+
+objcopy = find_program('objcopy',
+                       required: false)
+if (objcopy.found() and
+    not get_option('b_lto') and
+    get_option('default_library') == 'static' and
+    cc.has_function('posix_memalign', prefix : '#include <stdlib.h>', args : test_args))
+
+    libdav1d_af = custom_target('libdav1d_af',
+                                input: libdav1d,
+                                output: 'libdav1d_af.a',
+                                depends: libdav1d,
+                                command: [objcopy,
+                                          '--redefine-sym', 'malloc=__wrap_malloc',
+                                          '--redefine-sym', 'posix_memalign=__wrap_posix_memalign',
+                                          '--redefine-sym', 'pthread_create=__wrap_pthread_create',
+                                          '--redefine-sym', 'pthread_cond_init=__wrap_pthread_cond_init',
+                                          '--redefine-sym', 'pthread_mutex_init=__wrap_pthread_mutex_init',
+                                          '@INPUT@', '@OUTPUT@'])
+
+    dav1d_fuzzer_mem = executable('dav1d_fuzzer_mem',
+        dav1d_fuzzer_sources + ['libfuzzer/alloc_fail.c'],
+        include_directories: dav1d_inc_dirs,
+        c_args: [stackalign_flag, stackrealign_flag, '-DDAV1D_ALLOC_FAIL'],
+        link_args: fuzzer_ldflags + [join_paths(libdav1d_af.full_path())],
+        link_depends: libdav1d_af,
+        build_by_default: false,
+        dependencies : [thread_dependency],
+        )
+endif
 
 # Include dav1d test data repository with additional tests
 if get_option('testdata_tests')

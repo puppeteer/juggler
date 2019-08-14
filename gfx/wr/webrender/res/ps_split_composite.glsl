@@ -4,7 +4,10 @@
 
 #include shared,prim_shared
 
-varying vec3 vUv;
+// interpolated UV coordinates to sample.
+varying vec2 vUv;
+// X = layer index to sample, Y = flag to allow perspective interpolation of UV.
+flat varying vec2 vLayerAndPerspective;
 flat varying vec4 vUvSampleBounds;
 
 #ifdef WR_VERTEX_SHADER
@@ -39,6 +42,7 @@ struct SplitCompositeInstance {
     int prim_header_index;
     int polygons_address;
     float z;
+    int render_task_index;
 };
 
 SplitCompositeInstance fetch_composite_instance() {
@@ -47,6 +51,7 @@ SplitCompositeInstance fetch_composite_instance() {
     ci.prim_header_index = aData.x;
     ci.polygons_address = aData.y;
     ci.z = float(aData.z);
+    ci.render_task_index = aData.w;
 
     return ci;
 }
@@ -55,11 +60,10 @@ void main(void) {
     SplitCompositeInstance ci = fetch_composite_instance();
     SplitGeometry geometry = fetch_split_geometry(ci.polygons_address);
     PrimitiveHeader ph = fetch_prim_header(ci.prim_header_index);
-    PictureTask dest_task = fetch_picture_task(ph.render_task_index);
+    PictureTask dest_task = fetch_picture_task(ci.render_task_index);
     Transform transform = fetch_transform(ph.transform_id);
     ImageResource res = fetch_image_resource(ph.user_data.x);
-    ImageResourceExtra extra_data = fetch_image_resource_extra(ph.user_data.x);
-    ClipArea clip_area = fetch_clip_area(ph.clip_task_index);
+    ClipArea clip_area = fetch_clip_area(ph.user_data.w);
 
     vec2 dest_origin = dest_task.common_data.task_rect.p0 -
                        dest_task.content_origin;
@@ -70,7 +74,7 @@ void main(void) {
     vec4 world_pos = transform.m * vec4(local_pos, 0.0, 1.0);
 
     vec4 final_pos = vec4(
-        dest_origin * world_pos.w + world_pos.xy * dest_task.common_data.device_pixel_scale,
+        dest_origin * world_pos.w + world_pos.xy * dest_task.device_pixel_scale,
         world_pos.w * ci.z,
         world_pos.w
     );
@@ -96,22 +100,20 @@ void main(void) {
     ) / texture_size.xyxy;
 
     vec2 f = (local_pos - ph.local_rect.p0) / ph.local_rect.size;
-
-    f = bilerp(
-        extra_data.st_tl, extra_data.st_tr,
-        extra_data.st_bl, extra_data.st_br,
-        f.y, f.x
-    );
+    f = get_image_quad_uv(ph.user_data.x, f);
     vec2 uv = mix(uv0, uv1, f);
+    float perspective_interpolate = float(ph.user_data.y);
 
-    vUv = vec3(uv / texture_size, res.layer);
+    vUv = uv / texture_size * mix(gl_Position.w, 1.0, perspective_interpolate);
+    vLayerAndPerspective = vec2(res.layer, perspective_interpolate);
 }
 #endif
 
 #ifdef WR_FRAGMENT_SHADER
 void main(void) {
     float alpha = do_clip();
-    vec2 uv = clamp(vUv.xy, vUvSampleBounds.xy, vUvSampleBounds.zw);
-    oFragColor = alpha * textureLod(sPrevPassColor, vec3(uv, vUv.z), 0.0);
+    float perspective_divisor = mix(gl_FragCoord.w, 1.0, vLayerAndPerspective.y);
+    vec2 uv = clamp(vUv * perspective_divisor, vUvSampleBounds.xy, vUvSampleBounds.zw);
+    write_output(alpha * textureLod(sPrevPassColor, vec3(uv, vLayerAndPerspective.x), 0.0));
 }
 #endif

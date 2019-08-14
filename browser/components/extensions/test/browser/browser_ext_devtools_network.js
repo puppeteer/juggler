@@ -2,18 +2,17 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
-const {gDevTools} = require("devtools/client/framework/devtools");
+loadTestSubscript("head_devtools.js");
 
 function background() {
   browser.test.onMessage.addListener(msg => {
     let code;
     if (msg === "navigate") {
       code = "window.wrappedJSObject.location.href = 'http://example.com/';";
-      browser.tabs.executeScript({code});
+      browser.tabs.executeScript({ code });
     } else if (msg === "reload") {
       code = "window.wrappedJSObject.location.reload(true);";
-      browser.tabs.executeScript({code});
+      browser.tabs.executeScript({ code });
     }
   });
   browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -28,7 +27,11 @@ function devtools_page() {
   let eventCount = 0;
   let listener = url => {
     eventCount++;
-    browser.test.assertEq("http://example.com/", url, "onNavigated received the expected url.");
+    browser.test.assertEq(
+      "http://example.com/",
+      url,
+      "onNavigated received the expected url."
+    );
     browser.test.sendMessage("onNavigatedFired", eventCount);
 
     if (eventCount === 2) {
@@ -64,22 +67,30 @@ function devtools_page() {
 
     // Get response content using callback
     request.getContent((content, encoding) => {
-      browser.test.sendMessage("onRequestFinished-callbackExecuted",
-                               [content, encoding]);
+      browser.test.sendMessage("onRequestFinished-callbackExecuted", [
+        content,
+        encoding,
+      ]);
     });
 
     // Get response content using returned promise
     request.getContent().then(([content, encoding]) => {
-      browser.test.sendMessage("onRequestFinished-promiseResolved",
-                               [content, encoding]);
+      browser.test.sendMessage("onRequestFinished-promiseResolved", [
+        content,
+        encoding,
+      ]);
     });
 
-    browser.devtools.network.onRequestFinished.removeListener(requestFinishedListener);
+    browser.devtools.network.onRequestFinished.removeListener(
+      requestFinishedListener
+    );
   };
 
   browser.test.onMessage.addListener(msg => {
     if (msg === "addOnRequestFinishedListener") {
-      browser.devtools.network.onRequestFinished.addListener(requestFinishedListener);
+      browser.devtools.network.onRequestFinished.addListener(
+        requestFinishedListener
+      );
     }
   });
 }
@@ -128,16 +139,16 @@ async function navigateToolboxTarget(extension, toolbox) {
  * Test for `chrome.devtools.network.onNavigate()` API
  */
 add_task(async function test_devtools_network_on_navigated() {
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://mochi.test:8888/");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "http://mochi.test:8888/"
+  );
   let extension = ExtensionTestUtils.loadExtension(extData);
 
   await extension.startup();
   await extension.awaitMessage("ready");
 
-  let target = await gDevTools.getTargetForTab(tab);
-
-  await gDevTools.showToolbox(target, "webconsole");
-  info("Developer toolbox opened.");
+  await openToolboxForTab(tab);
 
   extension.sendMessage("navigate");
   await extension.awaitMessage("tabUpdated");
@@ -153,9 +164,7 @@ add_task(async function test_devtools_network_on_navigated() {
   extension.sendMessage("reload");
   await extension.awaitMessage("tabUpdated");
 
-  await gDevTools.closeToolbox(target);
-
-  await target.destroy();
+  await closeToolboxForTab(tab);
 
   await extension.unload();
 
@@ -166,17 +175,17 @@ add_task(async function test_devtools_network_on_navigated() {
  * Test for `chrome.devtools.network.getHAR()` API
  */
 add_task(async function test_devtools_network_get_har() {
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://mochi.test:8888/");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "http://mochi.test:8888/"
+  );
   let extension = ExtensionTestUtils.loadExtension(extData);
 
   await extension.startup();
   await extension.awaitMessage("ready");
 
-  let target = await gDevTools.getTargetForTab(tab);
-
   // Open the Toolbox
-  let toolbox = await gDevTools.showToolbox(target, "webconsole");
-  info("Developer toolbox opened.");
+  const { toolbox } = await openToolboxForTab(tab);
 
   // Get HAR, it should be empty since no data collected yet.
   const getHAREmptyPromise = extension.awaitMessage("getHAR-result");
@@ -205,9 +214,7 @@ add_task(async function test_devtools_network_get_har() {
   is(emptyResultWithPanel.entries.length, 1, "HAR log should not be empty");
 
   // Shutdown
-  await gDevTools.closeToolbox(target);
-
-  await target.destroy();
+  await closeToolboxForTab(tab);
 
   await extension.unload();
 
@@ -218,16 +225,17 @@ add_task(async function test_devtools_network_get_har() {
  * Test for `chrome.devtools.network.onRequestFinished()` API
  */
 add_task(async function test_devtools_network_on_request_finished() {
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://mochi.test:8888/");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "http://mochi.test:8888/"
+  );
   let extension = ExtensionTestUtils.loadExtension(extData);
 
   await extension.startup();
   await extension.awaitMessage("ready");
-  let target = await gDevTools.getTargetForTab(tab);
 
   // Open the Toolbox
-  let toolbox = await gDevTools.showToolbox(target, "webconsole");
-  info("Developer toolbox opened.");
+  const { toolbox } = await openToolboxForTab(tab);
 
   // Wait the extension to subscribe the onRequestFinished listener.
   await extension.sendMessage("addOnRequestFinishedListener");
@@ -245,19 +253,28 @@ add_task(async function test_devtools_network_on_request_finished() {
     extension.awaitMessage("onRequestFinished-promiseResolved"),
   ]);
 
-  ok(callbackRes[0].startsWith("<html>"),
-     "The expected content has been retrieved.");
-  is(callbackRes[1], "text/html; charset=utf-8",
-     "The expected content has been retrieved.");
-  is(promiseRes[0], callbackRes[0],
-     "The resolved value is equal to the one received in the callback API mode");
-  is(promiseRes[1], callbackRes[1],
-     "The resolved value is equal to the one received in the callback API mode");
+  ok(
+    callbackRes[0].startsWith("<html>"),
+    "The expected content has been retrieved."
+  );
+  is(
+    callbackRes[1],
+    "text/html; charset=utf-8",
+    "The expected content has been retrieved."
+  );
+  is(
+    promiseRes[0],
+    callbackRes[0],
+    "The resolved value is equal to the one received in the callback API mode"
+  );
+  is(
+    promiseRes[1],
+    callbackRes[1],
+    "The resolved value is equal to the one received in the callback API mode"
+  );
 
   // Shutdown
-  await gDevTools.closeToolbox(target);
-
-  await target.destroy();
+  await closeToolboxForTab(tab);
 
   await extension.unload();
 

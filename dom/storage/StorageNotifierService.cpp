@@ -21,7 +21,8 @@ StaticRefPtr<StorageNotifierService> gStorageNotifierService;
 
 }  // namespace
 
-/* static */ StorageNotifierService* StorageNotifierService::GetOrCreate() {
+/* static */
+StorageNotifierService* StorageNotifierService::GetOrCreate() {
   MOZ_ASSERT(NS_IsMainThread());
   if (!gStorageNotifierService && !gStorageShuttingDown) {
     gStorageNotifierService = new StorageNotifierService();
@@ -42,9 +43,11 @@ StorageNotifierService::~StorageNotifierService() {
   gStorageShuttingDown = true;
 }
 
-/* static */ void StorageNotifierService::Broadcast(
-    StorageEvent* aEvent, const char16_t* aStorageType, bool aPrivateBrowsing,
-    bool aImmediateDispatch) {
+/* static */
+void StorageNotifierService::Broadcast(StorageEvent* aEvent,
+                                       const char16_t* aStorageType,
+                                       bool aPrivateBrowsing,
+                                       bool aImmediateDispatch) {
   MOZ_ASSERT(NS_IsMainThread());
 
   RefPtr<StorageNotifierService> service = gStorageNotifierService;
@@ -72,8 +75,8 @@ StorageNotifierService::~StorageNotifierService() {
 
     // No reasons to continue if the principal of the event doesn't match with
     // the window's one.
-    if (!StorageUtils::PrincipalsEqual(aEvent->GetPrincipal(),
-                                       observer->GetPrincipal())) {
+    if (!StorageUtils::PrincipalsEqual(
+            aEvent->GetPrincipal(), observer->GetEffectiveStoragePrincipal())) {
       continue;
     }
 

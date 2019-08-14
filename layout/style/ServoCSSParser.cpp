@@ -10,27 +10,31 @@
 
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoStyleSet.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
-/* static */ bool ServoCSSParser::IsValidCSSColor(const nsAString& aValue) {
+/* static */
+bool ServoCSSParser::IsValidCSSColor(const nsAString& aValue) {
   return Servo_IsValidCSSColor(&aValue);
 }
 
-/* static */ bool ServoCSSParser::ComputeColor(
-    ServoStyleSet* aStyleSet, nscolor aCurrentColor, const nsAString& aValue,
-    nscolor* aResultColor, bool* aWasCurrentColor, css::Loader* aLoader) {
+/* static */
+bool ServoCSSParser::ComputeColor(ServoStyleSet* aStyleSet,
+                                  nscolor aCurrentColor,
+                                  const nsAString& aValue,
+                                  nscolor* aResultColor, bool* aWasCurrentColor,
+                                  css::Loader* aLoader) {
   return Servo_ComputeColor(aStyleSet ? aStyleSet->RawSet() : nullptr,
                             aCurrentColor, &aValue, aResultColor,
                             aWasCurrentColor, aLoader);
 }
 
-/* static */ already_AddRefed<RawServoDeclarationBlock>
-ServoCSSParser::ParseProperty(nsCSSPropertyID aProperty,
-                              const nsAString& aValue,
-                              const ParsingEnvironment& aParsingEnvironment,
-                              ParsingMode aParsingMode) {
+/* static */
+already_AddRefed<RawServoDeclarationBlock> ServoCSSParser::ParseProperty(
+    nsCSSPropertyID aProperty, const nsAString& aValue,
+    const ParsingEnvironment& aParsingEnvironment, ParsingMode aParsingMode) {
   NS_ConvertUTF16toUTF8 value(aValue);
   return Servo_ParseProperty(
              aProperty, &value, aParsingEnvironment.mUrlExtraData, aParsingMode,
@@ -38,28 +42,31 @@ ServoCSSParser::ParseProperty(nsCSSPropertyID aProperty,
       .Consume();
 }
 
-/* static */ bool ServoCSSParser::ParseEasing(const nsAString& aValue,
-                                              URLExtraData* aUrl,
-                                              nsTimingFunction& aResult) {
+/* static */
+bool ServoCSSParser::ParseEasing(const nsAString& aValue, URLExtraData* aUrl,
+                                 nsTimingFunction& aResult) {
   return Servo_ParseEasing(&aValue, aUrl, &aResult);
 }
 
-/* static */ bool ServoCSSParser::ParseTransformIntoMatrix(
-    const nsAString& aValue, bool& aContains3DTransform,
-    RawGeckoGfxMatrix4x4& aResult) {
+/* static */
+bool ServoCSSParser::ParseTransformIntoMatrix(const nsAString& aValue,
+                                              bool& aContains3DTransform,
+                                              gfx::Matrix4x4& aResult) {
   return Servo_ParseTransformIntoMatrix(&aValue, &aContains3DTransform,
-                                        &aResult);
+                                        &aResult.components);
 }
 
-/* static */ bool ServoCSSParser::ParseFontShorthandForMatching(
+/* static */
+bool ServoCSSParser::ParseFontShorthandForMatching(
     const nsAString& aValue, URLExtraData* aUrl, RefPtr<SharedFontList>& aList,
     StyleComputedFontStyleDescriptor& aStyle, float& aStretch, float& aWeight) {
   return Servo_ParseFontShorthandForMatching(&aValue, aUrl, &aList, &aStyle,
                                              &aStretch, &aWeight);
 }
 
-/* static */ already_AddRefed<URLExtraData> ServoCSSParser::GetURLExtraData(
-    nsIDocument* aDocument) {
+/* static */
+already_AddRefed<URLExtraData> ServoCSSParser::GetURLExtraData(
+    Document* aDocument) {
   MOZ_ASSERT(aDocument);
 
   // FIXME this is using the wrong base uri (bug 1343919)
@@ -70,7 +77,7 @@ ServoCSSParser::ParseProperty(nsCSSPropertyID aProperty,
 }
 
 /* static */ ServoCSSParser::ParsingEnvironment
-ServoCSSParser::GetParsingEnvironment(nsIDocument* aDocument) {
+ServoCSSParser::GetParsingEnvironment(Document* aDocument) {
   return ParsingEnvironment(GetURLExtraData(aDocument),
                             aDocument->GetCompatibilityMode(),
                             aDocument->CSSLoader());

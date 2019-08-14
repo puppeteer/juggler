@@ -6,6 +6,7 @@ import os
 import posixpath
 import sys
 import traceback
+import uuid
 
 sys.path.insert(
     0, os.path.abspath(
@@ -16,7 +17,7 @@ from automation import Automation
 from remoteautomation import RemoteAutomation, fennecLogcatFilters
 from runtests import MochitestDesktop, MessageLogger
 from mochitest_options import MochitestArgumentParser
-from mozdevice import ADBAndroid, ADBTimeoutError
+from mozdevice import ADBDevice, ADBTimeoutError
 from mozscreenshot import dump_screen, dump_device_screen
 import mozinfo
 
@@ -38,12 +39,11 @@ class MochiRemote(MochitestDesktop):
 
         self.certdbNew = True
         self.chromePushed = False
-        self.mozLogName = "moz.log"
 
-        self.device = ADBAndroid(adb=options.adbPath or 'adb',
-                                 device=options.deviceSerial,
-                                 test_root=options.remoteTestRoot,
-                                 verbose=verbose)
+        self.device = ADBDevice(adb=options.adbPath or 'adb',
+                                device=options.deviceSerial,
+                                test_root=options.remoteTestRoot,
+                                verbose=verbose)
 
         if options.remoteTestRoot is None:
             options.remoteTestRoot = self.device.test_root
@@ -69,8 +69,6 @@ class MochiRemote(MochitestDesktop):
         if not self.device.is_app_installed(expected):
             raise Exception("%s is not installed on this device" % expected)
 
-        self.automation.deleteANRs()
-        self.automation.deleteTombstones()
         self.device.clear_logcat()
 
         self.remoteModulesDir = posixpath.join(options.remoteTestRoot, "modules/")
@@ -102,6 +100,8 @@ class MochiRemote(MochitestDesktop):
             "Android sdk version '%s'; will use this to filter manifests" %
             str(self.device.version))
         mozinfo.info['android_version'] = str(self.device.version)
+        mozinfo.info['is_fennec'] = not ('geckoview' in options.app)
+        mozinfo.info['is_emulator'] = self.device._device_serial.startswith('emulator-')
 
     def cleanup(self, options, final=False):
         if final:
@@ -211,15 +211,14 @@ class MochiRemote(MochitestDesktop):
 
         return fixup
 
-    def startServers(self, options, debuggerInfo):
+    def startServers(self, options, debuggerInfo, public=None):
         """ Create the servers on the host and start them up """
         restoreRemotePaths = self.switchToLocalPaths(options)
-        # ignoreSSLTunnelExts is a workaround for bug 1109310
         MochitestDesktop.startServers(
             self,
             options,
             debuggerInfo,
-            ignoreSSLTunnelExts=True)
+            public=True)
         restoreRemotePaths()
 
     def buildProfile(self, options):
@@ -283,7 +282,9 @@ class MochiRemote(MochitestDesktop):
                 logcat = self.device.get_logcat(
                     filter_out_regexps=fennecLogcatFilters)
                 for l in logcat:
-                    self.log.info(l.decode('utf-8', 'replace'))
+                    ul = l.decode('utf-8', errors='replace')
+                    sl = ul.encode('iso8859-1', errors='replace')
+                    self.log.info(sl)
             self.log.info("Device info:")
             devinfo = self.device.get_info()
             for category in devinfo:
@@ -311,11 +312,10 @@ class MochiRemote(MochitestDesktop):
         # remove desktop environment not used on device
         if "XPCOM_MEM_BLOAT_LOG" in browserEnv:
             del browserEnv["XPCOM_MEM_BLOAT_LOG"]
-        # override mozLogs to avoid processing in MochitestDesktop base class
-        self.mozLogs = None
-        browserEnv["MOZ_LOG_FILE"] = os.path.join(
-            self.remoteMozLog,
-            self.mozLogName)
+        if self.mozLogs:
+            browserEnv["MOZ_LOG_FILE"] = os.path.join(
+                self.remoteMozLog,
+                "moz-pid=%PID-uid={}.log".format(str(uuid.uuid4())))
         if options.dmd:
             browserEnv['DMD'] = '1'
         # Contents of remoteMozLog will be pulled from device and copied to the
@@ -382,8 +382,9 @@ def run_test_harness(parser, options):
         retVal = 1
 
     if not device_exception and options.log_mach is None and not options.verify:
-        mochitest.printDeviceInfo(printLogcat=True)
+        mochitest.printDeviceInfo(printLogcat=(retVal != 0))
 
+    mochitest.archiveMozLogs()
     mochitest.message_logger.finish()
 
     return retVal

@@ -80,23 +80,40 @@ class MediaStreamAudioSourceNode
   // Detaches from the currently attached track if there is one.
   void DetachFromTrack();
 
-  // Attaches to the first available audio track in aMediaStream.
-  void AttachToFirstTrack(const RefPtr<DOMMediaStream>& aMediaStream);
+  // Attaches to the first audio track in the MediaStream, when the tracks are
+  // ordered by id.
+  void AttachToRightTrack(const RefPtr<DOMMediaStream>& aMediaStream,
+                          ErrorResult& aRv);
 
   // From DOMMediaStream::TrackListener.
   void NotifyTrackAdded(const RefPtr<MediaStreamTrack>& aTrack) override;
   void NotifyTrackRemoved(const RefPtr<MediaStreamTrack>& aTrack) override;
+  void NotifyActive() override;
 
   // From PrincipalChangeObserver<MediaStreamTrack>.
   void PrincipalChanged(MediaStreamTrack* aMediaStreamTrack) override;
 
+  // This allows implementing the correct behaviour for both
+  // MediaElementAudioSourceNode and MediaStreamAudioSourceNode, that have most
+  // of their behaviour shared.
+  enum TrackChangeBehavior {
+    // MediaStreamAudioSourceNode locks on the track it picked, and never
+    // changes.
+    LockOnTrackPicked,
+    // MediaElementAudioSourceNode can change track, depending on what the
+    // HTMLMediaElement does.
+    FollowChanges
+  };
+
  protected:
-  explicit MediaStreamAudioSourceNode(AudioContext* aContext);
+  MediaStreamAudioSourceNode(AudioContext* aContext,
+                             TrackChangeBehavior aBehavior);
   void Init(DOMMediaStream* aMediaStream, ErrorResult& aRv);
-  void Destroy();
+  virtual void Destroy();
   virtual ~MediaStreamAudioSourceNode();
 
  private:
+  const TrackChangeBehavior mBehavior;
   RefPtr<MediaInputPort> mInputPort;
   RefPtr<DOMMediaStream> mInputStream;
 

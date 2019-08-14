@@ -14,7 +14,6 @@ from marionette_harness import (
     __version__,
     BaseMarionetteTestRunner,
     BaseMarionetteArguments,
-    BrowserMobProxyArguments,
     MarionetteTestCase,
 )
 
@@ -26,9 +25,7 @@ class MarionetteTestRunner(BaseMarionetteTestRunner):
 
 
 class MarionetteArguments(BaseMarionetteArguments):
-    def __init__(self, **kwargs):
-        BaseMarionetteArguments.__init__(self, **kwargs)
-        self.register_argument_container(BrowserMobProxyArguments())
+    pass
 
 
 class MarionetteHarness(object):
@@ -94,8 +91,8 @@ def cli(runner_class=MarionetteTestRunner, parser_class=MarionetteArguments,
         failed = harness_instance.run()
         if failed > 0:
             sys.exit(10)
-    except Exception:
-        logger.error('Failure during harness execution', exc_info=True)
+    except Exception as e:
+        logger.error(e.message, exc_info=True)
         sys.exit(1)
     sys.exit(0)
 

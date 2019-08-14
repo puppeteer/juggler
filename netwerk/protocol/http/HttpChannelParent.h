@@ -34,7 +34,7 @@ class nsICacheEntry;
 namespace mozilla {
 
 namespace dom {
-class TabParent;
+class BrowserParent;
 class PBrowserOrId;
 }  // namespace dom
 
@@ -101,9 +101,9 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
     }
   }
 
-  MOZ_MUST_USE nsresult OpenAlternativeOutputStream(const nsACString& type,
-                                                    int64_t predictedSize,
-                                                    nsIOutputStream** _retval);
+  MOZ_MUST_USE nsresult
+  OpenAlternativeOutputStream(const nsACString& type, int64_t predictedSize,
+                              nsIAsyncOutputStream** _retval);
 
   // Callbacks for each asynchronous tasks required in AsyncOpen
   // procedure, will call InvokeAsyncOpen when all the expected
@@ -121,9 +121,15 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   // Callback while background channel is destroyed.
   void OnBackgroundParentDestroyed();
 
-  base::ProcessId OtherPid() const override;
+  base::ProcessId OtherPid() const;
 
-  void SetCrossProcessRedirect() { mDoingCrossProcessRedirect = true; }
+  // Calling this method will cancel the HttpChannelChild because the consumer
+  // needs to be relocated to another process.
+  // Any OnStart/Stop/DataAvailable calls that follow will not be sent to the
+  // child channel.
+  void CancelChildCrossProcessRedirect();
+
+  already_AddRefed<HttpChannelParentListener> GetParentListener();
 
  protected:
   // used to connect redirected-to channel in parent with just created
@@ -132,13 +138,12 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
                                    const bool& shouldIntercept);
 
   MOZ_MUST_USE bool DoAsyncOpen(
-      const URIParams& uri, const OptionalURIParams& originalUri,
-      const OptionalURIParams& docUri, const OptionalURIParams& referrerUri,
-      const uint32_t& referrerPolicy,
-      const OptionalURIParams& internalRedirectUri,
-      const OptionalURIParams& topWindowUri, const uint32_t& loadFlags,
+      const URIParams& uri, const Maybe<URIParams>& originalUri,
+      const Maybe<URIParams>& docUri, nsIReferrerInfo* aReferrerInfo,
+      const Maybe<URIParams>& internalRedirectUri,
+      const Maybe<URIParams>& topWindowUri, const uint32_t& loadFlags,
       const RequestHeaderTuples& requestHeaders, const nsCString& requestMethod,
-      const OptionalIPCStream& uploadStream, const bool& uploadStreamHasHeaders,
+      const Maybe<IPCStream>& uploadStream, const bool& uploadStreamHasHeaders,
       const int16_t& priority, const uint32_t& classOfService,
       const uint8_t& redirectionLimit, const bool& allowSTS,
       const uint32_t& thirdPartyFlags, const bool& doResumeAt,
@@ -146,18 +151,19 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const bool& chooseApplicationCache, const nsCString& appCacheClientID,
       const bool& allowSpdy, const bool& allowAltSvc,
       const bool& beConservative, const uint32_t& tlsFlags,
-      const OptionalLoadInfoArgs& aLoadInfoArgs,
-      const OptionalHttpResponseHead& aSynthesizedResponseHead,
+      const Maybe<LoadInfoArgs>& aLoadInfoArgs,
+      const Maybe<nsHttpResponseHead>& aSynthesizedResponseHead,
       const nsCString& aSecurityInfoSerialization, const uint32_t& aCacheKey,
       const uint64_t& aRequestContextID,
-      const OptionalCorsPreflightArgs& aCorsPreflightArgs,
+      const Maybe<CorsPreflightArgs>& aCorsPreflightArgs,
       const uint32_t& aInitialRwin, const bool& aBlockAuthPrompt,
       const bool& aSuspendAfterSynthesizeResponse,
       const bool& aAllowStaleCacheContent, const nsCString& aContentTypeHint,
       const uint32_t& aCorsMode, const uint32_t& aRedirectMode,
       const uint64_t& aChannelId, const nsString& aIntegrityMetadata,
       const uint64_t& aContentWindowId,
-      const ArrayOfStringPairs& aPreferredAlternativeTypes,
+      const nsTArray<PreferredAlternativeDataTypeParams>&
+          aPreferredAlternativeTypes,
       const uint64_t& aTopLevelOuterContentWindowId,
       const TimeStamp& aLaunchServiceWorkerStart,
       const TimeStamp& aLaunchServiceWorkerEnd,
@@ -166,7 +172,8 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const TimeStamp& aHandleFetchEventStart,
       const TimeStamp& aHandleFetchEventEnd,
       const bool& aForceMainDocumentChannel,
-      const TimeStamp& aNavigationStartTimeStamp);
+      const TimeStamp& aNavigationStartTimeStamp,
+      const bool& hasSandboxedAuxiliaryNavigations);
 
   virtual mozilla::ipc::IPCResult RecvSetPriority(
       const int16_t& priority) override;
@@ -180,10 +187,9 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   virtual mozilla::ipc::IPCResult RecvRedirect2Verify(
       const nsresult& result, const RequestHeaderTuples& changedHeaders,
       const ChildLoadInfoForwarderArgs& aLoadInfoForwarder,
-      const uint32_t& loadFlags, const uint32_t& referrerPolicy,
-      const OptionalURIParams& aReferrerURI,
-      const OptionalURIParams& apiRedirectUri,
-      const OptionalCorsPreflightArgs& aCorsPreflightArgs,
+      const uint32_t& loadFlags, nsIReferrerInfo* aReferrerInfo,
+      const Maybe<URIParams>& apiRedirectUri,
+      const Maybe<CorsPreflightArgs>& aCorsPreflightArgs,
       const bool& aChooseAppcache) override;
   virtual mozilla::ipc::IPCResult RecvDocumentChannelCleanup(
       const bool& clearCacheEntry) override;
@@ -195,12 +201,15 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const nsresult& statusCode) override;
   virtual mozilla::ipc::IPCResult RecvDivertComplete() override;
   virtual mozilla::ipc::IPCResult RecvCrossProcessRedirectDone(
-      const nsresult& aResult) override;
+      const nsresult& aResult,
+      const mozilla::Maybe<LoadInfoArgs>& aLoadInfoArgs) override;
   virtual mozilla::ipc::IPCResult RecvRemoveCorsPreflightCacheEntry(
       const URIParams& uri,
       const mozilla::ipc::PrincipalInfo& requestingPrincipal) override;
   virtual mozilla::ipc::IPCResult RecvBytesRead(const int32_t& aCount) override;
   virtual mozilla::ipc::IPCResult RecvOpenOriginalCacheInputStream() override;
+  virtual mozilla::ipc::IPCResult RecvOpenAltDataCacheInputStream(
+      const nsCString& aType) override;
   virtual void ActorDestroy(ActorDestroyReason why) override;
 
   // Supporting function for ADivertableParentChannel.
@@ -210,12 +219,15 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   void FailDiversion(nsresult aErrorCode);
 
   friend class HttpChannelParentListener;
-  RefPtr<mozilla::dom::TabParent> mTabParent;
+  RefPtr<mozilla::dom::BrowserParent> mBrowserParent;
 
   MOZ_MUST_USE nsresult ReportSecurityMessage(
       const nsAString& aMessageTag, const nsAString& aMessageCategory) override;
   nsresult LogBlockedCORSRequest(const nsAString& aMessage,
                                  const nsACString& aCategory) override;
+  nsresult LogMimeTypeMismatch(const nsACString& aMessageName, bool aWarning,
+                               const nsAString& aURL,
+                               const nsAString& aContentType) override;
 
   // Calls SendDeleteSelf and sets mIPCClosed to true because we should not
   // send any more messages after that. Bug 1274886
@@ -246,7 +258,7 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   // id, a promise will be returned so the caller can append callbacks on it.
   // If called multiple times before mBgParent is available, the same promise
   // will be returned and the callbacks will be invoked in order.
-  already_AddRefed<GenericPromise> WaitForBgParent();
+  MOZ_MUST_USE RefPtr<GenericNonExclusivePromise> WaitForBgParent();
 
   // Remove the association with background channel after main-thread IPC
   // is about to be destroyed or no further event is going to be sent, i.e.,
@@ -284,8 +296,8 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
 
   RefPtr<HttpBackgroundChannelParent> mBgParent;
 
-  MozPromiseHolder<GenericPromise> mPromise;
-  MozPromiseRequestHolder<GenericPromise> mRequest;
+  MozPromiseHolder<GenericNonExclusivePromise> mPromise;
+  MozPromiseRequestHolder<GenericNonExclusivePromise> mRequest;
 
   dom::TabId mNestedFrameId;
 
@@ -334,6 +346,9 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   uint8_t mCacheNeedFlowControlInitialized : 1;
   uint8_t mNeedFlowControl : 1;
   uint8_t mSuspendedForFlowControl : 1;
+
+  // The child channel was cancelled, as the consumer was relocated to another
+  // process.
   uint8_t mDoingCrossProcessRedirect : 1;
 
   // Number of events to wait before actually invoking AsyncOpen on the main

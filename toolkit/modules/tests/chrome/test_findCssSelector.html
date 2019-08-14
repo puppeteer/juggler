@@ -7,7 +7,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=
   <meta charset="utf-8">
   <title>Test for Bug </title>
 
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
   <script type="application/javascript">
 
@@ -46,7 +46,6 @@ addTest(function findAllCssSelectors() {
 });
 
 addTest(function findCssSelectorNotContainedInDocument() {
-
   var unattached = document.createElement("div");
   unattached.id = "unattached";
   is(findCssSelector(unattached), "", "Unattached node returns empty string");
@@ -62,7 +61,6 @@ addTest(function findCssSelectorNotContainedInDocument() {
 });
 
 addTest(function findCssSelectorBasic() {
-
   let data = [
     "#one",
     "#" + CSS.escape("2"),

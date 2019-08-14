@@ -8,6 +8,7 @@ extern crate gleam;
 extern crate webrender;
 extern crate winit;
 
+use euclid::size2;
 use direct_composition::DirectComposition;
 use std::sync::mpsc;
 use webrender::api;
@@ -34,10 +35,9 @@ fn main() {
 
     let mut clicks: usize = 0;
     let mut offset_y = 100.;
-    let size = api::DeviceIntSize::new;
     let mut rects = [
-        Rectangle::new(&composition, &notifier, factor, size(300, 200), 0., 0.2, 0.4, 1.),
-        Rectangle::new(&composition, &notifier, factor, size(400, 300), 0., 0.5, 0., 0.5),
+        Rectangle::new(&composition, &notifier, factor, size2(300, 200), 0., 0.2, 0.4, 1.),
+        Rectangle::new(&composition, &notifier, factor, size2(400, 300), 0., 0.5, 0., 0.5),
     ];
     rects[0].render(factor, &rx);
     rects[1].render(factor, &rx);
@@ -95,13 +95,13 @@ struct Rectangle {
     renderer: Option<webrender::Renderer>,
     api: api::RenderApi,
     document_id: api::DocumentId,
-    size: api::DeviceIntSize,
+    size: api::units::DeviceIntSize,
     color: api::ColorF,
 }
 
 impl Rectangle {
     fn new(composition: &DirectComposition, notifier: &Box<Notifier>,
-           device_pixel_ratio: f32, size: api::DeviceIntSize, r: f32, g: f32, b: f32, a: f32)
+           device_pixel_ratio: f32, size: api::units::DeviceIntSize, r: f32, g: f32, b: f32, a: f32)
            -> Self {
         let visual = composition.create_angle_visual(size.width as u32, size.height as u32);
         visual.make_current();
@@ -115,6 +115,7 @@ impl Rectangle {
                 ..webrender::RendererOptions::default()
             },
             None,
+            size,
         ).unwrap();
         let api = sender.create_api();
 
@@ -142,12 +143,23 @@ impl Rectangle {
             api::BorderRadius::uniform(20.),
             api::ClipMode::Clip
         );
-        let clip_id = builder.define_clip(rect, vec![region], None);
-        builder.push_clip_id(clip_id);
+        let clip_id = builder.define_clip(
+            &api::SpaceAndClipInfo::root_scroll(pipeline_id),
+            rect,
+            vec![region],
+            None,
+        );
 
-        builder.push_rect(&api::PrimitiveInfo::new(rect), self.color);
-
-        builder.pop_clip_id();
+        builder.push_rect(
+            &api::CommonItemProperties::new(
+                rect,
+                api::SpaceAndClipInfo {
+                    spatial_id: api::SpatialId::root_scroll_node(pipeline_id),
+                    clip_id,
+                },
+            ),
+            self.color,
+        );
 
         let mut transaction = api::Transaction::new();
         transaction.set_display_list(

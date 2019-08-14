@@ -25,22 +25,23 @@ add_task(async function() {
 });
 
 async function performTests() {
-  const { jsterm } = await openNewTabAndConsole(TEST_URI);
-
-  const {
-    autocompletePopup: popup,
-  } = jsterm;
+  const hud = await openNewTabAndConsole(TEST_URI);
+  const { autocompletePopup: popup } = hud.jsterm;
 
   const onPopUpOpen = popup.once("popup-opened");
 
   info("wait for popup to show");
-  jsterm.setInputValue("foo");
+  setInputValue(hud, "foo");
   EventUtils.sendString(".");
 
   await onPopUpOpen;
 
   const popupItems = popup.getItems().map(e => e.label);
-  is(popupItems.includes("0"), false, "Completing on an array doesn't show numbers.");
+  is(
+    popupItems.includes("0"),
+    false,
+    "Completing on an array doesn't show numbers."
+  );
 
   info("press Escape to close the popup");
   const onPopupClose = popup.once("popup-closed");

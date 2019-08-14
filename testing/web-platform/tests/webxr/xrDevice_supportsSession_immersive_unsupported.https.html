@@ -8,12 +8,11 @@
       "supportsSession rejects when options not supported",
       (t) => {
       return XRTest.simulateDeviceConnection({ supportsImmersive:false })
-        .then( (controller) => { return navigator.xr.requestDevice() })
-        .then( (device) => {
+        .then( (controller) => {
           return promise_rejects(
             t,
             "NotSupportedError",
-            device.supportsSession({ immersive: true })
+            navigator.xr.supportsSession('immersive-vr')
           );
         });
     });

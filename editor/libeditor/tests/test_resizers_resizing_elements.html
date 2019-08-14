@@ -2,8 +2,8 @@
 <html>
 <head>
   <title>Test for resizers of some elements</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/EventUtils.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
   <style>
   #target {
@@ -97,6 +97,12 @@ SimpleTest.waitForFocus(async function() {
            '"input" event should be never cancelable');
         is(aEvent.bubbles, true,
            '"input" event should always bubble');
+        is(aEvent.inputType, "",
+           `inputType should be empty string when an element is resized`);
+        is(aEvent.data, null,
+           `data should be null ${aDescription}`);
+        is(aEvent.dataTransfer, null,
+           `data should be null ${aDescription}`);
       }
 
       content.addEventListener("input", onInput);

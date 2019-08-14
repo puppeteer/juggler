@@ -6,29 +6,36 @@
 
 var EXPORTED_SYMBOLS = ["UAWidgetsChild"];
 
-ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { ActorChild } = ChromeUtils.import(
+  "resource://gre/modules/ActorChild.jsm"
+);
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+
+const HANDLED_ELEMENTS = ["video", "audio", "embed", "object", "marquee"];
 
 class UAWidgetsChild extends ActorChild {
   constructor(dispatcher) {
     super(dispatcher);
 
     this.widgets = new WeakMap();
+    this.prefsCache = new Map();
   }
 
   handleEvent(aEvent) {
-    switch (aEvent.type) {
-      case "UAWidgetSetupOrChange":
-        this.setupOrNotifyWidget(aEvent.target);
-        break;
-      case "UAWidgetTeardown":
-        this.teardownWidget(aEvent.target);
-        break;
-    }
+    if (HANDLED_ELEMENTS.includes(aEvent.target.localName)) {
+      switch (aEvent.type) {
+        case "UAWidgetSetupOrChange":
+          this.setupOrNotifyWidget(aEvent.target);
+          break;
+        case "UAWidgetTeardown":
+          this.teardownWidget(aEvent.target);
+          break;
+      }
 
-    // In case we are a nested frame, prevent the message manager of the
-    // parent frame from receving the event.
-    aEvent.stopPropagation();
+      // In case we are a nested frame, prevent the message manager of the
+      // parent frame from receving the event.
+      aEvent.stopPropagation();
+    }
   }
 
   setupOrNotifyWidget(aElement) {
@@ -37,9 +44,9 @@ class UAWidgetsChild extends ActorChild {
       this.setupWidget(aElement);
       return;
     }
-    if (typeof widget.wrappedJSObject.onchange == "function") {
+    if (typeof widget.onchange == "function") {
       try {
-        widget.wrappedJSObject.onchange();
+        widget.onchange();
       } catch (ex) {
         Cu.reportError(ex);
       }
@@ -49,15 +56,16 @@ class UAWidgetsChild extends ActorChild {
   setupWidget(aElement) {
     let uri;
     let widgetName;
+    let prefKeys = [];
     switch (aElement.localName) {
       case "video":
       case "audio":
         uri = "chrome://global/content/elements/videocontrols.js";
         widgetName = "VideoControlsWidget";
-        break;
-      case "input":
-        uri = "chrome://global/content/elements/datetimebox.js";
-        widgetName = "DateTimeBoxWidget";
+        prefKeys = [
+          "media.videocontrols.picture-in-picture.video-toggle.enabled",
+          "media.videocontrols.picture-in-picture.video-toggle.always-show",
+        ];
         break;
       case "embed":
       case "object":
@@ -71,32 +79,41 @@ class UAWidgetsChild extends ActorChild {
     }
 
     if (!uri || !widgetName) {
-      Cu.reportError("Getting a UAWidgetSetupOrChange event on undefined element.");
+      Cu.reportError(
+        "Getting a UAWidgetSetupOrChange event on undefined element."
+      );
       return;
     }
 
     let shadowRoot = aElement.openOrClosedShadowRoot;
     if (!shadowRoot) {
-      Cu.reportError("Getting a UAWidgetSetupOrChange event without the Shadow Root.");
+      Cu.reportError(
+        "Getting a UAWidgetSetupOrChange event without the Shadow Root."
+      );
       return;
     }
 
     let isSystemPrincipal = aElement.nodePrincipal.isSystemPrincipal;
-    let sandbox = isSystemPrincipal ?
-      Object.create(null) : Cu.getUAWidgetScope(aElement.nodePrincipal);
+    let sandbox = isSystemPrincipal
+      ? Object.create(null)
+      : Cu.getUAWidgetScope(aElement.nodePrincipal);
 
     if (!sandbox[widgetName]) {
-      Services.scriptloader.loadSubScript(uri, sandbox, "UTF-8");
+      Services.scriptloader.loadSubScript(uri, sandbox);
     }
 
-    let widget = new sandbox[widgetName](shadowRoot);
+    let prefs = Cu.cloneInto(
+      this.getPrefsForUAWidget(widgetName, prefKeys),
+      sandbox
+    );
+
+    let widget = new sandbox[widgetName](shadowRoot, prefs);
+    if (!isSystemPrincipal) {
+      widget = widget.wrappedJSObject;
+    }
     this.widgets.set(aElement, widget);
     try {
-      if (!isSystemPrincipal) {
-        widget.wrappedJSObject.onsetup();
-      } else {
-        widget.onsetup();
-      }
+      widget.onsetup();
     } catch (ex) {
       Cu.reportError(ex);
     }
@@ -107,13 +124,41 @@ class UAWidgetsChild extends ActorChild {
     if (!widget) {
       return;
     }
-    if (typeof widget.wrappedJSObject.destructor == "function") {
+    if (typeof widget.destructor == "function") {
       try {
-        widget.wrappedJSObject.destructor();
+        widget.destructor();
       } catch (ex) {
         Cu.reportError(ex);
       }
     }
     this.widgets.delete(aElement);
+  }
+
+  getPrefsForUAWidget(aWidgetName, aPrefKeys) {
+    let result = this.prefsCache.get(aWidgetName);
+    if (result) {
+      return result;
+    }
+
+    result = {};
+    for (let key of aPrefKeys) {
+      switch (Services.prefs.getPrefType(key)) {
+        case Ci.nsIPrefBranch.PREF_BOOL: {
+          result[key] = Services.prefs.getBoolPref(key);
+          break;
+        }
+        case Ci.nsIPrefBranch.PREF_INT: {
+          result[key] = Services.prefs.getIntPref(key);
+          break;
+        }
+        case Ci.nsIPrefBranch.PREF_STRING: {
+          result[key] = Services.prefs.getStringPref(key);
+          break;
+        }
+      }
+    }
+
+    this.prefsCache.set(aWidgetName, result);
+    return result;
   }
 }

@@ -3,14 +3,13 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import datetime
-import glob
 import time
 import re
-import os
 import posixpath
 import tempfile
 import shutil
-import sys
+
+import six
 
 from automation import Automation
 from mozdevice import ADBTimeoutError
@@ -28,13 +27,13 @@ class RemoteAutomation(Automation):
 
     def __init__(self, device, appName='', remoteProfile=None, remoteLog=None,
                  processArgs=None):
+        super(RemoteAutomation, self).__init__()
         self.device = device
         self.appName = appName
         self.remoteProfile = remoteProfile
         self.remoteLog = remoteLog
         self.processArgs = processArgs or {}
         self.lastTestSeen = "remoteautomation.py"
-        Automation.__init__(self)
 
     def runApp(self, testURL, env, app, profileDir, extraArgs,
                utilityPath=None, xrePath=None, debuggerInfo=None, symbolsPath=None,
@@ -44,6 +43,9 @@ class RemoteAutomation(Automation):
         Kills the app if it runs for longer than |maxTime| seconds, or outputs nothing
         for |timeout| seconds.
         """
+        if self.device.is_file(self.remoteLog):
+            self.device.rm(self.remoteLog, root=True)
+            self.log.info("remoteautomation.py | runApp deleted %s" % self.remoteLog)
 
         if utilityPath is None:
             utilityPath = self.DIST_BIN
@@ -101,9 +103,6 @@ class RemoteAutomation(Automation):
         env.setdefault('MOZ_IN_AUTOMATION', '1')
 
         # Set WebRTC logging in case it is not set yet.
-        # On Android, environment variables cannot contain ',' so the
-        # standard WebRTC setting for NSPR_LOG_MODULES is not available.
-        # env.setdefault('NSPR_LOG_MODULES', 'signaling:5,mtransport:5,datachannel:5,jsep:5,MediaPipelineFactory:5')  # NOQA: E501
         env.setdefault('R_LOG_LEVEL', '6')
         env.setdefault('R_LOG_DESTINATION', 'stderr')
         env.setdefault('R_LOG_VERBOSE', '1')
@@ -138,70 +137,7 @@ class RemoteAutomation(Automation):
 
         return status
 
-    def deleteANRs(self):
-        # Remove files from the dalvik stack-trace directory.
-        if not self.device.is_dir(self.device.stack_trace_dir, root=True):
-            return
-        try:
-            for trace_file in self.device.ls(self.device.stack_trace_dir, root=True):
-                trace_path = posixpath.join(self.device.stack_trace_dir, trace_file)
-                self.device.chmod(trace_path, root=True)
-                self.device.rm(trace_path, root=True)
-        except Exception as e:
-            print("Error deleting %s: %s" % (self.device.stack_trace_dir, str(e)))
-
-    def checkForANRs(self):
-        if not self.device.is_dir(self.device.stack_trace_dir):
-            print("%s not found" % self.device.stack_trace_dir)
-            return
-        try:
-            for trace_file in self.device.ls(self.device.stack_trace_dir, root=True):
-                trace_path = posixpath.join(self.device.stack_trace_dir, trace_file)
-                t = self.device.get_file(trace_path)
-                if t:
-                    stripped = t.strip()
-                    if len(stripped) > 0:
-                        print("Contents of %s:" % trace_path)
-                        print(t)
-            # Once reported, delete traces
-            self.deleteANRs()
-        except Exception as e:
-            print("Error pulling %s: %s" % (self.device.stack_trace_dir, str(e)))
-
-    def deleteTombstones(self):
-        # delete any tombstone files from device
-        self.device.rm("/data/tombstones", force=True, recursive=True, root=True)
-
-    def checkForTombstones(self):
-        # pull any tombstones from device and move to MOZ_UPLOAD_DIR
-        remoteDir = "/data/tombstones"
-        uploadDir = os.environ.get('MOZ_UPLOAD_DIR', None)
-        if uploadDir:
-            if not os.path.exists(uploadDir):
-                os.mkdir(uploadDir)
-            if self.device.is_dir(remoteDir):
-                # copy tombstone files from device to local upload directory
-                self.device.chmod(remoteDir, recursive=True, root=True)
-                self.device.pull(remoteDir, uploadDir)
-                self.deleteTombstones()
-                for f in glob.glob(os.path.join(uploadDir, "tombstone_??")):
-                    # add a unique integer to the file name, in case there are
-                    # multiple tombstones generated with the same name, for
-                    # instance, after multiple robocop tests
-                    for i in xrange(1, sys.maxint):
-                        newname = "%s.%d.txt" % (f, i)
-                        if not os.path.exists(newname):
-                            os.rename(f, newname)
-                            break
-            else:
-                print("%s does not exist; tombstone check skipped" % remoteDir)
-        else:
-            print("MOZ_UPLOAD_DIR not defined; tombstone check skipped")
-
     def checkForCrashes(self, symbolsPath):
-        self.checkForANRs()
-        self.checkForTombstones()
-
         logcat = self.device.get_logcat(
             filter_out_regexps=fennecLogcatFilters)
 
@@ -357,7 +293,13 @@ class RemoteAutomation(Automation):
 
         for line in lines:
             # This passes the line to the logger (to be logged or buffered)
-            parsed_messages = self.messageLogger.write(line)
+            if isinstance(line, six.text_type):
+                # if line is unicode - let's encode it to bytes
+                parsed_messages = self.messageLogger.write(line.encode('UTF-8', 'replace'))
+            else:
+                # if line is bytes type, write it as it is
+                parsed_messages = self.messageLogger.write(line)
+
             for message in parsed_messages:
                 if isinstance(message, dict) and message.get('action') == 'test_start':
                     self.lastTestSeen = message['test']

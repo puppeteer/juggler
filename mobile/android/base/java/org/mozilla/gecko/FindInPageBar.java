@@ -10,9 +10,14 @@ import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoBundle;
 
 import android.content.Context;
+import android.graphics.Color;
+import android.graphics.drawable.Drawable;
+import android.support.graphics.drawable.VectorDrawableCompat;
 import android.text.Editable;
+import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.TextWatcher;
+import android.text.style.ForegroundColorSpan;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -23,7 +28,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public class FindInPageBar extends LinearLayout
-        implements TextWatcher, View.OnClickListener, BundleEventListener {
+        implements TextWatcher, View.OnClickListener, BundleEventListener, View.OnKeyListener {
     private static final String LOGTAG = "GeckoFindInPageBar";
     private static final String REQUEST_ID = "FindInPageBar";
 
@@ -53,6 +58,7 @@ public class FindInPageBar extends LinearLayout
 
         mFindText = (CustomEditText) content.findViewById(R.id.find_text);
         mFindText.addTextChangedListener(this);
+        mFindText.setOnKeyListener(this);
         mFindText.setOnKeyPreImeListener(new CustomEditText.OnKeyPreImeListener() {
             @Override
             public boolean onKeyPreIme(View v, int keyCode, KeyEvent event) {
@@ -109,6 +115,9 @@ public class FindInPageBar extends LinearLayout
         // Always clear the Find string, primarily for privacy.
         mFindText.setText("");
 
+        // Always clear the error message bug 1556382
+        mFindText.setError(null);
+
         // Only close the IMM if its EditText is the one with focus.
         if (mFindText.isFocused()) {
           getInputMethodManager(mFindText).hideSoftInputFromWindow(mFindText.getWindowToken(), 0);
@@ -122,7 +131,7 @@ public class FindInPageBar extends LinearLayout
     private InputMethodManager getInputMethodManager(View view) {
         Context context = view.getContext();
         return (InputMethodManager) context.getSystemService(Context.INPUT_METHOD_SERVICE);
-     }
+    }
 
     public void onDestroy() {
         if (!mInflated) {
@@ -135,15 +144,45 @@ public class FindInPageBar extends LinearLayout
     private void onMatchesCountResult(final int total, final int current, final int limit, final String searchString) {
         if (total == -1) {
             updateResult(Integer.toString(limit) + "+");
+            updateFindTextBackgroundColor(true);
         } else if (total > 0) {
             updateResult(Integer.toString(current) + "/" + Integer.toString(total));
+            updateFindTextBackgroundColor(true);
         } else if (TextUtils.isEmpty(searchString)) {
             updateResult("");
+            updateFindTextBackgroundColor(false);
+            updateFindTextError();
         } else {
             // We display 0/0, when there were no
             // matches found, or if matching has been turned off by setting
             // pref accessibility.typeaheadfind.matchesCountLimit to 0.
             updateResult("0/0");
+        }
+    }
+
+    private void updateFindTextError() {
+        if (!TextUtils.isEmpty(mFindText.getText().toString())) {
+            String errorText = getResources().getString(R.string.find_error);
+            ForegroundColorSpan foregroundColorSpan = new ForegroundColorSpan(Color.WHITE);
+            SpannableStringBuilder spannableStringBuilder = new SpannableStringBuilder(errorText);
+            spannableStringBuilder.setSpan(foregroundColorSpan, 0, errorText.length(), 0);
+
+            Drawable errorDrawable = VectorDrawableCompat.create(getResources(), R.drawable.ic_baseline_error, null);
+            errorDrawable.setBounds(0, 0, errorDrawable.getIntrinsicWidth(), errorDrawable.getIntrinsicHeight());
+
+            mFindText.setError(spannableStringBuilder, errorDrawable);
+        }
+    }
+
+    private void updateFindTextBackgroundColor(final boolean hasResults) {
+        if (TextUtils.isEmpty(mFindText.getText().toString())) {
+            mFindText.setBackgroundColor(Color.WHITE);
+        } else {
+            if (hasResults) {
+                mFindText.setBackgroundColor(Color.WHITE);
+            } else {
+                mFindText.setBackgroundColor(getResources().getColor(R.color.fip_text_error_background));
+            }
         }
     }
 
@@ -179,13 +218,13 @@ public class FindInPageBar extends LinearLayout
         Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, TelemetryContract.Method.BUTTON, extras);
 
         if (viewId == R.id.find_prev) {
-            sendRequestToFinderHelper("FindInPage:Prev", mFindText.getText().toString());
+            findPrevInPage();
             getInputMethodManager(mFindText).hideSoftInputFromWindow(mFindText.getWindowToken(), 0);
             return;
         }
 
         if (viewId == R.id.find_next) {
-            sendRequestToFinderHelper("FindInPage:Next", mFindText.getText().toString());
+            findNextInPage();
             getInputMethodManager(mFindText).hideSoftInputFromWindow(mFindText.getWindowToken(), 0);
             return;
         }
@@ -228,9 +267,28 @@ public class FindInPageBar extends LinearLayout
 
                     mFindText.setOnWindowFocusChangeListener(null);
                     getInputMethodManager(mFindText).showSoftInput(mFindText, 0);
-               }
+                }
             });
         }
+    }
+
+    @Override
+    public boolean onKey(View v, int keyCode, KeyEvent event) {
+        if (event == null) return false;
+
+        // Keeping the buttons pressed will continue cycling through the search results
+
+        if (event.getAction() == KeyEvent.ACTION_DOWN &&
+                event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {
+            if (event.isShiftPressed()) {
+                findPrevInPage();
+            } else {
+                findNextInPage();
+            }
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -240,5 +298,17 @@ public class FindInPageBar extends LinearLayout
         final GeckoBundle data = new GeckoBundle(1);
         data.putString("searchString", searchString);
         EventDispatcher.getInstance().dispatch(request, data);
+    }
+
+    private void findNextInPage() {
+        sendRequestToFinderHelper("FindInPage:Next", getSearchedForText());
+    }
+
+    private void findPrevInPage() {
+        sendRequestToFinderHelper("FindInPage:Prev", getSearchedForText());
+    }
+
+    private String getSearchedForText() {
+        return mFindText.getText().toString();
     }
 }

@@ -11,17 +11,19 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { ManifestObtainer } = ChromeUtils.import(
+  "resource://gre/modules/ManifestObtainer.jsm"
+);
+const { ManifestIcons } = ChromeUtils.import(
+  "resource://gre/modules/ManifestIcons.jsm"
+);
 
-const { ManifestObtainer } =
-  ChromeUtils.import("resource://gre/modules/ManifestObtainer.jsm", {});
-const { ManifestIcons } =
-  ChromeUtils.import("resource://gre/modules/ManifestIcons.jsm", {});
-
-ChromeUtils.defineModuleGetter(this, "OS",
-                               "resource://gre/modules/osfile.jsm");
-ChromeUtils.defineModuleGetter(this, "JSONFile",
-                               "resource://gre/modules/JSONFile.jsm");
+ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "JSONFile",
+  "resource://gre/modules/JSONFile.jsm"
+);
 
 /**
  * Generates an hash for the given string.
@@ -30,11 +32,13 @@ ChromeUtils.defineModuleGetter(this, "JSONFile",
  * is case-sensitive if you are going to reuse this code.
  */
 function generateHash(aString) {
-  const cryptoHash = Cc["@mozilla.org/security/hash;1"]
-    .createInstance(Ci.nsICryptoHash);
+  const cryptoHash = Cc["@mozilla.org/security/hash;1"].createInstance(
+    Ci.nsICryptoHash
+  );
   cryptoHash.init(Ci.nsICryptoHash.MD5);
-  const stringStream = Cc["@mozilla.org/io/string-input-stream;1"]
-    .createInstance(Ci.nsIStringInputStream);
+  const stringStream = Cc[
+    "@mozilla.org/io/string-input-stream;1"
+  ].createInstance(Ci.nsIStringInputStream);
   stringStream.data = aString;
   cryptoHash.updateFromStream(stringStream, -1);
   // base64 allows the '/' char, but we can't use it for filenames.
@@ -60,7 +64,6 @@ const MANIFESTS_FILE = "manifest-scopes.json";
  */
 
 class Manifest {
-
   constructor(browser, manifestUrl) {
     this._manifestUrl = manifestUrl;
     // The key for this is the manifests URL that is required to be unique.
@@ -71,37 +74,46 @@ class Manifest {
   }
 
   async initialise() {
-    this._store = new JSONFile({path: this._path, saveDelayMs: 100});
+    this._store = new JSONFile({ path: this._path, saveDelayMs: 100 });
     await this._store.load();
   }
 
   async prefetch(browser) {
     const manifestData = await ManifestObtainer.browserObtainManifest(browser);
-    const icon = await ManifestIcons.browserFetchIcon(browser, manifestData, 192);
+    const icon = await ManifestIcons.browserFetchIcon(
+      browser,
+      manifestData,
+      192
+    );
     const data = {
       installed: false,
       manifest: manifestData,
-      cached_icon: icon
+      cached_icon: icon,
     };
     return data;
   }
 
   async install() {
-    const manifestData = await ManifestObtainer.browserObtainManifest(this._browser);
+    const manifestData = await ManifestObtainer.browserObtainManifest(
+      this._browser
+    );
     this._store.data = {
       installed: true,
-      manifest: manifestData
+      manifest: manifestData,
     };
     Manifests.manifestInstalled(this);
     this._store.saveSoon();
   }
 
   async icon(expectedSize) {
-    if ('cached_icon' in this._store.data) {
+    if ("cached_icon" in this._store.data) {
       return this._store.data.cached_icon;
     }
-    const icon = await ManifestIcons
-      .browserFetchIcon(this._browser, this._store.data.manifest, expectedSize);
+    const icon = await ManifestIcons.browserFetchIcon(
+      this._browser,
+      this._store.data.manifest,
+      expectedSize
+    );
     // Cache the icon so future requests do not go over the network
     this._store.data.cached_icon = icon;
     this._store.saveSoon();
@@ -109,15 +121,17 @@ class Manifest {
   }
 
   get scope() {
-    const scope = this._store.data.manifest.scope ||
-      this._store.data.manifest.start_url;
+    const scope =
+      this._store.data.manifest.scope || this._store.data.manifest.start_url;
     return stripQuery(scope);
   }
 
   get name() {
-    return this._store.data.manifest.short_name ||
+    return (
+      this._store.data.manifest.short_name ||
       this._store.data.manifest.name ||
-      this._store.data.manifest.short_url;
+      this._store.data.manifest.short_url
+    );
   }
 
   get url() {
@@ -125,7 +139,7 @@ class Manifest {
   }
 
   get installed() {
-    return this._store.data && this._store.data.installed || false;
+    return (this._store.data && this._store.data.installed) || false;
   }
 
   get start_url() {
@@ -141,21 +155,18 @@ class Manifest {
  * Manifests maintains the list of installed manifests
  */
 var Manifests = {
-
-  async initialise () {
-
+  async initialise() {
     if (this.started) {
       return this.started;
     }
 
     this.started = (async () => {
-
       // Make sure the manifests have the folder needed to save into
-      await OS.File.makeDir(MANIFESTS_DIR, {ignoreExisting: true});
+      await OS.File.makeDir(MANIFESTS_DIR, { ignoreExisting: true });
 
       // Ensure any existing scope data we have about manifests is loaded
       this._path = OS.Path.join(OS.Constants.Path.profileDir, MANIFESTS_FILE);
-      this._store = new JSONFile({path: this._path});
+      this._store = new JSONFile({ path: this._path });
       await this._store.load();
 
       // If we dont have any existing data, initialise empty
@@ -166,7 +177,6 @@ var Manifests = {
       // Cache the Manifest objects creates as they are references to files
       // and we do not want multiple file handles
       this.manifestObjs = {};
-
     })();
 
     return this.started;
@@ -193,7 +203,6 @@ var Manifests = {
   // Get the manifest given a url, or if not look for a manifest that is
   // tied to the current page
   async getManifest(browser, manifestUrl) {
-
     // Ensure we have all started up
     await this.initialise();
 
@@ -219,8 +228,7 @@ var Manifests = {
     this.manifestObjs[manifestUrl] = new Manifest(browser, manifestUrl);
     await this.manifestObjs[manifestUrl].initialise();
     return this.manifestObjs[manifestUrl];
-  }
-
+  },
 };
 
 var EXPORTED_SYMBOLS = ["Manifests"]; // jshint ignore:line

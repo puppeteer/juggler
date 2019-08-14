@@ -1,4 +1,3 @@
-// |reftest| skip -- String.prototype.matchAll is not supported
 // Copyright (C) 2018 Jordan Harband. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 /*---

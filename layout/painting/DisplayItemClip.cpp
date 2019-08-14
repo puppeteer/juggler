@@ -439,7 +439,9 @@ bool DisplayItemClip::ComputeRegionInClips(const DisplayItemClip* aOldClip,
 }
 
 void DisplayItemClip::MoveBy(const nsPoint& aPoint) {
-  if (!mHaveClipRect) return;
+  if (!mHaveClipRect) {
+    return;
+  }
   mClipRect += aPoint;
   for (uint32_t i = 0; i < mRoundedClipRects.Length(); ++i) {
     mRoundedClipRects[i].mRect += aPoint;
@@ -477,7 +479,7 @@ nsCString DisplayItemClip::ToString() const {
 }
 
 void DisplayItemClip::ToComplexClipRegions(
-    int32_t aAppUnitsPerDevPixel, const layers::StackingContextHelper& aSc,
+    int32_t aAppUnitsPerDevPixel,
     nsTArray<wr::ComplexClipRegion>& aOutArray) const {
   for (const auto& clipRect : mRoundedClipRects) {
     aOutArray.AppendElement(wr::ToComplexClipRegion(

@@ -2,21 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
- /* CSS Variables specific to the Changes panel that aren't defined by the themes */
- :root {
-   --diff-add-background-color: #f1feec;
-   --diff-add-text-color: #54983f;
-   --diff-remove-background-color: #fbf2f5;
-   --diff-remove-text-color: #bf7173;
-   --diff-source-background: var(--theme-toolbar-background);
-   --diff-level: 0;
-   --diff-level-offset: 10px;
-   /*
+/* CSS Variables specific to the Changes panel that aren't defined by the themes */
+:root {
+  --diff-add-background-color: #f1feec;
+  --diff-add-text-color: #54983f;
+  --diff-remove-background-color: #fbf2f5;
+  --diff-remove-text-color: #bf7173;
+  --diff-source-background: var(--theme-toolbar-background);
+  --diff-level: 0;
+  --diff-level-offset: 10px;
+  /*
     Minimum padding so content on the first level (zero) isn't touching the edge. Added
     and removed lines will re-declare this to add extra padding to clear the +/- icons.
-   */
-   --diff-level-min-offset: 5px;
- }
+  */
+  --diff-level-min-offset: 5px;
+}
 
 :root.theme-dark {
   --diff-add-background-color: rgba(18, 188, 0, 0.15);
@@ -75,33 +75,104 @@
   padding-bottom: 3px;
   padding-left: calc(var(--diff-level-min-offset) +
                      var(--diff-level-offset) * var(--diff-level));
+}
+
+#sidebar-panel-changes .changes__toolbar {
+  background: var(--theme-sidebar-background);
+  border-bottom: 1px solid var(--theme-splitter-color);
+  padding: 2px 5px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* Remove the top border of the first source to avoid double border from sticky toolbar */
+#sidebar-panel-changes .changes__toolbar + .source .href {
+  border-top: none;
+}
+
+.changes__copy-all-changes-button {
+  -moz-context-properties: fill;
+  /* Use the Firefox copy icon (16px) instead of the smaller DevTools one (12px) */
+  background: url(chrome://browser/skin/edit-copy.svg) no-repeat;
+  background-position: 4px 3px;
+  background-size: 16px;
+  border: none;
+  border-radius: 3px;
+  color: var(--theme-body-color);
+  fill: currentColor;
+  padding: 4px 5px 4px 25px;
+}
+
+.changes__copy-all-changes-button:hover,
+.changes__copy-all-changes-button:focus {
+  background-color: var(--theme-button-background);
+}
+
+.changes__copy-all-changes-button:active {
+  background-color: var(--theme-button-active-background);
+}
+
+/* Hide the Copy Rule button by default. */
+.changes__copy-rule-button {
+  /**
+   * The rgba() format of the background colors makes the button see-through and it looks
+   * bad when stacked on top of long selectors.
+   *
+   * To solve this and not change the color format which is inherited from the Photon
+   * color guide in `client/themes/variables.css`, we use a blending trick to overlay the
+   * rgba() color value onto a solid color used for the panel background (achieved with
+   * a linear gradient with no transition). This keeps the rgba() color, but prevents the
+   * see-through effect.
+   */
+  background-blend-mode: overlay;
+  background-color: var(--theme-button-background);
+  background-image:
+    linear-gradient(var(--theme-sidebar-background), var(--theme-sidebar-background));
+  border-radius: 8px;
+  border: none;
+  color: var(--theme-body-color);
+  display: none;
+  padding: 1px 7px;
+  position: absolute;
+  right: 5px;
+  top: 2px;
+}
+
+.changes__copy-rule-button:active {
+  background-color: var(--theme-button-active-background);
+}
+
+.changes__rule {
   position: relative;
 }
 
-#sidebar-panel-changes .selector {
+.changes__selector {
   word-wrap: break-word;
 }
 
-#sidebar-panel-changes .rule .bracket-open {
-  display: inline-block;
-  margin-left: 5px;
+/* Show the Copy Rule button when hovering over the rule's selector elements */
+.changes__selector:hover + .changes__copy-rule-button,
+.changes__selector:hover + .changes__selector + .changes__copy-rule-button,
+.changes__copy-rule-button:hover {
+  display: block;
 }
 
-#sidebar-panel-changes .declaration-name {
+.changes__declaration {
+  overflow-wrap: break-word;
+}
+
+.changes__declaration-name {
   margin-left: 10px;
-}
-
-#sidebar-panel-changes .declaration-value {
-  margin-left: 5px;
 }
 
 .diff-add,
 .diff-remove {
   --diff-level-min-offset: 15px;
+  position: relative;
 }
 
-.diff-add::before,
-.diff-remove::before {
+.diff-marker {
   position: absolute;
   left: 5px;
 }
@@ -110,8 +181,7 @@
   background-color: var(--diff-add-background-color);
 }
 
-.diff-add::before {
-  content: "+";
+.diff-add .diff-marker {
   color: var(--diff-add-text-color);
 }
 
@@ -119,8 +189,7 @@
   background-color: var(--diff-remove-background-color);
 }
 
-.diff-remove::before{
-  content: "-";
+.diff-remove .diff-marker{
   color: var(--diff-remove-text-color);
 }
 

@@ -4,20 +4,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "TabParent.h"
+#include "BrowserParent.h"
 
-// TabParent.h transitively includes <windows.h>, which does
+// BrowserParent.h transitively includes <windows.h>, which does
 //   #define CreateEvent CreateEventW
 // That messes up our call to EventDispatcher::CreateEvent below.
 
 #ifdef CreateEvent
-#undef CreateEvent
+#  undef CreateEvent
 #endif
 
 #include "BrowserElementParent.h"
 #include "mozilla/EventDispatcher.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsVariant.h"
 #include "mozilla/dom/BrowserElementDictionariesBinding.h"
@@ -112,6 +114,7 @@ BrowserElementParent::DispatchOpenWindowEvent(Element* aOpenerFrameElement,
                                               Element* aPopupFrameElement,
                                               const nsAString& aURL,
                                               const nsAString& aName,
+                                              bool aForceNoReferrer,
                                               const nsAString& aFeatures) {
   // Dispatch a CustomEvent at aOpenerFrameElement with a detail object
   // (OpenWindowEventDetail) containing aPopupFrameElement, aURL, aName, and
@@ -128,14 +131,20 @@ BrowserElementParent::DispatchOpenWindowEvent(Element* aOpenerFrameElement,
   detail.mName = aName;
   detail.mFeatures = aFeatures;
   detail.mFrameElement = aPopupFrameElement;
-
-  AutoJSContext cx;
-  JS::Rooted<JS::Value> val(cx);
+  detail.mForceNoReferrer = aForceNoReferrer;
 
   nsIGlobalObject* sgo = aPopupFrameElement->OwnerDoc()->GetScopeObject();
   if (!sgo) {
     return BrowserElementParent::OPEN_WINDOW_IGNORED;
   }
+
+  AutoJSAPI jsapi;
+  if (!jsapi.Init(sgo)) {
+    return BrowserElementParent::OPEN_WINDOW_IGNORED;
+  }
+
+  JSContext* cx = jsapi.cx();
+  JS::Rooted<JS::Value> val(cx);
 
   JS::Rooted<JSObject*> global(cx, sgo->GetGlobalJSObject());
   JSAutoRealm ar(cx, global);
@@ -165,10 +174,12 @@ BrowserElementParent::DispatchOpenWindowEvent(Element* aOpenerFrameElement,
 
 /*static*/
 BrowserElementParent::OpenWindowResult BrowserElementParent::OpenWindowOOP(
-    TabParent* aOpenerTabParent, TabParent* aPopupTabParent,
-    const nsAString& aURL, const nsAString& aName, const nsAString& aFeatures) {
+    BrowserParent* aOpenerBrowserParent, BrowserParent* aPopupBrowserParent,
+    const nsAString& aURL, const nsAString& aName, bool aForceNoReferrer,
+    const nsAString& aFeatures) {
   // Create an iframe owned by the same document which owns openerFrameElement.
-  nsCOMPtr<Element> openerFrameElement = aOpenerTabParent->GetOwnerElement();
+  nsCOMPtr<Element> openerFrameElement =
+      aOpenerBrowserParent->GetOwnerElement();
   NS_ENSURE_TRUE(openerFrameElement, BrowserElementParent::OPEN_WINDOW_IGNORED);
   RefPtr<HTMLIFrameElement> popupFrameElement =
       CreateIframe(openerFrameElement, aName, /* aRemote = */ true);
@@ -185,8 +196,9 @@ BrowserElementParent::OpenWindowResult BrowserElementParent::OpenWindowOOP(
   // allowed.
   popupFrameElement->DisallowCreateFrameLoader();
 
-  OpenWindowResult opened = DispatchOpenWindowEvent(
-      openerFrameElement, popupFrameElement, aURL, aName, aFeatures);
+  OpenWindowResult opened =
+      DispatchOpenWindowEvent(openerFrameElement, popupFrameElement, aURL,
+                              aName, aForceNoReferrer, aFeatures);
 
   if (opened != BrowserElementParent::OPEN_WINDOW_ADDED) {
     return opened;
@@ -194,16 +206,16 @@ BrowserElementParent::OpenWindowResult BrowserElementParent::OpenWindowOOP(
 
   // The popup was not blocked, so hook up the frame element and the popup tab
   // parent, and return success.
-  aPopupTabParent->SetOwnerElement(popupFrameElement);
+  aPopupBrowserParent->SetOwnerElement(popupFrameElement);
   popupFrameElement->AllowCreateFrameLoader();
-  popupFrameElement->CreateRemoteFrameLoader(aPopupTabParent);
+  popupFrameElement->CreateRemoteFrameLoader(aPopupBrowserParent);
 
   return opened;
 }
 
 /* static */
 BrowserElementParent::OpenWindowResult
-BrowserElementParent::OpenWindowInProcess(nsPIDOMWindowOuter* aOpenerWindow,
+BrowserElementParent::OpenWindowInProcess(BrowsingContext* aOpenerWindow,
                                           nsIURI* aURI, const nsAString& aName,
                                           const nsACString& aFeatures,
                                           bool aForceNoOpener,
@@ -218,7 +230,8 @@ BrowserElementParent::OpenWindowInProcess(nsPIDOMWindowOuter* aOpenerWindow,
   // GetScriptableTop gets us the <iframe mozbrowser>'s window; we'll use its
   // frame element, rather than aOpenerWindow's frame element, as our "opener
   // frame element" below.
-  nsCOMPtr<nsPIDOMWindowOuter> win = aOpenerWindow->GetScriptableTop();
+  nsCOMPtr<nsPIDOMWindowOuter> win =
+      aOpenerWindow->GetDOMWindow()->GetScriptableTop();
 
   nsCOMPtr<Element> openerFrameElement = win->GetFrameElementInternal();
   NS_ENSURE_TRUE(openerFrameElement, BrowserElementParent::OPEN_WINDOW_IGNORED);
@@ -234,13 +247,14 @@ BrowserElementParent::OpenWindowInProcess(nsPIDOMWindowOuter* aOpenerWindow,
 
   if (!aForceNoOpener) {
     ErrorResult res;
-    popupFrameElement->PresetOpenerWindow(aOpenerWindow, res);
+    popupFrameElement->PresetOpenerWindow(WindowProxyHolder(aOpenerWindow),
+                                          res);
     MOZ_ASSERT(!res.Failed());
   }
 
   OpenWindowResult opened = DispatchOpenWindowEvent(
       openerFrameElement, popupFrameElement, NS_ConvertUTF8toUTF16(spec), aName,
-      NS_ConvertUTF8toUTF16(aFeatures));
+      false, NS_ConvertUTF8toUTF16(aFeatures));
 
   if (opened != BrowserElementParent::OPEN_WINDOW_ADDED) {
     return opened;

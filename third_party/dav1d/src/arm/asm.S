@@ -25,17 +25,19 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DAV1D_SRC_ARM_ASM_S__
-#define __DAV1D_SRC_ARM_ASM_S__
+#ifndef DAV1D_SRC_ARM_ASM_S
+#define DAV1D_SRC_ARM_ASM_S
 
 #include "config.h"
 
 #if ARCH_ARM
-    .syntax unified
+        .syntax unified
 #ifdef __ELF__
-    .fpu neon
-    .eabi_attribute 10, 0           // suppress Tag_FP_arch
-    .eabi_attribute 12, 0           // suppress Tag_Advanced_SIMD_arch
+        .arch armv7-a
+        .fpu neon
+        .eabi_attribute 10, 0           // suppress Tag_FP_arch
+        .eabi_attribute 12, 0           // suppress Tag_Advanced_SIMD_arch
+        .section .note.GNU-stack,"",%progbits // Mark stack as non-executable
 #endif
 
 #ifdef _WIN32
@@ -45,7 +47,7 @@
 #endif
 
 #if CONFIG_THUMB
-    .thumb
+        .thumb
 #define A @
 #define T
 #else
@@ -85,25 +87,25 @@
 #endif
         .purgem endfunc
     .endm
-    .text
-    .align \align
-  .if \export
-    .global EXTERN\name
+        .text
+        .align \align
+    .if \export
+        .global EXTERN\name
 #ifdef __ELF__
-    .type   EXTERN\name, %function
+        .type   EXTERN\name, %function
 #endif
 #if HAVE_AS_FUNC
-    .func   EXTERN\name
+        .func   EXTERN\name
 #endif
 EXTERN\name:
-  .else
+    .else
 #ifdef __ELF__
-    .type \name, %function
+        .type \name, %function
 #endif
 #if HAVE_AS_FUNC
-    .func \name
+        .func \name
 #endif
-  .endif
+    .endif
 \name:
 .endm
 
@@ -114,7 +116,9 @@ EXTERN\name:
 #endif
         .purgem endconst
     .endm
-#if !defined(__MACH__)
+#if defined(_WIN32)
+        .section        .rdata
+#elif !defined(__MACH__)
         .section        .rodata
 #else
         .const_data
@@ -131,4 +135,4 @@ EXTERN\name:
 
 #define X(x) CONCAT(EXTERN, x)
 
-#endif /* __DAV1D_SRC_ARM_ASM_S__ */
+#endif /* DAV1D_SRC_ARM_ASM_S */

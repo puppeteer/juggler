@@ -23,7 +23,7 @@
 
 #include "jit/ExecutableAllocator.h"
 #ifdef JS_ION_PERF
-#include "jit/PerfSpewer.h"
+#  include "jit/PerfSpewer.h"
 #endif
 #include "vtune/VTuneWrapper.h"
 #include "wasm/WasmModule.h"
@@ -108,8 +108,8 @@ static uint32_t RoundupCodeLength(uint32_t codeLength) {
   return JS_ROUNDUP(codeLength, ExecutableCodePageSize);
 }
 
-/* static */ UniqueCodeBytes CodeSegment::AllocateCodeBytes(
-    uint32_t codeLength) {
+/* static */
+UniqueCodeBytes CodeSegment::AllocateCodeBytes(uint32_t codeLength) {
   if (codeLength > MaxCodeBytesPerProcess) {
     return nullptr;
   }
@@ -337,8 +337,9 @@ ModuleSegment::ModuleSegment(Tier tier, UniqueCodeBytes codeBytes,
       tier_(tier),
       trapCode_(base() + linkData.trapOffset) {}
 
-/* static */ UniqueModuleSegment ModuleSegment::create(
-    Tier tier, MacroAssembler& masm, const LinkData& linkData) {
+/* static */
+UniqueModuleSegment ModuleSegment::create(Tier tier, MacroAssembler& masm,
+                                          const LinkData& linkData) {
   uint32_t codeLength = masm.bytesNeeded();
 
   UniqueCodeBytes codeBytes = AllocateCodeBytes(codeLength);
@@ -353,8 +354,9 @@ ModuleSegment::ModuleSegment(Tier tier, UniqueCodeBytes codeBytes,
                                        linkData);
 }
 
-/* static */ UniqueModuleSegment ModuleSegment::create(
-    Tier tier, const Bytes& unlinkedBytes, const LinkData& linkData) {
+/* static */
+UniqueModuleSegment ModuleSegment::create(Tier tier, const Bytes& unlinkedBytes,
+                                          const LinkData& linkData) {
   uint32_t codeLength = unlinkedBytes.length();
 
   UniqueCodeBytes codeBytes = AllocateCodeBytes(codeLength);
@@ -648,8 +650,7 @@ struct ProjectLazyFuncIndex {
 
 static constexpr unsigned LAZY_STUB_LIFO_DEFAULT_CHUNK_SIZE = 8 * 1024;
 
-bool LazyStubTier::createMany(HasGcTypes gcTypesConfigured,
-                              const Uint32Vector& funcExportIndices,
+bool LazyStubTier::createMany(const Uint32Vector& funcExportIndices,
                               const CodeTier& codeTier,
                               size_t* stubSegmentIndex) {
   MOZ_ASSERT(funcExportIndices.length());
@@ -673,8 +674,7 @@ bool LazyStubTier::createMany(HasGcTypes gcTypesConfigured,
     Maybe<ImmPtr> callee;
     callee.emplace(calleePtr, ImmPtr::NoCheckToken());
     if (!GenerateEntryStubs(masm, funcExportIndex, fe, callee,
-                            /* asmjs */ false, gcTypesConfigured,
-                            &codeRanges)) {
+                            /* asmjs */ false, &codeRanges)) {
       return false;
     }
   }
@@ -685,10 +685,7 @@ bool LazyStubTier::createMany(HasGcTypes gcTypesConfigured,
 
   MOZ_ASSERT(masm.callSites().empty());
   MOZ_ASSERT(masm.callSiteTargets().empty());
-  MOZ_ASSERT(masm.callFarJumps().empty());
   MOZ_ASSERT(masm.trapSites().empty());
-  MOZ_ASSERT(masm.callFarJumps().empty());
-  MOZ_ASSERT(masm.symbolicAccesses().empty());
 
   if (masm.oom()) {
     return false;
@@ -720,6 +717,7 @@ bool LazyStubTier::createMany(HasGcTypes gcTypesConfigured,
     return false;
 
   masm.executableCopy(codePtr, /* flushICache = */ false);
+  PatchDebugSymbolicAccesses(codePtr, masm);
   memset(codePtr + masm.bytesNeeded(), 0, codeLength - masm.bytesNeeded());
 
   for (const CodeLabel& label : masm.codeLabels()) {
@@ -769,8 +767,7 @@ bool LazyStubTier::createOne(uint32_t funcExportIndex,
   }
 
   size_t stubSegmentIndex;
-  if (!createMany(codeTier.code().metadata().temporaryGcTypesConfigured,
-                  funcExportIndexes, codeTier, &stubSegmentIndex)) {
+  if (!createMany(funcExportIndexes, codeTier, &stubSegmentIndex)) {
     return false;
   }
 
@@ -797,8 +794,7 @@ bool LazyStubTier::createOne(uint32_t funcExportIndex,
   return true;
 }
 
-bool LazyStubTier::createTier2(HasGcTypes gcTypesConfigured,
-                               const Uint32Vector& funcExportIndices,
+bool LazyStubTier::createTier2(const Uint32Vector& funcExportIndices,
                                const CodeTier& codeTier,
                                Maybe<size_t>* outStubSegmentIndex) {
   if (!funcExportIndices.length()) {
@@ -806,8 +802,7 @@ bool LazyStubTier::createTier2(HasGcTypes gcTypesConfigured,
   }
 
   size_t stubSegmentIndex;
-  if (!createMany(gcTypesConfigured, funcExportIndices, codeTier,
-                  &stubSegmentIndex)) {
+  if (!createMany(funcExportIndices, codeTier, &stubSegmentIndex)) {
     return false;
   }
 
@@ -837,8 +832,10 @@ bool LazyStubTier::hasStub(uint32_t funcIndex) const {
 
 void* LazyStubTier::lookupInterpEntry(uint32_t funcIndex) const {
   size_t match;
-  MOZ_ALWAYS_TRUE(BinarySearch(ProjectLazyFuncIndex(exports_), 0,
-                               exports_.length(), funcIndex, &match));
+  if (!BinarySearch(ProjectLazyFuncIndex(exports_), 0, exports_.length(),
+                    funcIndex, &match)) {
+    return nullptr;
+  }
   const LazyFuncExport& fe = exports_[match];
   const LazyStubSegment& stub = *stubSegments_[fe.lazyStubSegmentIndex];
   return stub.base() + stub.codeRanges()[fe.funcCodeRangeIndex].begin();
@@ -1073,18 +1070,8 @@ const CodeRange* CodeTier::lookupRange(const void* pc) const {
 
 bool JumpTables::init(CompileMode mode, const ModuleSegment& ms,
                       const CodeRangeVector& codeRanges) {
-  // Note a fast jit entry has two addresses, to be compatible with
-  // ion/baseline functions which have the raw vs checked args entries,
-  // both used all over the place in jit calls. This allows the fast entries
-  // to be compatible with jit code pointer loading routines.
-  // We can use the same entry for both kinds of jit entries since a wasm
-  // entry knows how to convert any kind of arguments and doesn't assume
-  // any input types.
-
   static_assert(JSScript::offsetOfJitCodeRaw() == 0,
-                "wasm fast jit entry is at (void*) jit[2*funcIndex]");
-  static_assert(JSScript::offsetOfJitCodeSkipArgCheck() == sizeof(void*),
-                "wasm fast jit entry is also at (void*) jit[2*funcIndex+1]");
+                "wasm fast jit entry is at (void*) jit[funcIndex]");
 
   mode_ = mode;
 
@@ -1108,7 +1095,7 @@ bool JumpTables::init(CompileMode mode, const ModuleSegment& ms,
   // filling/looking up the jit entries and safe (worst case we'll crash
   // because of a null deref when trying to call the jit entry of an
   // unexported function).
-  jit_ = TablePointer(js_pod_calloc<void*>(2 * numFuncs));
+  jit_ = TablePointer(js_pod_calloc<void*>(numFuncs));
   if (!jit_) {
     return false;
   }
@@ -1166,8 +1153,9 @@ void Code::commitTier2() const {
 }
 
 uint32_t Code::getFuncIndex(JSFunction* fun) const {
-  if (fun->isAsmJSNative()) {
-    return fun->asmJSFuncIndex();
+  MOZ_ASSERT(fun->isWasm() || fun->isAsmJSNative());
+  if (!fun->isWasmWithJitEntry()) {
+    return fun->wasmFuncIndex();
   }
   return jumpTables_.funcIndexFromJitEntry(fun->wasmJitEntry());
 }
@@ -1255,6 +1243,16 @@ const CodeRange* Code::lookupFuncRange(void* pc) const {
   for (Tier t : tiers()) {
     const CodeRange* result = codeTier(t).lookupRange(pc);
     if (result && result->isFunction()) {
+      return result;
+    }
+  }
+  return nullptr;
+}
+
+const StackMap* Code::lookupStackMap(uint8_t* nextPC) const {
+  for (Tier t : tiers()) {
+    const StackMap* result = metadata(t).stackMaps.findMap(nextPC);
+    if (result) {
       return result;
     }
   }
@@ -1442,4 +1440,29 @@ uint8_t* Code::serialize(uint8_t* cursor, const LinkData& linkData) const {
 
   *out = code;
   return cursor;
+}
+
+void wasm::PatchDebugSymbolicAccesses(uint8_t* codeBase, MacroAssembler& masm) {
+#ifdef WASM_CODEGEN_DEBUG
+  for (auto& access : masm.symbolicAccesses()) {
+    switch (access.target) {
+      case SymbolicAddress::PrintI32:
+      case SymbolicAddress::PrintPtr:
+      case SymbolicAddress::PrintF32:
+      case SymbolicAddress::PrintF64:
+      case SymbolicAddress::PrintText:
+        break;
+      default:
+        MOZ_CRASH("unexpected symbol in PatchDebugSymbolicAccesses");
+    }
+    ABIFunctionType abiType;
+    void* target = AddressOf(access.target, &abiType);
+    uint8_t* patchAt = codeBase + access.patchAt.offset();
+    Assembler::PatchDataWithValueCheck(CodeLocationLabel(patchAt),
+                                       PatchedImmPtr(target),
+                                       PatchedImmPtr((void*)-1));
+  }
+#else
+  MOZ_ASSERT(masm.symbolicAccesses().empty());
+#endif
 }

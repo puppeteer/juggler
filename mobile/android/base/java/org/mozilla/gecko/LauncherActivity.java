@@ -5,10 +5,15 @@
 
 package org.mozilla.gecko;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.PendingIntent;
+import android.appwidget.AppWidgetManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.customtabs.CustomTabsIntent;
@@ -16,8 +21,8 @@ import android.util.Log;
 
 import org.mozilla.gecko.home.HomeConfig;
 import org.mozilla.gecko.mma.MmaDelegate;
-import org.mozilla.gecko.switchboard.SwitchBoard;
-import org.mozilla.gecko.util.FileUtils;
+import org.mozilla.gecko.search.SearchWidgetConfigurationActivity;
+import org.mozilla.gecko.search.SearchWidgetProvider;
 import org.mozilla.gecko.webapps.WebAppActivity;
 import org.mozilla.gecko.webapps.WebAppIndexer;
 import org.mozilla.gecko.customtabs.CustomTabsActivity;
@@ -32,6 +37,7 @@ import static org.mozilla.gecko.deeplink.DeepLinkContract.DEEP_LINK_SCHEME;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_BOOKMARK_LIST;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_DEFAULT_BROWSER;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_HISTORY_LIST;
+import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_OPEN;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_HOME;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_ACCESSIBILITY;
@@ -40,9 +46,11 @@ import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_NOTIF
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_PRIAVACY;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_PREFERENCES_SEARCH;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_SAVE_AS_PDF;
+import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_SEARCH_WIDGET;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_SIGN_UP;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.SUMO_DEFAULT_BROWSER;
 import static org.mozilla.gecko.deeplink.DeepLinkContract.LINK_FXA_SIGNIN;
+import static org.mozilla.gecko.deeplink.DeepLinkContract.URL_PARAM;
 import static org.mozilla.gecko.util.FileUtils.isContentUri;
 
 import org.mozilla.gecko.deeplink.DeepLinkContract;
@@ -101,10 +109,15 @@ public class LauncherActivity extends Activity {
     /**
      * Launch tab queue service to display overlay.
      */
+    @SuppressLint("NewApi")
     private void dispatchTabQueueIntent() {
         Intent intent = new Intent(getIntent());
         intent.setClass(getApplicationContext(), TabQueueService.class);
-        startService(intent);
+        if (AppConstants.Versions.preO) {
+            startService(intent);
+        } else {
+            startForegroundService(intent);
+        }
     }
 
     /**
@@ -195,8 +208,11 @@ public class LauncherActivity extends Activity {
             return;
         }
         final String deepLink = intent.getData().getHost();
-        final String uid = intent.getData().getQueryParameter("uid");
-        final String localUid = getSharedPreferences(BrowserApp.class.getName(), MODE_PRIVATE).getString(MmaDelegate.KEY_ANDROID_PREF_STRING_LEANPLUM_DEVICE_ID, null);
+        String uid = intent.getData().getQueryParameter("uid");
+        if (uid != null) {
+            uid = uid.replaceAll("\\n", "");
+        }
+        final String localUid = MmaDelegate.getDeviceId(LauncherActivity.this);
         final boolean isMmaDeepLink = uid != null && localUid != null && uid.equals(localUid);
 
         if (!validateMmaDeepLink(deepLink, isMmaDeepLink)) {
@@ -204,6 +220,9 @@ public class LauncherActivity extends Activity {
         }
 
         switch (deepLink) {
+            case LINK_OPEN:
+                dispatchUrlDeepLink(intent);
+                break;
             case LINK_DEFAULT_BROWSER:
                 GeckoSharedPrefs.forApp(this).edit().putBoolean(GeckoPreferences.PREFS_DEFAULT_BROWSER, true).apply();
 
@@ -215,6 +234,27 @@ public class LauncherActivity extends Activity {
                     startActivity(changeDefaultApps);
                 } else {
                     dispatchUrlIntent(SUMO_DEFAULT_BROWSER);
+                }
+                break;
+            case LINK_SEARCH_WIDGET:
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    AppWidgetManager appWidgetManager = getApplicationContext().getSystemService(AppWidgetManager.class);
+                    ComponentName componentName = new ComponentName(this, SearchWidgetProvider.class);
+
+                    if (appWidgetManager != null && appWidgetManager.isRequestPinAppWidgetSupported()) {
+                        // Create the PendingIntent object only if your app needs to be notified
+                        // that the user allowed the widget to be pinned. Note that, if the pinning
+                        // operation fails, your app isn't notified.
+                        Intent pinnedWidgetCallbackIntent = new Intent(getApplicationContext(), SearchWidgetConfigurationActivity.class);
+                        pinnedWidgetCallbackIntent.setAction(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
+
+                        // Configure the intent so that your app's broadcast receiver gets
+                        // the callback successfully. This callback receives the ID of the
+                        // newly-pinned widget (EXTRA_APPWIDGET_ID).
+                        PendingIntent successCallback = PendingIntent.getBroadcast(this, 0,
+                                pinnedWidgetCallbackIntent, PendingIntent.FLAG_UPDATE_CURRENT);
+                        appWidgetManager.requestPinAppWidget(componentName, null, successCallback);
+                    }
                 }
                 break;
             case LINK_SAVE_AS_PDF:
@@ -304,4 +344,10 @@ public class LauncherActivity extends Activity {
         startActivity(intent);
     }
 
+    private void dispatchUrlDeepLink(final SafeIntent intent) {
+        String url = intent.getData().getQueryParameter(URL_PARAM);
+        if (url != null) {
+            dispatchUrlIntent(url);
+        }
+    }
 }

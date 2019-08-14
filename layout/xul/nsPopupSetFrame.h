@@ -11,15 +11,19 @@
 #include "nsAtom.h"
 #include "nsBoxFrame.h"
 
-nsIFrame* NS_NewPopupSetFrame(nsIPresShell* aPresShell,
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
+nsIFrame* NS_NewPopupSetFrame(mozilla::PresShell* aPresShell,
                               mozilla::ComputedStyle* aStyle);
 
 class nsPopupSetFrame final : public nsBoxFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsPopupSetFrame)
 
-  explicit nsPopupSetFrame(ComputedStyle* aStyle)
-      : nsBoxFrame(aStyle, kClassID) {}
+  explicit nsPopupSetFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsBoxFrame(aStyle, aPresContext, kClassID) {}
 
   ~nsPopupSetFrame() {}
 

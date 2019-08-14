@@ -1,4 +1,4 @@
-// |reftest| skip-if(!Intl.hasOwnProperty('Segmenter')) -- Intl.Segmenter is not enabled unconditionally
+// |reftest| skip -- Intl.Segmenter is not supported
 // Copyright 2018 Igalia, S.L. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -11,6 +11,8 @@ info: |
     1. If NewTarget is undefined, throw a TypeError exception.
 features: [Intl.Segmenter]
 ---*/
+
+assert.sameValue(typeof Intl.Segmenter, "function");
 
 assert.throws(TypeError, function() {
   Intl.Segmenter();

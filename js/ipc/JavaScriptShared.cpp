@@ -8,7 +8,7 @@
 #include "JavaScriptShared.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/CPOWManagerGetter.h"
-#include "mozilla/dom/TabChild.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "jsfriendapi.h"
 #include "js/Symbol.h"
 #include "xpcprivate.h"
@@ -173,9 +173,9 @@ bool JavaScriptShared::toVariant(JSContext* cx, JS::HandleValue from,
         return true;
       }
 
-      if (xpc_JSObjectIsID(cx, obj)) {
+      Maybe<nsID> id = xpc::JSValue2ID(cx, from);
+      if (id) {
         JSIID iid;
-        const nsID* id = xpc_JSObjectToID(cx, obj);
         ConvertID(*id, &iid);
         *to = iid;
         return true;
@@ -278,14 +278,7 @@ bool JavaScriptShared::fromVariant(JSContext* cx, const JSVariant& from,
       nsID iid;
       const JSIID& id = from.get_JSIID();
       ConvertID(id, &iid);
-
-      RootedObject global(cx, JS::CurrentGlobalOrNull(cx));
-      JSObject* obj = xpc_NewIDObject(cx, global, iid);
-      if (!obj) {
-        return false;
-      }
-      to.set(ObjectValue(*obj));
-      return true;
+      return xpc::ID2JSValue(cx, iid, to);
     }
 
     default:
@@ -393,7 +386,8 @@ JS::Symbol* JavaScriptShared::fromSymbolVariant(JSContext* cx,
   }
 }
 
-/* static */ void JavaScriptShared::ConvertID(const nsID& from, JSIID* to) {
+/* static */
+void JavaScriptShared::ConvertID(const nsID& from, JSIID* to) {
   to->m0() = from.m0;
   to->m1() = from.m1;
   to->m2() = from.m2;
@@ -407,7 +401,8 @@ JS::Symbol* JavaScriptShared::fromSymbolVariant(JSContext* cx,
   to->m3_7() = from.m3[7];
 }
 
-/* static */ void JavaScriptShared::ConvertID(const JSIID& from, nsID* to) {
+/* static */
+void JavaScriptShared::ConvertID(const JSIID& from, nsID* to) {
   to->m0 = from.m0();
   to->m1 = from.m1();
   to->m2 = from.m2();

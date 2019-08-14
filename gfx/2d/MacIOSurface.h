@@ -7,9 +7,11 @@
 #ifndef MacIOSurface_h__
 #define MacIOSurface_h__
 #ifdef XP_DARWIN
-#include <QuartzCore/QuartzCore.h>
-#include <CoreVideo/CoreVideo.h>
-#include <dlfcn.h>
+#  include <QuartzCore/QuartzCore.h>
+#  include <CoreVideo/CoreVideo.h>
+#  include <dlfcn.h>
+
+#  include "mozilla/gfx/Types.h"
 
 namespace mozilla {
 namespace gl {
@@ -24,10 +26,10 @@ typedef struct CGContext* CGContextRef;
 typedef struct CGImage* CGImageRef;
 typedef uint32_t IOSurfaceID;
 
-#ifdef XP_IOS
+#  ifdef XP_IOS
 typedef kern_return_t IOReturn;
 typedef int CGLError;
-#endif
+#  endif
 
 typedef CFTypeRef IOSurfacePtr;
 typedef IOSurfacePtr (*IOSurfaceCreateFunc)(CFDictionaryRef properties);
@@ -61,15 +63,15 @@ typedef IOSurfacePtr (*CVPixelBufferGetIOSurfaceFunc)(
 
 typedef OSType (*IOSurfacePixelFormatFunc)(IOSurfacePtr io_surface);
 
-#ifdef XP_MACOSX
-#import <OpenGL/OpenGL.h>
-#else
-#import <OpenGLES/ES2/gl.h>
-#endif
+#  ifdef XP_MACOSX
+#    import <OpenGL/OpenGL.h>
+#  else
+#    import <OpenGLES/ES2/gl.h>
+#  endif
 
-#include "2D.h"
-#include "mozilla/RefPtr.h"
-#include "mozilla/RefCounted.h"
+#  include "2D.h"
+#  include "mozilla/RefPtr.h"
+#  include "mozilla/RefCounted.h"
 
 enum CGContextType {
   CG_CONTEXT_TYPE_UNKNOWN = 0,
@@ -96,11 +98,15 @@ class MacIOSurface final
   static void ReleaseIOSurface(MacIOSurface* aIOSurface);
   static already_AddRefed<MacIOSurface> LookupSurface(
       IOSurfaceID aSurfaceID, double aContentsScaleFactor = 1.0,
-      bool aHasAlpha = true);
+      bool aHasAlpha = true,
+      mozilla::gfx::YUVColorSpace aColorSpace =
+          mozilla::gfx::YUVColorSpace::UNKNOWN);
 
   explicit MacIOSurface(IOSurfacePtr aIOSurfacePtr,
                         double aContentsScaleFactor = 1.0,
-                        bool aHasAlpha = true);
+                        bool aHasAlpha = true,
+                        mozilla::gfx::YUVColorSpace aColorSpace =
+                            mozilla::gfx::YUVColorSpace::UNKNOWN);
   ~MacIOSurface();
   IOSurfaceID GetIOSurfaceID();
   void* GetBaseAddress();
@@ -124,6 +130,13 @@ class MacIOSurface final
   bool HasAlpha() { return mHasAlpha; }
   mozilla::gfx::SurfaceFormat GetFormat();
   mozilla::gfx::SurfaceFormat GetReadFormat();
+  // This would be better suited on MacIOSurfaceImage type, however due to the
+  // current data structure, this is not possible as only the IOSurfacePtr is
+  // being used across.
+  void SetYUVColorSpace(mozilla::gfx::YUVColorSpace aColorSpace) {
+    mColorSpace = aColorSpace;
+  }
+  mozilla::gfx::YUVColorSpace GetYUVColorSpace() const { return mColorSpace; }
 
   // We would like to forward declare NSOpenGLContext, but it is an @interface
   // and this file is also used from c++, so we use a void *.
@@ -151,6 +164,8 @@ class MacIOSurface final
   const IOSurfacePtr mIOSurfacePtr;
   double mContentsScaleFactor;
   bool mHasAlpha;
+  mozilla::gfx::YUVColorSpace mColorSpace =
+      mozilla::gfx::YUVColorSpace::UNKNOWN;
 };
 
 class MacIOSurfaceLib {

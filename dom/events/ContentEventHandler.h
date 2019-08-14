@@ -123,10 +123,11 @@ class MOZ_STACK_CLASS ContentEventHandler {
   nsresult OnQueryDOMWidgetHittest(WidgetQueryContentEvent* aEvent);
 
   // NS_SELECTION_* event
+  MOZ_CAN_RUN_SCRIPT
   nsresult OnSelectionEvent(WidgetSelectionEvent* aEvent);
 
  protected:
-  nsCOMPtr<nsIDocument> mDocument;
+  RefPtr<dom::Document> mDocument;
   // mSelection is typically normal selection but if OnQuerySelectedText()
   // is called, i.e., handling eQuerySelectedText, it's the specified selection
   // by WidgetQueryContentEvent::mInput::mSelectionType.

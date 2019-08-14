@@ -12,7 +12,6 @@ import android.os.Build;
 import android.system.Os;
 import android.util.Log;
 
-import org.mozilla.gecko.SysInfo;
 import org.mozilla.geckoview.BuildConfig;
 
 import java.io.File;
@@ -41,7 +40,7 @@ public final class HardwareUtils {
     private HardwareUtils() {
     }
 
-    public static void init(Context context) {
+    public static void init(final Context context) {
         if (sInited) {
             return;
         }
@@ -77,10 +76,6 @@ public final class HardwareUtils {
 
     public static boolean isTelevision() {
         return sIsTelevision;
-    }
-
-    public static int getMemSize() {
-        return SysInfo.getMemSize();
     }
 
     private static String getPreferredAbi() {
@@ -156,7 +151,7 @@ public final class HardwareUtils {
         }
     }
 
-    private static String machineTypeToString(int machineType) {
+    private static String machineTypeToString(final int machineType) {
         switch (machineType) {
             case ELF_MACHINE_X86:
                 return "x86";

@@ -6,7 +6,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1339722
 <head>
   <meta charset="utf-8">
   <title>Test for Bug 1339722</title>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://global/skin"/>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css"/>
   <script type="application/javascript">
@@ -20,33 +20,33 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1339722
    * 4. Verify that it doesn't crash.
   **/
 
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
+  const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-  const TOPIC = 'http-on-useragent-request';
+  const TOPIC = "http-on-useragent-request";
+  let win;
   Services.obs.addObserver({
     observe(subject, topic, data) {
-      info('Got ' + topic);
+      info("Got " + topic);
       Services.obs.removeObserver(this, TOPIC);
 
       // Query window proxy so it triggers DOMWindowCreated.
       let channel = subject.QueryInterface(Ci.nsIHttpChannel);
-      let win = channel.notificationCallbacks.getInterface(Ci.mozIDOMWindowProxy);
-    }
+      win = channel.notificationCallbacks.getInterface(Ci.mozIDOMWindowProxy);
+    },
   }, TOPIC);
 
   let docShell = SpecialPowers.wrap(window).docShell;
-  docShell.chromeEventHandler.addEventListener('DOMWindowCreated', function handler(e) {
-    docShell.chromeEventHandler.removeEventListener('DOMWindowCreated', handler);
-    let iframe = document.getElementById('testFrame');
-    is(e.target, iframe.contentDocument, 'verify event target');
+  docShell.chromeEventHandler.addEventListener("DOMWindowCreated", function handler(e) {
+    let iframe = document.getElementById("testFrame");
+    is(e.target, iframe.contentDocument, "verify event target");
 
     // Remove the iframe to cause frameloader destroy.
     iframe.remove();
     setTimeout($ => {
-      ok(!document.getElementById('testFrame'), 'verify iframe removed');
+      ok(!document.getElementById("testFrame"), "verify iframe removed");
       SimpleTest.finish();
     }, 0);
-  });
+  }, {once: true});
 
   SimpleTest.waitForExplicitFinish();
   </script>

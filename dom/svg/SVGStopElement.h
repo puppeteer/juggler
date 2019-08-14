@@ -7,16 +7,16 @@
 #ifndef mozilla_dom_SVGStopElement_h
 #define mozilla_dom_SVGStopElement_h
 
-#include "nsSVGElement.h"
-#include "nsSVGNumber2.h"
+#include "mozilla/dom/SVGElement.h"
+#include "SVGAnimatedNumber.h"
 
 nsresult NS_NewSVGStopElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
-typedef nsSVGElement SVGStopElementBase;
-
 namespace mozilla {
 namespace dom {
+
+typedef SVGElement SVGStopElementBase;
 
 class SVGStopElement final : public SVGStopElementBase {
  protected:
@@ -34,11 +34,11 @@ class SVGStopElement final : public SVGStopElementBase {
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedNumber> Offset();
+  already_AddRefed<DOMSVGAnimatedNumber> Offset();
 
  protected:
   virtual NumberAttributesInfo GetNumberInfo() override;
-  nsSVGNumber2 mOffset;
+  SVGAnimatedNumber mOffset;
   static NumberInfo sNumberInfo;
 };
 

@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, unicode_literals
 
 import bz2
 import gzip
@@ -84,6 +84,7 @@ def create_tar_gz_from_files(fp, files, filename=None, compresslevel=9):
 
 class _BZ2Proxy(object):
     """File object that proxies writes to a bz2 compressor."""
+
     def __init__(self, fp, compresslevel=9):
         self.fp = fp
         self.compressor = bz2.BZ2Compressor(compresslevel=compresslevel)

@@ -7,7 +7,10 @@
 "use strict";
 
 define(function(require, exports, module) {
-  const { Component, createRef } = require("devtools/client/shared/vendor/react");
+  const {
+    Component,
+    createRef,
+  } = require("devtools/client/shared/vendor/react");
   const dom = require("devtools/client/shared/vendor/react-dom-factories");
   const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
@@ -39,14 +42,12 @@ define(function(require, exports, module) {
           PropTypes.string,
           PropTypes.object,
         ]),
-        tabActive: PropTypes.number,
+        activeTab: PropTypes.number,
         onMount: PropTypes.func,
         onBeforeChange: PropTypes.func,
         onAfterChange: PropTypes.func,
-        children: PropTypes.oneOfType([
-          PropTypes.array,
-          PropTypes.element,
-        ]).isRequired,
+        children: PropTypes.oneOfType([PropTypes.array, PropTypes.element])
+          .isRequired,
         showAllTabsMenu: PropTypes.bool,
         onAllTabsMenuClick: PropTypes.func,
 
@@ -62,7 +63,7 @@ define(function(require, exports, module) {
 
     static get defaultProps() {
       return {
-        tabActive: 0,
+        activeTab: 0,
         showAllTabsMenu: false,
         renderOnlySelected: false,
       };
@@ -72,7 +73,7 @@ define(function(require, exports, module) {
       super(props);
 
       this.state = {
-        tabActive: props.tabActive,
+        activeTab: props.activeTab,
 
         // This array is used to store an object containing information on whether a tab
         // at a specified index has already been created (e.g. selected at least once) and
@@ -113,14 +114,14 @@ define(function(require, exports, module) {
         node.addEventListener("underflow", this.onUnderflow);
       }
 
-      const index = this.state.tabActive;
+      const index = this.state.activeTab;
       if (this.props.onMount) {
         this.props.onMount(index);
       }
     }
 
     componentWillReceiveProps(nextProps) {
-      let { children, tabActive } = nextProps;
+      let { children, activeTab } = nextProps;
       const panels = children.filter(panel => panel);
       let created = [...this.state.created];
 
@@ -143,18 +144,17 @@ define(function(require, exports, module) {
         });
       }
 
-      // Check type of 'tabActive' props to see if it's valid (it's 0-based index).
-      if (typeof tabActive === "number") {
+      // Check type of 'activeTab' props to see if it's valid (it's 0-based index).
+      if (typeof activeTab === "number") {
         // Reset to index 0 if index overflows the range of panel array
-        tabActive = (tabActive < panels.length && tabActive >= 0) ?
-          tabActive : 0;
+        activeTab = activeTab < panels.length && activeTab >= 0 ? activeTab : 0;
 
-        created[tabActive] = Object.assign({}, created[tabActive], {
+        created[activeTab] = Object.assign({}, created[activeTab], {
           isCreated: true,
         });
 
         this.setState({
-          tabActive,
+          activeTab,
         });
       }
 
@@ -197,20 +197,20 @@ define(function(require, exports, module) {
         return;
       }
 
-      let tabActive = this.state.tabActive;
+      let activeTab = this.state.activeTab;
       const tabCount = this.props.children.length;
 
       switch (event.code) {
         case "ArrowRight":
-          tabActive = Math.min(tabCount - 1, tabActive + 1);
+          activeTab = Math.min(tabCount - 1, activeTab + 1);
           break;
         case "ArrowLeft":
-          tabActive = Math.max(0, tabActive - 1);
+          activeTab = Math.max(0, activeTab - 1);
           break;
       }
 
-      if (this.state.tabActive != tabActive) {
-        this.setActive(tabActive);
+      if (this.state.activeTab != activeTab) {
+        this.setActive(activeTab);
       }
     }
 
@@ -242,7 +242,7 @@ define(function(require, exports, module) {
 
       const newState = Object.assign({}, this.state, {
         created,
-        tabActive: index,
+        activeTab: index,
       });
 
       this.setState(newState, () => {
@@ -270,8 +270,8 @@ define(function(require, exports, module) {
       }
 
       const tabs = this.props.children
-        .map((tab) => typeof tab === "function" ? tab() : tab)
-        .filter((tab) => tab)
+        .map(tab => (typeof tab === "function" ? tab() : tab))
+        .filter(tab => tab)
         .map((tab, index) => {
           const {
             id,
@@ -282,7 +282,7 @@ define(function(require, exports, module) {
           } = tab.props;
 
           const ref = "tab-menu-" + index;
-          const isTabSelected = this.state.tabActive === index;
+          const isTabSelected = this.state.activeTab === index;
 
           const className = [
             "tabs-menu-item",
@@ -295,15 +295,16 @@ define(function(require, exports, module) {
           // Changing selected tab (and so, moving focus) is done through
           // left and right arrow keys.
           // See also `onKeyDown()` event handler.
-          return (
-            dom.li({
+          return dom.li(
+            {
               className,
               key: index,
               ref,
               role: "presentation",
             },
-              dom.span({className: "devtools-tab-line"}),
-              dom.a({
+            dom.span({ className: "devtools-tab-line" }),
+            dom.a(
+              {
                 id: id ? id + "-tab" : "tab-" + index,
                 tabIndex: isTabSelected ? 0 : -1,
                 title,
@@ -312,37 +313,33 @@ define(function(require, exports, module) {
                 role: "tab",
                 onClick: this.onClickTab.bind(this, index),
               },
-                title,
-                badge && !isTabSelected && showBadge() ?
-                  dom.span({ className: "tab-badge" }, badge)
-                  :
-                  null
-              )
+              title,
+              badge && !isTabSelected && showBadge()
+                ? dom.span({ className: "tab-badge" }, badge)
+                : null
             )
           );
         });
 
       // Display the menu only if there is not enough horizontal
       // space for all tabs (and overflow happened).
-      const allTabsMenu = this.state.overflow ? (
-        dom.button({
-          className: "all-tabs-menu",
-          onClick: this.props.onAllTabsMenuClick,
-        })
-      ) : null;
+      const allTabsMenu = this.state.overflow
+        ? dom.button({
+            className: "all-tabs-menu",
+            onClick: this.props.onAllTabsMenuClick,
+          })
+        : null;
 
       // Get the sidebar toggle button if a renderSidebarToggle function is provided.
-      const sidebarToggle =  this.props.renderSidebarToggle ?
-        this.props.renderSidebarToggle() : null;
+      const sidebarToggle = this.props.renderSidebarToggle
+        ? this.props.renderSidebarToggle()
+        : null;
 
-      return (
-        dom.nav({className: "tabs-navigation"},
-          sidebarToggle,
-          dom.ul({className: "tabs-menu", role: "tablist"},
-            tabs
-          ),
-          allTabsMenu
-        )
+      return dom.nav(
+        { className: "tabs-navigation" },
+        sidebarToggle,
+        dom.ul({ className: "tabs-menu", role: "tablist" }, tabs),
+        allTabsMenu
       );
     }
 
@@ -357,11 +354,11 @@ define(function(require, exports, module) {
         children = [children];
       }
 
-      const selectedIndex = this.state.tabActive;
+      const selectedIndex = this.state.activeTab;
 
       const panels = children
-        .map((tab) => typeof tab === "function" ? tab() : tab)
-        .filter((tab) => tab)
+        .map(tab => (typeof tab === "function" ? tab() : tab))
+        .filter(tab => tab)
         .map((tab, index) => {
           const selected = selectedIndex === index;
           if (renderOnlySelected && !selected) {
@@ -369,8 +366,8 @@ define(function(require, exports, module) {
           }
 
           const id = tab.props.id;
-          const isCreated = this.state.created[index] &&
-            this.state.created[index].isCreated;
+          const isCreated =
+            this.state.created[index] && this.state.created[index].isCreated;
 
           // Use 'visibility:hidden' + 'height:0' for hiding content of non-selected
           // tab. It's faster than 'display:none' because it avoids triggering frame
@@ -387,8 +384,8 @@ define(function(require, exports, module) {
           }
           const panel = tab.panel || tab;
 
-          return (
-            dom.div({
+          return dom.div(
+            {
               id: id ? id + "-panel" : "panel-" + index,
               key: id,
               style: style,
@@ -396,27 +393,21 @@ define(function(require, exports, module) {
               role: "tabpanel",
               "aria-labelledby": id ? id + "-tab" : "tab-" + index,
             },
-              (selected || isCreated) ? panel : null
-            )
+            selected || isCreated ? panel : null
           );
         });
 
-      return (
-        dom.div({className: "panels"},
-          panels
-        )
-      );
+      return dom.div({ className: "panels" }, panels);
     }
 
     render() {
-      return (
-        dom.div({
+      return dom.div(
+        {
           className: ["tabs", this.props.className].join(" "),
           ref: this.tabsEl,
         },
-          this.renderMenuItems(),
-          this.renderPanels()
-        )
+        this.renderMenuItems(),
+        this.renderPanels()
       );
     }
   }
@@ -430,17 +421,13 @@ define(function(require, exports, module) {
         id: PropTypes.string.isRequired,
         className: PropTypes.string,
         title: PropTypes.string.isRequired,
-        children: PropTypes.oneOfType([
-          PropTypes.array,
-          PropTypes.element,
-        ]).isRequired,
+        children: PropTypes.oneOfType([PropTypes.array, PropTypes.element])
+          .isRequired,
       };
     }
 
     render() {
-      return dom.div({className: "tab-panel"},
-        this.props.children
-      );
+      return dom.div({ className: "tab-panel" }, this.props.children);
     }
   }
 

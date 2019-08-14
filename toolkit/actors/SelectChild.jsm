@@ -6,13 +6,20 @@
 
 var EXPORTED_SYMBOLS = ["SelectChild"];
 
-ChromeUtils.import("resource://gre/modules/ActorChild.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
-ChromeUtils.defineModuleGetter(this, "BrowserUtils",
-                               "resource://gre/modules/BrowserUtils.jsm");
-ChromeUtils.defineModuleGetter(this, "DeferredTask",
-                               "resource://gre/modules/DeferredTask.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "BrowserUtils",
+  "resource://gre/modules/BrowserUtils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "DeferredTask",
+  "resource://gre/modules/DeferredTask.jsm"
+);
 
 XPCOMUtils.defineLazyGlobalGetters(this, ["InspectorUtils"]);
 
@@ -20,9 +27,14 @@ const kStateActive = 0x00000001; // NS_EVENT_STATE_ACTIVE
 const kStateHover = 0x00000004; // NS_EVENT_STATE_HOVER
 
 const SUPPORTED_PROPERTIES = [
+  "direction",
   "color",
   "background-color",
   "text-shadow",
+  "font-family",
+  "font-weight",
+  "font-size",
+  "font-style",
 ];
 
 // A process global state for whether or not content thinks
@@ -31,14 +43,12 @@ const SUPPORTED_PROPERTIES = [
 // via SelectContentHelper.open.
 var gOpen = false;
 
-var SelectContentHelper = function(aElement, aOptions, aGlobal) {
+var SelectContentHelper = function(aElement, aOptions, aActor) {
   this.element = aElement;
   this.initialSelection = aElement[aElement.selectedIndex] || null;
-  this.global = aGlobal;
+  this.actor = aActor;
   this.closedWithClickOn = false;
   this.isOpenedViaTouch = aOptions.isOpenedViaTouch;
-  this._selectBackgroundColor = null;
-  this._selectColor = null;
   this._closeAfterBlur = true;
   this._pseudoStylesSetup = false;
   this._lockedDescendants = null;
@@ -55,17 +65,12 @@ Object.defineProperty(SelectContentHelper, "open", {
 
 this.SelectContentHelper.prototype = {
   init() {
-    this.global.addMessageListener("Forms:SelectDropDownItem", this);
-    this.global.addMessageListener("Forms:DismissedDropDown", this);
-    this.global.addMessageListener("Forms:MouseOver", this);
-    this.global.addMessageListener("Forms:MouseOut", this);
-    this.global.addMessageListener("Forms:MouseUp", this);
-    this.global.addMessageListener("Forms:SearchFocused", this);
-    this.global.addMessageListener("Forms:BlurDropDown-Pong", this);
-    this.global.addEventListener("pagehide", this, { mozSystemGroup: true });
-    this.global.addEventListener("mozhidedropdown", this, { mozSystemGroup: true });
+    let win = this.element.ownerGlobal;
+    win.addEventListener("pagehide", this, { mozSystemGroup: true });
     this.element.addEventListener("blur", this, { mozSystemGroup: true });
-    this.element.addEventListener("transitionend", this, { mozSystemGroup: true });
+    this.element.addEventListener("transitionend", this, {
+      mozSystemGroup: true,
+    });
     let MutationObserver = this.element.ownerGlobal.MutationObserver;
     this.mut = new MutationObserver(mutations => {
       // Something changed the <select> while it was open, so
@@ -73,24 +78,23 @@ this.SelectContentHelper.prototype = {
       // in the very near future.
       this._updateTimer.arm();
     });
-    this.mut.observe(this.element, {childList: true, subtree: true, attributes: true});
+    this.mut.observe(this.element, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+    });
   },
 
   uninit() {
     this.element.openInParentProcess = false;
-    this.global.removeMessageListener("Forms:SelectDropDownItem", this);
-    this.global.removeMessageListener("Forms:DismissedDropDown", this);
-    this.global.removeMessageListener("Forms:MouseOver", this);
-    this.global.removeMessageListener("Forms:MouseOut", this);
-    this.global.removeMessageListener("Forms:MouseUp", this);
-    this.global.removeMessageListener("Forms:SearchFocused", this);
-    this.global.removeMessageListener("Forms:BlurDropDown-Pong", this);
-    this.global.removeEventListener("pagehide", this, { mozSystemGroup: true });
-    this.global.removeEventListener("mozhidedropdown", this, { mozSystemGroup: true });
+    let win = this.element.ownerGlobal;
+    win.removeEventListener("pagehide", this, { mozSystemGroup: true });
     this.element.removeEventListener("blur", this, { mozSystemGroup: true });
-    this.element.removeEventListener("transitionend", this, { mozSystemGroup: true });
+    this.element.removeEventListener("transitionend", this, {
+      mozSystemGroup: true,
+    });
     this.element = null;
-    this.global = null;
+    this.actor = null;
     this.mut.disconnect();
     this._updateTimer.disarm();
     this._updateTimer = null;
@@ -102,22 +106,17 @@ this.SelectContentHelper.prototype = {
     this._setupPseudoClassStyles();
     let rect = this._getBoundingContentRect();
     let computedStyles = getComputedStyles(this.element);
-    this._selectBackgroundColor = computedStyles.backgroundColor;
-    this._selectColor = computedStyles.color;
-    this._selectTextShadow = computedStyles.textShadow;
     let options = this._buildOptionList();
-    let defaultStyles = this.element.ownerGlobal.getDefaultComputedStyle(this.element);
-    this.global.sendAsyncMessage("Forms:ShowDropDown", {
-      direction: computedStyles.direction,
+    let defaultStyles = this.element.ownerGlobal.getDefaultComputedStyle(
+      this.element
+    );
+    this.actor.sendAsyncMessage("Forms:ShowDropDown", {
       isOpenedViaTouch: this.isOpenedViaTouch,
       options,
       rect,
       selectedIndex: this.element.selectedIndex,
-      selectBackgroundColor: this._selectBackgroundColor,
-      selectColor: this._selectColor,
-      selectTextShadow: this._selectTextShadow,
-      uaSelectBackgroundColor: defaultStyles.backgroundColor,
-      uaSelectColor: defaultStyles.color,
+      style: supportedStyles(computedStyles),
+      defaultStyle: supportedStyles(defaultStyles),
     });
     this._clearPseudoClassStyles();
     gOpen = true;
@@ -131,7 +130,9 @@ this.SelectContentHelper.prototype = {
     // any styles.
     this._pseudoStylesSetup = true;
     InspectorUtils.addPseudoClassLock(this.element, ":focus");
-    let lockedDescendants = this._lockedDescendants = this.element.querySelectorAll(":checked");
+    let lockedDescendants = (this._lockedDescendants = this.element.querySelectorAll(
+      ":checked"
+    ));
     for (let child of lockedDescendants) {
       // Selected options have the :checked pseudo-class, which
       // we want to disable before calculating the computed
@@ -164,7 +165,9 @@ this.SelectContentHelper.prototype = {
     if (!this._pseudoStylesSetup) {
       throw new Error("pseudo styles must be set up");
     }
-    return buildOptionListForChildren(this.element);
+    let uniqueStyles = [];
+    let options = buildOptionListForChildren(this.element, uniqueStyles);
+    return { options, uniqueStyles };
   },
 
   _update() {
@@ -175,19 +178,14 @@ this.SelectContentHelper.prototype = {
     // have :focus, though it is here for belt-and-suspenders.
     this._setupPseudoClassStyles();
     let computedStyles = getComputedStyles(this.element);
-    this._selectBackgroundColor = computedStyles.backgroundColor;
-    this._selectColor = computedStyles.color;
-    this._selectTextShadow = computedStyles.textShadow;
-
-    let defaultStyles = this.element.ownerGlobal.getDefaultComputedStyle(this.element);
-    this.global.sendAsyncMessage("Forms:UpdateDropDown", {
+    let defaultStyles = this.element.ownerGlobal.getDefaultComputedStyle(
+      this.element
+    );
+    this.actor.sendAsyncMessage("Forms:UpdateDropDown", {
       options: this._buildOptionList(),
       selectedIndex: this.element.selectedIndex,
-      selectBackgroundColor: this._selectBackgroundColor,
-      selectColor: this._selectColor,
-      selectTextShadow: this._selectTextShadow,
-      uaSelectBackgroundColor: defaultStyles.backgroundColor,
-      uaSelectColor: defaultStyles.color,
+      style: supportedStyles(computedStyles),
+      defaultStyle: supportedStyles(defaultStyles),
     });
     this._clearPseudoClassStyles();
   },
@@ -209,47 +207,54 @@ this.SelectContentHelper.prototype = {
         break;
 
       case "Forms:DismissedDropDown": {
-          let win = this.element.ownerGlobal;
-          let selectedOption = this.element.item(this.element.selectedIndex);
-
-          // For ordering of events, we're using non-e10s as our guide here,
-          // since the spec isn't exactly clear. In non-e10s:
-          // - If the user clicks on an element in the dropdown, we fire
-          //   mousedown, mouseup, input, change, and click events.
-          // - If the user uses the keyboard to select an element in the
-          //   dropdown, we only fire input and change events.
-          // - If the user pressed ESC key or clicks outside the dropdown,
-          //   we fire nothing as the selected option is unchanged.
-          if (this.closedWithClickOn) {
-            this.dispatchMouseEvent(win, selectedOption, "mousedown");
-            this.dispatchMouseEvent(win, selectedOption, "mouseup");
-          }
-
-          // Clear active document no matter user selects via keyboard or mouse
-          InspectorUtils.removeContentState(this.element, kStateActive,
-                                            /* aClearActiveDocument */ true);
-
-          // Fire input and change events when selected option changes
-          if (this.initialSelection !== selectedOption) {
-            let inputEvent = new win.Event("input", {
-              bubbles: true,
-            });
-            this.element.dispatchEvent(inputEvent);
-
-            let changeEvent = new win.Event("change", {
-              bubbles: true,
-            });
-            this.element.dispatchEvent(changeEvent);
-          }
-
-          // Fire click event
-          if (this.closedWithClickOn) {
-            this.dispatchMouseEvent(win, selectedOption, "click");
-          }
-
-          this.uninit();
-          break;
+        if (!this.element) {
+          return;
         }
+
+        let win = this.element.ownerGlobal;
+        let selectedOption = this.element.item(this.element.selectedIndex);
+
+        // For ordering of events, we're using non-e10s as our guide here,
+        // since the spec isn't exactly clear. In non-e10s:
+        // - If the user clicks on an element in the dropdown, we fire
+        //   mousedown, mouseup, input, change, and click events.
+        // - If the user uses the keyboard to select an element in the
+        //   dropdown, we only fire input and change events.
+        // - If the user pressed ESC key or clicks outside the dropdown,
+        //   we fire nothing as the selected option is unchanged.
+        if (this.closedWithClickOn) {
+          this.dispatchMouseEvent(win, selectedOption, "mousedown");
+          this.dispatchMouseEvent(win, selectedOption, "mouseup");
+        }
+
+        // Clear active document no matter user selects via keyboard or mouse
+        InspectorUtils.removeContentState(
+          this.element,
+          kStateActive,
+          /* aClearActiveDocument */ true
+        );
+
+        // Fire input and change events when selected option changes
+        if (this.initialSelection !== selectedOption) {
+          let inputEvent = new win.Event("input", {
+            bubbles: true,
+          });
+          this.element.dispatchEvent(inputEvent);
+
+          let changeEvent = new win.Event("change", {
+            bubbles: true,
+          });
+          this.element.dispatchEvent(changeEvent);
+        }
+
+        // Fire click event
+        if (this.closedWithClickOn) {
+          this.dispatchMouseEvent(win, selectedOption, "click");
+        }
+
+        this.uninit();
+        break;
+      }
 
       case "Forms:MouseOver":
         InspectorUtils.setContentState(this.element, kStateHover);
@@ -278,7 +283,7 @@ this.SelectContentHelper.prototype = {
         if (!this._closeAfterBlur || !gOpen) {
           return;
         }
-        this.global.sendAsyncMessage("Forms:HideDropDown", {});
+        this.actor.sendAsyncMessage("Forms:HideDropDown", {});
         this.uninit();
         break;
     }
@@ -288,7 +293,7 @@ this.SelectContentHelper.prototype = {
     switch (event.type) {
       case "pagehide":
         if (this.element.ownerDocument === event.target) {
-          this.global.sendAsyncMessage("Forms:HideDropDown", {});
+          this.actor.sendAsyncMessage("Forms:HideDropDown", {});
           this.uninit();
         }
         break;
@@ -300,12 +305,12 @@ this.SelectContentHelper.prototype = {
         // Send a ping-pong message to make sure that we wait for
         // enough cycles to pass from the potential focusing of the
         // search box to disable closing-after-blur.
-        this.global.sendAsyncMessage("Forms:BlurDropDown-Ping", {});
+        this.actor.sendAsyncMessage("Forms:BlurDropDown-Ping", {});
         break;
       }
       case "mozhidedropdown":
         if (this.element === event.target) {
-          this.global.sendAsyncMessage("Forms:HideDropDown", {});
+          this.actor.sendAsyncMessage("Forms:HideDropDown", {});
           this.uninit();
         }
         break;
@@ -316,14 +321,41 @@ this.SelectContentHelper.prototype = {
         break;
     }
   },
-
 };
 
 function getComputedStyles(element) {
   return element.ownerGlobal.getComputedStyle(element);
 }
 
-function buildOptionListForChildren(node) {
+function supportedStyles(cs) {
+  let styles = {};
+  for (let property of SUPPORTED_PROPERTIES) {
+    styles[property] = cs.getPropertyValue(property);
+  }
+  return styles;
+}
+
+function supportedStylesEqual(styles, otherStyles) {
+  for (let property of SUPPORTED_PROPERTIES) {
+    if (styles[property] !== otherStyles[property]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function uniqueStylesIndex(cs, uniqueStyles) {
+  let styles = supportedStyles(cs);
+  for (let i = uniqueStyles.length; i--; ) {
+    if (supportedStylesEqual(uniqueStyles[i], styles)) {
+      return i;
+    }
+  }
+  uniqueStyles.push(styles);
+  return uniqueStyles.length - 1;
+}
+
+function buildOptionListForChildren(node, uniqueStyles) {
   let result = [];
 
   for (let child of node.children) {
@@ -335,36 +367,27 @@ function buildOptionListForChildren(node) {
       }
 
       let textContent =
-        tagName == "OPTGROUP" ? child.getAttribute("label")
-                              : child.text;
+        tagName == "OPTGROUP" ? child.getAttribute("label") : child.text;
       if (textContent == null) {
         textContent = "";
       }
 
       let cs = getComputedStyles(child);
-
-      // Note: If you add any more CSS properties support here,
-      // please add the property name to the SUPPORTED_PROPERTIES
-      // list so that the menu can be correctly updated when CSS
-      // transitions are used.
       let info = {
         index: child.index,
         tagName,
         textContent,
         disabled: child.disabled,
         display: cs.display,
-        // We need to do this for every option element as each one can have
-        // an individual style set for direction
-        textDirection: cs.direction,
         tooltip: child.title,
-        backgroundColor: cs.backgroundColor,
-        color: cs.color,
-        children: tagName == "OPTGROUP" ? buildOptionListForChildren(child) : [],
+        children:
+          tagName == "OPTGROUP"
+            ? buildOptionListForChildren(child, uniqueStyles)
+            : [],
+        // Most options have the same style. In order to reduce the size of the
+        // IPC message, coalesce them in uniqueStyles.
+        styleIndex: uniqueStylesIndex(cs, uniqueStyles),
       };
-
-      if (cs.textShadow != "none") {
-        info.textShadow = cs.textShadow;
-      }
 
       result.push(info);
     }
@@ -372,20 +395,50 @@ function buildOptionListForChildren(node) {
   return result;
 }
 
-class SelectChild extends ActorChild {
+// Hold the instance of SelectContentHelper created
+// when the dropdown list is opened. This variable helps
+// re-route the received message from SelectChild to SelectContentHelper object.
+let currentSelectContentHelper = new WeakMap();
+
+class SelectChild extends JSWindowActorChild {
   handleEvent(event) {
     if (SelectContentHelper.open) {
+      // The SelectContentHelper object handles captured
+      // events when the <select> popup is open.
+      let contentHelper = currentSelectContentHelper.get(this);
+      if (contentHelper) {
+        contentHelper.handleEvent(event);
+      }
       return;
     }
 
     switch (event.type) {
-    case "mozshowdropdown":
-      new SelectContentHelper(event.target, {isOpenedViaTouch: false}, this.mm);
-      break;
+      case "mozshowdropdown": {
+        let contentHelper = new SelectContentHelper(
+          event.target,
+          { isOpenedViaTouch: false },
+          this
+        );
+        currentSelectContentHelper.set(this, contentHelper);
+        break;
+      }
 
-    case "mozshowdropdown-sourcetouch":
-      new SelectContentHelper(event.target, {isOpenedViaTouch: true}, this.mm);
-      break;
+      case "mozshowdropdown-sourcetouch": {
+        let contentHelper = new SelectContentHelper(
+          event.target,
+          { isOpenedViaTouch: true },
+          this
+        );
+        currentSelectContentHelper.set(this, contentHelper);
+        break;
+      }
+    }
+  }
+
+  receiveMessage(message) {
+    let contentHelper = currentSelectContentHelper.get(this);
+    if (contentHelper) {
+      contentHelper.receiveMessage(message);
     }
   }
 }

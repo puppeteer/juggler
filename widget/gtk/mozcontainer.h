@@ -9,6 +9,7 @@
 #define __MOZ_CONTAINER_H__
 
 #include <gtk/gtk.h>
+#include <functional>
 
 /*
  * MozContainer
@@ -69,16 +70,19 @@ struct wl_subsurface;
 
 struct _MozContainer {
   GtkContainer container;
-  GList *children;
+  GList* children;
 
 #ifdef MOZ_WAYLAND
-  struct wl_surface *surface;
-  struct wl_subsurface *subsurface;
-  struct wl_egl_window *eglwindow;
-  struct wl_callback *frame_callback_handler;
+  struct wl_surface* surface;
+  struct wl_subsurface* subsurface;
+  struct wl_egl_window* eglwindow;
+  struct wl_callback* frame_callback_handler;
+  int frame_callback_handler_surface_id;
   gboolean surface_needs_clear;
   gboolean ready_to_draw;
+  std::function<void(void)> inital_draw_cb;
 #endif
+  gboolean force_default_visual;
 };
 
 struct _MozContainerClass {
@@ -86,16 +90,21 @@ struct _MozContainerClass {
 };
 
 GType moz_container_get_type(void);
-GtkWidget *moz_container_new(void);
-void moz_container_put(MozContainer *container, GtkWidget *child_widget, gint x,
+GtkWidget* moz_container_new(void);
+void moz_container_put(MozContainer* container, GtkWidget* child_widget, gint x,
                        gint y);
+void moz_container_force_default_visual(MozContainer* container);
 
 #ifdef MOZ_WAYLAND
-struct wl_surface *moz_container_get_wl_surface(MozContainer *container);
-struct wl_egl_window *moz_container_get_wl_egl_window(MozContainer *container);
+struct wl_surface* moz_container_get_wl_surface(MozContainer* container);
+struct wl_egl_window* moz_container_get_wl_egl_window(MozContainer* container);
 
-gboolean moz_container_has_wl_egl_window(MozContainer *container);
-gboolean moz_container_surface_needs_clear(MozContainer *container);
+gboolean moz_container_has_wl_egl_window(MozContainer* container);
+gboolean moz_container_surface_needs_clear(MozContainer* container);
+void moz_container_scale_changed(MozContainer* container,
+                                 GtkAllocation* aAllocation);
+void moz_container_set_initial_draw_callback(
+    MozContainer* container, std::function<void(void)> inital_draw_cb);
 #endif
 
 #endif /* __MOZ_CONTAINER_H__ */

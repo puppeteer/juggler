@@ -27,6 +27,8 @@
 #include "mozilla/dom/ChildIterator.h"
 #include "mozilla/dom/TreeIterator.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLOptionElement.h"
+#include "mozilla/dom/HTMLSelectElement.h"
 #include "mozilla/dom/Text.h"
 
 using namespace mozilla;
@@ -34,9 +36,6 @@ using namespace mozilla::dom;
 
 // Yikes!  Casting a char to unichar can fill with ones!
 #define CHAR_TO_UNICHAR(c) ((char16_t)(unsigned char)c)
-
-static NS_DEFINE_CID(kCContentIteratorCID, NS_CONTENTITERATOR_CID);
-static NS_DEFINE_CID(kCPreContentIteratorCID, NS_PRECONTENTITERATOR_CID);
 
 #define CH_QUOTE ((char16_t)0x22)
 #define CH_APOSTROPHE ((char16_t)0x27)
@@ -67,9 +66,9 @@ nsFind::nsFind()
 nsFind::~nsFind() = default;
 
 #ifdef DEBUG_FIND
-#define DEBUG_FIND_PRINTF(...) printf(__VA_ARGS__)
+#  define DEBUG_FIND_PRINTF(...) printf(__VA_ARGS__)
 #else
-#define DEBUG_FIND_PRINTF(...) /* nothing */
+#  define DEBUG_FIND_PRINTF(...) /* nothing */
 #endif
 
 static nsIContent& AnonymousSubtreeRootParent(const nsINode& aNode) {
@@ -156,12 +155,27 @@ static bool IsTextFormControl(nsIContent& aContent) {
 static bool SkipNode(const nsIContent* aContent) {
   const nsIContent* content = aContent;
   while (content) {
-    if (!IsDisplayedNode(content) || content->IsComment() ||
+    if (!IsVisibleNode(content) || content->IsComment() ||
         content->IsAnyOfHTMLElements(nsGkAtoms::script, nsGkAtoms::noframes,
                                      nsGkAtoms::select)) {
       DEBUG_FIND_PRINTF("Skipping node: ");
       DumpNode(content);
       return true;
+    }
+
+    // Skip option nodes if their select is a combo box, or if they
+    // have no select (somehow).
+    if (content->IsHTMLElement(nsGkAtoms::option)) {
+      const HTMLOptionElement* option = HTMLOptionElement::FromNode(content);
+      if (option) {
+        HTMLSelectElement* select =
+            HTMLSelectElement::FromNodeOrNull(option->GetParent());
+        if (!select || select->IsCombobox()) {
+          DEBUG_FIND_PRINTF("Skipping node: ");
+          DumpNode(content);
+          return true;
+        }
+      }
     }
 
     // Skip NAC in non-form-control.
@@ -434,7 +448,7 @@ char16_t nsFind::PeekNextChar(State& aState) const {
 // Take nodes out of the tree with NextNode, until null (NextNode will return 0
 // at the end of our range).
 NS_IMETHODIMP
-nsFind::Find(const char16_t* aPatText, nsRange* aSearchRange,
+nsFind::Find(const nsAString& aPatText, nsRange* aSearchRange,
              nsRange* aStartPoint, nsRange* aEndPoint, nsRange** aRangeRet) {
   DEBUG_FIND_PRINTF("============== nsFind::Find('%s'%s, %p, %p, %p)\n",
                     NS_LossyConvertUTF16toASCII(aPatText).get(),
@@ -446,7 +460,7 @@ nsFind::Find(const char16_t* aPatText, nsRange* aSearchRange,
   NS_ENSURE_ARG(aEndPoint);
   NS_ENSURE_ARG_POINTER(aRangeRet);
 
-  nsIDocument* document =
+  Document* document =
       aStartPoint->GetRoot() ? aStartPoint->GetRoot()->OwnerDoc() : nullptr;
   NS_ENSURE_ARG(document);
 
@@ -454,10 +468,6 @@ nsFind::Find(const char16_t* aPatText, nsRange* aSearchRange,
   NS_ENSURE_ARG(root);
 
   *aRangeRet = 0;
-
-  if (!aPatText) {
-    return NS_ERROR_NULL_POINTER;
-  }
 
   nsAutoString patAutoStr(aPatText);
   if (!mCaseSensitive) {
@@ -470,6 +480,11 @@ nsFind::Find(const char16_t* aPatText, nsRange* aSearchRange,
 
   const char16_t* patStr = patAutoStr.get();
   int32_t patLen = patAutoStr.Length() - 1;
+
+  // If this function is called with an empty string, we should early exit.
+  if (patLen < 0) {
+    return NS_OK;
+  }
 
   // current offset into the pattern -- reset to beginning/end:
   int32_t pindex = (mFindBackward ? patLen : 0);

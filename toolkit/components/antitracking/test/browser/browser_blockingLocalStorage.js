@@ -1,11 +1,15 @@
-AntiTracking.runTest("localStorage",
+/* import-globals-from antitracking_head.js */
+
+AntiTracking.runTest(
+  "localStorage",
   async _ => {
+    is(window.localStorage, null, "LocalStorage is null");
     try {
       localStorage.foo = 42;
       ok(false, "LocalStorage cannot be used!");
     } catch (e) {
       ok(true, "LocalStorage cannot be used!");
-      is(e.name, "SecurityError", "We want a security error message.");
+      is(e.name, "TypeError", "We want a type error message.");
     }
   },
   async _ => {
@@ -14,32 +18,56 @@ AntiTracking.runTest("localStorage",
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
-  });
+  }
+);
 
-AntiTracking.runTest("localStorage and Storage Access API",
+AntiTracking.runTest(
+  "localStorage and Storage Access API",
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
     await noStorageAccessInitially();
 
+    is(window.localStorage, null, "LocalStorage is null");
     try {
       localStorage.foo = 42;
       ok(false, "LocalStorage cannot be used!");
     } catch (e) {
       ok(true, "LocalStorage cannot be used!");
-      is(e.name, "SecurityError", "We want a security error message.");
+      is(e.name, "TypeError", "We want a type error message.");
     }
 
     /* import-globals-from storageAccessAPIHelpers.js */
     await callRequestStorageAccess();
 
-    localStorage.foo = 42;
-    ok(true, "LocalStorage is allowed");
+    if (
+      SpecialPowers.Services.prefs.getIntPref(
+        "network.cookie.cookieBehavior"
+      ) == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT
+    ) {
+      is(window.localStorage, null, "LocalStorage is null");
+      try {
+        localStorage.foo = 42;
+        ok(false, "LocalStorage cannot be used!");
+      } catch (e) {
+        ok(true, "LocalStorage cannot be used!");
+        is(e.name, "TypeError", "We want a type error message.");
+      }
+    } else {
+      localStorage.foo = 42;
+      ok(true, "LocalStorage is allowed");
+    }
   },
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
-    await noStorageAccessInitially();
+    if (allowListed) {
+      await hasStorageAccessInitially();
+    } else {
+      await noStorageAccessInitially();
+    }
 
     localStorage.foo = 42;
     ok(true, "LocalStorage is allowed");
@@ -53,7 +81,12 @@ AntiTracking.runTest("localStorage and Storage Access API",
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
   },
-  null, false, false);
+  null,
+  false,
+  false
+);

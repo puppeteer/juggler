@@ -2,17 +2,19 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BorderRadius, BoxShadowClipMode, ClipMode, ColorF, DeviceIntSize, LayoutPrimitiveInfo};
-use api::{LayoutRect, LayoutSize, LayoutVector2D, MAX_BLUR_RADIUS};
-use clip::ClipItemKey;
-use display_list_flattener::DisplayListFlattener;
-use gpu_cache::GpuCacheHandle;
-use gpu_types::BoxShadowStretchMode;
-use prim_store::{ScrollNodeAndClipChain, PrimitiveKeyKind};
-use render_task::RenderTaskCacheEntryHandle;
-use util::RectHelpers;
+use api::{BorderRadius, BoxShadowClipMode, ClipMode, ColorF, PrimitiveKeyKind};
+use api::MAX_BLUR_RADIUS;
+use api::units::*;
+use crate::clip::ClipItemKey;
+use crate::display_list_flattener::DisplayListFlattener;
+use crate::gpu_cache::GpuCacheHandle;
+use crate::gpu_types::BoxShadowStretchMode;
+use crate::prim_store::ScrollNodeAndClipChain;
+use crate::render_task::RenderTaskCacheEntryHandle;
+use crate::util::RectHelpers;
+use crate::internal_types::LayoutPrimitiveInfo;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, MallocSizeOf)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct BoxShadowClipSource {
@@ -51,7 +53,7 @@ pub const BLUR_SAMPLE_SCALE: f32 = 3.0;
 // A cache key that uniquely identifies a minimally sized
 // and blurred box-shadow rect that can be stored in the
 // texture cache and applied to clip-masks.
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
+#[derive(Debug, Clone, Eq, Hash, MallocSizeOf, PartialEq)]
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct BoxShadowCacheKey {
@@ -169,7 +171,7 @@ impl<'a> DisplayListFlattener<'a> {
             );
         } else {
             // Normal path for box-shadows with a valid blur radius.
-            let blur_offset = BLUR_SAMPLE_SCALE * blur_radius;
+            let blur_offset = (BLUR_SAMPLE_SCALE * blur_radius).ceil();
             let mut extra_clips = vec![];
 
             // Add a normal clip mask to clip out the contents

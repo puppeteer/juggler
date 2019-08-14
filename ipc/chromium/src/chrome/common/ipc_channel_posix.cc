@@ -9,8 +9,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
-#if defined(OS_MACOSX)
-#include <sched.h>
+#if defined(OS_MACOSX) || defined(OS_NETBSD)
+#  include <sched.h>
 #endif
 #include <stddef.h>
 #include <unistd.h>
@@ -25,7 +25,6 @@
 
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/string_util.h"
@@ -33,10 +32,11 @@
 #include "chrome/common/file_descriptor_set_posix.h"
 #include "chrome/common/ipc_message_utils.h"
 #include "mozilla/ipc/ProtocolUtils.h"
+#include "mozilla/StaticMutex.h"
 #include "mozilla/UniquePtr.h"
 
 #ifdef FUZZING
-#include "mozilla/ipc/Faulty.h"
+#  include "mozilla/ipc/Faulty.h"
 #endif
 
 // Use OS specific iovec array limit where it's possible.
@@ -49,7 +49,7 @@ static const size_t kMaxIOVecSize = 16;
 #endif
 
 #ifdef MOZ_TASK_TRACER
-#include "GeckoTaskTracerImpl.h"
+#  include "GeckoTaskTracerImpl.h"
 using namespace mozilla::tasktracer;
 #endif
 
@@ -108,7 +108,7 @@ class PipeMap {
  public:
   // Lookup a given channel id. Return -1 if not found.
   int Lookup(const std::string& channel_id) {
-    AutoLock locked(lock_);
+    mozilla::StaticMutexAutoLock locked(lock_);
 
     ChannelToFDMap::const_iterator i = map_.find(channel_id);
     if (i == map_.end()) return -1;
@@ -118,7 +118,7 @@ class PipeMap {
   // Remove the mapping for the given channel id. No error is signaled if the
   // channel_id doesn't exist
   void Remove(const std::string& channel_id) {
-    AutoLock locked(lock_);
+    mozilla::StaticMutexAutoLock locked(lock_);
 
     ChannelToFDMap::iterator i = map_.find(channel_id);
     if (i != map_.end()) map_.erase(i);
@@ -127,25 +127,34 @@ class PipeMap {
   // Insert a mapping from @channel_id to @fd. It's a fatal error to insert a
   // mapping if one already exists for the given channel_id
   void Insert(const std::string& channel_id, int fd) {
-    AutoLock locked(lock_);
+    mozilla::StaticMutexAutoLock locked(lock_);
     DCHECK(fd != -1);
 
     ChannelToFDMap::const_iterator i = map_.find(channel_id);
-    CHECK(i == map_.end()) << "Creating second IPC server for '" << channel_id
-                           << "' while first still exists";
+    CHECK(i == map_.end())
+    << "Creating second IPC server for '" << channel_id
+    << "' while first still exists";
     map_[channel_id] = fd;
   }
 
   static PipeMap& instance() {
-    static PipeMap map;
+    // This setup is a little gross: the `map` instance lives until libxul is
+    // unloaded, but leak checking runs prior to that, and would see a Mutex
+    // instance contained in PipeMap as still live.  Said instance would be
+    // reported as a leak...but it's not, really.  To avoid that, we need to
+    // use StaticMutex (which is not leak-checked), but StaticMutex can't be
+    // a member variable.  So we have to have this separate variable and pass
+    // it into the PipeMap constructor.
+    static mozilla::StaticMutex mutex;
+    static PipeMap map(mutex);
     return map;
   }
 
  private:
-  PipeMap() = default;
+  explicit PipeMap(mozilla::StaticMutex& aMutex) : lock_(aMutex) {}
   ~PipeMap() = default;
 
-  Lock lock_;
+  mozilla::StaticMutex& lock_;
   typedef std::map<std::string, int> ChannelToFDMap;
   ChannelToFDMap map_;
 };
@@ -691,13 +700,14 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages() {
           // Not an error; the sendmsg would have blocked, so return to the
           // event loop and try again later.
           break;
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(OS_NETBSD)
           // (Note: this comment is copied from https://crrev.com/86c3d9ef4fdf6;
           // see also bug 1142693 comment #73.)
           //
           // On OS X if sendmsg() is trying to send fds between processes and
           // there isn't enough room in the output buffer to send the fd
-          // structure over atomically then EMSGSIZE is returned.
+          // structure over atomically then EMSGSIZE is returned. The same
+          // applies to NetBSD as well.
           //
           // EMSGSIZE presents a problem since the system APIs can only call us
           // when there's room in the socket buffer and not when there is

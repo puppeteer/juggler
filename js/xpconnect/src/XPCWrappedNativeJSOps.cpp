@@ -43,7 +43,7 @@ static bool ToStringGuts(XPCCallContext& ccx) {
   XPCWrappedNative* wrapper = ccx.GetWrapper();
 
   if (wrapper) {
-    sz.reset(wrapper->ToString(ccx.GetTearOff()));
+    sz.reset(wrapper->ToString(ccx, ccx.GetTearOff()));
   } else {
     sz = JS_smprintf("[xpconnect wrapped native prototype]");
   }
@@ -110,7 +110,7 @@ static bool XPC_WN_Shared_toPrimitive(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   if (hint == JSTYPE_NUMBER) {
-    args.rval().set(JS_GetNaNValue(cx));
+    args.rval().set(NaNValue());
     return true;
   }
 
@@ -173,12 +173,6 @@ static bool XPC_WN_Shared_toPrimitive(JSContext* cx, unsigned argc, Value* vp) {
  * conditions are met:
  *
  * 1) 'foo' really is an XPConnect wrapper around a JSObject.
- * 2) The underlying JSObject actually implements a "wrappedJSObject"
- *    property that returns a JSObject. This is called by XPConnect. This
- *    restriction allows wrapped objects to only allow access to the underlying
- *    JSObject if they choose to do so. Usually this just means that 'foo'
- *    would have a property that looks like:
- *       this.wrappedJSObject = this.
  * 3) The caller must be system JS and not content. Double-wrapped XPCWJS should
  *    not be exposed to content except with enablePrivilege or a remote-XUL
  *    domain.
@@ -188,16 +182,10 @@ static bool XPC_WN_Shared_toPrimitive(JSContext* cx, unsigned argc, Value* vp) {
  * a) If 'foo' above were the underlying JSObject and not a wrapper at all,
  *    then this all just works and XPConnect is not part of the picture at all.
  * b) One might ask why 'foo' should not just implement an interface through
- *    which callers might get at the underlying object. There are three reasons:
+ *    which callers might get at the underlying object. There are two reasons:
  *   i)   XPConnect would still have to do magic since JSObject is not a
  *        scriptable type.
- *   ii)  JS Components might use aggregation (like C++ objects) and have
- *        different JSObjects for different interfaces 'within' an aggregate
- *        object. But, using an additional interface only allows returning one
- *        underlying JSObject. However, this allows for the possibility that
- *        each of the aggregte JSObjects could return something different.
- *        Note that one might do: this.wrappedJSObject = someOtherObject;
- *   iii) Avoiding the explicit interface makes it easier for both the caller
+ *   ii)  Avoiding the explicit interface makes it easier for both the caller
  *        and the component.
  */
 
@@ -209,14 +197,20 @@ static JSObject* GetDoubleWrappedJSObject(XPCCallContext& ccx,
   if (underware) {
     RootedObject mainObj(ccx, underware->GetJSObject());
     if (mainObj) {
-      RootedId id(ccx, ccx.GetContext()->GetStringID(
-                           XPCJSContext::IDX_WRAPPED_JSOBJECT));
-
       JSAutoRealm ar(ccx, underware->GetJSObjectGlobal());
 
+      // We don't have to root this ID, as it's already rooted by our context.
+      HandleId id =
+          ccx.GetContext()->GetStringID(XPCJSContext::IDX_WRAPPED_JSOBJECT);
+
+      // If the `wrappedJSObject` property is defined, use the result of getting
+      // that property, otherwise fall back to the `mainObj` object which is
+      // directly being wrapped.
       RootedValue val(ccx);
       if (JS_GetPropertyById(ccx, mainObj, id, &val) && !val.isPrimitive()) {
         obj = val.toObjectOrNull();
+      } else {
+        obj = mainObj;
       }
     }
   }
@@ -355,12 +349,13 @@ static bool DefinePropertyIfFound(
           break;
         }
 
-        iface2 = XPCNativeInterface::GetNewOrUsed(name.get());
+        iface2 = XPCNativeInterface::GetNewOrUsed(ccx, name.get());
         if (!iface2) {
           break;
         }
 
-        to = wrapperToReflectInterfaceNames->FindTearOff(iface2, true, &rv);
+        to =
+            wrapperToReflectInterfaceNames->FindTearOff(ccx, iface2, true, &rv);
         if (!to) {
           break;
         }
@@ -427,7 +422,7 @@ static bool DefinePropertyIfFound(
   if (!member) {
     if (wrapperToReflectInterfaceNames) {
       XPCWrappedNativeTearOff* to =
-          wrapperToReflectInterfaceNames->FindTearOff(iface, true);
+          wrapperToReflectInterfaceNames->FindTearOff(ccx, iface, true);
 
       if (!to) {
         return false;
@@ -609,7 +604,8 @@ void XPC_WN_NoHelper_Finalize(js::FreeOp* fop, JSObject* obj) {
  * should mark any JS objects held by |wrapper| as members.
  */
 
-/* static */ void XPCWrappedNative::Trace(JSTracer* trc, JSObject* obj) {
+/* static */
+void XPCWrappedNative::Trace(JSTracer* trc, JSObject* obj) {
   const js::Class* clazz = js::GetObjectClass(obj);
   if (clazz->flags & JSCLASS_DOM_GLOBAL) {
     mozilla::dom::TraceProtoAndIfaceCache(trc, obj);
@@ -662,9 +658,7 @@ static const js::ClassOps XPC_WN_NoHelper_JSClassOps = {
     XPCWrappedNative::Trace,            // trace
 };
 
-const js::ClassExtension XPC_WN_JSClassExtension = {
-    nullptr,  // weakmapKeyDelegateOp
-    WrappedNativeObjectMoved};
+const js::ClassExtension XPC_WN_JSClassExtension = {WrappedNativeObjectMoved};
 
 const js::Class XPC_WN_NoHelper_JSClass = {
     "XPCWrappedNative_NoHelper",
@@ -705,7 +699,7 @@ bool XPC_WN_MaybeResolvingDeletePropertyStub(JSContext* cx, HandleObject obj,
 // macro fun!
 #define PRE_HELPER_STUB                                                 \
   /* It's very important for "unwrapped" to be rooted here.  */         \
-  RootedObject unwrapped(cx, js::CheckedUnwrap(obj, false));            \
+  RootedObject unwrapped(cx, js::CheckedUnwrapDynamic(obj, cx, false)); \
   if (!unwrapped) {                                                     \
     JS_ReportErrorASCII(cx, "Permission denied to operate on object."); \
     return false;                                                       \
@@ -856,7 +850,8 @@ bool XPC_WN_Helper_Enumerate(JSContext* cx, HandleObject obj) {
 /***************************************************************************/
 
 bool XPC_WN_NewEnumerate(JSContext* cx, HandleObject obj,
-                         AutoIdVector& properties, bool enumerableOnly) {
+                         MutableHandleIdVector properties,
+                         bool enumerableOnly) {
   XPCCallContext ccx(cx, obj);
   XPCWrappedNative* wrapper = ccx.GetWrapper();
   THROW_AND_RETURN_IF_BAD_WRAPPER(cx, wrapper);
@@ -1043,14 +1038,6 @@ static size_t XPC_WN_Proto_ObjectMoved(JSObject* obj, JSObject* old) {
   return 0;
 }
 
-static void XPC_WN_Proto_Trace(JSTracer* trc, JSObject* obj) {
-  // This can be null if xpc shutdown has already happened
-  XPCWrappedNativeProto* p = (XPCWrappedNativeProto*)xpc_GetJSPrivate(obj);
-  if (p) {
-    p->TraceInside(trc);
-  }
-}
-
 /*****************************************************/
 
 static bool XPC_WN_OnlyIWrite_Proto_AddPropertyStub(JSContext* cx,
@@ -1110,11 +1097,10 @@ static const js::ClassOps XPC_WN_Proto_JSClassOps = {
     nullptr,                                  // call
     nullptr,                                  // construct
     nullptr,                                  // hasInstance
-    XPC_WN_Proto_Trace,                       // trace
+    nullptr,                                  // trace
 };
 
 static const js::ClassExtension XPC_WN_Proto_ClassExtension = {
-    nullptr, /* weakmapKeyDelegateOp */
     XPC_WN_Proto_ObjectMoved};
 
 const js::Class XPC_WN_Proto_JSClass = {
@@ -1204,7 +1190,6 @@ static const js::ClassOps XPC_WN_Tearoff_JSClassOps = {
 };
 
 static const js::ClassExtension XPC_WN_Tearoff_JSClassExtension = {
-    nullptr,  // weakmapKeyDelegateOp
     XPC_WN_TearOff_ObjectMoved};
 
 const js::Class XPC_WN_Tearoff_JSClass = {

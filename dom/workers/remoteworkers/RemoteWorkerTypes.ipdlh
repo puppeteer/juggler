@@ -5,18 +5,13 @@
 include ClientIPCTypes;
 include PBackgroundSharedTypes;
 include URIParams;
+include DOMTypes;
 
 using struct mozilla::void_t from "ipc/IPCMessageUtils.h";
+using mozilla::StorageAccess from "mozilla/dom/ClientIPCUtils.h";
 
 namespace mozilla {
 namespace dom {
-
-struct ContentSecurityPolicy
-{
-  nsString policy;
-  bool reportOnlyFlag;
-  bool deliveredViaMetaTagFlag;
-};
 
 struct RemoteWorkerData
 {
@@ -37,18 +32,18 @@ struct RemoteWorkerData
   nsString name;
 
   PrincipalInfo loadingPrincipalInfo;
-  ContentSecurityPolicy[] loadingPrincipalCsp;
-  ContentSecurityPolicy[] loadingPrincipalPreloadCsp;
-
   PrincipalInfo principalInfo;
-  ContentSecurityPolicy[] principalCsp;
-  ContentSecurityPolicy[] principalPreloadCsp;
+  PrincipalInfo storagePrincipalInfo;
 
   nsCString domain;
 
   bool isSecureContext;
 
-  OptionalIPCClientInfo clientInfo;
+  IPCClientInfo? clientInfo;
+
+  nsIReferrerInfo referrerInfo;
+
+  StorageAccess storageAccess;
 
   bool isSharedWorker;
 };

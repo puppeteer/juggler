@@ -25,8 +25,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __AV1_CDF_H__
-#define __AV1_CDF_H__
+#ifndef DAV1D_SRC_CDF_H
+#define DAV1D_SRC_CDF_H
 
 #include <stdint.h>
 
@@ -34,11 +34,13 @@
 #include "src/ref.h"
 #include "src/thread_data.h"
 
+/* Buffers padded to [8] or [16] for SIMD where needed. */
+
 typedef struct CdfModeContext {
-    uint16_t y_mode[4][N_INTRA_PRED_MODES + 1];
+    uint16_t y_mode[4][N_INTRA_PRED_MODES + 1 + 2];
     uint16_t use_filter_intra[N_BS_SIZES][2];
     uint16_t filter_intra[5 + 1];
-    uint16_t uv_mode[2][N_INTRA_PRED_MODES][N_UV_INTRA_PRED_MODES + 1];
+    uint16_t uv_mode[2][N_INTRA_PRED_MODES][N_UV_INTRA_PRED_MODES + 1 + 1];
     uint16_t angle_delta[8][8];
     uint16_t filter[2][8][DAV1D_N_SWITCHABLE_FILTERS + 1];
     uint16_t newmv_mode[6][2];
@@ -66,7 +68,7 @@ typedef struct CdfModeContext {
     uint16_t txtp_intra[3][N_TX_SIZES][N_INTRA_PRED_MODES][N_TX_TYPES + 1];
     uint16_t skip[3][2];
     uint16_t skip_mode[3][2];
-    uint16_t partition[N_BL_LEVELS][4][N_PARTITIONS + 1];
+    uint16_t partition[N_BL_LEVELS][4][N_PARTITIONS + 1 + 5];
     uint16_t seg_pred[3][2];
     uint16_t seg_id[3][DAV1D_MAX_SEGMENTS + 1];
     uint16_t cfl_sign[8 + 1];
@@ -88,12 +90,12 @@ typedef struct CdfModeContext {
 typedef struct CdfCoefContext {
     uint16_t skip[N_TX_SIZES][13][2];
     uint16_t eob_bin_16[2][2][6];
-    uint16_t eob_bin_32[2][2][7];
+    uint16_t eob_bin_32[2][2][7 + 1];
     uint16_t eob_bin_64[2][2][8];
     uint16_t eob_bin_128[2][2][9];
-    uint16_t eob_bin_256[2][2][10];
-    uint16_t eob_bin_512[2][2][11];
-    uint16_t eob_bin_1024[2][2][12];
+    uint16_t eob_bin_256[2][2][10 + 6];
+    uint16_t eob_bin_512[2][2][11 + 5];
+    uint16_t eob_bin_1024[2][2][12 + 4];
     uint16_t eob_hi_bit[N_TX_SIZES][2][11 /*22*/][2];
     uint16_t eob_base_tok[N_TX_SIZES][2][4][4];
     uint16_t base_tok[N_TX_SIZES][2][41][5];
@@ -102,7 +104,7 @@ typedef struct CdfCoefContext {
 } CdfCoefContext;
 
 typedef struct CdfMvComponent {
-    uint16_t classes[11 + 1];
+    uint16_t classes[11 + 1 + 4];
     uint16_t class0[2];
     uint16_t classN[10][2];
     uint16_t class0_fp[2][4 + 1];
@@ -119,25 +121,28 @@ typedef struct CdfMvContext {
 
 typedef struct CdfContext {
     CdfModeContext m;
-    uint16_t kfym[5][5][N_INTRA_PRED_MODES + 1];
+    uint16_t kfym[5][5][N_INTRA_PRED_MODES + 1 + 2];
     CdfCoefContext coef;
     CdfMvContext mv, dmv;
 } CdfContext;
 
 typedef struct CdfThreadContext {
-    CdfContext *cdf;
     Dav1dRef *ref; ///< allocation origin
+    union {
+        CdfContext *cdf; // if ref != NULL
+        unsigned qcat; // if ref == NULL, from static CDF tables
+    } data;
     struct thread_data *t;
     atomic_uint *progress;
 } CdfThreadContext;
 
-void dav1d_init_states(CdfThreadContext *cdf, int qidx);
-void dav1d_update_tile_cdf(const Dav1dFrameHeader *hdr, CdfContext *dst,
-                         const CdfContext *src);
-
-void dav1d_cdf_thread_alloc(CdfThreadContext *cdf, struct thread_data *t);
+void dav1d_cdf_thread_init_static(CdfThreadContext *cdf, int qidx);
+int dav1d_cdf_thread_alloc(CdfThreadContext *cdf, struct thread_data *t);
+void dav1d_cdf_thread_copy(CdfContext *dst, const CdfThreadContext *src);
 void dav1d_cdf_thread_ref(CdfThreadContext *dst, CdfThreadContext *src);
 void dav1d_cdf_thread_unref(CdfThreadContext *cdf);
+void dav1d_cdf_thread_update(const Dav1dFrameHeader *hdr, CdfContext *dst,
+                             const CdfContext *src);
 
 /*
  * These are binary signals (so a signal is either "done" or "not done").
@@ -145,4 +150,4 @@ void dav1d_cdf_thread_unref(CdfThreadContext *cdf);
 void dav1d_cdf_thread_wait(CdfThreadContext *cdf);
 void dav1d_cdf_thread_signal(CdfThreadContext *cdf);
 
-#endif /* __AV1_CDF_H__ */
+#endif /* DAV1D_SRC_CDF_H */

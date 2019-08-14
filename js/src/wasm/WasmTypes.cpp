@@ -18,6 +18,7 @@
 
 #include "wasm/WasmTypes.h"
 
+#include "js/Printf.h"
 #include "vm/ArrayBufferObject.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmInstance.h"
@@ -36,15 +37,15 @@ using mozilla::MakeEnumeratedRange;
 // We have only tested x64 with WASM_HUGE_MEMORY.
 
 #if defined(JS_CODEGEN_X64) && !defined(WASM_HUGE_MEMORY)
-#error "Not an expected configuration"
+#  error "Not an expected configuration"
 #endif
 
 // We have only tested WASM_HUGE_MEMORY on x64 and arm64.
 
 #if defined(WASM_HUGE_MEMORY)
-#if !(defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64))
-#error "Not an expected configuration"
-#endif
+#  if !(defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64))
+#    error "Not an expected configuration"
+#  endif
 #endif
 
 // More sanity checks.
@@ -77,49 +78,121 @@ Val::Val(const LitVal& val) {
       u.f64_ = val.f64();
       return;
     case ValType::Ref:
-    case ValType::NullRef:
+    case ValType::FuncRef:
     case ValType::AnyRef:
-      u.ptr_ = val.ptr();
+      u.ref_ = val.ref();
       return;
+    case ValType::NullRef:
+      break;
   }
   MOZ_CRASH();
 }
 
-void Val::writePayload(uint8_t* dst) const {
-  switch (type_.code()) {
-    case ValType::I32:
-    case ValType::F32:
-      memcpy(dst, &u.i32_, sizeof(u.i32_));
-      return;
-    case ValType::I64:
-    case ValType::F64:
-      memcpy(dst, &u.i64_, sizeof(u.i64_));
-      return;
-    case ValType::Ref:
-    case ValType::NullRef:
-    case ValType::AnyRef:
-      MOZ_ASSERT(*(JSObject**)dst == nullptr,
-                 "should be null so no need for a pre-barrier");
-      memcpy(dst, &u.ptr_, sizeof(JSObject*));
-      // Either the written location is in the global data section in the
-      // WasmInstanceObject, or the Cell of a WasmGlobalObject:
-      // - WasmInstanceObjects are always tenured and u.ptr_ may point to a
-      // nursery object, so we need a post-barrier since the global data of
-      // an instance is effectively a field of the WasmInstanceObject.
-      // - WasmGlobalObjects are always tenured, and they have a Cell field,
-      // so a post-barrier may be needed for the same reason as above.
-      if (u.ptr_) {
-        JSObject::writeBarrierPost((JSObject**)dst, nullptr, u.ptr_);
-      }
-      return;
+void Val::trace(JSTracer* trc) {
+  if (type_.isValid() && type_.isReference() && !u.ref_.isNull()) {
+    // TODO/AnyRef-boxing: With boxed immediates and strings, the write
+    // barrier is going to have to be more complicated.
+    ASSERT_ANYREF_IS_JSOBJECT;
+    TraceManuallyBarrieredEdge(trc, u.ref_.asJSObjectAddress(),
+                               "wasm reference-typed global");
   }
-  MOZ_CRASH("unexpected Val type");
 }
 
-void Val::trace(JSTracer* trc) {
-  if (type_.isValid() && type_.isReference() && u.ptr_) {
-    TraceManuallyBarrieredEdge(trc, &u.ptr_, "wasm ref/anyref global");
+void AnyRef::trace(JSTracer* trc) {
+  if (value_) {
+    TraceManuallyBarrieredEdge(trc, &value_, "wasm anyref referent");
   }
+}
+
+class WasmValueBox : public NativeObject {
+  static const unsigned VALUE_SLOT = 0;
+
+ public:
+  static const unsigned RESERVED_SLOTS = 1;
+  static const Class class_;
+
+  static WasmValueBox* create(JSContext* cx, HandleValue val);
+  Value value() const { return getFixedSlot(VALUE_SLOT); }
+};
+
+const Class WasmValueBox::class_ = {"WasmValueBox",
+                                    JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS)};
+
+WasmValueBox* WasmValueBox::create(JSContext* cx, HandleValue val) {
+  WasmValueBox* obj = (WasmValueBox*)NewObjectWithGivenProto(
+      cx, &WasmValueBox::class_, nullptr);
+  if (!obj) {
+    return nullptr;
+  }
+  obj->setFixedSlot(VALUE_SLOT, val);
+  return obj;
+}
+
+bool wasm::BoxAnyRef(JSContext* cx, HandleValue val, MutableHandleAnyRef addr) {
+  if (val.isNull()) {
+    addr.set(AnyRef::null());
+    return true;
+  }
+
+  if (val.isObject()) {
+    JSObject* obj = &val.toObject();
+    MOZ_ASSERT(!obj->is<WasmValueBox>());
+    MOZ_ASSERT(obj->compartment() == cx->compartment());
+    addr.set(AnyRef::fromJSObject(obj));
+    return true;
+  }
+
+  WasmValueBox* box = WasmValueBox::create(cx, val);
+  if (!box) return false;
+  addr.set(AnyRef::fromJSObject(box));
+  return true;
+}
+
+Value wasm::UnboxAnyRef(AnyRef val) {
+  // If UnboxAnyRef needs to allocate then we need a more complicated API, and
+  // we need to root the value in the callers, see comments in callExport().
+  JSObject* obj = val.asJSObject();
+  Value result;
+  if (obj == nullptr) {
+    result.setNull();
+  } else if (obj->is<WasmValueBox>()) {
+    result = obj->as<WasmValueBox>().value();
+  } else {
+    result.setObjectOrNull(obj);
+  }
+  return result;
+}
+
+bool js::IsBoxedWasmAnyRef(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 1);
+  args.rval().setBoolean(args[0].isObject() &&
+                         args[0].toObject().is<WasmValueBox>());
+  return true;
+}
+
+bool js::IsBoxableWasmAnyRef(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 1);
+  args.rval().setBoolean(!(args[0].isObject() || args[0].isNull()));
+  return true;
+}
+
+bool js::BoxWasmAnyRef(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 1);
+  WasmValueBox* box = WasmValueBox::create(cx, args[0]);
+  if (!box) return false;
+  args.rval().setObject(*box);
+  return true;
+}
+
+bool js::UnboxBoxedWasmAnyRef(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 1);
+  WasmValueBox* box = &args[0].toObject().as<WasmValueBox>();
+  args.rval().set(box->value());
+  return true;
 }
 
 bool wasm::IsRoundingFunction(SymbolicAddress callee, jit::RoundingMode* mode) {
@@ -195,6 +268,7 @@ static bool IsImmediateType(ValType vt) {
     case ValType::I64:
     case ValType::F32:
     case ValType::F64:
+    case ValType::FuncRef:
     case ValType::AnyRef:
       return true;
     case ValType::NullRef:
@@ -215,8 +289,10 @@ static unsigned EncodeImmediateType(ValType vt) {
       return 2;
     case ValType::F64:
       return 3;
-    case ValType::AnyRef:
+    case ValType::FuncRef:
       return 4;
+    case ValType::AnyRef:
+      return 5;
     case ValType::NullRef:
     case ValType::Ref:
       break;
@@ -224,7 +300,8 @@ static unsigned EncodeImmediateType(ValType vt) {
   MOZ_CRASH("bad ValType");
 }
 
-/* static */ bool FuncTypeIdDesc::isGlobal(const FuncType& funcType) {
+/* static */
+bool FuncTypeIdDesc::isGlobal(const FuncType& funcType) {
   unsigned numTypes =
       (funcType.ret() == ExprType::Void ? 0 : 1) + (funcType.args().length());
   if (numTypes > sMaxTypes) {
@@ -245,8 +322,9 @@ static unsigned EncodeImmediateType(ValType vt) {
   return false;
 }
 
-/* static */ FuncTypeIdDesc FuncTypeIdDesc::global(const FuncType& funcType,
-                                                   uint32_t globalDataOffset) {
+/* static */
+FuncTypeIdDesc FuncTypeIdDesc::global(const FuncType& funcType,
+                                      uint32_t globalDataOffset) {
   MOZ_ASSERT(isGlobal(funcType));
   return FuncTypeIdDesc(FuncTypeIdDescKind::Global, globalDataOffset);
 }
@@ -257,8 +335,8 @@ static ImmediateType LengthToBits(uint32_t length) {
   return length;
 }
 
-/* static */ FuncTypeIdDesc FuncTypeIdDesc::immediate(
-    const FuncType& funcType) {
+/* static */
+FuncTypeIdDesc FuncTypeIdDesc::immediate(const FuncType& funcType) {
   ImmediateType immediate = ImmediateBit;
   uint32_t shift = sTagBits;
 
@@ -516,11 +594,11 @@ uint32_t wasm::RoundUpToNextValidARMImmediate(uint32_t i) {
 #ifndef WASM_HUGE_MEMORY
 
 bool wasm::IsValidBoundsCheckImmediate(uint32_t i) {
-#ifdef JS_CODEGEN_ARM
+#  ifdef JS_CODEGEN_ARM
   return IsValidARMImmediate(i);
-#else
+#  else
   return true;
-#endif
+#  endif
 }
 
 size_t wasm::ComputeMappedSize(uint32_t maxSize) {
@@ -530,11 +608,11 @@ size_t wasm::ComputeMappedSize(uint32_t maxSize) {
   // code. Thus round up the maxSize to the next valid immediate value
   // *before* adding in the guard page.
 
-#ifdef JS_CODEGEN_ARM
+#  ifdef JS_CODEGEN_ARM
   uint32_t boundsCheckLimit = RoundUpToNextValidARMImmediate(maxSize);
-#else
+#  else
   uint32_t boundsCheckLimit = maxSize;
-#endif
+#  endif
   MOZ_ASSERT(IsValidBoundsCheckImmediate(boundsCheckLimit));
 
   MOZ_ASSERT(boundsCheckLimit % gc::SystemPageSize() == 0);
@@ -544,7 +622,8 @@ size_t wasm::ComputeMappedSize(uint32_t maxSize) {
 
 #endif  // WASM_HUGE_MEMORY
 
-/* static */ DebugFrame* DebugFrame::from(Frame* fp) {
+/* static */
+DebugFrame* DebugFrame::from(Frame* fp) {
   MOZ_ASSERT(fp->tls->instance->code().metadata().debugEnabled);
   auto* df =
       reinterpret_cast<DebugFrame*>((uint8_t*)fp - DebugFrame::offsetOfFrame());
@@ -571,6 +650,10 @@ void DebugFrame::alignmentStaticAsserts() {
 
 GlobalObject* DebugFrame::global() const {
   return &instance()->object()->global();
+}
+
+bool DebugFrame::hasGlobal(const GlobalObject* global) const {
+  return global == &instance()->objectUnbarriered()->global();
 }
 
 JSObject* DebugFrame::environmentChain() const {
@@ -607,7 +690,7 @@ bool DebugFrame::getLocal(uint32_t localIndex, MutableHandleValue vp) {
     case jit::MIRType::Double:
       vp.set(NumberValue(JS::CanonicalizeNaN(*static_cast<double*>(dataPtr))));
       break;
-    case jit::MIRType::Pointer:
+    case jit::MIRType::RefOrNull:
       vp.set(ObjectOrNullValue(*(JSObject**)dataPtr));
       break;
     default:
@@ -637,8 +720,11 @@ void DebugFrame::updateReturnJSValue() {
       cachedReturnJSValue_.setDouble(JS::CanonicalizeNaN(resultF64_));
       break;
     case ExprType::Ref:
+      cachedReturnJSValue_ = ObjectOrNullValue((JSObject*)resultRef_);
+      break;
+    case ExprType::FuncRef:
     case ExprType::AnyRef:
-      cachedReturnJSValue_ = ObjectOrNullValue(*(JSObject**)&resultRef_);
+      cachedReturnJSValue_ = UnboxAnyRef(resultAnyRef_);
       break;
     default:
       MOZ_CRASH("result type");
@@ -856,4 +942,49 @@ bool TlsData::isInterrupted() const {
 void TlsData::resetInterrupt(JSContext* cx) {
   interrupt = false;
   stackLimit = cx->stackLimitForJitCode(JS::StackForUntrustedScript);
+}
+
+void wasm::Log(JSContext* cx, const char* fmt, ...) {
+  MOZ_ASSERT(!cx->isExceptionPending());
+
+  if (!cx->options().wasmVerbose()) {
+    return;
+  }
+
+  va_list args;
+  va_start(args, fmt);
+
+  if (UniqueChars chars = JS_vsmprintf(fmt, args)) {
+    JS_ReportErrorFlagsAndNumberASCII(cx, JSREPORT_WARNING, GetErrorMessage,
+                                      nullptr, JSMSG_WASM_VERBOSE, chars.get());
+    if (cx->isExceptionPending()) {
+      cx->clearPendingException();
+    }
+  }
+
+  va_end(args);
+}
+
+#ifdef WASM_CODEGEN_DEBUG
+bool wasm::IsCodegenDebugEnabled(DebugChannel channel) {
+  switch (channel) {
+    case DebugChannel::Function:
+      return JitOptions.enableWasmFuncCallSpew;
+    case DebugChannel::Import:
+      return JitOptions.enableWasmImportCallSpew;
+  }
+  return false;
+}
+#endif
+
+void wasm::DebugCodegen(DebugChannel channel, const char* fmt, ...) {
+#ifdef WASM_CODEGEN_DEBUG
+  if (!IsCodegenDebugEnabled(channel)) {
+    return;
+  }
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+#endif
 }

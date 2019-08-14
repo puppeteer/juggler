@@ -5,14 +5,14 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 import os
+import six
 import sys
-import types
 from collections import OrderedDict
 
 
 def istupleofstrings(obj):
     return isinstance(obj, tuple) and len(obj) and all(
-        isinstance(o, types.StringTypes) for o in obj)
+        isinstance(o, six.string_types) for o in obj)
 
 
 class OptionValue(tuple):
@@ -69,6 +69,8 @@ class OptionValue(tuple):
         # Allow explicit tuples to be compared.
         if type(other) == tuple:
             return tuple.__eq__(self, other)
+        elif isinstance(other, bool):
+            return bool(self) == other
         # Else we're likely an OptionValue class.
         elif type(other) != type(self):
             return False
@@ -82,12 +84,29 @@ class OptionValue(tuple):
         return '%s%s' % (self.__class__.__name__,
                          super(OptionValue, self).__repr__())
 
+    @staticmethod
+    def from_(value):
+        if isinstance(value, OptionValue):
+            return value
+        elif value is True:
+            return PositiveOptionValue()
+        elif value is False or value == ():
+            return NegativeOptionValue()
+        elif isinstance(value, six.string_types):
+            return PositiveOptionValue((value,))
+        elif isinstance(value, tuple):
+            return PositiveOptionValue(value)
+        else:
+            raise TypeError("Unexpected type: '%s'"
+                            % type(value).__name__)
+
 
 class PositiveOptionValue(OptionValue):
     '''Represents the value for a positive option (--enable/--with/--foo)
     in the form of a tuple for when values are given to the option (in the form
     --option=value[,value2...].
     '''
+
     def __nonzero__(self):
         return True
 
@@ -113,7 +132,7 @@ class ConflictingOptionError(InvalidOptionError):
         if format_data:
             message = message.format(**format_data)
         super(ConflictingOptionError, self).__init__(message)
-        for k, v in format_data.iteritems():
+        for k, v in six.iteritems(format_data):
             setattr(self, k, v)
 
 
@@ -149,7 +168,7 @@ class Option(object):
                 'At least an option name or an environment variable name must '
                 'be given')
         if name:
-            if not isinstance(name, types.StringTypes):
+            if not isinstance(name, six.string_types):
                 raise InvalidOptionError('Option must be a string')
             if not name.startswith('--'):
                 raise InvalidOptionError('Option must start with `--`')
@@ -158,7 +177,7 @@ class Option(object):
             if not name.islower():
                 raise InvalidOptionError('Option must be all lowercase')
         if env:
-            if not isinstance(env, types.StringTypes):
+            if not isinstance(env, six.string_types):
                 raise InvalidOptionError(
                     'Environment variable name must be a string')
             if not env.isupper():
@@ -168,8 +187,8 @@ class Option(object):
                 isinstance(nargs, int) and nargs >= 0):
             raise InvalidOptionError(
                 "nargs must be a positive integer, '?', '*' or '+'")
-        if (not isinstance(default, types.StringTypes) and
-                not isinstance(default, (bool, types.NoneType)) and
+        if (not isinstance(default, six.string_types) and
+                not isinstance(default, (bool, type(None))) and
                 not istupleofstrings(default)):
             raise InvalidOptionError(
                 'default must be a bool, a string or a tuple of strings')
@@ -255,7 +274,7 @@ class Option(object):
         where prefix is one of 'with', 'without', 'enable' or 'disable'.
         The '=values' part is optional. Values are separated with commas.
         '''
-        if not isinstance(option, types.StringTypes):
+        if not isinstance(option, six.string_types):
             raise InvalidOptionError('Option must be a string')
 
         elements = option.split('=', 1)
@@ -388,8 +407,7 @@ class Option(object):
         return values
 
     def __repr__(self):
-        return '<%s.%s [%s]>' % (self.__class__.__module__,
-                                 self.__class__.__name__, self.option)
+        return '<%s [%s]>' % (self.__class__.__name__, self.option)
 
 
 class CommandLineHelper(object):
@@ -407,6 +425,7 @@ class CommandLineHelper(object):
     Extra options can be added afterwards through API calls. For those,
     conflicting values will raise an exception.
     '''
+
     def __init__(self, environ=os.environ, argv=sys.argv):
         self._environ = dict(environ)
         self._args = OrderedDict()
@@ -499,5 +518,5 @@ class CommandLineHelper(object):
 
     def __iter__(self):
         for d in (self._args, self._extra_args):
-            for arg, pos in d.itervalues():
+            for arg, pos in six.itervalues(d):
                 yield arg

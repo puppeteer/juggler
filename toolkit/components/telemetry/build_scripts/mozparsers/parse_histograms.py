@@ -547,7 +547,7 @@ the histogram."""
         if not self._strict_type_checks:
             # This handles some old non-numeric expressions.
             EXPRESSIONS = {
-                "JS::gcreason::NUM_TELEMETRY_REASONS": 101,
+                "JS::GCReason::NUM_TELEMETRY_REASONS": 101,
                 "mozilla::StartupTimeline::MAX_EVENT_ID": 12,
             }
 
@@ -663,8 +663,8 @@ the histogram."""
 
     def set_dataset(self, definition):
         datasets = {
-            'opt-in': 'DATASET_RELEASE_CHANNEL_OPTIN',
-            'opt-out': 'DATASET_RELEASE_CHANNEL_OPTOUT'
+            'opt-in': 'DATASET_PRERELEASE_CHANNELS',
+            'opt-out': 'DATASET_ALL_CHANNELS'
         }
 
         value = definition.get('releaseChannelCollection', 'opt-in')

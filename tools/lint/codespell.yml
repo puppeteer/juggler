@@ -4,19 +4,21 @@ codespell:
     include:
         - browser/base/content/docs/
         - browser/branding/
-        - browser/components/newtab/prerendered/locales/en-US/
+        - browser/components/newtab/docs/
         - browser/extensions/formautofill/locales/en-US/
-        - browser/components/pocket/locale/en-US/
-        - browser/extensions/webcompat-reporter/locales/en-US/
+        - browser/extensions/report-site-issue/locales/en-US/
+        - browser/installer/windows/docs/
         - browser/locales/en-US/
         - build/docs/
         - devtools/client/locales/en-US/
+        - devtools/docs/
         - devtools/shared/locales/en-US/
         - devtools/startup/locales/en-US/
         - dom/locales/en-US/
         - gfx/docs/
         - intl/docs/
         - intl/locales/en-US/
+        - js/src/doc/
         - layout/tools/layout-debug/ui/locale/en-US/
         - mobile/android/base/locales/en-US/
         - mobile/android/branding/
@@ -25,15 +27,22 @@ codespell:
         - mobile/locales/en-US/
         - netwerk/locales/en-US/
         - python/docs/
+        - python/mach/docs/
         - python/mozlint/
         - python/safety/
+        - security/manager/locales/en-US/
         - services/sync/locales/en-US/
         - taskcluster/docs/
         - testing/mozbase/docs/
         - toolkit/components/extensions/docs/
+        - toolkit/components/normandy/docs/
         - toolkit/components/telemetry/docs/
         - toolkit/crashreporter/docs/
+        - toolkit/docs/
+        - toolkit/locales/en-US/
+        - toolkit/components/search/docs/
         - tools/lint/
+        - tools/tryselect/
     # List of extensions coming from:
     # tools/lint/{flake8,eslint}.yml
     # tools/mach_commands.py (clang-format)
@@ -53,6 +62,8 @@ codespell:
         - py
         - properties
         - rst
+        - md
+        - ftl
     support-files:
         - 'tools/lint/spell/**'
     type: external

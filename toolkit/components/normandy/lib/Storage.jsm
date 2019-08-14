@@ -4,17 +4,26 @@
 
 "use strict";
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
-ChromeUtils.defineModuleGetter(this, "JSONFile", "resource://gre/modules/JSONFile.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "JSONFile",
+  "resource://gre/modules/JSONFile.jsm"
+);
 ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
 var EXPORTED_SYMBOLS = ["Storage"];
 
 // Lazy-load JSON file that backs Storage instances.
 XPCOMUtils.defineLazyGetter(this, "lazyStore", async function() {
-  const path = OS.Path.join(OS.Constants.Path.profileDir, "shield-recipe-client.json");
-  const store = new JSONFile({path});
+  const path = OS.Path.join(
+    OS.Constants.Path.profileDir,
+    "shield-recipe-client.json"
+  );
+  const store = new JSONFile({ path });
   await store.load();
   return store;
 });
@@ -48,7 +57,7 @@ var Storage = class {
   /**
    * Sets an item in the prefixed storage.
    * @returns {Promise}
-   * @resolves When the operation is completed succesfully
+   * @resolves When the operation is completed successfully
    * @rejects Javascript exception.
    */
   async setItem(name, value) {
@@ -63,7 +72,7 @@ var Storage = class {
   /**
    * Removes a single item from the prefixed storage.
    * @returns {Promise}
-   * @resolves When the operation is completed succesfully
+   * @resolves When the operation is completed successfully
    * @rejects Javascript exception.
    */
   async removeItem(name) {
@@ -77,7 +86,7 @@ var Storage = class {
   /**
    * Clears all storage for the prefix.
    * @returns {Promise}
-   * @resolves When the operation is completed succesfully
+   * @resolves When the operation is completed successfully
    * @rejects Javascript exception.
    */
   async clear() {

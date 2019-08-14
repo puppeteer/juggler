@@ -11,18 +11,17 @@ interface nsIBrowser;
 interface nsIRequest;
 interface nsIInputStream;
 interface nsIDocShell;
-interface nsIFrameLoaderOwner;
-interface nsITabParent;
+interface nsIRemoteTab;
 interface nsIPrincipal;
 interface mozIDOMWindowProxy;
-
+interface nsIContentSecurityPolicy;
 webidl Element;
 webidl Node;
 
 /**
  * The nsIXULBrowserWindow supplies the methods that may be called from the
  * internals of the browser area to tell the containing xul window to update
- * its ui. 
+ * its ui.
  */
 [scriptable, uuid(a8675fa9-c8b4-4350-9803-c38f344a9e38)]
 interface nsIXULBrowserWindow : nsISupports
@@ -63,17 +62,21 @@ interface nsIXULBrowserWindow : nsISupports
    *        boundaries.
    * @param aTriggeringPrincipal
    *        The principal that initiated the load of aURI.
+   * @param aCsp
+   *        The CSP to be used for that load. That is the CSP that e.g. upgrades
+   *        the load to HTTPS in case upgrade-insecure-requests is set
    */
   bool shouldLoadURI(in nsIDocShell    aDocShell,
                      in nsIURI         aURI,
                      in nsIURI         aReferrer,
                      in boolean        aHasPostData,
-                     in nsIPrincipal   aTriggeringPrincipal);
+                     in nsIPrincipal   aTriggeringPrincipal,
+                     in nsIContentSecurityPolicy aCsp);
   /**
    * Show/hide a tooltip (when the user mouses over a link, say).
    */
   void showTooltip(in long x, in long y, in AString tooltip, in AString direction,
-                   in nsIFrameLoaderOwner browser);
+                   in Element browser);
   void hideTooltip();
 
   /**
@@ -89,5 +92,10 @@ interface nsIXULBrowserWindow : nsISupports
    */
   void navigateAndRestoreByIndex(in nsIBrowser aBrowser, in long aIndex);
 
+  // update sessionStore from the tabListener implemented by C++
+  void updateDocShellCaps(in ACString aDisCaps);
+  void updateIsPrivate(in boolean aIsPrivate);
+  void updateScrollPositions(in Array<ACString> aPositions, in Array<long> aChildren);
+  void updateSessionStore(in Element aBrowser, in uint32_t aFlushId, in boolean aIsFinal);
 };
 

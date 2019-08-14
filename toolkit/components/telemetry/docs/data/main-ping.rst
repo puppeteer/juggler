@@ -86,8 +86,6 @@ The length of the current session so far in seconds.
 This uses a monotonic clock, so this may mismatch with other measurements that
 are not monotonic like calculations based on ``Date.now()``.
 
-If the monotonic clock failed, this will be ``-1``.
-
 Note that this currently does not behave consistently over our supported platforms:
 
 * On Windows this uses ``GetTickCount64()``, which does increase over sleep periods
@@ -100,8 +98,6 @@ subsessionLength
 ~~~~~~~~~~~~~~~~
 The length of this subsession in seconds.
 This uses a monotonic clock, so this may mismatch with other measurements that are not monotonic (e.g. based on ``Date.now()``).
-
-If ``sessionLength`` is ``-1``, the monotonic clock is not working.
 
 Also see the remarks for ``sessionLength`` on platform consistency.
 
@@ -672,25 +668,6 @@ Structure:
       }
       ...
     ],
-
-Prio
-----
-This section contains experimental data encoded with a basic version of the Prio system for private aggregation.
-See `the Prio paper <https://crypto.stanford.edu/prio/>`_ and `the libprio Github repo <https://github.com/mozilla/libprio>`_
-for more information.
-
-Prio splits data packets into two "shares", signed for different servers that will do the decryption and
-aggregation. We call these "Server A" and "Server B", represented as `a` and `b` keys in `payload.prio`.
-
-Structure:
-
-.. code-block:: js
-
-    "prio": {
-      a: [...],
-      b: [...]
-    }
-
 
 Version History
 ---------------

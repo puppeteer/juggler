@@ -4,18 +4,23 @@
 "use strict";
 
 // Check that focus is restored to content page after closing the console. See Bug 588342.
-const TEST_URI = "data:text/html;charset=utf-8,Test content focus after closing console";
+const TEST_URI =
+  "data:text/html;charset=utf-8,Test content focus after closing console";
 
 add_task(async function() {
   const hud = await openNewTabAndConsole(TEST_URI);
 
   info("Focus after console is opened");
-  ok(isJstermFocused(hud.jsterm), "input node is focused after console is opened");
+  ok(isInputFocused(hud), "input node is focused after console is opened");
 
   info("Closing console");
   await closeConsole();
-  const isFocused = await ContentTask.spawn(gBrowser.selectedBrowser, { }, function() {
-    return Services.focus.focusedWindow == content;
-  });
+  const isFocused = await ContentTask.spawn(
+    gBrowser.selectedBrowser,
+    {},
+    function() {
+      return Services.focus.focusedWindow == content;
+    }
+  );
   ok(isFocused, "content document has focus after closing the console");
 });

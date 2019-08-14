@@ -30,7 +30,7 @@ namespace dom {
 class Promise;
 } /* namespace dom */
 
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 struct NonOwningAnimationTarget;
 
 namespace dom {
@@ -84,7 +84,7 @@ class CSSAnimation final : public Animation {
 
   void PlayFromStyle();
   void PauseFromStyle();
-  void CancelFromStyle() override {
+  void CancelFromStyle(PostRestyleMode aPostRestyle) {
     // When an animation is disassociated with style it enters an odd state
     // where its composite order is undefined until it first transitions
     // out of the idle state.
@@ -98,10 +98,10 @@ class CSSAnimation final : public Animation {
     mAnimationIndex = sNextAnimationIndex++;
     mNeedsNewAnimationIndexWhenRun = true;
 
-    Animation::CancelFromStyle();
+    Animation::Cancel(aPostRestyle);
 
-    // We need to do this *after* calling CancelFromStyle() since
-    // CancelFromStyle might synchronously trigger a cancel event for which
+    // We need to do this *after* calling Cancel() since
+    // Cancel() might synchronously trigger a cancel event for which
     // we need an owning element to target the event at.
     mOwningElement = OwningElementRef();
   }
@@ -255,6 +255,9 @@ struct AnimationTypeTraits<dom::CSSAnimation> {
   static nsAtom* AfterPropertyAtom() {
     return nsGkAtoms::animationsOfAfterProperty;
   }
+  static nsAtom* MarkerPropertyAtom() {
+    return nsGkAtoms::animationsOfMarkerProperty;
+  }
 };
 
 } /* namespace mozilla */
@@ -278,7 +281,7 @@ class nsAnimationManager final
    * but with servo's computed values.
    */
   void UpdateAnimations(mozilla::dom::Element* aElement,
-                        mozilla::CSSPseudoElementType aPseudoType,
+                        mozilla::PseudoStyleType aPseudoType,
                         const mozilla::ComputedStyle* aComputedValues);
 
   // Utility function to walk through |aIter| to find the Keyframe with

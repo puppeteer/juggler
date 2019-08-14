@@ -112,12 +112,6 @@ class GeckoMigration(MercurialScript, VirtualenvMixin,
         if self.abs_dirs:
             return self.abs_dirs
         dirs = super(GeckoMigration, self).query_abs_dirs()
-        self.abs_dirs['abs_tools_dir'] = os.path.join(
-            dirs['abs_work_dir'], 'tools'
-        )
-        self.abs_dirs['abs_tools_lib_dir'] = os.path.join(
-            dirs['abs_work_dir'], 'tools', 'lib', 'python'
-        )
         for k in ('from', 'to'):
             url = self.config.get("%s_repo_url" % k)
             if url:
@@ -176,7 +170,8 @@ class GeckoMigration(MercurialScript, VirtualenvMixin,
             return ['-r', '.']
 
     def set_push_to_ssh(self):
-        for cwd in self.query_push_dirs():
+        push_dirs = [d for d in self.query_push_dirs() if d is not None]
+        for cwd in push_dirs:
             repo_url = self.read_repo_hg_rc(cwd).get('paths', 'default')
             username = self.config.get('ssh_user', '')
             # Add a trailing @ to the username if it exists, otherwise it gets
@@ -395,6 +390,9 @@ class GeckoMigration(MercurialScript, VirtualenvMixin,
         dirs = self.query_abs_dirs()
         self.apply_replacements()
         self.touch_clobber_file(dirs['abs_to_dir'])
+        next_esr_version = self.get_version(dirs['abs_to_dir'])[0]
+        self.bump_version(dirs['abs_to_dir'], next_esr_version, next_esr_version, "", "",
+                          use_config_suffix=True)
 
     def apply_replacements(self):
         dirs = self.query_abs_dirs()
@@ -444,14 +442,8 @@ class GeckoMigration(MercurialScript, VirtualenvMixin,
         self.touch_clobber_file(dirs['abs_to_dir'])
 
     def pull(self):
-        """ Pull tools first, then clone the gecko repos
-            """
-        repos = [{
-            "repo": self.config["tools_repo_url"],
-            "branch": self.config["tools_repo_branch"],
-            "dest": "tools",
-            "vcs": "hg",
-        }] + self.query_repos()
+        """Clone the gecko repos"""
+        repos = self.query_repos()
         super(GeckoMigration, self).pull(repos=repos)
 
     def migrate(self):

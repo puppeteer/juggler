@@ -6,16 +6,16 @@
 #include "Tickler.h"
 
 #ifdef MOZ_USE_WIFI_TICKLER
-#include "nsComponentManagerUtils.h"
-#include "nsINamed.h"
-#include "nsIPrefBranch.h"
-#include "nsIPrefService.h"
-#include "nsServiceManagerUtils.h"
-#include "nsThreadUtils.h"
-#include "prnetdb.h"
+#  include "nsComponentManagerUtils.h"
+#  include "nsINamed.h"
+#  include "nsIPrefBranch.h"
+#  include "nsIPrefService.h"
+#  include "nsServiceManagerUtils.h"
+#  include "nsThreadUtils.h"
+#  include "prnetdb.h"
 
-#include "mozilla/jni/Utils.h"
-#include "GeneratedJNIWrappers.h"
+#  include "mozilla/jni/Utils.h"
+#  include "GeneratedJNIWrappers.h"
 
 namespace mozilla {
 namespace net {
@@ -175,12 +175,12 @@ class TicklerTimer final : public nsITimerCallback, public nsINamed {
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
 
-  explicit TicklerTimer(Tickler *aTickler) {
+  explicit TicklerTimer(Tickler* aTickler) {
     mTickler = do_GetWeakReference(aTickler);
   }
 
   // nsINamed
-  NS_IMETHOD GetName(nsACString &aName) override {
+  NS_IMETHOD GetName(nsACString& aName) override {
     aName.AssignLiteral("TicklerTimer");
     return NS_OK;
   }
@@ -211,7 +211,7 @@ void Tickler::SetIPV4Port(uint16_t port) { mAddr.inet.port = port; }
 
 NS_IMPL_ISUPPORTS(TicklerTimer, nsITimerCallback, nsINamed)
 
-NS_IMETHODIMP TicklerTimer::Notify(nsITimer *timer) {
+NS_IMETHODIMP TicklerTimer::Notify(nsITimer* timer) {
   RefPtr<Tickler> tickler = do_QueryReferent(mTickler);
   if (!tickler) return NS_ERROR_FAILURE;
   MutexAutoLock lock(tickler->mLock);

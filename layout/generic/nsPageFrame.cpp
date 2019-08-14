@@ -6,6 +6,7 @@
 
 #include "nsPageFrame.h"
 
+#include "mozilla/PresShell.h"
 #include "mozilla/gfx/2D.h"
 #include "gfxContext.h"
 #include "nsDeviceContext.h"
@@ -13,11 +14,10 @@
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
-#include "nsIPresShell.h"
 #include "nsPageContentFrame.h"
 #include "nsDisplayList.h"
-#include "nsSimplePageSequenceFrame.h"  // for nsSharedPageData
-#include "nsTextFormatter.h"  // for page number localization formatting
+#include "nsPageSequenceFrame.h"  // for nsSharedPageData
+#include "nsTextFormatter.h"      // for page number localization formatting
 #include "nsBidiUtils.h"
 #include "nsIPrintSettings.h"
 
@@ -28,8 +28,8 @@ extern mozilla::LazyLogModule gLayoutPrintingLog;
 using namespace mozilla;
 using namespace mozilla::gfx;
 
-nsPageFrame* NS_NewPageFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsPageFrame(aStyle);
+nsPageFrame* NS_NewPageFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell) nsPageFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPageFrame)
@@ -38,8 +38,8 @@ NS_QUERYFRAME_HEAD(nsPageFrame)
   NS_QUERYFRAME_ENTRY(nsPageFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
-nsPageFrame::nsPageFrame(ComputedStyle* aStyle)
-    : nsContainerFrame(aStyle, kClassID) {}
+nsPageFrame::nsPageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+    : nsContainerFrame(aStyle, aPresContext, kClassID) {}
 
 nsPageFrame::~nsPageFrame() {}
 
@@ -94,9 +94,9 @@ void nsPageFrame::Reflow(nsPresContext* aPresContext,
     // Use the margins given in the @page rule.
     // If a margin is 'auto', use the margin from the print settings for that
     // side.
-    const nsStyleSides& marginStyle = kidReflowInput.mStyleMargin->mMargin;
+    const auto& marginStyle = kidReflowInput.mStyleMargin->mMargin;
     NS_FOR_CSS_SIDES(side) {
-      if (marginStyle.GetUnit(side) == eStyleUnit_Auto) {
+      if (marginStyle.Get(side).IsAuto()) {
         mPageContentMargin.Side(side) = mPD->mReflowMargin.Side(side);
       } else {
         mPageContentMargin.Side(side) =
@@ -362,7 +362,7 @@ void nsPageFrame::DrawHeaderFooter(gfxContext& aRenderingContext,
     aRenderingContext.SetColor(Color(0.f, 0.f, 0.f));
     nsLayoutUtils::DrawString(this, aFontMetrics, &aRenderingContext, str.get(),
                               str.Length(), nsPoint(x, y + aAscent), nullptr,
-                              DrawStringFlags::eForceHorizontal);
+                              DrawStringFlags::ForceHorizontal);
     aRenderingContext.Restore();
   }
 }
@@ -405,8 +405,8 @@ static void BuildDisplayListForExtraPage(nsDisplayListBuilder* aBuilder,
                                          nsPageFrame* aPage,
                                          nsIFrame* aExtraPage,
                                          nsDisplayList* aList) {
-  // The only content in aExtraPage we care about is out-of-flow content whose
-  // placeholders have occurred in aPage. If
+  // The only content in aExtraPage we care about is out-of-flow content from
+  // aPage, whose placeholders have occurred in aExtraPage. If
   // NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO is not set, then aExtraPage has
   // no such content.
   if (!aExtraPage->HasAnyStateBits(NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO)) {
@@ -440,10 +440,10 @@ static gfx::Matrix4x4 ComputePageTransform(nsIFrame* aFrame,
   return gfx::Matrix4x4::Scaling(scale, scale, 1);
 }
 
-class nsDisplayHeaderFooter final : public nsDisplayItem {
+class nsDisplayHeaderFooter final : public nsPaintedDisplayItem {
  public:
   nsDisplayHeaderFooter(nsDisplayListBuilder* aBuilder, nsPageFrame* aFrame)
-      : nsDisplayItem(aBuilder, aFrame) {
+      : nsPaintedDisplayItem(aBuilder, aFrame) {
     MOZ_COUNT_CTOR(nsDisplayHeaderFooter);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -457,7 +457,7 @@ class nsDisplayHeaderFooter final : public nsDisplayItem {
     MOZ_ASSERT(pageFrame, "We should have an nsPageFrame");
 #endif
     static_cast<nsPageFrame*>(mFrame)->PaintHeaderFooter(
-        *aCtx, ToReferenceFrame(), mDisableSubpixelAA);
+        *aCtx, ToReferenceFrame(), IsSubpixelAADisabled());
   }
   NS_DISPLAY_DECL_NAME("HeaderFooter", TYPE_HEADER_FOOTER)
 
@@ -510,8 +510,7 @@ void nsPageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
     nsRect visibleRect = child->GetVisualOverflowRectRelativeToSelf();
     nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
-        aBuilder, child, visibleRect, visibleRect,
-        aBuilder->IsAtRootOfPseudoStackingContext());
+        aBuilder, child, visibleRect, visibleRect);
     child->BuildDisplayListForStackingContext(aBuilder, &content);
 
     // We may need to paint out-of-flow frames whose placeholders are
@@ -521,21 +520,34 @@ void nsPageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // these extra pages are pruned so that only display items for the
     // page we currently care about (which we would have reached by
     // following placeholders to their out-of-flows) end up on the list.
-    nsIFrame* page = child;
-    while ((page = GetNextPage(page)) != nullptr) {
-      nsRect childVisible = visibleRect + child->GetOffsetTo(page);
+    //
+    // Stacking context frames that wrap content on their normal page,
+    // as well as OOF content for this page will have their container
+    // items duplicated. We tell the builder to include our page number
+    // in the unique key for any extra page items so that they can be
+    // differentiated from the ones created on the normal page.
+    NS_ASSERTION(mPageNum <= 255, "Too many pages to handle OOFs");
+    if (mPageNum <= 255) {
+      uint8_t oldPageNum = aBuilder->GetBuildingExtraPagesForPageNum();
+      aBuilder->SetBuildingExtraPagesForPageNum(mPageNum);
 
-      nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
-          aBuilder, page, childVisible, childVisible,
-          aBuilder->IsAtRootOfPseudoStackingContext());
-      BuildDisplayListForExtraPage(aBuilder, this, page, &content);
+      nsIFrame* page = child;
+      while ((page = GetNextPage(page)) != nullptr) {
+        nsRect childVisible = visibleRect + child->GetOffsetTo(page);
+
+        nsDisplayListBuilder::AutoBuildingDisplayList buildingForChild(
+            aBuilder, page, childVisible, childVisible);
+        BuildDisplayListForExtraPage(aBuilder, this, page, &content);
+      }
+
+      aBuilder->SetBuildingExtraPagesForPageNum(oldPageNum);
     }
 
     // Invoke AutoBuildingDisplayList to ensure that the correct visibleRect
     // is used to compute the visible rect if AddCanvasBackgroundColorItem
     // creates a display item.
     nsDisplayListBuilder::AutoBuildingDisplayList building(
-        aBuilder, child, visibleRect, visibleRect, true);
+        aBuilder, child, visibleRect, visibleRect);
 
     // Add the canvas background color to the bottom of the list. This
     // happens after we've built the list so that AddCanvasBackgroundColorItem
@@ -544,18 +556,17 @@ void nsPageFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         nsRect(aBuilder->ToReferenceFrame(child), child->GetSize());
 
     PresContext()->GetPresShell()->AddCanvasBackgroundColorItem(
-        *aBuilder, content, child, backgroundRect, NS_RGBA(0, 0, 0, 0));
+        aBuilder, &content, child, backgroundRect, NS_RGBA(0, 0, 0, 0));
   }
 
-  content.AppendToTop(MakeDisplayItem<nsDisplayTransform>(
-      aBuilder, child, &content, content.GetBuildingRect(),
-      ::ComputePageTransform));
+  content.AppendNewToTop<nsDisplayTransform>(aBuilder, child, &content,
+                                             content.GetBuildingRect(), 0,
+                                             ::ComputePageTransform);
 
   set.Content()->AppendToTop(&content);
 
   if (PresContext()->IsRootPaginatedDocument()) {
-    set.Content()->AppendToTop(
-        MakeDisplayItem<nsDisplayHeaderFooter>(aBuilder, this));
+    set.Content()->AppendNewToTop<nsDisplayHeaderFooter>(aBuilder, this);
   }
 
   set.MoveTo(aLists);
@@ -587,6 +598,7 @@ void nsPageFrame::PaintHeaderFooter(gfxContext& aRenderingContext, nsPoint aPt,
   nsFontMetrics::Params params;
   params.userFontSet = pc->GetUserFontSet();
   params.textPerf = pc->GetTextPerfMetrics();
+  params.featureValueLookup = pc->GetFontFeatureValuesLookup();
   RefPtr<nsFontMetrics> fontMet =
       pc->DeviceContext()->GetMetricsFor(mPD->mHeadFootFont, params);
 
@@ -630,20 +642,21 @@ void nsPageFrame::AppendDirectlyOwnedAnonBoxes(
   aResult.AppendElement(mFrames.FirstChild());
 }
 
-nsIFrame* NS_NewPageBreakFrame(nsIPresShell* aPresShell,
-                               ComputedStyle* aStyle) {
+nsIFrame* NS_NewPageBreakFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
   MOZ_ASSERT(aPresShell, "null PresShell");
   // check that we are only creating page break frames when printing
   NS_ASSERTION(aPresShell->GetPresContext()->IsPaginated(),
                "created a page break frame while not printing");
 
-  return new (aPresShell) nsPageBreakFrame(aStyle);
+  return new (aPresShell)
+      nsPageBreakFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsPageBreakFrame)
 
-nsPageBreakFrame::nsPageBreakFrame(ComputedStyle* aStyle)
-    : nsLeafFrame(aStyle, kClassID), mHaveReflowed(false) {}
+nsPageBreakFrame::nsPageBreakFrame(ComputedStyle* aStyle,
+                                   nsPresContext* aPresContext)
+    : nsLeafFrame(aStyle, aPresContext, kClassID), mHaveReflowed(false) {}
 
 nsPageBreakFrame::~nsPageBreakFrame() {}
 

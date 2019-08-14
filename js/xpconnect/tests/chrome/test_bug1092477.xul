@@ -7,8 +7,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1092477
 -->
 <window title="Mozilla Bug 1092477"
   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
 
   <!-- test results are displayed in the html:body -->
   <body xmlns="http://www.w3.org/1999/xhtml">
@@ -19,7 +18,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=1092477
   <!-- test code goes here -->
   <script type="application/javascript"><![CDATA[
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 var exn;
 var url = "resource://non-existent/script.js";
 try {
@@ -29,7 +28,7 @@ try {
 catch (e) {
     exn = String(e);
 }
-var msg = "loadSubscript should throw an exception for trying to load a non-existent script"
+var msg = "loadSubScript should throw an exception for trying to load a non-existent script"
 is(exn, "Error opening input stream (invalid filename?): " + url, msg);
   ]]></script>
 </window>

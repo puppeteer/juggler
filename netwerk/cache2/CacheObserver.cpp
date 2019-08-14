@@ -21,7 +21,7 @@
 namespace mozilla {
 namespace net {
 
-CacheObserver* CacheObserver::sSelf = nullptr;
+StaticRefPtr<CacheObserver> CacheObserver::sSelf;
 
 static float const kDefaultHalfLifeHours = 24.0F;  // 24 hours
 float CacheObserver::sHalfLifeHours = kDefaultHalfLifeHours;
@@ -37,7 +37,7 @@ uint32_t CacheObserver::sMetadataMemoryLimit = kDefaultMetadataMemoryLimit;
 
 static int32_t const kDefaultMemoryCacheCapacity = -1;  // autodetect
 int32_t CacheObserver::sMemoryCacheCapacity = kDefaultMemoryCacheCapacity;
-// Cache of the calculated memory capacity based on the system memory size
+// Cache of the calculated memory capacity based on the system memory size in KB
 int32_t CacheObserver::sAutoMemoryCacheCapacity = -1;
 
 static uint32_t const kDefaultDiskCacheCapacity = 250 * 1024;  // 250 MB
@@ -53,7 +53,8 @@ uint32_t CacheObserver::sDiskFreeSpaceHardLimit =
     kDefaultDiskFreeSpaceHardLimit;
 
 static bool const kDefaultSmartCacheSizeEnabled = false;
-bool CacheObserver::sSmartCacheSizeEnabled = kDefaultSmartCacheSizeEnabled;
+Atomic<bool, Relaxed> CacheObserver::sSmartCacheSizeEnabled(
+    kDefaultSmartCacheSizeEnabled);
 
 static uint32_t const kDefaultPreloadChunkCount = 4;
 uint32_t CacheObserver::sPreloadChunkCount = kDefaultPreloadChunkCount;
@@ -95,6 +96,14 @@ Atomic<uint32_t, Relaxed> CacheObserver::sMaxShutdownIOLag(
 Atomic<PRIntervalTime> CacheObserver::sShutdownDemandedTime(
     PR_INTERVAL_NO_TIMEOUT);
 
+static uint32_t const kDefaultTelemetryReportID = 0;
+Atomic<uint32_t, Relaxed> CacheObserver::sTelemetryReportID(
+    kDefaultTelemetryReportID);
+
+static uint32_t const kDefaultCacheAmountWritten = 0;
+Atomic<uint32_t, Relaxed> CacheObserver::sCacheAmountWritten(
+    kDefaultCacheAmountWritten);
+
 NS_IMPL_ISUPPORTS(CacheObserver, nsIObserver, nsISupportsWeakReference)
 
 // static
@@ -113,7 +122,6 @@ nsresult CacheObserver::Init() {
   }
 
   sSelf = new CacheObserver();
-  NS_ADDREF(sSelf);
 
   obs->AddObserver(sSelf, "prefservice:after-app-defaults", true);
   obs->AddObserver(sSelf, "profile-do-change", true);
@@ -133,7 +141,7 @@ nsresult CacheObserver::Shutdown() {
     return NS_ERROR_NOT_INITIALIZED;
   }
 
-  NS_RELEASE(sSelf);
+  sSelf = nullptr;
   return NS_OK;
 }
 
@@ -150,9 +158,9 @@ void CacheObserver::AttachToPreferences() {
   mozilla::Preferences::AddAtomicUintVarCache(&sDiskCacheCapacity,
                                               "browser.cache.disk.capacity",
                                               kDefaultDiskCacheCapacity);
-  mozilla::Preferences::AddBoolVarCache(&sSmartCacheSizeEnabled,
-                                        "browser.cache.disk.smart_size.enabled",
-                                        kDefaultSmartCacheSizeEnabled);
+  mozilla::Preferences::AddAtomicBoolVarCache(
+      &sSmartCacheSizeEnabled, "browser.cache.disk.smart_size.enabled",
+      kDefaultSmartCacheSizeEnabled);
   mozilla::Preferences::AddIntVarCache(&sMemoryCacheCapacity,
                                        "browser.cache.memory.capacity",
                                        kDefaultMemoryCacheCapacity);
@@ -207,11 +215,19 @@ void CacheObserver::AttachToPreferences() {
   mozilla::Preferences::AddAtomicUintVarCache(
       &sMaxShutdownIOLag, "browser.cache.max_shutdown_io_lag",
       kDefaultMaxShutdownIOLag);
+
+  mozilla::Preferences::AddAtomicUintVarCache(
+      &sTelemetryReportID, "browser.cache.disk.telemetry_report_ID",
+      kDefaultTelemetryReportID);
+
+  mozilla::Preferences::AddAtomicUintVarCache(
+      &sCacheAmountWritten, "browser.cache.disk.amount_written",
+      kDefaultCacheAmountWritten);
 }
 
 // static
 uint32_t CacheObserver::MemoryCacheCapacity() {
-  if (sMemoryCacheCapacity >= 0) return sMemoryCacheCapacity << 10;
+  if (sMemoryCacheCapacity >= 0) return sMemoryCacheCapacity;
 
   if (sAutoMemoryCacheCapacity != -1) return sAutoMemoryCacheCapacity;
 
@@ -234,16 +250,16 @@ uint32_t CacheObserver::MemoryCacheCapacity() {
   if (x > 0) {
     capacity = (int32_t)(x * x / 3.0 + x + 2.0 / 3 + 0.1);  // 0.1 for rounding
     if (capacity > 32) capacity = 32;
-    capacity <<= 20;
+    capacity <<= 10;
   }
 
-  // Result is in bytes.
+  // Result is in kilobytes.
   return sAutoMemoryCacheCapacity = capacity;
 }
 
 // static
 void CacheObserver::SetDiskCacheCapacity(uint32_t aCapacity) {
-  sDiskCacheCapacity = aCapacity >> 10;
+  sDiskCacheCapacity = aCapacity;
 
   if (!sSelf) {
     return;
@@ -253,8 +269,8 @@ void CacheObserver::SetDiskCacheCapacity(uint32_t aCapacity) {
     sSelf->StoreDiskCacheCapacity();
   } else {
     nsCOMPtr<nsIRunnable> event =
-        NewRunnableMethod("net::CacheObserver::StoreDiskCacheCapacity", sSelf,
-                          &CacheObserver::StoreDiskCacheCapacity);
+        NewRunnableMethod("net::CacheObserver::StoreDiskCacheCapacity",
+                          sSelf.get(), &CacheObserver::StoreDiskCacheCapacity);
     NS_DispatchToMainThread(event);
   }
 }
@@ -276,8 +292,8 @@ void CacheObserver::SetCacheFSReported() {
     sSelf->StoreCacheFSReported();
   } else {
     nsCOMPtr<nsIRunnable> event =
-        NewRunnableMethod("net::CacheObserver::StoreCacheFSReported", sSelf,
-                          &CacheObserver::StoreCacheFSReported);
+        NewRunnableMethod("net::CacheObserver::StoreCacheFSReported",
+                          sSelf.get(), &CacheObserver::StoreCacheFSReported);
     NS_DispatchToMainThread(event);
   }
 }
@@ -299,8 +315,8 @@ void CacheObserver::SetHashStatsReported() {
     sSelf->StoreHashStatsReported();
   } else {
     nsCOMPtr<nsIRunnable> event =
-        NewRunnableMethod("net::CacheObserver::StoreHashStatsReported", sSelf,
-                          &CacheObserver::StoreHashStatsReported);
+        NewRunnableMethod("net::CacheObserver::StoreHashStatsReported",
+                          sSelf.get(), &CacheObserver::StoreHashStatsReported);
     NS_DispatchToMainThread(event);
   }
 }
@@ -308,6 +324,52 @@ void CacheObserver::SetHashStatsReported() {
 void CacheObserver::StoreHashStatsReported() {
   mozilla::Preferences::SetInt("browser.cache.disk.hashstats_reported",
                                sHashStatsReported);
+}
+
+// static
+void CacheObserver::SetTelemetryReportID(uint32_t aTelemetryReportID) {
+  sTelemetryReportID = aTelemetryReportID;
+
+  if (!sSelf) {
+    return;
+  }
+
+  if (NS_IsMainThread()) {
+    sSelf->StoreTelemetryReportID();
+  } else {
+    nsCOMPtr<nsIRunnable> event =
+        NewRunnableMethod("net::CacheObserver::StoreTelemetryReportID",
+                          sSelf.get(), &CacheObserver::StoreTelemetryReportID);
+    NS_DispatchToMainThread(event);
+  }
+}
+
+void CacheObserver::StoreTelemetryReportID() {
+  mozilla::Preferences::SetInt("browser.cache.disk.telemetry_report_ID",
+                               sTelemetryReportID);
+}
+
+// static
+void CacheObserver::SetCacheAmountWritten(uint32_t aCacheAmountWritten) {
+  sCacheAmountWritten = aCacheAmountWritten;
+
+  if (!sSelf) {
+    return;
+  }
+
+  if (NS_IsMainThread()) {
+    sSelf->StoreCacheAmountWritten();
+  } else {
+    nsCOMPtr<nsIRunnable> event =
+        NewRunnableMethod("net::CacheObserver::StoreCacheAmountWritten",
+                          sSelf.get(), &CacheObserver::StoreCacheAmountWritten);
+    NS_DispatchToMainThread(event);
+  }
+}
+
+void CacheObserver::StoreCacheAmountWritten() {
+  mozilla::Preferences::SetInt("browser.cache.disk.amount_written",
+                               sCacheAmountWritten);
 }
 
 // static
@@ -383,10 +445,10 @@ bool CacheObserver::EntryIsTooBig(int64_t aSize, bool aUsingDisk) {
   if (preferredLimit != -1 && aSize > preferredLimit) return true;
 
   // Otherwise (or when in the custom limit), check limit based on the global
-  // limit.  It's 1/8 (>> 3) of the respective capacity.
+  // limit. It's 1/8 of the respective capacity.
   int64_t derivedLimit =
-      aUsingDisk ? (static_cast<int64_t>(DiskCacheCapacity() >> 3))
-                 : (static_cast<int64_t>(MemoryCacheCapacity() >> 3));
+      aUsingDisk ? DiskCacheCapacity() : MemoryCacheCapacity();
+  derivedLimit <<= (10 - 3);
 
   if (aSize > derivedLimit) return true;
 

@@ -20,12 +20,7 @@ class nsIThreadObserver;
 namespace mozilla {
 
 class EventQueue;
-
-template <typename InnerQueueT>
 class PrioritizedEventQueue;
-
-class LabeledEventQueue;
-
 class ThreadEventTarget;
 
 // A ThreadEventQueue implements normal monitor-style synchronization over the
@@ -39,11 +34,12 @@ class ThreadEventQueue final : public SynchronizedEventQueue {
   explicit ThreadEventQueue(UniquePtr<InnerQueueT> aQueue);
 
   bool PutEvent(already_AddRefed<nsIRunnable>&& aEvent,
-                EventPriority aPriority) final;
+                EventQueuePriority aPriority) final;
 
   already_AddRefed<nsIRunnable> GetEvent(bool aMayWait,
-                                         EventPriority* aPriority) final;
+                                         EventQueuePriority* aPriority) final;
   bool HasPendingEvent() final;
+  bool HasPendingHighPriorityEvents() final;
 
   bool ShutdownIfNoPendingEvents() final;
 
@@ -54,27 +50,8 @@ class ThreadEventQueue final : public SynchronizedEventQueue {
   void SuspendInputEventPrioritization() final;
   void ResumeInputEventPrioritization() final;
 
-  /**
-   * This method causes any events currently enqueued on the thread to be
-   * suppressed until PopEventQueue is called, and any event dispatched to this
-   * thread's nsIEventTarget will queue as well. Calls to PushEventQueue may be
-   * nested and must each be paired with a call to PopEventQueue in order to
-   * restore the original state of the thread. The returned nsIEventTarget may
-   * be used to push events onto the nested queue. Dispatching will be disabled
-   * once the event queue is popped. The thread will only ever process pending
-   * events for the innermost event queue. Must only be called on the target
-   * thread.
-   */
-  already_AddRefed<nsISerialEventTarget> PushEventQueue();
-
-  /**
-   * Revert a call to PushEventQueue. When an event queue is popped, any events
-   * remaining in the queue are appended to the elder queue. This also causes
-   * the nsIEventTarget returned from PushEventQueue to stop dispatching events.
-   * Must only be called on the target thread, and with the innermost event
-   * queue.
-   */
-  void PopEventQueue(nsIEventTarget* aTarget);
+  already_AddRefed<nsISerialEventTarget> PushEventQueue() final;
+  void PopEventQueue(nsIEventTarget* aTarget) final;
 
   already_AddRefed<nsIThreadObserver> GetObserver() final;
   already_AddRefed<nsIThreadObserver> GetObserverOnThread() final;
@@ -91,7 +68,7 @@ class ThreadEventQueue final : public SynchronizedEventQueue {
   virtual ~ThreadEventQueue();
 
   bool PutEventInternal(already_AddRefed<nsIRunnable>&& aEvent,
-                        EventPriority aPriority, NestedSink* aQueue);
+                        EventQueuePriority aPriority, NestedSink* aQueue);
 
   UniquePtr<InnerQueueT> mBaseQueue;
 
@@ -114,9 +91,7 @@ class ThreadEventQueue final : public SynchronizedEventQueue {
 };
 
 extern template class ThreadEventQueue<EventQueue>;
-extern template class ThreadEventQueue<PrioritizedEventQueue<EventQueue>>;
-extern template class ThreadEventQueue<
-    PrioritizedEventQueue<LabeledEventQueue>>;
+extern template class ThreadEventQueue<PrioritizedEventQueue>;
 
 };  // namespace mozilla
 

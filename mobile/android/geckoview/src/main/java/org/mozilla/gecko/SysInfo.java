@@ -5,15 +5,15 @@
 
 package org.mozilla.gecko;
 
+import android.app.ActivityManager;
+import android.app.ActivityManager.MemoryInfo;
+import android.content.Context;
 import android.util.Log;
 
 import org.mozilla.gecko.util.StrictModeContext;
 
 import java.io.File;
 import java.io.FileFilter;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
 
 import java.util.regex.Pattern;
 
@@ -63,7 +63,7 @@ public final class SysInfo {
     private static int readCPUCount() {
         class CpuFilter implements FileFilter {
             @Override
-            public boolean accept(File pathname) {
+            public boolean accept(final File pathname) {
                 return Pattern.matches("cpu[0-9]+", pathname.getName());
             }
         }
@@ -77,96 +77,30 @@ public final class SysInfo {
     }
 
     /**
-     * Helper functions used to extract key/value data from /proc/meminfo
-     * Pulled from:
-     * http://androidxref.com/4.2_r1/xref/frameworks/base/core/java/com/android/internal/util/MemInfoReader.java
+     * Fetch the total memory of the device in MB.
+     *
+     * NB: This cannot be called before GeckoAppShell has been
+     * initialized.
+     *
+     * @return Memory size in MB.
      */
-    private static boolean matchMemText(byte[] buffer, int index, int bufferLength, byte[] text) {
-        final int N = text.length;
-        if ((index + N) >= bufferLength) {
-            return false;
-        }
-        for (int i = 0; i < N; i++) {
-            if (buffer[index + i] != text[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Parses a line like:
-     *
-     *  MemTotal: 1605324 kB
-     *
-     * into 1605324.
-     *
-     * @return the first uninterrupted sequence of digits following the
-     *         specified index, parsed as an integer value in KB.
-     */
-    private static int extractMemValue(byte[] buffer, int offset, int length) {
-        if (offset >= length) {
-            return 0;
-        }
-
-        while (offset < length && buffer[offset] != '\n') {
-            if (buffer[offset] >= '0' && buffer[offset] <= '9') {
-                int start = offset++;
-                while (offset < length &&
-                       buffer[offset] >= '0' &&
-                       buffer[offset] <= '9') {
-                    ++offset;
-                }
-                return Integer.parseInt(new String(buffer, start, offset - start), 10);
-            }
-            ++offset;
-        }
-        return 0;
-    }
-
-    /**
-     * Fetch the total memory of the device in MB by parsing /proc/meminfo.
-     *
-     * Of course, Android doesn't have a neat and tidy way to find total
-     * RAM, so we do it by parsing /proc/meminfo.
-     *
-     * @return 0 if a problem occurred, or memory size in MB.
-     */
-    @SuppressWarnings("try")
-    public static int getMemSize() {
+    public static int getMemSize(final Context context) {
         if (totalRAM >= 0) {
             return totalRAM;
         }
 
-        // This is the string "MemTotal" that we're searching for in the buffer.
-        final byte[] MEMTOTAL = {'M', 'e', 'm', 'T', 'o', 't', 'a', 'l'};
+        final MemoryInfo memInfo = new MemoryInfo();
 
-        // `/proc/meminfo` is not a real file and thus safe to read on the main thread.
-        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
-            final byte[] buffer = new byte[MEMINFO_BUFFER_SIZE_BYTES];
-            final FileInputStream is = new FileInputStream("/proc/meminfo");
-            try {
-                final int length = is.read(buffer);
+        final ActivityManager am = (ActivityManager) context
+                                   .getSystemService(Context.ACTIVITY_SERVICE);
+        am.getMemoryInfo(memInfo);
 
-                for (int i = 0; i < length; i++) {
-                    if (matchMemText(buffer, i, length, MEMTOTAL)) {
-                        i += 8;
-                        totalRAM = extractMemValue(buffer, i, length) / 1024;
-                        Log.d(LOG_TAG, "System memory: " + totalRAM + "MB.");
-                        return totalRAM;
-                    }
-                }
-            } finally {
-                is.close();
-            }
+        // `getMemoryInfo()` returns a value in B. Convert to MB.
+        totalRAM = (int)(memInfo.totalMem / (1024 * 1024));
 
-            Log.w(LOG_TAG, "Did not find MemTotal line in /proc/meminfo.");
-            return totalRAM = 0;
-        } catch (FileNotFoundException f) {
-            return totalRAM = 0;
-        } catch (IOException e) {
-            return totalRAM = 0;
-        }
+        Log.d(LOG_TAG, "System memory: " + totalRAM + "MB.");
+
+        return totalRAM;
     }
 
     /**

@@ -6,12 +6,14 @@
 const protocol = require("devtools/shared/protocol");
 const { ActorClassWithSpec, Actor } = protocol;
 const { perfSpec } = require("devtools/shared/specs/perf");
-const { DEFAULT_WINDOW_LENGTH } = require("devtools/shared/performance-new/common");
 const { Ci } = require("chrome");
 const Services = require("Services");
 
-loader.lazyImporter(this, "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+loader.lazyImporter(
+  this,
+  "PrivateBrowsingUtils",
+  "resource://gre/modules/PrivateBrowsingUtils.jsm"
+);
 
 // Some platforms are built without the Gecko Profiler.
 const IS_SUPPORTED_PLATFORM = "nsIProfiler" in Ci;
@@ -30,7 +32,10 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
       };
       Services.obs.addObserver(this._observer, "profiler-started");
       Services.obs.addObserver(this._observer, "profiler-stopped");
-      Services.obs.addObserver(this._observer, "chrome-document-global-created");
+      Services.obs.addObserver(
+        this._observer,
+        "chrome-document-global-created"
+      );
       Services.obs.addObserver(this._observer, "last-pb-context-exited");
     }
   },
@@ -41,7 +46,10 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
     }
     Services.obs.removeObserver(this._observer, "profiler-started");
     Services.obs.removeObserver(this._observer, "profiler-stopped");
-    Services.obs.removeObserver(this._observer, "chrome-document-global-created");
+    Services.obs.removeObserver(
+      this._observer,
+      "chrome-document-global-created"
+    );
     Services.obs.removeObserver(this._observer, "last-pb-context-exited");
     Actor.prototype.destroy.call(this);
   },
@@ -55,11 +63,17 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
     // to be tweaked or made configurable as needed.
     const settings = {
       entries: options.entries || 1000000,
-      duration: options.duration !== undefined
-        ? options.duration : DEFAULT_WINDOW_LENGTH,
+      // Window length should be Infinite if nothing's been passed.
+      // options.duration is supported for `perfActorVersion > 0`.
+      duration: options.duration || 0,
       interval: options.interval || 1,
-      features: options.features ||
-        ["js", "stackwalk", "responsiveness", "threads", "leaf"],
+      features: options.features || [
+        "js",
+        "stackwalk",
+        "responsiveness",
+        "threads",
+        "leaf",
+      ],
       threads: options.threads || ["GeckoMain", "Compositor"],
     };
 
@@ -69,9 +83,7 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
         settings.entries,
         settings.interval,
         settings.features,
-        settings.features.length,
         settings.threads,
-        settings.threads.length,
         settings.duration
       );
     } catch (e) {
@@ -90,8 +102,10 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
   },
 
   async getSymbolTable(debugPath, breakpadId) {
-    const [addr, index, buffer] =
-      await Services.profiler.getSymbolTable(debugPath, breakpadId);
+    const [addr, index, buffer] = await Services.profiler.getSymbolTable(
+      debugPath,
+      breakpadId
+    );
     // The protocol does not support the transfer of typed arrays, so we convert
     // these typed arrays to plain JS arrays of numbers now.
     // Our return value type is declared as "array:array:number".
@@ -157,7 +171,13 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
         break;
       case "profiler-started":
         const param = subject.QueryInterface(Ci.nsIProfilerStartParams);
-        this.emit(topic, param.entries, param.interval, param.features, param.duration);
+        this.emit(
+          topic,
+          param.entries,
+          param.interval,
+          param.features,
+          param.duration
+        );
         break;
       case "profiler-stopped":
         this.emit(topic);

@@ -120,7 +120,7 @@ namespace layers {
  * alternative of making mIndex a int32_t that can store -1, but then having
  * to cast to uint32_t all over the place.
  */
-class MOZ_STACK_CLASS LayerMetricsWrapper {
+class MOZ_STACK_CLASS LayerMetricsWrapper final {
  public:
   enum StartAt {
     TOP,
@@ -282,6 +282,12 @@ class MOZ_STACK_CLASS LayerMetricsWrapper {
     return false;
   }
 
+  bool Combines3DTransformWithAncestors() const {
+    MOZ_ASSERT(IsValid());
+
+    return mLayer->Combines3DTransformWithAncestors();
+  }
+
   EventRegions GetEventRegions() const {
     MOZ_ASSERT(IsValid());
 
@@ -331,6 +337,8 @@ class MOZ_STACK_CLASS LayerMetricsWrapper {
     return Nothing();
   }
 
+  Maybe<wr::RenderRoot> GetReferentRenderRoot() const { return Nothing(); }
+
   Maybe<ParentLayerIntRect> GetClipRect() const {
     MOZ_ASSERT(IsValid());
 
@@ -377,12 +385,12 @@ class MOZ_STACK_CLASS LayerMetricsWrapper {
     return mLayer->GetScrollbarData();
   }
 
-  uint64_t GetScrollbarAnimationId() const {
+  Maybe<uint64_t> GetScrollbarAnimationId() const {
     MOZ_ASSERT(IsValid());
     // This function is only really needed for template-compatibility with
     // WebRenderScrollDataWrapper. Although it will be called, the return
     // value is not used.
-    return 0;
+    return Nothing();
   }
 
   ScrollableLayerGuid::ViewID GetFixedPositionScrollContainerId() const {
@@ -403,6 +411,12 @@ class MOZ_STACK_CLASS LayerMetricsWrapper {
     MOZ_ASSERT(IsValid());
 
     return mLayer->IsBackfaceHidden();
+  }
+
+  Maybe<ScrollableLayerGuid::ViewID> IsAsyncZoomContainer() const {
+    MOZ_ASSERT(IsValid());
+
+    return mLayer->IsAsyncZoomContainer();
   }
 
   // Expose an opaque pointer to the layer. Mostly used for printf

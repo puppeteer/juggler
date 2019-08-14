@@ -1139,3 +1139,21 @@ CERT_GetCertKeyType;
 ;+    local:
 ;+       *;
 ;+};
+;+NSS_3.43 { 	# NSS 3.43 release
+;+    global:
+HASH_GetHashOidTagByHashType;
+;+    local:
+;+       *;
+;+};
+;+NSS_3.44 { 	# NSS 3.44 release
+;+    global:
+CERT_GetCertificateDer;
+;+    local:
+;+       *;
+;+};
+;+NSS_3.45 { 	# NSS 3.45 release
+;+    global:
+PK11_FindRawCertsWithSubject;
+;+    local:
+;+       *;
+;+};

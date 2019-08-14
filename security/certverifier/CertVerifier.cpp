@@ -88,7 +88,8 @@ CertVerifier::CertVerifier(OcspDownloadConfig odc, OcspStrictConfig osc,
                            BRNameMatchingPolicy::Mode nameMatchingMode,
                            NetscapeStepUpPolicy netscapeStepUpPolicy,
                            CertificateTransparencyMode ctMode,
-                           DistrustedCAPolicy distrustedCAPolicy)
+                           DistrustedCAPolicy distrustedCAPolicy,
+                           const Vector<EnterpriseCert>& thirdPartyCerts)
     : mOCSPDownloadConfig(odc),
       mOCSPStrict(osc == ocspStrict),
       mOCSPTimeoutSoft(ocspTimeoutSoft),
@@ -101,6 +102,26 @@ CertVerifier::CertVerifier(OcspDownloadConfig odc, OcspStrictConfig osc,
       mCTMode(ctMode),
       mDistrustedCAPolicy(distrustedCAPolicy) {
   LoadKnownCTLogs();
+  for (const auto& root : thirdPartyCerts) {
+    EnterpriseCert rootCopy;
+    // Best-effort. If we run out of memory, users might see untrusted issuer
+    // errors, but the browser will probably crash before then.
+    if (NS_SUCCEEDED(rootCopy.Init(root))) {
+      Unused << mThirdPartyCerts.append(std::move(rootCopy));
+    }
+  }
+  for (const auto& root : mThirdPartyCerts) {
+    Input input;
+    if (root.GetInput(input) == Success) {
+      // mThirdPartyCerts consists of roots and intermediates.
+      if (root.GetIsRoot()) {
+        // Best effort again.
+        Unused << mThirdPartyRootInputs.append(input);
+      } else {
+        Unused << mThirdPartyIntermediateInputs.append(input);
+      }
+    }
+  }
 }
 
 CertVerifier::~CertVerifier() {}
@@ -278,7 +299,19 @@ Result CertVerifier::VerifyCertificateTransparencyPolicy(
   CERTCertListNode* issuerNode = CERT_LIST_NEXT(endEntityNode);
   if (!issuerNode || CERT_LIST_END(issuerNode, builtChain)) {
     // Issuer certificate is required for SCT verification.
-    return Result::FATAL_ERROR_INVALID_ARGS;
+    // If we've arrived here, we probably have a "trust chain" with only one
+    // certificate (i.e. a self-signed end-entity that has been set as a trust
+    // anchor either by a third party modifying our trust DB or via the
+    // enterprise roots feature). If this is the case, certificate transparency
+    // information will probably not be present, and it certainly won't verify
+    // correctly. To simplify things, we return an empty CTVerifyResult and a
+    // "not enough SCTs" CTPolicyCompliance result.
+    if (ctInfo) {
+      CTVerifyResult emptyResult;
+      ctInfo->verifyResult = std::move(emptyResult);
+      ctInfo->policyCompliance = CTPolicyCompliance::NotEnoughScts;
+    }
+    return Success;
   }
 
   CERTCertificate* endEntity = endEntityNode->cert;
@@ -511,7 +544,8 @@ Result CertVerifier::VerifyCert(
           mOCSPTimeoutHard, mCertShortLifetimeInDays, pinningDisabled,
           MIN_RSA_BITS_WEAK, ValidityCheckingMode::CheckingOff,
           SHA1Mode::Allowed, NetscapeStepUpPolicy::NeverMatch,
-          mDistrustedCAPolicy, originAttributes, builtChain, nullptr, nullptr);
+          mDistrustedCAPolicy, originAttributes, mThirdPartyRootInputs,
+          mThirdPartyIntermediateInputs, builtChain, nullptr, nullptr);
       rv = BuildCertChain(
           trustDomain, certDER, time, EndEntityOrCA::MustBeEndEntity,
           KeyUsage::digitalSignature, KeyPurposeId::id_kp_clientAuth,
@@ -583,8 +617,9 @@ Result CertVerifier::VerifyCert(
             mOCSPTimeoutHard, mCertShortLifetimeInDays, mPinningMode,
             MIN_RSA_BITS, ValidityCheckingMode::CheckForEV,
             sha1ModeConfigurations[i], mNetscapeStepUpPolicy,
-            mDistrustedCAPolicy, originAttributes, builtChain,
-            pinningTelemetryInfo, hostname);
+            mDistrustedCAPolicy, originAttributes, mThirdPartyRootInputs,
+            mThirdPartyIntermediateInputs, builtChain, pinningTelemetryInfo,
+            hostname);
         rv = BuildCertChainForOneKeyUsage(
             trustDomain, certDER, time,
             KeyUsage::digitalSignature,  // (EC)DHE
@@ -665,7 +700,8 @@ Result CertVerifier::VerifyCert(
               mPinningMode, keySizeOptions[i],
               ValidityCheckingMode::CheckingOff, sha1ModeConfigurations[j],
               mNetscapeStepUpPolicy, mDistrustedCAPolicy, originAttributes,
-              builtChain, pinningTelemetryInfo, hostname);
+              mThirdPartyRootInputs, mThirdPartyIntermediateInputs, builtChain,
+              pinningTelemetryInfo, hostname);
           rv = BuildCertChainForOneKeyUsage(
               trustDomain, certDER, time,
               KeyUsage::digitalSignature,  //(EC)DHE
@@ -733,7 +769,8 @@ Result CertVerifier::VerifyCert(
           mOCSPTimeoutHard, mCertShortLifetimeInDays, pinningDisabled,
           MIN_RSA_BITS_WEAK, ValidityCheckingMode::CheckingOff,
           SHA1Mode::Allowed, mNetscapeStepUpPolicy, mDistrustedCAPolicy,
-          originAttributes, builtChain, nullptr, nullptr);
+          originAttributes, mThirdPartyRootInputs,
+          mThirdPartyIntermediateInputs, builtChain, nullptr, nullptr);
       rv = BuildCertChain(trustDomain, certDER, time, EndEntityOrCA::MustBeCA,
                           KeyUsage::keyCertSign, KeyPurposeId::id_kp_serverAuth,
                           CertPolicyId::anyPolicy, stapledOCSPResponse);
@@ -746,7 +783,8 @@ Result CertVerifier::VerifyCert(
           mOCSPTimeoutHard, mCertShortLifetimeInDays, pinningDisabled,
           MIN_RSA_BITS_WEAK, ValidityCheckingMode::CheckingOff,
           SHA1Mode::Allowed, NetscapeStepUpPolicy::NeverMatch,
-          mDistrustedCAPolicy, originAttributes, builtChain, nullptr, nullptr);
+          mDistrustedCAPolicy, originAttributes, mThirdPartyRootInputs,
+          mThirdPartyIntermediateInputs, builtChain, nullptr, nullptr);
       rv = BuildCertChain(
           trustDomain, certDER, time, EndEntityOrCA::MustBeEndEntity,
           KeyUsage::digitalSignature, KeyPurposeId::id_kp_emailProtection,
@@ -769,7 +807,8 @@ Result CertVerifier::VerifyCert(
           mOCSPTimeoutHard, mCertShortLifetimeInDays, pinningDisabled,
           MIN_RSA_BITS_WEAK, ValidityCheckingMode::CheckingOff,
           SHA1Mode::Allowed, NetscapeStepUpPolicy::NeverMatch,
-          mDistrustedCAPolicy, originAttributes, builtChain, nullptr, nullptr);
+          mDistrustedCAPolicy, originAttributes, mThirdPartyRootInputs,
+          mThirdPartyIntermediateInputs, builtChain, nullptr, nullptr);
       rv = BuildCertChain(trustDomain, certDER, time,
                           EndEntityOrCA::MustBeEndEntity,
                           KeyUsage::keyEncipherment,  // RSA

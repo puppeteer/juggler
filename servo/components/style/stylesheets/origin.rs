@@ -10,18 +10,17 @@ use std::ops::BitOrAssign;
 /// Each style rule has an origin, which determines where it enters the cascade.
 ///
 /// <https://drafts.csswg.org/css-cascade/#cascading-origins>
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, MallocSizeOf, PartialEq, ToShmem)]
 #[repr(u8)]
-#[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub enum Origin {
     /// <https://drafts.csswg.org/css-cascade/#cascade-origin-user-agent>
-    UserAgent = 1 << 0,
+    UserAgent = 0x1,
 
     /// <https://drafts.csswg.org/css-cascade/#cascade-origin-user>
-    User = 1 << 1,
+    User = 0x2,
 
     /// <https://drafts.csswg.org/css-cascade/#cascade-origin-author>
-    Author = 1 << 2,
+    Author = 0x4,
 }
 
 impl Origin {
@@ -36,11 +35,30 @@ impl Origin {
             _ => return None,
         })
     }
+
+    fn to_index(self) -> i8 {
+        match self {
+            Origin::Author => 0,
+            Origin::User => 1,
+            Origin::UserAgent => 2,
+        }
+    }
+
+    /// Returns an iterator from this origin, towards all the less specific
+    /// origins. So for `UserAgent`, it'd iterate through all origins.
+    #[inline]
+    pub fn following_including(self) -> OriginSetIterator {
+        OriginSetIterator {
+            set: OriginSet::ORIGIN_USER | OriginSet::ORIGIN_AUTHOR | OriginSet::ORIGIN_USER_AGENT,
+            cur: self.to_index(),
+            rev: true,
+        }
+    }
 }
 
 bitflags! {
     /// A set of origins. This is equivalent to Gecko's OriginFlags.
-    #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
+    #[derive(MallocSizeOf)]
     pub struct OriginSet: u8 {
         /// <https://drafts.csswg.org/css-cascade/#cascade-origin-user-agent>
         const ORIGIN_USER_AGENT = Origin::UserAgent as u8;
@@ -57,7 +75,11 @@ impl OriginSet {
     /// See the `OriginSet` documentation for information about the order
     /// origins are iterated.
     pub fn iter(&self) -> OriginSetIterator {
-        OriginSetIterator { set: *self, cur: 0 }
+        OriginSetIterator {
+            set: *self,
+            cur: 0,
+            rev: false,
+        }
     }
 }
 
@@ -79,6 +101,7 @@ impl BitOrAssign<Origin> for OriginSet {
 pub struct OriginSetIterator {
     set: OriginSet,
     cur: i8,
+    rev: bool,
 }
 
 impl Iterator for OriginSetIterator {
@@ -88,7 +111,11 @@ impl Iterator for OriginSetIterator {
         loop {
             let origin = Origin::from_index(self.cur)?;
 
-            self.cur += 1;
+            if self.rev {
+                self.cur -= 1;
+            } else {
+                self.cur += 1;
+            }
 
             if self.set.contains(origin.into()) {
                 return Some(origin);

@@ -1,14 +1,12 @@
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-
 function run_test() {
   allow_all_plugins();
   let pluginDefaultState = Services.prefs.getIntPref("plugin.default.state");
   // if this fails, we just have to switch around the values we're testing
   Assert.notEqual(pluginDefaultState, Ci.nsIPluginTag.STATE_DISABLED);
-  let nonDefaultState = (pluginDefaultState != Ci.nsIPluginTag.STATE_ENABLED ?
-                         Ci.nsIPluginTag.STATE_ENABLED :
-                         Ci.nsIPluginTag.STATE_CLICKTOPLAY);
-  let ph = Cc["@mozilla.org/plugin/host;1"].getService(Ci.nsIPluginHost);
+  let nonDefaultState =
+    pluginDefaultState != Ci.nsIPluginTag.STATE_ENABLED
+      ? Ci.nsIPluginTag.STATE_ENABLED
+      : Ci.nsIPluginTag.STATE_CLICKTOPLAY;
   let testPlugin = get_test_plugintag();
   // the test plugin should have the default enabledState
   Assert.equal(testPlugin.enabledState, pluginDefaultState);

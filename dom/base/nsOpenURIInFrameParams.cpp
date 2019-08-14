@@ -6,6 +6,7 @@
 
 #include "nsOpenURIInFrameParams.h"
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/net/ReferrerPolicy.h"
 
@@ -21,34 +22,20 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsOpenURIInFrameParams)
 
 nsOpenURIInFrameParams::nsOpenURIInFrameParams(
     const mozilla::OriginAttributes& aOriginAttributes,
-    nsIFrameLoaderOwner* aOpener)
-    : mOpenerOriginAttributes(aOriginAttributes),
-      mOpenerBrowser(aOpener),
-      mReferrerPolicy(mozilla::net::RP_Unset) {}
+    mozilla::dom::Element* aOpener)
+    : mOpenerOriginAttributes(aOriginAttributes), mOpenerBrowser(aOpener) {}
 
 nsOpenURIInFrameParams::~nsOpenURIInFrameParams() {}
 
 NS_IMETHODIMP
-nsOpenURIInFrameParams::GetReferrer(nsAString& aReferrer) {
-  aReferrer = mReferrer;
+nsOpenURIInFrameParams::GetReferrerInfo(nsIReferrerInfo** aReferrerInfo) {
+  NS_IF_ADDREF(*aReferrerInfo = mReferrerInfo);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsOpenURIInFrameParams::SetReferrer(const nsAString& aReferrer) {
-  mReferrer = aReferrer;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsOpenURIInFrameParams::GetReferrerPolicy(uint32_t* aReferrerPolicy) {
-  *aReferrerPolicy = mReferrerPolicy;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsOpenURIInFrameParams::SetReferrerPolicy(uint32_t aReferrerPolicy) {
-  mReferrerPolicy = aReferrerPolicy;
+nsOpenURIInFrameParams::SetReferrerInfo(nsIReferrerInfo* aReferrerInfo) {
+  mReferrerInfo = aReferrerInfo;
   return NS_OK;
 }
 
@@ -75,8 +62,21 @@ nsOpenURIInFrameParams::SetTriggeringPrincipal(
 }
 
 NS_IMETHODIMP
-nsOpenURIInFrameParams::GetOpenerBrowser(nsIFrameLoaderOwner** aOpenerBrowser) {
-  nsCOMPtr<nsIFrameLoaderOwner> owner = mOpenerBrowser;
+nsOpenURIInFrameParams::GetCsp(nsIContentSecurityPolicy** aCsp) {
+  NS_IF_ADDREF(*aCsp = mCsp);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsOpenURIInFrameParams::SetCsp(nsIContentSecurityPolicy* aCsp) {
+  NS_ENSURE_TRUE(aCsp, NS_ERROR_INVALID_ARG);
+  mCsp = aCsp;
+  return NS_OK;
+}
+
+nsresult nsOpenURIInFrameParams::GetOpenerBrowser(
+    mozilla::dom::Element** aOpenerBrowser) {
+  RefPtr<mozilla::dom::Element> owner = mOpenerBrowser;
   owner.forget(aOpenerBrowser);
   return NS_OK;
 }

@@ -73,14 +73,13 @@ class HTMLImageElement final : public nsGenericHTMLElement,
   bool IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
                        int32_t* aTabIndex) override;
 
-  virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                              nsIContent* aBindingParent) override;
-  virtual void UnbindFromTree(bool aDeep, bool aNullParent) override;
+  virtual nsresult BindToTree(BindContext&, nsINode& aParent) override;
+  virtual void UnbindFromTree(bool aNullParent) override;
 
   virtual EventStates IntrinsicState() const override;
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
-  virtual void NodeInfoChanged(nsIDocument* aOldDoc) override;
+  virtual void NodeInfoChanged(Document* aOldDoc) override;
 
   nsresult CopyInnerTo(HTMLImageElement* aDest);
 
@@ -90,26 +89,26 @@ class HTMLImageElement final : public nsGenericHTMLElement,
   void SetIsMap(bool aIsMap, ErrorResult& aError) {
     SetHTMLBoolAttr(nsGkAtoms::ismap, aIsMap, aError);
   }
-  MOZ_CAN_RUN_SCRIPT uint32_t Width() {
-    return GetWidthHeightForImage(mCurrentRequest).width;
-  }
+  MOZ_CAN_RUN_SCRIPT uint32_t Width();
   void SetWidth(uint32_t aWidth, ErrorResult& aError) {
     SetUnsignedIntAttr(nsGkAtoms::width, aWidth, 0, aError);
   }
-  MOZ_CAN_RUN_SCRIPT uint32_t Height() {
-    return GetWidthHeightForImage(mCurrentRequest).height;
-  }
+  MOZ_CAN_RUN_SCRIPT uint32_t Height();
   void SetHeight(uint32_t aHeight, ErrorResult& aError) {
     SetUnsignedIntAttr(nsGkAtoms::height, aHeight, 0, aError);
   }
   uint32_t NaturalWidth();
   uint32_t NaturalHeight();
   bool Complete();
-  uint32_t Hspace() { return GetUnsignedIntAttr(nsGkAtoms::hspace, 0); }
+  uint32_t Hspace() {
+    return GetDimensionAttrAsUnsignedInt(nsGkAtoms::hspace, 0);
+  }
   void SetHspace(uint32_t aHspace, ErrorResult& aError) {
     SetUnsignedIntAttr(nsGkAtoms::hspace, aHspace, 0, aError);
   }
-  uint32_t Vspace() { return GetUnsignedIntAttr(nsGkAtoms::vspace, 0); }
+  uint32_t Vspace() {
+    return GetDimensionAttrAsUnsignedInt(nsGkAtoms::vspace, 0);
+  }
   void SetVspace(uint32_t aVspace, ErrorResult& aError) {
     SetUnsignedIntAttr(nsGkAtoms::vspace, aVspace, 0, aError);
   }
@@ -184,6 +183,8 @@ class HTMLImageElement final : public nsGenericHTMLElement,
   }
   void GetDecoding(nsAString& aValue);
 
+  already_AddRefed<Promise> Decode(ErrorResult& aRv);
+
   net::ReferrerPolicy GetImageReferrerPolicy() override {
     return GetReferrerPolicyAsEnum();
   }
@@ -241,7 +242,7 @@ class HTMLImageElement final : public nsGenericHTMLElement,
    * further <source> or <img> tags would be considered.
    */
   static bool SelectSourceForTagWithAttrs(
-      nsIDocument* aDocument, bool aIsSourceTag, const nsAString& aSrcAttr,
+      Document* aDocument, bool aIsSourceTag, const nsAString& aSrcAttr,
       const nsAString& aSrcsetAttr, const nsAString& aSizesAttr,
       const nsAString& aTypeAttr, const nsAString& aMediaAttr,
       nsAString& aResult);

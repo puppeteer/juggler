@@ -2,9 +2,8 @@
 <html>
 <head>
   <title>WebExtension test</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/ExtensionTestUtils.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/ExtensionTestUtils.js"></script>
   <script type="text/javascript" src="head.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
 </head>
@@ -36,6 +35,7 @@ add_task(async function test_in_incognito_context_true() {
         <script src="tab.js"><\/script>
       </head></html>`,
     },
+    incognitoOverride: "spanning",
   });
 
   await extension.startup();

@@ -12,6 +12,23 @@ var ignoreIndirectCalls = {
     "mozalloc_oom.cpp:void (* gAbortHandler)(size_t)" : true,
 };
 
+// Types that when constructed with no arguments, are "safe" values (they do
+// not contain GC pointers).
+var typesWithSafeConstructors = new Set([
+    "mozilla::Maybe",
+    "mozilla::dom::Nullable",
+    "mozilla::dom::Optional",
+    "mozilla::UniquePtr",
+    "js::UniquePtr"
+]);
+
+var resetterMethods = {
+    'mozilla::Maybe': new Set(["reset"]),
+    'mozilla::UniquePtr': new Set(["reset"]),
+    'js::UniquePtr': new Set(["reset"]),
+    'mozilla::dom::Nullable': new Set(["SetNull"]),
+};
+
 function indirectCallCannotGC(fullCaller, fullVariable)
 {
     var caller = readable(fullCaller);
@@ -29,9 +46,6 @@ function indirectCallCannotGC(fullCaller, fullVariable)
         return true;
 
     if (name == "params" && caller == "PR_ExplodeTime")
-        return true;
-
-    if (name == "op" && /GetWeakmapKeyDelegate/.test(caller))
         return true;
 
     // hook called during script finalization which cannot GC.
@@ -168,7 +182,6 @@ var ignoreFunctions = {
     "PR_ExplodeTime" : true,
     "PR_ErrorInstallTable" : true,
     "PR_SetThreadPrivate" : true,
-    "JSObject* js::GetWeakmapKeyDelegate(JSObject*)" : true, // FIXME: mark with AutoSuppressGCAnalysis instead
     "uint8 NS_IsMainThread()" : true,
 
     // Has an indirect call under it by the name "__f", which seemed too
@@ -393,6 +406,8 @@ function isOverridableField(initialCSU, csu, field)
     if (field == 'GetNativeContext')
         return false;
     if (field == "GetGlobalJSObject")
+        return false;
+    if (field == "GetGlobalJSObjectPreserveColor")
         return false;
     if (field == "GetIsMainThread")
         return false;

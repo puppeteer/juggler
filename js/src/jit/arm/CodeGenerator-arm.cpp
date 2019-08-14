@@ -172,10 +172,6 @@ void CodeGeneratorARM::bailoutIf(Assembler::Condition condition,
 }
 
 void CodeGeneratorARM::bailoutFrom(Label* label, LSnapshot* snapshot) {
-  if (masm.bailed()) {
-    return;
-  }
-
   MOZ_ASSERT_IF(!masm.oom(), label->used());
   MOZ_ASSERT_IF(!masm.oom(), !label->bound());
 
@@ -1152,7 +1148,7 @@ void CodeGeneratorARM::emitTableSwitchDispatch(MTableSwitch* mir,
   // Inhibit pools within the following sequence because we are indexing into
   // a pc relative table. The region will have one instruction for ma_ldr, one
   // for ma_b, and each table case takes one word.
-  AutoForbidPools afp(&masm, 1 + 1 + cases);
+  AutoForbidPoolsAndNops afp(&masm, 1 + 1 + cases);
   masm.ma_ldr(DTRAddr(pc, DtrRegImmShift(index, LSL, 2)), pc, Offset,
               Assembler::NotSigned);
   masm.ma_b(defaultcase);
@@ -1283,18 +1279,6 @@ void CodeGenerator::visitTruncF(LTruncF* lir) {
   Label bail;
   masm.truncf(input, output, &bail);
   bailoutFrom(&bail, lir->snapshot());
-}
-
-void CodeGeneratorARM::emitRoundDouble(FloatRegister src, Register dest,
-                                       Label* fail) {
-  ScratchDoubleScope scratch(masm);
-  ScratchRegisterScope scratchReg(masm);
-
-  masm.ma_vcvt_F64_I32(src, scratch);
-  masm.ma_vxfer(scratch, dest);
-  masm.ma_cmp(dest, Imm32(0x7fffffff), scratchReg);
-  masm.ma_cmp(dest, Imm32(0x80000000), scratchReg, Assembler::NotEqual);
-  masm.ma_b(fail, Assembler::Equal);
 }
 
 void CodeGenerator::visitTruncateDToInt32(LTruncateDToInt32* ins) {
@@ -1794,7 +1778,7 @@ void CodeGenerator::visitWasmSelect(LWasmSelect* ins) {
   Register cond = ToRegister(ins->condExpr());
   masm.as_cmp(cond, Imm8(0));
 
-  if (mirType == MIRType::Int32) {
+  if (mirType == MIRType::Int32 || mirType == MIRType::RefOrNull) {
     Register falseExpr = ToRegister(ins->falseExpr());
     Register out = ToRegister(ins->output());
     MOZ_ASSERT(ToRegister(ins->trueExpr()) == out,
@@ -2455,9 +2439,9 @@ void CodeGenerator::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir) {
     addOutOfLineCode(ool, mir);
   }
 
-  ScratchDoubleScope scratchScope(masm);
+  ScratchDoubleScope fpscratch(masm);
   if (fromType == MIRType::Float32) {
-    inputDouble = ScratchDoubleReg;
+    inputDouble = fpscratch;
     masm.convertFloat32ToDouble(input, inputDouble);
   }
 

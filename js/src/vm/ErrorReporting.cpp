@@ -13,6 +13,7 @@
 #include "jsexn.h"
 #include "jsfriendapi.h"
 
+#include "js/Warnings.h"  // JS::WarningReporter
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 
@@ -52,19 +53,19 @@ void js::CompileError::throwError(JSContext* cx) {
 }
 
 bool js::ReportExceptionClosure::operator()(JSContext* cx) {
-  cx->setPendingException(exn_);
+  cx->setPendingExceptionAndCaptureStack(exn_);
   return false;
 }
 
 bool js::ReportCompileWarning(JSContext* cx, ErrorMetadata&& metadata,
                               UniquePtr<JSErrorNotes> notes, unsigned flags,
-                              unsigned errorNumber, va_list args) {
+                              unsigned errorNumber, va_list* args) {
   // On the main thread, report the error immediately. When compiling off
   // thread, save the error so that the thread finishing the parse can report
   // it later.
   CompileError tempErr;
   CompileError* err = &tempErr;
-  if (cx->helperThread() && !cx->addPendingCompileError(&err)) {
+  if (cx->isHelperThreadContext() && !cx->addPendingCompileError(&err)) {
     return false;
   }
 
@@ -83,11 +84,11 @@ bool js::ReportCompileWarning(JSContext* cx, ErrorMetadata&& metadata,
   }
 
   if (!ExpandErrorArgumentsVA(cx, GetErrorMessage, nullptr, errorNumber,
-                              nullptr, ArgumentsAreLatin1, err, args)) {
+                              nullptr, ArgumentsAreLatin1, err, *args)) {
     return false;
   }
 
-  if (!cx->helperThread()) {
+  if (!cx->isHelperThreadContext()) {
     err->throwError(cx);
   }
 
@@ -96,13 +97,13 @@ bool js::ReportCompileWarning(JSContext* cx, ErrorMetadata&& metadata,
 
 void js::ReportCompileError(JSContext* cx, ErrorMetadata&& metadata,
                             UniquePtr<JSErrorNotes> notes, unsigned flags,
-                            unsigned errorNumber, va_list args) {
+                            unsigned errorNumber, va_list* args) {
   // On the main thread, report the error immediately. When compiling off
   // thread, save the error so that the thread finishing the parse can report
   // it later.
   CompileError tempErr;
   CompileError* err = &tempErr;
-  if (cx->helperThread() && !cx->addPendingCompileError(&err)) {
+  if (cx->isHelperThreadContext() && !cx->addPendingCompileError(&err)) {
     return;
   }
 
@@ -121,11 +122,11 @@ void js::ReportCompileError(JSContext* cx, ErrorMetadata&& metadata,
   }
 
   if (!ExpandErrorArgumentsVA(cx, GetErrorMessage, nullptr, errorNumber,
-                              nullptr, ArgumentsAreLatin1, err, args)) {
+                              nullptr, ArgumentsAreLatin1, err, *args)) {
     return;
   }
 
-  if (!cx->helperThread()) {
+  if (!cx->isHelperThreadContext()) {
     err->throwError(cx);
   }
 }

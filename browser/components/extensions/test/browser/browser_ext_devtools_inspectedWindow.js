@@ -2,8 +2,7 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
-const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
-const {gDevTools} = require("devtools/client/framework/devtools");
+loadTestSubscript("head_devtools.js");
 
 /**
  * Helper that returns the id of the last additional/extension tool for a provided
@@ -17,7 +16,10 @@ const {gDevTools} = require("devtools/client/framework/devtools");
  */
 function getAdditionalPanelId(toolbox, label) {
   // Copy the tools array and pop the last element from it.
-  const panelDef = toolbox.getAdditionalTools().slice().pop();
+  const panelDef = toolbox
+    .getAdditionalTools()
+    .slice()
+    .pop();
   is(panelDef.label, label, "Additional panel label is the expected label");
   return panelDef.id;
 }
@@ -38,20 +40,31 @@ function getAdditionalPanelId(toolbox, label) {
  *     javascript code.
  */
 add_task(async function test_devtools_inspectedWindow_tabId() {
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, "http://mochi.test:8888/");
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "http://mochi.test:8888/"
+  );
 
   async function background() {
-    browser.test.assertEq(undefined, browser.devtools,
-                          "No devtools APIs should be available in the background page");
+    browser.test.assertEq(
+      undefined,
+      browser.devtools,
+      "No devtools APIs should be available in the background page"
+    );
 
-    const tabs = await browser.tabs.query({active: true, lastFocusedWindow: true});
+    const tabs = await browser.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    });
     browser.test.sendMessage("current-tab-id", tabs[0].id);
   }
 
   function devtools_page() {
     browser.test.assertEq(
-      undefined, browser.runtime.getBackgroundPage,
-      "The `runtime.getBackgroundPage` API method should be missing in a devtools_page context");
+      undefined,
+      browser.runtime.getBackgroundPage,
+      "The `runtime.getBackgroundPage` API method should be missing in a devtools_page context"
+    );
 
     try {
       let tabId = browser.devtools.inspectedWindow.tabId;
@@ -65,10 +78,16 @@ add_task(async function test_devtools_inspectedWindow_tabId() {
   function devtools_page_iframe() {
     try {
       let tabId = browser.devtools.inspectedWindow.tabId;
-      browser.test.sendMessage("devtools_page_iframe.inspectedWindow-tab-id", tabId);
+      browser.test.sendMessage(
+        "devtools_page_iframe.inspectedWindow-tab-id",
+        tabId
+      );
     } catch (err) {
       browser.test.fail(`Error: ${err} :: ${err.stack}`);
-      browser.test.sendMessage("devtools_page_iframe.inspectedWindow-tab-id", undefined);
+      browser.test.sendMessage(
+        "devtools_page_iframe.inspectedWindow-tab-id",
+        undefined
+      );
     }
   }
 
@@ -104,26 +123,33 @@ add_task(async function test_devtools_inspectedWindow_tabId() {
 
   await extension.startup();
 
-  let backgroundPageCurrentTabId = await extension.awaitMessage("current-tab-id");
+  let backgroundPageCurrentTabId = await extension.awaitMessage(
+    "current-tab-id"
+  );
 
-  let target = await gDevTools.getTargetForTab(tab);
+  await openToolboxForTab(tab);
 
-  await gDevTools.showToolbox(target, "webconsole");
-  info("developer toolbox opened");
+  let devtoolsInspectedWindowTabId = await extension.awaitMessage(
+    "inspectedWindow-tab-id"
+  );
 
-  let devtoolsInspectedWindowTabId = await extension.awaitMessage("inspectedWindow-tab-id");
+  is(
+    devtoolsInspectedWindowTabId,
+    backgroundPageCurrentTabId,
+    "Got the expected tabId from devtool.inspectedWindow.tabId"
+  );
 
-  is(devtoolsInspectedWindowTabId, backgroundPageCurrentTabId,
-     "Got the expected tabId from devtool.inspectedWindow.tabId");
+  let devtoolsPageIframeTabId = await extension.awaitMessage(
+    "devtools_page_iframe.inspectedWindow-tab-id"
+  );
 
-  let devtoolsPageIframeTabId = await extension.awaitMessage("devtools_page_iframe.inspectedWindow-tab-id");
+  is(
+    devtoolsPageIframeTabId,
+    backgroundPageCurrentTabId,
+    "Got the expected tabId from devtool.inspectedWindow.tabId called in a devtool_page iframe"
+  );
 
-  is(devtoolsPageIframeTabId, backgroundPageCurrentTabId,
-     "Got the expected tabId from devtool.inspectedWindow.tabId called in a devtool_page iframe");
-
-  await gDevTools.closeToolbox(target);
-
-  await target.destroy();
+  await closeToolboxForTab(tab);
 
   await extension.unload();
 
@@ -132,7 +158,10 @@ add_task(async function test_devtools_inspectedWindow_tabId() {
 
 add_task(async function test_devtools_inspectedWindow_eval() {
   const TEST_TARGET_URL = "http://mochi.test:8888/";
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, TEST_TARGET_URL);
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    TEST_TARGET_URL
+  );
 
   function devtools_page() {
     browser.test.onMessage.addListener(async (msg, ...args) => {
@@ -142,7 +171,10 @@ add_task(async function test_devtools_inspectedWindow_eval() {
       }
 
       try {
-        const [evalResult, errorResult] = await browser.devtools.inspectedWindow.eval(...args);
+        const [
+          evalResult,
+          errorResult,
+        ] = await browser.devtools.inspectedWindow.eval(...args);
         browser.test.sendMessage("inspectedWindow-eval-result", {
           evalResult,
           errorResult,
@@ -174,16 +206,13 @@ add_task(async function test_devtools_inspectedWindow_eval() {
 
   await extension.startup();
 
-  let target = await gDevTools.getTargetForTab(tab);
-
-  await gDevTools.showToolbox(target, "webconsole");
-  info("developer toolbox opened");
+  await openToolboxForTab(tab);
 
   const evalTestCases = [
     // Successful evaluation results.
     {
       args: ["window.location.href"],
-      expectedResults: {evalResult: TEST_TARGET_URL, errorResult: undefined},
+      expectedResults: { evalResult: TEST_TARGET_URL, errorResult: undefined },
     },
 
     // Error evaluation results.
@@ -195,9 +224,7 @@ add_task(async function test_devtools_inspectedWindow_eval() {
           isError: true,
           code: "E_PROTOCOLERROR",
           description: "Inspector protocol error: %s",
-          details: [
-            "TypeError: cyclic object value",
-          ],
+          details: ["TypeError: cyclic object value"],
         },
       },
     },
@@ -212,20 +239,25 @@ add_task(async function test_devtools_inspectedWindow_eval() {
           value: /Error: fake eval exception\n.*moz-extension:\/\//,
         },
       },
-
     },
   ];
 
   for (let testCase of evalTestCases) {
     info(`test inspectedWindow.eval with ${JSON.stringify(testCase)}`);
 
-    const {args, expectedResults} = testCase;
+    const { args, expectedResults } = testCase;
 
     extension.sendMessage(`inspectedWindow-eval-request`, ...args);
 
-    const {evalResult, errorResult} = await extension.awaitMessage(`inspectedWindow-eval-result`);
+    const { evalResult, errorResult } = await extension.awaitMessage(
+      `inspectedWindow-eval-result`
+    );
 
-    Assert.deepEqual(evalResult, expectedResults.evalResult, "Got the expected eval result");
+    Assert.deepEqual(
+      evalResult,
+      expectedResults.evalResult,
+      "Got the expected eval result"
+    );
 
     if (errorResult) {
       for (const errorPropName of Object.keys(expectedResults.errorResult)) {
@@ -233,19 +265,22 @@ add_task(async function test_devtools_inspectedWindow_eval() {
         const actual = errorResult[errorPropName];
 
         if (expected instanceof RegExp) {
-          ok(expected.test(actual),
-             `Got exceptionInfo.${errorPropName} value ${actual} matches ${expected}`);
+          ok(
+            expected.test(actual),
+            `Got exceptionInfo.${errorPropName} value ${actual} matches ${expected}`
+          );
         } else {
-          Assert.deepEqual(actual, expected,
-                           `Got the expected exceptionInfo.${errorPropName} value`);
+          Assert.deepEqual(
+            actual,
+            expected,
+            `Got the expected exceptionInfo.${errorPropName} value`
+          );
         }
       }
     }
   }
 
-  await gDevTools.closeToolbox(target);
-
-  await target.destroy();
+  await closeToolboxForTab(tab);
 
   await extension.unload();
 
@@ -258,15 +293,25 @@ add_task(async function test_devtools_inspectedWindow_eval() {
  */
 add_task(async function test_devtools_inspectedWindow_eval_in_page_and_panel() {
   const TEST_TARGET_URL = "http://mochi.test:8888/";
-  let tab = await BrowserTestUtils.openNewForegroundTab(gBrowser, TEST_TARGET_URL);
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    TEST_TARGET_URL
+  );
 
   async function devtools_page() {
-    await browser.devtools.panels.create("test-eval", "fake-icon.png", "devtools_panel.html");
+    await browser.devtools.panels.create(
+      "test-eval",
+      "fake-icon.png",
+      "devtools_panel.html"
+    );
 
     browser.test.onMessage.addListener(async (msg, ...args) => {
       switch (msg) {
         case "inspectedWindow-page-eval-request": {
-          const [evalResult, errorResult] = await browser.devtools.inspectedWindow.eval(...args);
+          const [
+            evalResult,
+            errorResult,
+          ] = await browser.devtools.inspectedWindow.eval(...args);
           browser.test.sendMessage("inspectedWindow-page-eval-result", {
             evalResult,
             errorResult,
@@ -288,7 +333,10 @@ add_task(async function test_devtools_inspectedWindow_eval_in_page_and_panel() {
     browser.test.onMessage.addListener(async (msg, ...args) => {
       switch (msg) {
         case "inspectedWindow-panel-eval-request": {
-          const [evalResult, errorResult] = await browser.devtools.inspectedWindow.eval(...args);
+          const [
+            evalResult,
+            errorResult,
+          ] = await browser.devtools.inspectedWindow.eval(...args);
           browser.test.sendMessage("inspectedWindow-panel-eval-result", {
             evalResult,
             errorResult,
@@ -320,7 +368,7 @@ add_task(async function test_devtools_inspectedWindow_eval_in_page_and_panel() {
        </body>
       </html>`,
       "devtools_page.js": devtools_page,
-      "devtools_panel.html":  `<!DOCTYPE html>
+      "devtools_panel.html": `<!DOCTYPE html>
       <html>
        <head>
          <meta charset="utf-8">
@@ -336,36 +384,55 @@ add_task(async function test_devtools_inspectedWindow_eval_in_page_and_panel() {
 
   await extension.startup();
 
-  const target = await gDevTools.getTargetForTab(tab);
-  const toolbox = await gDevTools.showToolbox(target, "webconsole");
-  info("developer toolbox opened");
+  const { toolbox } = await openToolboxForTab(tab);
 
   info("Wait for devtools_panel_created event");
   await extension.awaitMessage("devtools_panel_created");
 
   info("Switch to the extension test panel");
-  await gDevTools.showToolbox(target, getAdditionalPanelId(toolbox, "test-eval"));
+  await openToolboxForTab(tab, getAdditionalPanelId(toolbox, "test-eval"));
 
   info("Wait for devtools_panel_initialized event");
   await extension.awaitMessage("devtools_panel_initialized");
 
-  info(`test inspectedWindow.eval with eval(window.location.href) from the devtools page`);
-  extension.sendMessage(`inspectedWindow-page-eval-request`, "window.location.href");
+  info(
+    `test inspectedWindow.eval with eval(window.location.href) from the devtools page`
+  );
+  extension.sendMessage(
+    `inspectedWindow-page-eval-request`,
+    "window.location.href"
+  );
 
   info("Wait for response from the page");
-  let {evalResult} = await extension.awaitMessage(`inspectedWindow-page-eval-result`);
-  Assert.deepEqual(evalResult, TEST_TARGET_URL, "Got the expected eval result in the page");
+  let { evalResult } = await extension.awaitMessage(
+    `inspectedWindow-page-eval-result`
+  );
+  Assert.deepEqual(
+    evalResult,
+    TEST_TARGET_URL,
+    "Got the expected eval result in the page"
+  );
 
-  info(`test inspectedWindow.eval with eval(window.location.href) from the devtools panel`);
-  extension.sendMessage(`inspectedWindow-panel-eval-request`, "window.location.href");
+  info(
+    `test inspectedWindow.eval with eval(window.location.href) from the devtools panel`
+  );
+  extension.sendMessage(
+    `inspectedWindow-panel-eval-request`,
+    "window.location.href"
+  );
 
   info("Wait for response from the panel");
-  ({evalResult} = await extension.awaitMessage(`inspectedWindow-panel-eval-result`));
-  Assert.deepEqual(evalResult, TEST_TARGET_URL, "Got the expected eval result in the panel");
+  ({ evalResult } = await extension.awaitMessage(
+    `inspectedWindow-panel-eval-result`
+  ));
+  Assert.deepEqual(
+    evalResult,
+    TEST_TARGET_URL,
+    "Got the expected eval result in the panel"
+  );
 
   // Cleanup
-  await gDevTools.closeToolbox(target);
-  await target.destroy();
+  await closeToolboxForTab(tab);
   await extension.unload();
   BrowserTestUtils.removeTab(tab);
 });

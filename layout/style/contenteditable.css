@@ -11,16 +11,16 @@
 
 input:-moz-read-write > .anonymous-div:-moz-read-only,
 textarea:-moz-read-write > .anonymous-div:-moz-read-only {
-  -moz-user-select: text;
+  user-select: text;
 }
 
-/* Use default arrow over objects with size that 
+/* Use default arrow over objects with size that
    are selected when clicked on.
    Override the browser's pointer cursor over links
 */
 
 img:-moz-read-write, img:-moz-read-write[usemap], area:-moz-read-write,
-object:-moz-read-write, object:-moz-read-write[usemap], 
+object:-moz-read-write, object:-moz-read-write[usemap],
 applet:-moz-read-write, hr:-moz-read-write, button:-moz-read-write,
 select:-moz-read-write,
 a:-moz-read-write:link img, a:-moz-read-write:visited img,
@@ -38,7 +38,7 @@ a:active:-moz-read-write img {
   -moz-user-input: none;
 }
 
-/* We suppress user/author's prefs for link underline, 
+/* We suppress user/author's prefs for link underline,
    so we must set explicitly. This isn't good!
 */
 a:link:-moz-read-write {
@@ -50,7 +50,7 @@ a:link:-moz-read-write {
 *|*:-moz-read-write > input:-moz-read-only,
 *|*:-moz-read-write > button:-moz-read-only,
 *|*:-moz-read-write > textarea:-moz-read-only {
-  -moz-user-select: all;
+  user-select: all;
   -moz-user-input: auto !important;
   -moz-user-focus: none !important;
 }
@@ -65,23 +65,9 @@ input[contenteditable="true"]:disabled,
 input[contenteditable="true"][type="checkbox"],
 input[contenteditable="true"][type="radio"],
 input[contenteditable="true"][type="file"] {
-  -moz-user-select: all;
+  user-select: all;
   -moz-user-input: none !important;
   -moz-user-focus: none !important;
-}
-
-/* emulation of non-standard HTML <marquee> tag */
-
-@supports not -moz-bool-pref("dom.ua_widget.enabled") {
-
-  marquee:-moz-read-write {
-    -moz-binding: url('chrome://xbl-marquee/content/xbl-marquee.xml#marquee-horizontal-editable');
-  }
-
-  marquee[direction="up"]:-moz-read-write, marquee[direction="down"]:-moz-read-write {
-    -moz-binding: url('chrome://xbl-marquee/content/xbl-marquee.xml#marquee-vertical-editable');
-  }
-
 }
 
 *|*:-moz-read-write > input[type="hidden"],
@@ -91,15 +77,15 @@ input[contenteditable="true"][type="hidden"] {
 }
 
 label:-moz-read-write {
-  -moz-user-select: all;
+  user-select: all;
 }
 
 *|*::-moz-display-comboboxcontrol-frame {
-  -moz-user-select: text;
+  user-select: text;
 }
 
 option:-moz-read-write {
-  -moz-user-select: text;
+  user-select: text;
 }
 
 /* the following rules are for Image Resizing */
@@ -110,7 +96,7 @@ span[\_moz_anonclass="mozResizer"] {
   position: absolute;
   border: 1px black solid;
   background-color: white;
-  -moz-user-select: none;
+  user-select: none;
   z-index: 2147483646; /* max value -1 for this property */
 }
 
@@ -158,7 +144,7 @@ span[\_moz_anonclass="mozResizer"][anonlocation="se"] {
 span[\_moz_anonclass="mozResizingShadow"],
 img[\_moz_anonclass="mozResizingShadow"] {
   outline: thin dashed black;
-  -moz-user-select: none;
+  user-select: none;
   opacity: 0.5;
   position: absolute;
   z-index: 2147483647; /* max value for this property */
@@ -199,7 +185,7 @@ span[\_moz_anonclass="mozGrabber"] {
   background-image: url("resource://gre/res/grabber.gif");
   background-repeat: no-repeat;
   background-position: center center;
-  -moz-user-select: none;
+  user-select: none;
   cursor: move;
 }
 
@@ -215,7 +201,7 @@ a[\_moz_anonclass="mozTableAddColumnBefore"] {
   background-image: url("resource://gre/res/table-add-column-before.gif");
   background-repeat: no-repeat;
   background-position: center center;
-  -moz-user-select: none;
+  user-select: none;
   -moz-user-focus: none !important;
 }
 
@@ -237,7 +223,7 @@ a[\_moz_anonclass="mozTableAddColumnAfter"] {
   background-image: url("resource://gre/res/table-add-column-after.gif");
   background-repeat: no-repeat;
   background-position: center center;
-  -moz-user-select: none;
+  user-select: none;
   -moz-user-focus: none !important;
 }
 
@@ -259,7 +245,7 @@ a[\_moz_anonclass="mozTableRemoveColumn"] {
   background-image: url("resource://gre/res/table-remove-column.gif");
   background-repeat: no-repeat;
   background-position: center center;
-  -moz-user-select: none;
+  user-select: none;
   -moz-user-focus: none !important;
 }
 
@@ -281,7 +267,7 @@ a[\_moz_anonclass="mozTableAddRowBefore"] {
   background-image: url("resource://gre/res/table-add-row-before.gif");
   background-repeat: no-repeat;
   background-position: center center;
-  -moz-user-select: none;
+  user-select: none;
   -moz-user-focus: none !important;
 }
 
@@ -303,7 +289,7 @@ a[\_moz_anonclass="mozTableAddRowAfter"] {
   background-image: url("resource://gre/res/table-add-row-after.gif");
   background-repeat: no-repeat;
   background-position: center center;
-  -moz-user-select: none;
+  user-select: none;
   -moz-user-focus: none !important;
 }
 
@@ -325,7 +311,7 @@ a[\_moz_anonclass="mozTableRemoveRow"] {
   background-image: url("resource://gre/res/table-remove-row.gif");
   background-repeat: no-repeat;
   background-position: center center;
-  -moz-user-select: none;
+  user-select: none;
   -moz-user-focus: none !important;
 }
 

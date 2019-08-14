@@ -30,8 +30,8 @@ nscoord CSSAlignUtils::AlignJustifySelf(uint8_t aAlignment, LogicalAxis aAxis,
       "caller should map that to the corresponding START/END");
 
   // Promote aFlags to convenience bools:
-  const bool isOverflowSafe = !!(aFlags & AlignJustifyFlags::eOverflowSafe);
-  const bool isSameSide = !!(aFlags & AlignJustifyFlags::eSameSide);
+  const bool isOverflowSafe = !!(aFlags & AlignJustifyFlags::OverflowSafe);
+  const bool isSameSide = !!(aFlags & AlignJustifyFlags::SameSide);
 
   // Map some alignment values to 'start' / 'end'.
   switch (aAlignment) {
@@ -82,16 +82,16 @@ nscoord CSSAlignUtils::AlignJustifySelf(uint8_t aAlignment, LogicalAxis aAxis,
   const auto& styleMargin = aRI.mStyleMargin->mMargin;
   bool hasAutoMarginStart;
   bool hasAutoMarginEnd;
-  if (aFlags & AlignJustifyFlags::eIgnoreAutoMargins) {
+  if (aFlags & AlignJustifyFlags::IgnoreAutoMargins) {
     // (Note: ReflowInput will have treated "auto" margins as 0, so we
     // don't need to do anything special to avoid expanding them.)
     hasAutoMarginStart = hasAutoMarginEnd = false;
   } else if (aAxis == eLogicalAxisBlock) {
-    hasAutoMarginStart = styleMargin.GetBStartUnit(wm) == eStyleUnit_Auto;
-    hasAutoMarginEnd = styleMargin.GetBEndUnit(wm) == eStyleUnit_Auto;
+    hasAutoMarginStart = styleMargin.GetBStart(wm).IsAuto();
+    hasAutoMarginEnd = styleMargin.GetBEnd(wm).IsAuto();
   } else { /* aAxis == eLogicalAxisInline */
-    hasAutoMarginStart = styleMargin.GetIStartUnit(wm) == eStyleUnit_Auto;
-    hasAutoMarginEnd = styleMargin.GetIEndUnit(wm) == eStyleUnit_Auto;
+    hasAutoMarginStart = styleMargin.GetIStart(wm).IsAuto();
+    hasAutoMarginEnd = styleMargin.GetIEnd(wm).IsAuto();
   }
 
   // https://drafts.csswg.org/css-align-3/#overflow-values

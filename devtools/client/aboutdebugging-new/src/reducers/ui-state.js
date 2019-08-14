@@ -6,25 +6,33 @@
 
 const {
   ADB_ADDON_STATUS_UPDATED,
+  ADB_READY_UPDATED,
   DEBUG_TARGET_COLLAPSIBILITY_UPDATED,
-  NETWORK_LOCATIONS_UPDATED,
-  PAGE_SELECTED,
+  HIDE_PROFILER_DIALOG,
+  NETWORK_LOCATIONS_UPDATE_SUCCESS,
+  SELECT_PAGE_SUCCESS,
+  SHOW_PROFILER_DIALOG,
+  TEMPORARY_EXTENSION_INSTALL_FAILURE,
+  TEMPORARY_EXTENSION_INSTALL_SUCCESS,
   USB_RUNTIMES_SCAN_START,
   USB_RUNTIMES_SCAN_SUCCESS,
 } = require("../constants");
 
-function UiState(locations = [], debugTargetCollapsibilities = {},
-                 networkEnabled = false, wifiEnabled = false, showSystemAddons = false) {
+function UiState(
+  locations = [],
+  debugTargetCollapsibilities = {},
+  showHiddenAddons = false
+) {
   return {
     adbAddonStatus: null,
     debugTargetCollapsibilities,
+    isAdbReady: false,
     isScanningUsb: false,
-    networkEnabled,
     networkLocations: locations,
     selectedPage: null,
-    selectedRuntime: null,
-    showSystemAddons,
-    wifiEnabled,
+    showProfilerDialog: false,
+    showHiddenAddons,
+    temporaryInstallError: null,
   };
 }
 
@@ -35,22 +43,36 @@ function uiReducer(state = UiState(), action) {
       return Object.assign({}, state, { adbAddonStatus });
     }
 
+    case ADB_READY_UPDATED: {
+      const { isAdbReady } = action;
+      return Object.assign({}, state, { isAdbReady });
+    }
+
     case DEBUG_TARGET_COLLAPSIBILITY_UPDATED: {
       const { isCollapsed, key } = action;
-      const debugTargetCollapsibilities = new Map(state.debugTargetCollapsibilities);
+      const debugTargetCollapsibilities = new Map(
+        state.debugTargetCollapsibilities
+      );
       debugTargetCollapsibilities.set(key, isCollapsed);
       return Object.assign({}, state, { debugTargetCollapsibilities });
     }
 
-    case NETWORK_LOCATIONS_UPDATED: {
+    case NETWORK_LOCATIONS_UPDATE_SUCCESS: {
       const { locations } = action;
       return Object.assign({}, state, { networkLocations: locations });
     }
 
-    case PAGE_SELECTED: {
-      const { page, runtimeId } = action;
-      return Object.assign({}, state,
-        { selectedPage: page, selectedRuntime: runtimeId });
+    case SELECT_PAGE_SUCCESS: {
+      const { page } = action;
+      return Object.assign({}, state, { selectedPage: page });
+    }
+
+    case SHOW_PROFILER_DIALOG: {
+      return Object.assign({}, state, { showProfilerDialog: true });
+    }
+
+    case HIDE_PROFILER_DIALOG: {
+      return Object.assign({}, state, { showProfilerDialog: false });
     }
 
     case USB_RUNTIMES_SCAN_START: {
@@ -59,6 +81,15 @@ function uiReducer(state = UiState(), action) {
 
     case USB_RUNTIMES_SCAN_SUCCESS: {
       return Object.assign({}, state, { isScanningUsb: false });
+    }
+
+    case TEMPORARY_EXTENSION_INSTALL_SUCCESS: {
+      return Object.assign({}, state, { temporaryInstallError: null });
+    }
+
+    case TEMPORARY_EXTENSION_INSTALL_FAILURE: {
+      const { error } = action;
+      return Object.assign({}, state, { temporaryInstallError: error });
     }
 
     default:

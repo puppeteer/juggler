@@ -60,6 +60,10 @@ void ImageBitmapRenderingContext::TransferFromImageBitmap(
     return;
   }
 
+  if (aImageBitmap.IsWriteOnly() && mCanvasElement) {
+    mCanvasElement->SetWriteOnly();
+  }
+
   Redraw(gfxRect(0, 0, mWidth, mHeight));
 }
 
@@ -135,7 +139,7 @@ mozilla::UniquePtr<uint8_t[]> ImageBitmapRenderingContext::GetImageBuffer(
 
 NS_IMETHODIMP
 ImageBitmapRenderingContext::GetInputStream(const char* aMimeType,
-                                            const char16_t* aEncoderOptions,
+                                            const nsAString& aEncoderOptions,
                                             nsIInputStream** aStream) {
   nsCString enccid("@mozilla.org/image/encoder;2?type=");
   enccid += aMimeType;

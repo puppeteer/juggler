@@ -5,13 +5,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined(WMFMediaDataDecoder_h_)
-#define WMFMediaDataDecoder_h_
+#  define WMFMediaDataDecoder_h_
 
-#include "MFTDecoder.h"
-#include "PlatformDecoderModule.h"
-#include "WMF.h"
-#include "mozilla/RefPtr.h"
-#include "nsAutoPtr.h"
+#  include "MFTDecoder.h"
+#  include "PlatformDecoderModule.h"
+#  include "WMF.h"
+#  include "mozilla/RefPtr.h"
+#  include "nsAutoPtr.h"
 
 namespace mozilla {
 
@@ -35,12 +35,12 @@ class MFTManager {
   // MP4Reader.
   virtual HRESULT Output(int64_t aStreamOffset, RefPtr<MediaData>& aOutput) = 0;
 
-  virtual void Flush() {
+  void Flush() {
     mDecoder->Flush();
     mSeekTargetThreshold.reset();
   }
 
-  virtual void Drain() {
+  void Drain() {
     if (FAILED(mDecoder->SendMFTMessage(MFT_MESSAGE_COMMAND_DRAIN, 0))) {
       NS_WARNING("Failed to send DRAIN command to MFT");
     }
@@ -58,7 +58,11 @@ class MFTManager {
   virtual nsCString GetDescriptionName() const = 0;
 
   virtual void SetSeekThreshold(const media::TimeUnit& aTime) {
-    mSeekTargetThreshold = Some(aTime);
+    if (aTime.IsValid()) {
+      mSeekTargetThreshold = Some(aTime);
+    } else {
+      mSeekTargetThreshold.reset();
+    }
   }
 
   virtual MediaDataDecoder::ConversionRequired NeedsConversion() const {
@@ -138,6 +142,9 @@ class WMFMediaDataDecoder
   // The last offset into the media resource that was passed into Input().
   // This is used to approximate the decoder's position in the media resource.
   int64_t mLastStreamOffset;
+  Maybe<media::TimeUnit> mLastTime;
+  media::TimeUnit mLastDuration;
+  int64_t mSamplesCount = 0;
 
   bool mIsShutDown = false;
 

@@ -211,8 +211,6 @@ where
     type Item = (&'a S, SheetRebuildKind);
 
     fn next(&mut self) -> Option<Self::Item> {
-        use std::mem;
-
         loop {
             let potential_sheet = self.iter.next()?;
 
@@ -345,14 +343,6 @@ where
         self.data_validity = cmp::max(validity, self.data_validity);
     }
 
-    fn prepend(&mut self, sheet: S) {
-        debug_assert!(!self.contains(&sheet));
-        // Inserting stylesheets somewhere but at the end changes the validity
-        // of the cascade data, but not the invalidation data.
-        self.set_data_validity_at_least(DataValidity::CascadeInvalid);
-        self.entries.insert(0, StylesheetSetEntry::new(sheet));
-    }
-
     /// Returns an iterator over the current list of stylesheets.
     fn iter(&self) -> StylesheetCollectionIterator<S> {
         StylesheetCollectionIterator(self.entries.iter())
@@ -417,20 +407,6 @@ macro_rules! sheet_set_methods {
             collection.append(sheet);
         }
 
-        /// Prepend a new stylesheet to the current set.
-        pub fn prepend_stylesheet(
-            &mut self,
-            device: Option<&Device>,
-            sheet: S,
-            guard: &SharedRwLockReadGuard,
-        ) {
-            debug!(concat!($set_name, "::prepend_stylesheet"));
-            self.collect_invalidations_for(device, &sheet, guard);
-
-            let collection = self.collection_for(&sheet, guard);
-            collection.prepend(sheet);
-        }
-
         /// Insert a given stylesheet before another stylesheet in the document.
         pub fn insert_stylesheet_before(
             &mut self,
@@ -492,7 +468,14 @@ where
             .fold(0, |s, (item, _)| s + item.len())
     }
 
+    /// Returns the count of stylesheets for a given origin.
+    #[inline]
+    pub fn sheet_count(&self, origin: Origin) -> usize {
+        self.collections.borrow_for_origin(&origin).len()
+    }
+
     /// Returns the `index`th stylesheet in the set for the given origin.
+    #[inline]
     pub fn get(&self, origin: Origin, index: usize) -> Option<&S> {
         self.collections.borrow_for_origin(&origin).get(index)
     }
@@ -563,7 +546,7 @@ where
     }
 }
 
-/// The set of stylesheets effective for a given XBL binding or Shadow Root.
+/// The set of stylesheets effective for a given Shadow Root.
 #[derive(MallocSizeOf)]
 pub struct AuthorStylesheetSet<S>
 where
@@ -607,6 +590,16 @@ where
     /// Whether the collection is empty.
     pub fn is_empty(&self) -> bool {
         self.collection.len() == 0
+    }
+
+    /// Returns the `index`th stylesheet in the collection of author styles if present.
+    pub fn get(&self, index: usize) -> Option<&S> {
+        self.collection.get(index)
+    }
+
+    /// Returns the number of author stylesheets.
+    pub fn len(&self) -> usize {
+        self.collection.len()
     }
 
     fn collection_for(

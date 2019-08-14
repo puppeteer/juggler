@@ -4,11 +4,16 @@
 
 package org.mozilla.gecko.util;
 
+import android.annotation.TargetApi;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.os.storage.StorageVolume;
 import android.provider.MediaStore;
+import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -50,13 +55,13 @@ public class FileUtils {
         final private String mName;
         final private double mMaxAge;
 
-        public NameAndAgeFilter(String name, double age) {
+        public NameAndAgeFilter(final String name, final double age) {
             mName = name;
             mMaxAge = age;
         }
 
         @Override
-        public boolean accept(File dir, String filename) {
+        public boolean accept(final File dir, final String filename) {
             if (mName == null || mName.matches(filename)) {
                 File f = new File(dir, filename);
 
@@ -70,17 +75,17 @@ public class FileUtils {
     }
 
     @RobocopTarget
-    public static void delTree(File dir, FilenameFilter filter, boolean recurse) {
+    public static void delTree(final File dir, final FilenameFilter filter, final boolean recurse) {
         String[] files = null;
 
         if (filter != null) {
-          files = dir.list(filter);
+            files = dir.list(filter);
         } else {
-          files = dir.list();
+            files = dir.list();
         }
 
         if (files == null) {
-          return;
+            return;
         }
 
         for (String file : files) {
@@ -89,11 +94,11 @@ public class FileUtils {
         }
     }
 
-    public static boolean delete(File file) throws IOException {
+    public static boolean delete(final File file) throws IOException {
         return delete(file, true);
     }
 
-    public static boolean delete(File file, boolean recurse) {
+    public static boolean delete(final File file, final boolean recurse) {
         if (file.isDirectory() && recurse) {
             // If the quick delete failed and this is a dir, recursively delete the contents of the dir
             String files[] = file.list();
@@ -276,28 +281,27 @@ public class FileUtils {
         }
     }
 
-    public static File createTempDir(File directory, String prefix) {
+    public static File createTempDir(final File directory, final String prefix) {
         // Force a prefix null check first
         if (prefix.length() < 3) {
             throw new IllegalArgumentException("prefix must be at least 3 characters");
         }
-        if (directory == null) {
+        File tempDirectory = directory;
+        if (tempDirectory == null) {
             String tmpDir = System.getProperty("java.io.tmpdir", ".");
-            directory = new File(tmpDir);
+            tempDirectory = new File(tmpDir);
         }
         File result;
         Random random = new Random();
         do {
-            result = new File(directory, prefix + random.nextInt());
+            result = new File(tempDirectory, prefix + random.nextInt());
         } while (!result.mkdirs());
         return result;
     }
 
     public static String resolveContentUri(final Context context, final Uri uri) {
-        String path;
-        try {
-            path = getOriginalFilePathFromUri(context, uri);
-        } catch (IllegalArgumentException ex) {
+        String path = getOriginalFilePathFromUri(context, uri);
+        if (TextUtils.isEmpty(path)) {
             // We cannot always successfully guess the original path of the file behind the
             // content:// URI, so we need a fallback. This will break local subresources and
             // relative links, but unfortunately there's nothing else we can do
@@ -307,7 +311,7 @@ public class FileUtils {
         return !TextUtils.isEmpty(path) ? String.format(FILE_ABSOLUTE_URI, path) : path;
     }
 
-    public static String getFileNameFromContentUri(Context context, Uri uri) {
+    public static String getFileNameFromContentUri(final Context context, final Uri uri) {
         final ContentResolver cr = context.getContentResolver();
         final String[] projection = {MediaStore.MediaColumns.DISPLAY_NAME};
         String fileName = null;
@@ -323,7 +327,7 @@ public class FileUtils {
         return fileName;
     }
 
-    public static void copy(Context context, Uri srcUri, File dstFile) {
+    public static void copy(final Context context, final Uri srcUri, final File dstFile) {
         try (InputStream inputStream = context.getContentResolver().openInputStream(srcUri);
              OutputStream outputStream = new FileOutputStream(dstFile)) {
             IOUtils.copy(inputStream, outputStream);
@@ -332,11 +336,84 @@ public class FileUtils {
         }
     }
 
-    public static boolean isContentUri(Uri uri) {
+    public static boolean isContentUri(final Uri uri) {
         return uri != null && uri.getScheme() != null && CONTENT_SCHEME.equals(uri.getScheme());
     }
 
-    public static boolean isContentUri(String sUri) {
+    public static boolean isContentUri(final String sUri) {
         return sUri != null && sUri.startsWith(CONTENT_SCHEME);
+    }
+
+    /**
+     * Attempts to find the root path of an external (removable) SD card.
+     *
+     * @param uuid If you know the file system UUID (as returned e.g. by
+     *             {@link StorageVolume#getUuid()}) of the storage device you're looking for, this
+     *             may be used to filter down the selection of available non-emulated storage
+     *             devices. If no storage device matching the given UUID was found, the first
+     *             non-emulated storage device will be returned.
+     * @return The root path of the storage device.
+     */
+    @TargetApi(19)
+    public static @Nullable String getExternalStoragePath(final Context context,
+                                                          final @Nullable String uuid) {
+        // Since around the time of Lollipop or Marshmallow, the common convention is for external
+        // SD cards to be mounted at /storage/<file system UUID>/, however this pattern is still not
+        // guaranteed to be 100 % reliable. Therefore we need another way of getting all potential
+        // mount points for external storage devices.
+        // StorageManager.getStorageVolumes() might possibly do the trick and be just what we need
+        // to enumerate all mount points, but it only works on API24+.
+        // So instead, we use the output of getExternalFilesDirs for this purpose, which works on
+        // API19 and up.
+        File [] externalStorages = context.getExternalFilesDirs(null);
+        String uuidDir = !TextUtils.isEmpty(uuid) ? '/' + uuid + '/' : null;
+
+        String firstNonEmulatedStorage = null;
+        String targetStorage = null;
+        for (File externalStorage : externalStorages) {
+            if (isExternalStorageEmulated(externalStorage)) {
+                // The paths returned by getExternalFilesDirs also include locations that actually
+                // sit on the internal "external" storage, so we need to filter them out again.
+                continue;
+            }
+            String storagePath = externalStorage.getAbsolutePath();
+            /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+             * NOTE: This is our big assumption in this function: That the folders returned by   *
+             * context.getExternalFilesDir() will always be located somewhere inside             *
+             * /<storage root path>/Android/<app specific directories>, so that we can retrieve  *
+             * the storage root by simply snipping off everything starting from "/Android".      *
+             * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+            storagePath = storagePath.substring(0, storagePath.indexOf("/Android"));
+            if (firstNonEmulatedStorage == null) {
+                firstNonEmulatedStorage = storagePath;
+            }
+            if (!TextUtils.isEmpty(uuidDir) && storagePath.contains(uuidDir)) {
+                targetStorage = storagePath;
+                break;
+            }
+        }
+        if (targetStorage == null) {
+            // Either no UUID to narrow down the selection was given, or else this device doesn't
+            // mount its SD cards using the file system UUID, so we just fall back to the first
+            // non-emulated storage path we found.
+            targetStorage = firstNonEmulatedStorage;
+        }
+        return targetStorage;
+    }
+
+    /**
+     * Helper method because the framework version of this function is only available from API21+.
+     *
+     * @see Environment#isExternalStorageEmulated(File)
+     */
+    public static boolean isExternalStorageEmulated(final File path) {
+        if (Build.VERSION.SDK_INT >= 21) {
+            return Environment.isExternalStorageEmulated(path);
+        } else {
+            String absPath = path.getAbsolutePath();
+            // This is rather hacky, but then SD card support on older Android versions
+            // was equally messy.
+            return absPath.contains("/sdcard0") || absPath.contains("/storage/emulated");
+        }
     }
 }

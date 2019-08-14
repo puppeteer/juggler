@@ -280,10 +280,12 @@ void MacIOSurfaceLib::CloseLibrary() {
 }
 
 MacIOSurface::MacIOSurface(IOSurfacePtr aIOSurfacePtr,
-                           double aContentsScaleFactor, bool aHasAlpha)
+                           double aContentsScaleFactor, bool aHasAlpha,
+                           gfx::YUVColorSpace aColorSpace)
     : mIOSurfacePtr(aIOSurfacePtr),
       mContentsScaleFactor(aContentsScaleFactor),
-      mHasAlpha(aHasAlpha) {
+      mHasAlpha(aHasAlpha),
+      mColorSpace(aColorSpace) {
   CFRetain(mIOSurfacePtr);
   IncrementUseCount();
 }
@@ -330,10 +332,6 @@ already_AddRefed<MacIOSurface> MacIOSurface::CreateIOSurface(
 
   RefPtr<MacIOSurface> ioSurface =
       new MacIOSurface(surfaceRef, aContentsScaleFactor, aHasAlpha);
-  if (!ioSurface) {
-    ::CFRelease(surfaceRef);
-    return nullptr;
-  }
 
   // Release the IOSurface because MacIOSurface retained it
   CFRelease(surfaceRef);
@@ -342,18 +340,15 @@ already_AddRefed<MacIOSurface> MacIOSurface::CreateIOSurface(
 }
 
 already_AddRefed<MacIOSurface> MacIOSurface::LookupSurface(
-    IOSurfaceID aIOSurfaceID, double aContentsScaleFactor, bool aHasAlpha) {
+    IOSurfaceID aIOSurfaceID, double aContentsScaleFactor, bool aHasAlpha,
+    gfx::YUVColorSpace aColorSpace) {
   if (!MacIOSurfaceLib::isInit() || aContentsScaleFactor <= 0) return nullptr;
 
   IOSurfacePtr surfaceRef = MacIOSurfaceLib::IOSurfaceLookup(aIOSurfaceID);
   if (!surfaceRef) return nullptr;
 
-  RefPtr<MacIOSurface> ioSurface =
-      new MacIOSurface(surfaceRef, aContentsScaleFactor, aHasAlpha);
-  if (!ioSurface) {
-    ::CFRelease(surfaceRef);
-    return nullptr;
-  }
+  RefPtr<MacIOSurface> ioSurface = new MacIOSurface(
+      surfaceRef, aContentsScaleFactor, aHasAlpha, aColorSpace);
 
   // Release the IOSurface because MacIOSurface retained it
   CFRelease(surfaceRef);
@@ -388,13 +383,15 @@ size_t MacIOSurface::GetPlaneCount() {
   return MacIOSurfaceLib::IOSurfaceGetPlaneCount(mIOSurfacePtr);
 }
 
-/*static*/ size_t MacIOSurface::GetMaxWidth() {
+/*static*/
+size_t MacIOSurface::GetMaxWidth() {
   if (!MacIOSurfaceLib::isInit()) return -1;
   return MacIOSurfaceLib::IOSurfaceGetPropertyMaximum(
       MacIOSurfaceLib::kPropWidth);
 }
 
-/*static*/ size_t MacIOSurface::GetMaxHeight() {
+/*static*/
+size_t MacIOSurface::GetMaxHeight() {
   if (!MacIOSurfaceLib::isInit()) return -1;
   return MacIOSurfaceLib::IOSurfaceGetPropertyMaximum(
       MacIOSurfaceLib::kPropHeight);
@@ -439,7 +436,7 @@ using mozilla::gfx::IntSize;
 using mozilla::gfx::SourceSurface;
 using mozilla::gfx::SurfaceFormat;
 
-void MacIOSurfaceBufferDeallocator(void* aClosure) {
+static void MacIOSurfaceBufferDeallocator(void* aClosure) {
   MOZ_ASSERT(aClosure);
 
   delete[] static_cast<unsigned char*>(aClosure);
@@ -607,10 +604,6 @@ already_AddRefed<MacIOSurface> MacIOSurface::IOSurfaceContextGetSurface(
 
   RefPtr<MacIOSurface> ioSurface =
       new MacIOSurface(surfaceRef, aContentsScaleFactor, aHasAlpha);
-  if (!ioSurface) {
-    ::CFRelease(surfaceRef);
-    return nullptr;
-  }
   return ioSurface.forget();
 }
 

@@ -10,6 +10,7 @@
 #include "nsXULPrototypeDocument.h"
 #include "nsIServiceManager.h"
 #include "nsIURI.h"
+#include "nsNetUtil.h"
 
 #include "nsIFile.h"
 #include "nsIMemoryReporter.h"
@@ -75,7 +76,8 @@ nsXULPrototypeCache::~nsXULPrototypeCache() { FlushScripts(); }
 
 NS_IMPL_ISUPPORTS(nsXULPrototypeCache, nsIObserver)
 
-/* static */ nsXULPrototypeCache* nsXULPrototypeCache::GetInstance() {
+/* static */
+nsXULPrototypeCache* nsXULPrototypeCache::GetInstance() {
   if (!sInstance) {
     NS_ADDREF(sInstance = new nsXULPrototypeCache());
 
@@ -88,7 +90,6 @@ NS_IMPL_ISUPPORTS(nsXULPrototypeCache, nsIObserver)
         mozilla::services::GetObserverService();
     if (obsSvc) {
       nsXULPrototypeCache* p = sInstance;
-      obsSvc->AddObserver(p, "chrome-flush-skin-caches", false);
       obsSvc->AddObserver(p, "chrome-flush-caches", false);
       obsSvc->AddObserver(p, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
       obsSvc->AddObserver(p, "startupcache-invalidate", false);
@@ -102,10 +103,8 @@ NS_IMPL_ISUPPORTS(nsXULPrototypeCache, nsIObserver)
 NS_IMETHODIMP
 nsXULPrototypeCache::Observe(nsISupports* aSubject, const char* aTopic,
                              const char16_t* aData) {
-  if (!strcmp(aTopic, "chrome-flush-skin-caches")) {
-    FlushSkinFiles();
-  } else if (!strcmp(aTopic, "chrome-flush-caches") ||
-             !strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
+  if (!strcmp(aTopic, "chrome-flush-caches") ||
+      !strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
     Flush();
   } else if (!strcmp(aTopic, "startupcache-invalidate")) {
     AbortCaching();
@@ -207,33 +206,6 @@ nsresult nsXULPrototypeCache::PutXBLDocumentInfo(
     mXBLDocTable.Put(uri, aDocumentInfo);
   }
   return NS_OK;
-}
-
-void nsXULPrototypeCache::FlushSkinFiles() {
-  // Flush out skin XBL files from the cache.
-  for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-    nsAutoCString str;
-    iter.Key()->GetPathQueryRef(str);
-    if (strncmp(str.get(), "/skin", 5) == 0) {
-      iter.Remove();
-    }
-  }
-
-  // Now flush out our skin stylesheets from the cache.
-  for (auto iter = mStyleSheetTable.Iter(); !iter.Done(); iter.Next()) {
-    nsAutoCString str;
-    iter.Data()->GetSheetURI()->GetPathQueryRef(str);
-    if (strncmp(str.get(), "/skin", 5) == 0) {
-      iter.Remove();
-    }
-  }
-
-  // Iterate over all the remaining XBL and make sure cached
-  // scoped skin stylesheets are flushed and refetched by the
-  // prototype bindings.
-  for (auto iter = mXBLDocTable.Iter(); !iter.Done(); iter.Next()) {
-    iter.Data()->FlushSkinStylesheets();
-  }
 }
 
 void nsXULPrototypeCache::FlushScripts() { mScriptTable.Clear(); }
@@ -394,8 +366,10 @@ nsresult nsXULPrototypeCache::BeginCaching(nsIURI* aURI) {
 
   nsAutoCString path;
   aURI->GetPathQueryRef(path);
-  if (!StringEndsWith(path, NS_LITERAL_CSTRING(".xul")))
+  if (!(StringEndsWith(path, NS_LITERAL_CSTRING(".xul")) ||
+        StringEndsWith(path, NS_LITERAL_CSTRING(".xhtml")))) {
     return NS_ERROR_NOT_AVAILABLE;
+  }
 
   StartupCache* startupCache = StartupCache::GetSingleton();
   if (!startupCache) return NS_ERROR_FAILURE;
@@ -542,7 +516,8 @@ static void AppendURIForMemoryReport(nsIURI* aUri, nsACString& aOutput) {
   aOutput += spec;
 }
 
-/* static */ void nsXULPrototypeCache::CollectMemoryReports(
+/* static */
+void nsXULPrototypeCache::CollectMemoryReports(
     nsIHandleReportCallback* aHandleReport, nsISupports* aData) {
   if (!sInstance) {
     return;

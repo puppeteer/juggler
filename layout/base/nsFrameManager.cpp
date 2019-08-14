@@ -9,16 +9,16 @@
 #include "nsFrameManager.h"
 
 #include "nscore.h"
-#include "nsIPresShell.h"
 #include "nsCOMPtr.h"
 #include "plhash.h"
 #include "nsPlaceholderFrame.h"
 #include "nsGkAtoms.h"
 #include "nsILayoutHistoryState.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/PresState.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/dom/Element.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 #include "nsError.h"
 #include "nsAbsoluteContainingBlock.h"
@@ -145,9 +145,9 @@ void nsFrameManager::CaptureFrameStateFor(nsIFrame* aFrame,
   // Exit early if we get empty key
   nsAutoCString stateKey;
   nsIContent* content = aFrame->GetContent();
-  nsIDocument* doc = content ? content->GetUncomposedDoc() : nullptr;
-  nsresult rv = statefulFrame->GenerateStateKey(content, doc, stateKey);
-  if (NS_FAILED(rv) || stateKey.IsEmpty()) {
+  Document* doc = content ? content->GetUncomposedDoc() : nullptr;
+  statefulFrame->GenerateStateKey(content, doc, stateKey);
+  if (stateKey.IsEmpty()) {
     return;
   }
 
@@ -206,9 +206,9 @@ void nsFrameManager::RestoreFrameStateFor(nsIFrame* aFrame,
   }
 
   nsAutoCString stateKey;
-  nsIDocument* doc = content->GetUncomposedDoc();
-  nsresult rv = statefulFrame->GenerateStateKey(content, doc, stateKey);
-  if (NS_FAILED(rv) || stateKey.IsEmpty()) {
+  Document* doc = content->GetUncomposedDoc();
+  statefulFrame->GenerateStateKey(content, doc, stateKey);
+  if (stateKey.IsEmpty()) {
     return;
   }
 
@@ -219,7 +219,7 @@ void nsFrameManager::RestoreFrameStateFor(nsIFrame* aFrame,
   }
 
   // Restore it
-  rv = statefulFrame->RestoreState(frameState);
+  nsresult rv = statefulFrame->RestoreState(frameState);
   if (NS_FAILED(rv)) {
     return;
   }

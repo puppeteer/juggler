@@ -4,35 +4,26 @@
 "use strict";
 
 const {
-  Front,
   FrontClassWithSpec,
-  custom,
-  preEvent,
+  registerFront,
 } = require("devtools/shared/protocol");
 const {
   animationPlayerSpec,
   animationsSpec,
 } = require("devtools/shared/specs/animation");
 
-const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
-  initialize: function(conn, form, detail, ctx) {
-    Front.prototype.initialize.call(this, conn, form, detail, ctx);
+class AnimationPlayerFront extends FrontClassWithSpec(animationPlayerSpec) {
+  constructor(conn, form) {
+    super(conn, form);
 
     this.state = {};
-  },
+    this.before("changed", this.onChanged.bind(this));
+  }
 
-  form: function(form, detail) {
-    if (detail === "actorid") {
-      this.actorID = form;
-      return;
-    }
+  form(form) {
     this._form = form;
     this.state = this.initialState;
-  },
-
-  destroy: function() {
-    Front.prototype.destroy.call(this);
-  },
+  }
 
   /**
    * If the AnimationsActor was given a reference to the WalkerActor previously
@@ -44,7 +35,7 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
     }
 
     return this.conn.getActor(this._form.animationTargetNodeActorID);
-  },
+  }
 
   /**
    * Getter for the initial state of the player. Up to date states can be
@@ -74,16 +65,16 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
       currentTimeAtCreated: this._form.currentTimeAtCreated,
       absoluteValues: this.calculateAbsoluteValues(this._form),
     };
-  },
+  }
 
   /**
    * Executed when the AnimationPlayerActor emits a "changed" event. Used to
    * update the local knowledge of the state.
    */
-  onChanged: preEvent("changed", function(partialState) {
-    const {state} = this.reconstructState(partialState);
+  onChanged(partialState) {
+    const { state } = this.reconstructState(partialState);
     this.state = state;
-  }),
+  }
 
   /**
    * Refresh the current state of this animation on the client from information
@@ -94,24 +85,22 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
     if (this.currentStateHasChanged) {
       this.state = data;
     }
-  },
+  }
 
   /**
    * getCurrentState interceptor re-constructs incomplete states since the actor
    * only sends the values that have changed.
    */
-  getCurrentState: custom(function() {
+  getCurrentState() {
     this.currentStateHasChanged = false;
-    return this._getCurrentState().then(partialData => {
-      const {state, hasChanged} = this.reconstructState(partialData);
+    return super.getCurrentState().then(partialData => {
+      const { state, hasChanged } = this.reconstructState(partialData);
       this.currentStateHasChanged = hasChanged;
       return state;
     });
-  }, {
-    impl: "_getCurrentState",
-  }),
+  }
 
-  reconstructState: function(data) {
+  reconstructState(data) {
     let hasChanged = false;
 
     for (const key in this.state) {
@@ -123,8 +112,8 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
     }
 
     data.absoluteValues = this.calculateAbsoluteValues(data);
-    return {state: data, hasChanged};
-  },
+    return { state: data, hasChanged };
+  }
 
   calculateAbsoluteValues(data) {
     const {
@@ -166,22 +155,28 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
       // the graph duration as double of the delay amount. In case of no delay, handle
       // the duration as 1ms which is short enough so as to make the scrubber movable
       // and the limited duration is prioritized.
-      endTime = (absoluteDelay > 0 ? absoluteDelay * 2 : 1);
+      endTime = absoluteDelay > 0 ? absoluteDelay * 2 : 1;
     } else {
-      endTime = absoluteDelay +
-                toRate(duration * (iterationCount || 1)) +
-                absoluteEndDelay;
+      endTime =
+        absoluteDelay +
+        toRate(duration * (iterationCount || 1)) +
+        absoluteEndDelay;
     }
 
-    const absoluteCreatedTime =
-      isPositivePlaybackRate ? createdTime : createdTime - endTime;
-    const absoluteCurrentTimeAtCreated =
-      isPositivePlaybackRate ? currentTimeAtCreated : endTime - currentTimeAtCreated;
-    const animationCurrentTime =
-      isPositivePlaybackRate ? currentTime : endTime - currentTime;
-    const absoluteCurrentTime = absoluteCreatedTime + toRate(animationCurrentTime);
+    const absoluteCreatedTime = isPositivePlaybackRate
+      ? createdTime
+      : createdTime - endTime;
+    const absoluteCurrentTimeAtCreated = isPositivePlaybackRate
+      ? currentTimeAtCreated
+      : endTime - currentTimeAtCreated;
+    const animationCurrentTime = isPositivePlaybackRate
+      ? currentTime
+      : endTime - currentTime;
+    const absoluteCurrentTime =
+      absoluteCreatedTime + toRate(animationCurrentTime);
     const absoluteStartTime = absoluteCreatedTime + Math.min(absoluteDelay, 0);
-    const absoluteStartTimeAtCreated = absoluteCreatedTime + absoluteCurrentTimeAtCreated;
+    const absoluteStartTimeAtCreated =
+      absoluteCreatedTime + absoluteCurrentTimeAtCreated;
     // To show whole graph with endDelay, we add negative endDelay amount to endTime.
     const endTimeWithNegativeEndDelay = endTime - Math.min(absoluteEndDelay, 0);
     const absoluteEndTime = absoluteCreatedTime + endTimeWithNegativeEndDelay;
@@ -198,20 +193,20 @@ const AnimationPlayerFront = FrontClassWithSpec(animationPlayerSpec, {
       startTime: absoluteStartTime,
       startTimeAtCreated: absoluteStartTimeAtCreated,
     };
-  },
-});
+  }
+}
 
 exports.AnimationPlayerFront = AnimationPlayerFront;
+registerFront(AnimationPlayerFront);
 
-const AnimationsFront = FrontClassWithSpec(animationsSpec, {
-  initialize: function(client, {animationsActor}) {
-    Front.prototype.initialize.call(this, client, {actor: animationsActor});
-    this.manage(this);
-  },
+class AnimationsFront extends FrontClassWithSpec(animationsSpec) {
+  constructor(client) {
+    super(client);
 
-  destroy: function() {
-    Front.prototype.destroy.call(this);
-  },
-});
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "animationsActor";
+  }
+}
 
 exports.AnimationsFront = AnimationsFront;
+registerFront(AnimationsFront);

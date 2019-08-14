@@ -18,18 +18,14 @@
 
 #include "gtest/gtest.h"
 
-static void testResult( nsresult rv ) {
+static void testResult(nsresult rv) {
   EXPECT_TRUE(NS_SUCCEEDED(rv)) << "0x" << std::hex << (int)rv;
 }
 
-class TestObserver final : public nsIObserver,
-  public nsSupportsWeakReference
-{
-public:
-  explicit TestObserver( const nsAString &name )
-    : mName( name )
-    , mObservations( 0 ) {
-    }
+class TestObserver final : public nsIObserver, public nsSupportsWeakReference {
+ public:
+  explicit TestObserver(const nsAString& name)
+      : mName(name), mObservations(0) {}
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
 
@@ -39,18 +35,17 @@ public:
 
   nsString mExpectedData;
 
-private:
+ private:
   ~TestObserver() {}
 };
 
-NS_IMPL_ISUPPORTS( TestObserver, nsIObserver, nsISupportsWeakReference )
+NS_IMPL_ISUPPORTS(TestObserver, nsIObserver, nsISupportsWeakReference)
 
 int TestObserver::sTotalObservations;
 
 NS_IMETHODIMP
-TestObserver::Observe(nsISupports *aSubject,
-    const char *aTopic,
-    const char16_t *someData ) {
+TestObserver::Observe(nsISupports* aSubject, const char* aTopic,
+                      const char16_t* someData) {
   mObservations++;
   sTotalObservations++;
 
@@ -61,16 +56,12 @@ TestObserver::Observe(nsISupports *aSubject,
   return NS_OK;
 }
 
-static nsISupports* ToSupports(TestObserver* aObs)
-{
+static nsISupports* ToSupports(TestObserver* aObs) {
   return static_cast<nsIObserver*>(aObs);
 }
 
-static void TestExpectedCount(
-    nsIObserverService* svc,
-    const char* topic,
-    size_t expected)
-{
+static void TestExpectedCount(nsIObserverService* svc, const char* topic,
+                              size_t expected) {
   nsCOMPtr<nsISimpleEnumerator> e;
   nsresult rv = svc->EnumerateObservers(topic, getter_AddRefs(e));
   testResult(rv);
@@ -106,7 +97,7 @@ TEST(ObserverService, Creation)
 {
   nsresult rv;
   nsCOMPtr<nsIObserverService> svc =
-    do_CreateInstance("@mozilla.org/observer-service;1", &rv);
+      do_CreateInstance("@mozilla.org/observer-service;1", &rv);
 
   ASSERT_EQ(rv, NS_OK);
   ASSERT_TRUE(svc);
@@ -115,7 +106,7 @@ TEST(ObserverService, Creation)
 TEST(ObserverService, AddObserver)
 {
   nsCOMPtr<nsIObserverService> svc =
-    do_CreateInstance("@mozilla.org/observer-service;1");
+      do_CreateInstance("@mozilla.org/observer-service;1");
 
   // Add a strong ref.
   RefPtr<TestObserver> a = new TestObserver(NS_LITERAL_STRING("A"));
@@ -131,7 +122,7 @@ TEST(ObserverService, AddObserver)
 TEST(ObserverService, RemoveObserver)
 {
   nsCOMPtr<nsIObserverService> svc =
-    do_CreateInstance("@mozilla.org/observer-service;1");
+      do_CreateInstance("@mozilla.org/observer-service;1");
 
   RefPtr<TestObserver> a = new TestObserver(NS_LITERAL_STRING("A"));
   RefPtr<TestObserver> b = new TestObserver(NS_LITERAL_STRING("B"));
@@ -158,7 +149,7 @@ TEST(ObserverService, RemoveObserver)
 TEST(ObserverService, EnumerateEmpty)
 {
   nsCOMPtr<nsIObserverService> svc =
-    do_CreateInstance("@mozilla.org/observer-service;1");
+      do_CreateInstance("@mozilla.org/observer-service;1");
 
   // Try with no observers.
   TestExpectedCount(svc, "A", 0);
@@ -173,7 +164,7 @@ TEST(ObserverService, EnumerateEmpty)
 TEST(ObserverService, Enumerate)
 {
   nsCOMPtr<nsIObserverService> svc =
-    do_CreateInstance("@mozilla.org/observer-service;1");
+      do_CreateInstance("@mozilla.org/observer-service;1");
 
   const size_t kFooCount = 10;
   for (size_t i = 0; i < kFooCount; i++) {
@@ -197,7 +188,7 @@ TEST(ObserverService, Enumerate)
 TEST(ObserverService, EnumerateWeakRefs)
 {
   nsCOMPtr<nsIObserverService> svc =
-    do_CreateInstance("@mozilla.org/observer-service;1");
+      do_CreateInstance("@mozilla.org/observer-service;1");
 
   const size_t kFooCount = 10;
   for (size_t i = 0; i < kFooCount; i++) {
@@ -235,14 +226,18 @@ TEST(ObserverService, EnumerateWeakRefs)
 
 TEST(ObserverService, TestNotify)
 {
-  nsCString topicA; topicA.Assign( "topic-A" );
-  nsCString topicB; topicB.Assign( "topic-B" );
+  nsCString topicA;
+  topicA.Assign("topic-A");
+  nsCString topicB;
+  topicB.Assign("topic-B");
 
   nsCOMPtr<nsIObserverService> svc =
-    do_CreateInstance("@mozilla.org/observer-service;1");
+      do_CreateInstance("@mozilla.org/observer-service;1");
 
-  RefPtr<TestObserver> aObserver = new TestObserver(NS_LITERAL_STRING("Observer-A"));
-  RefPtr<TestObserver> bObserver = new TestObserver(NS_LITERAL_STRING("Observer-B"));
+  RefPtr<TestObserver> aObserver =
+      new TestObserver(NS_LITERAL_STRING("Observer-A"));
+  RefPtr<TestObserver> bObserver =
+      new TestObserver(NS_LITERAL_STRING("Observer-B"));
 
   // Add two observers for topicA.
   testResult(svc->AddObserver(aObserver, topicA.get(), false));

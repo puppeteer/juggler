@@ -11,12 +11,10 @@
 #include "nsIFile.h"
 #include <algorithm>
 
-#ifdef MOZ_TOOLKIT_SEARCH
-#include "nsIBrowserSearchService.h"
-#endif
-
+#include "nsISearchService.h"
 #include "nsIURIFixup.h"
 #include "nsIURIMutator.h"
+#include "nsIWebNavigation.h"
 #include "nsDefaultURIFixup.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/ContentChild.h"
@@ -51,29 +49,18 @@ nsDefaultURIFixup::CreateExposableURI(nsIURI* aURI, nsIURI** aReturn) {
   NS_ENSURE_ARG_POINTER(aURI);
   NS_ENSURE_ARG_POINTER(aReturn);
 
-  bool isWyciwyg = false;
-  aURI->SchemeIs("wyciwyg", &isWyciwyg);
-
   nsAutoCString userPass;
   aURI->GetUserPass(userPass);
 
   // most of the time we can just AddRef and return
-  if (!isWyciwyg && userPass.IsEmpty()) {
+  if (userPass.IsEmpty()) {
     *aReturn = aURI;
     NS_ADDREF(*aReturn);
     return NS_OK;
   }
 
   // Rats, we have to massage the URI
-  nsCOMPtr<nsIURI> uri;
-  if (isWyciwyg) {
-    nsresult rv =
-        nsContentUtils::RemoveWyciwygScheme(aURI, getter_AddRefs(uri));
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else {
-    // No need to clone the URI as NS_MutateURI does that for us.
-    uri = aURI;
-  }
+  nsCOMPtr<nsIURI> uri = aURI;
 
   Unused << NS_MutateURI(uri).SetUserPass(EmptyCString()).Finalize(uri);
 
@@ -396,6 +383,27 @@ nsDefaultURIFixup::GetFixupURIInfo(const nsACString& aStringURI,
 }
 
 NS_IMETHODIMP
+nsDefaultURIFixup::WebNavigationFlagsToFixupFlags(const nsACString& aStringURI,
+                                                  uint32_t aDocShellFlags,
+                                                  uint32_t* aFixupFlags) {
+  nsCOMPtr<nsIURI> uri;
+  NS_NewURI(getter_AddRefs(uri), aStringURI);
+  if (uri) {
+    aDocShellFlags &= ~nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
+  }
+
+  *aFixupFlags = 0;
+  if (aDocShellFlags & nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP) {
+    *aFixupFlags |= FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
+  }
+  if (aDocShellFlags & nsIWebNavigation::LOAD_FLAGS_FIXUP_SCHEME_TYPOS) {
+    *aFixupFlags |= FIXUP_FLAG_FIX_SCHEME_TYPOS;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
                                 nsIInputStream** aPostData,
                                 nsIURIFixupInfo** aInfo) {
@@ -421,7 +429,7 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
     }
 
     RefPtr<nsIInputStream> postData;
-    ipc::OptionalURIParams uri;
+    Maybe<ipc::URIParams> uri;
     nsAutoString providerName;
     if (!contentChild->SendKeywordToURI(keyword, &providerName, &postData,
                                         &uri)) {
@@ -440,9 +448,8 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
     return NS_OK;
   }
 
-#ifdef MOZ_TOOLKIT_SEARCH
   // Try falling back to the search service's default search engine
-  nsCOMPtr<nsIBrowserSearchService> searchSvc =
+  nsCOMPtr<nsISearchService> searchSvc =
       do_GetService("@mozilla.org/browser/search-service;1");
   if (searchSvc) {
     nsCOMPtr<nsISearchEngine> defaultEngine;
@@ -485,7 +492,6 @@ nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
       }
     }
   }
-#endif
 
   // out of options
   return NS_ERROR_NOT_AVAILABLE;
@@ -515,9 +521,7 @@ bool nsDefaultURIFixup::MakeAlternateURI(nsCOMPtr<nsIURI>& aURI) {
   }
 
   // Code only works for http. Not for any other protocol including https!
-  bool isHttp = false;
-  aURI->SchemeIs("http", &isHttp);
-  if (!isHttp) {
+  if (!net::SchemeIsHTTP(aURI)) {
     return false;
   }
 

@@ -61,19 +61,19 @@ static void padding(uint16_t *tmp, const ptrdiff_t tmp_stride,
 {
     // fill extended input buffer
     int x_start = -2, x_end = w + 2, y_start = -2, y_end = h + 2;
-    if (!(edges & HAVE_TOP)) {
+    if (!(edges & CDEF_HAVE_TOP)) {
         fill(tmp - 2 - 2 * tmp_stride, tmp_stride, w + 4, 2);
         y_start = 0;
     }
-    if (!(edges & HAVE_BOTTOM)) {
+    if (!(edges & CDEF_HAVE_BOTTOM)) {
         fill(tmp + h * tmp_stride - 2, tmp_stride, w + 4, 2);
         y_end -= 2;
     }
-    if (!(edges & HAVE_LEFT)) {
+    if (!(edges & CDEF_HAVE_LEFT)) {
         fill(tmp + y_start * tmp_stride - 2, tmp_stride, 2, y_end - y_start);
         x_start = 0;
     }
-    if (!(edges & HAVE_RIGHT)) {
+    if (!(edges & CDEF_HAVE_RIGHT)) {
         fill(tmp + y_start * tmp_stride + w, tmp_stride, 2, y_end - y_start);
         x_end -= 2;
     }
@@ -97,7 +97,8 @@ cdef_filter_block_c(pixel *dst, const ptrdiff_t dst_stride,
                     const pixel (*left)[2], /*const*/ pixel *const top[2],
                     const int w, const int h, const int pri_strength,
                     const int sec_strength, const int dir,
-                    const int damping, const enum CdefEdgeFlags edges)
+                    const int damping, const enum CdefEdgeFlags edges
+                    HIGHBD_DECL_SUFFIX)
 {
     static const int8_t cdef_directions[8 /* dir */][2 /* pass */] = {
         { -1 * 12 + 1, -2 * 12 + 2 },
@@ -109,13 +110,12 @@ cdef_filter_block_c(pixel *dst, const ptrdiff_t dst_stride,
         {  1 * 12 + 0,  2 * 12 + 0 },
         {  1 * 12 + 0,  2 * 12 - 1 }
     };
-    static const uint8_t cdef_pri_taps[2][2] = { { 4, 2 }, { 3, 3 } };
-    static const uint8_t sec_taps[2] = { 2, 1 };
     const ptrdiff_t tmp_stride = 12;
     assert((w == 4 || w == 8) && (h == 4 || h == 8));
     uint16_t tmp_buf[144];  // 12*12 is the maximum value of tmp_stride * (h + 4)
     uint16_t *tmp = tmp_buf + 2 * tmp_stride + 2;
-    const uint8_t *const pri_taps = cdef_pri_taps[(pri_strength >> (BITDEPTH - 8)) & 1];
+    const int bitdepth_min_8 = bitdepth_from_max(bitdepth_max) - 8;
+    const int pri_tap = 4 - ((pri_strength >> bitdepth_min_8) & 1);
 
     padding(tmp, tmp_stride, dst, dst_stride, left, top, w, h, edges);
 
@@ -125,12 +125,15 @@ cdef_filter_block_c(pixel *dst, const ptrdiff_t dst_stride,
             int sum = 0;
             const int px = dst[x];
             int max = px, min = px;
+            int pri_tap_k = pri_tap;
             for (int k = 0; k < 2; k++) {
                 const int off1 = cdef_directions[dir][k];
                 const int p0 = tmp[x + off1];
                 const int p1 = tmp[x - off1];
-                sum += pri_taps[k] * constrain(p0 - px, pri_strength, damping);
-                sum += pri_taps[k] * constrain(p1 - px, pri_strength, damping);
+                sum += pri_tap_k * constrain(p0 - px, pri_strength, damping);
+                sum += pri_tap_k * constrain(p1 - px, pri_strength, damping);
+                // if pri_tap_k == 4 then it becomes 2 else it remains 3
+                pri_tap_k -= (pri_tap_k << 1) - 6;
                 if (p0 != INT16_MAX) max = imax(p0, max);
                 if (p1 != INT16_MAX) max = imax(p1, max);
                 min = imin(p0, min);
@@ -149,10 +152,12 @@ cdef_filter_block_c(pixel *dst, const ptrdiff_t dst_stride,
                 min = imin(s1, min);
                 min = imin(s2, min);
                 min = imin(s3, min);
-                sum += sec_taps[k] * constrain(s0 - px, sec_strength, damping);
-                sum += sec_taps[k] * constrain(s1 - px, sec_strength, damping);
-                sum += sec_taps[k] * constrain(s2 - px, sec_strength, damping);
-                sum += sec_taps[k] * constrain(s3 - px, sec_strength, damping);
+                // sec_tap starts at 2 and becomes 1
+                const int sec_tap = 2 - k;
+                sum += sec_tap * constrain(s0 - px, sec_strength, damping);
+                sum += sec_tap * constrain(s1 - px, sec_strength, damping);
+                sum += sec_tap * constrain(s2 - px, sec_strength, damping);
+                sum += sec_tap * constrain(s3 - px, sec_strength, damping);
             }
             dst[x] = iclip(px + ((8 + sum - (sum < 0)) >> 4), min, max);
         }
@@ -170,10 +175,11 @@ static void cdef_filter_block_##w##x##h##_c(pixel *const dst, \
                                             const int sec_strength, \
                                             const int dir, \
                                             const int damping, \
-                                            const enum CdefEdgeFlags edges) \
+                                            const enum CdefEdgeFlags edges \
+                                            HIGHBD_DECL_SUFFIX) \
 { \
     cdef_filter_block_c(dst, stride, left, top, w, h, pri_strength, sec_strength, \
-                        dir, damping, edges); \
+                        dir, damping, edges HIGHBD_TAIL_SUFFIX); \
 }
 
 cdef_fn(4, 4);
@@ -181,15 +187,16 @@ cdef_fn(4, 8);
 cdef_fn(8, 8);
 
 static int cdef_find_dir_c(const pixel *img, const ptrdiff_t stride,
-                           unsigned *const var)
+                           unsigned *const var HIGHBD_DECL_SUFFIX)
 {
+    const int bitdepth_min_8 = bitdepth_from_max(bitdepth_max) - 8;
     int partial_sum_hv[2][8] = { { 0 } };
     int partial_sum_diag[2][15] = { { 0 } };
     int partial_sum_alt[4][11] = { { 0 } };
 
     for (int y = 0; y < 8; y++) {
         for (int x = 0; x < 8; x++) {
-            const int px = (img[x] >> (BITDEPTH - 8)) - 128;
+            const int px = (img[x] >> bitdepth_min_8) - 128;
 
             partial_sum_diag[0][     y       +  x      ] += px;
             partial_sum_alt [0][     y       + (x >> 1)] += px;
@@ -247,13 +254,17 @@ static int cdef_find_dir_c(const pixel *img, const ptrdiff_t stride,
     return best_dir;
 }
 
-void bitfn(dav1d_cdef_dsp_init)(Dav1dCdefDSPContext *const c) {
+COLD void bitfn(dav1d_cdef_dsp_init)(Dav1dCdefDSPContext *const c) {
     c->dir = cdef_find_dir_c;
     c->fb[0] = cdef_filter_block_8x8_c;
     c->fb[1] = cdef_filter_block_4x8_c;
     c->fb[2] = cdef_filter_block_4x4_c;
 
-#if HAVE_ASM && ARCH_X86 && BITDEPTH == 8
+#if HAVE_ASM
+#if ARCH_AARCH64 || ARCH_ARM
+    bitfn(dav1d_cdef_dsp_init_arm)(c);
+#elif ARCH_X86
     bitfn(dav1d_cdef_dsp_init_x86)(c);
+#endif
 #endif
 }

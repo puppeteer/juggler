@@ -12,9 +12,9 @@ import signal
 import subprocess
 import sys
 import tempfile
-import urllib2
 import zipfile
 from collections import namedtuple
+from six.moves.urllib.request import urlopen
 
 import mozfile
 import mozinfo
@@ -110,7 +110,9 @@ def check_for_crashes(dump_directory,
                 sig=signature,
                 out="\n".join(stackwalk_output),
                 err="\n".join(info.stackwalk_errors))
-            print(output.encode("utf-8"))
+            if sys.stdout.encoding != 'UTF-8':
+                output = output.encode('utf-8')
+            print(output)
 
     return crash_count
 
@@ -131,6 +133,34 @@ def log_crashes(logger,
         kwargs.pop("extra")
         logger.crash(process=process, test=test, **kwargs)
     return crash_count
+
+
+# Function signatures of abort functions which should be ignored when
+# determining the appropriate frame for the crash signature.
+ABORT_SIGNATURES = (
+    "Abort(char const*)",
+    "GeckoCrash",
+    "NS_DebugBreak",
+    # This signature is part of Rust panic stacks on some platforms. On
+    # others, it includes a template parameter containing "core::panic::" and
+    # is automatically filtered out by that pattern.
+    "core::ops::function::Fn::call",
+    "gkrust_shared::panic_hook",
+    "intentional_panic",
+    "mozalloc_abort",
+    "static void Abort(const char *)",
+)
+
+# Similar to above, but matches if the substring appears anywhere in the
+# frame's signature.
+ABORT_SUBSTRINGS = (
+    # On some platforms, Rust panic frames unfortunately appear without the
+    # std::panicking or core::panic namespaces.
+    "_panic_",
+    "core::panic::",
+    "core::result::unwrap_failed",
+    "std::panicking::",
+)
 
 
 class CrashInfo(object):
@@ -179,7 +209,7 @@ class CrashInfo(object):
             self.remove_symbols = True
             self.logger.info("Downloading symbols from: %s" % self.symbols_path)
             # Get the symbols and write them to a temporary zipfile
-            data = urllib2.urlopen(self.symbols_path)
+            data = urlopen(self.symbols_path)
             with tempfile.TemporaryFile() as symbols_file:
                 symbols_file.write(data.read())
                 # extract symbols to a temporary directory (which we'll delete after
@@ -273,9 +303,21 @@ class CrashInfo(object):
                 lines = out.splitlines()
                 for i, line in enumerate(lines):
                     if "(crashed)" in line:
-                        match = re.search(r"^ 0  (?:.*!)?(?:void )?([^\[]+)", lines[i + 1])
-                        if match:
-                            signature = "@ %s" % match.group(1).strip()
+                        # Try to find the first frame that isn't an abort
+                        # function to use as the signature.
+                        for line in lines[i + 1:]:
+                            if not line.startswith(" "):
+                                break
+
+                            match = re.search(r"^ \d  (?:.*!)?(?:void )?([^\[]+)", line)
+                            if match:
+                                func = match.group(1).strip()
+                                signature = "@ %s" % func
+
+                                if not (func in ABORT_SIGNATURES or
+                                        any(pat in func
+                                            for pat in ABORT_SUBSTRINGS)):
+                                    break
                         break
             else:
                 include_stderr = True
@@ -478,10 +520,11 @@ if mozinfo.isWin:
         :param pid: PID of the process to terminate.
         """
         PROCESS_TERMINATE = 0x0001
+        SYNCHRONIZE = 0x00100000
         WAIT_OBJECT_0 = 0x0
         WAIT_FAILED = -1
         logger = get_logger()
-        handle = OpenProcess(PROCESS_TERMINATE, 0, pid)
+        handle = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, 0, pid)
         if handle:
             if kernel32.TerminateProcess(handle, 1):
                 # TerminateProcess is async; wait up to 30 seconds for process to

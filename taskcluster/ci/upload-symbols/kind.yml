@@ -1,7 +1,7 @@
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
+---
 loader: taskgraph.loader.single_dep:loader
 
 transforms:
@@ -19,26 +19,16 @@ not-for-build-platforms:
 
 job-template:
     description: Upload Symbols
-    worker-type: aws-provisioner-v1/gecko-{level}-b-linux
+    worker-type: b-linux
     worker:
         docker-image: {in-tree: "lint"}
         max-run-time: 900
         env:
-            ARTIFACT_TASKID: {"task-reference": "<build>"}
             # {level} gets replaced in the upload_symbols transform
             SYMBOL_SECRET: "project/releng/gecko/build/level-{level}/gecko-symbol-upload"
     run:
         using: mach
-        mach: python toolkit/crashreporter/tools/upload_symbols.py https://queue.taskcluster.net/v1/task/${ARTIFACT_TASKID}/artifacts/public/build/target.crashreporter-symbols-full.zip
+        mach: {artifact-reference: "python toolkit/crashreporter/tools/upload_symbols.py <build/public/build/target.crashreporter-symbols-full.zip>"}
         sparse-profile: upload-symbols
-    optimization:
-        only-if-dependencies-run: null
     scopes:
         - secrets:get:project/releng/gecko/build/level-{level}/gecko-symbol-upload
-    run-on-projects:
-        by-build-platform:
-            .*devedition.*: ['mozilla-beta', 'maple']
-            # Only upload symbols for nightlies on most branches.
-            .*(?<!-devedition)-nightly: ['all']
-            # Allow symbol upload for any build type on try.
-            default: ['try']

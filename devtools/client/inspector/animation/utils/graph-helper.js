@@ -48,8 +48,14 @@ class SummaryGraphHelper {
    * @param {Function} toPathStringFunc
    *        Which returns a path string for 'd' attribute for <path> from given segments.
    */
-  constructor(state, keyframes, totalDuration, minSegmentDuration,
-              getValueFunc, toPathStringFunc) {
+  constructor(
+    state,
+    keyframes,
+    totalDuration,
+    minSegmentDuration,
+    getValueFunc,
+    toPathStringFunc
+  ) {
     this.totalDuration = totalDuration;
     this.minSegmentDuration = minSegmentDuration;
     this.minProgressThreshold =
@@ -73,9 +79,14 @@ class SummaryGraphHelper {
    *         e.g.[{x: {Number} time, y: {Number} progress}, ...]
    */
   createPathSegments(startTime, endTime) {
-    return createPathSegments(startTime, endTime,
-                              this.minSegmentDuration, this.minProgressThreshold,
-                              this.durationResolution, this.getSegment);
+    return createPathSegments(
+      startTime,
+      endTime,
+      this.minSegmentDuration,
+      this.minProgressThreshold,
+      this.durationResolution,
+      this.getSegment
+    );
   }
 
   /**
@@ -110,8 +121,14 @@ class SummaryGraphHelper {
  *         Array of path segment.
  *         e.g.[{x: {Number} time, y: {Number} progress}, ...]
  */
-function createPathSegments(startTime, endTime, minSegmentDuration,
-                            minProgressThreshold, resolution, getSegment) {
+function createPathSegments(
+  startTime,
+  endTime,
+  minSegmentDuration,
+  minProgressThreshold,
+  resolution,
+  getSegment
+) {
   // If the duration is too short, early return.
   if (endTime - startTime < minSegmentDuration) {
     return [getSegment(startTime), getSegment(endTime)];
@@ -141,9 +158,14 @@ function createPathSegments(startTime, endTime, minSegmentDuration,
       // by adding/subtracting BOUND_EXCLUDING_TIME).
       const nextStartTime = previousSegment.x + BOUND_EXCLUDING_TIME;
       const nextEndTime = currentSegment.x - BOUND_EXCLUDING_TIME;
-      const segments =
-        createPathSegments(nextStartTime, nextEndTime, minSegmentDuration,
-                           minProgressThreshold, DEFAULT_DURATION_RESOLUTION, getSegment);
+      const segments = createPathSegments(
+        nextStartTime,
+        nextEndTime,
+        minSegmentDuration,
+        minProgressThreshold,
+        DEFAULT_DURATION_RESOLUTION,
+        getSegment
+      );
       pathSegments = pathSegments.concat(segments);
     }
 
@@ -170,10 +192,10 @@ function createSummaryGraphPathStringFunction(endTime, playbackRate) {
   return segments => {
     segments = mapSegmentsToPlaybackRate(segments, endTime, playbackRate);
     const firstSegment = segments[0];
-    let pathString = `M${ firstSegment.x },0 `;
+    let pathString = `M${firstSegment.x},0 `;
     pathString += toPathString(segments);
     const lastSegment = segments[segments.length - 1];
-    pathString += `L${ lastSegment.x },0 Z`;
+    pathString += `L${lastSegment.x},0 Z`;
     return pathString;
   };
 }
@@ -197,7 +219,10 @@ function getPreferredDurationResolution(keyframes) {
   for (const keyframe of keyframes) {
     if (previousOffset && previousOffset != keyframe.offset) {
       const interval = keyframe.offset - previousOffset;
-      durationResolution = Math.max(durationResolution, Math.ceil(1 / interval));
+      durationResolution = Math.max(
+        durationResolution,
+        Math.ceil(1 / interval)
+      );
     }
     previousOffset = keyframe.offset;
   }
@@ -216,20 +241,17 @@ function getPreferredDurationResolution(keyframes) {
  *         Preferred threshold.
  */
 function getPreferredProgressThreshold(state, keyframes) {
-  let threshold = DEFAULT_MIN_PROGRESS_THRESHOLD;
-  let stepsOrFrames;
-
-  if ((stepsOrFrames = getStepsOrFramesCount(state.easing))) {
-    threshold = Math.min(threshold, (1 / (stepsOrFrames + 1)));
-  }
+  const steps = getStepsCount(state.easing);
+  const threshold = Math.min(DEFAULT_MIN_PROGRESS_THRESHOLD, 1 / (steps + 1));
 
   if (!keyframes) {
     return threshold;
   }
 
-  threshold = Math.min(threshold, getPreferredProgressThresholdByKeyframes(keyframes));
-
-  return threshold;
+  return Math.min(
+    threshold,
+    getPreferredProgressThresholdByKeyframes(keyframes)
+  );
 }
 
 /**
@@ -242,7 +264,6 @@ function getPreferredProgressThreshold(state, keyframes) {
  */
 function getPreferredProgressThresholdByKeyframes(keyframes) {
   let threshold = DEFAULT_MIN_PROGRESS_THRESHOLD;
-  let stepsOrFrames;
 
   for (let i = 0; i < keyframes.length - 1; i++) {
     const keyframe = keyframes[i];
@@ -251,20 +272,23 @@ function getPreferredProgressThresholdByKeyframes(keyframes) {
       continue;
     }
 
-    if ((stepsOrFrames = getStepsOrFramesCount(keyframe.easing))) {
+    const steps = getStepsCount(keyframe.easing);
+
+    if (steps) {
       const nextKeyframe = keyframes[i + 1];
-      threshold =
-        Math.min(threshold,
-                 1 / (stepsOrFrames + 1) * (nextKeyframe.offset - keyframe.offset));
+      threshold = Math.min(
+        threshold,
+        (1 / (steps + 1)) * (nextKeyframe.offset - keyframe.offset)
+      );
     }
   }
 
   return threshold;
 }
 
-function getStepsOrFramesCount(easing) {
-  const stepsOrFramesFunction = easing.match(/(steps|frames)\((\d+)/);
-  return stepsOrFramesFunction ? parseInt(stepsOrFramesFunction[2], 10) : 0;
+function getStepsCount(easing) {
+  const stepsFunction = easing.match(/(steps)\((\d+)/);
+  return stepsFunction ? parseInt(stepsFunction[2], 10) : 0;
 }
 
 function mapSegmentsToPlaybackRate(segments, endTime, playbackRate) {
@@ -290,7 +314,7 @@ function mapSegmentsToPlaybackRate(segments, endTime, playbackRate) {
 function toPathString(segments) {
   let pathString = "";
   segments.forEach(segment => {
-    pathString += `L${ segment.x },${ segment.y } `;
+    pathString += `L${segment.x},${segment.y} `;
   });
   return pathString;
 }
@@ -301,7 +325,6 @@ exports.DEFAULT_DURATION_RESOLUTION = DEFAULT_DURATION_RESOLUTION;
 exports.DEFAULT_EASING_HINT_STROKE_WIDTH = DEFAULT_EASING_HINT_STROKE_WIDTH;
 exports.DEFAULT_GRAPH_HEIGHT = DEFAULT_GRAPH_HEIGHT;
 exports.DEFAULT_KEYFRAMES_GRAPH_DURATION = DEFAULT_KEYFRAMES_GRAPH_DURATION;
-exports.getPreferredProgressThresholdByKeyframes =
-  getPreferredProgressThresholdByKeyframes;
+exports.getPreferredProgressThresholdByKeyframes = getPreferredProgressThresholdByKeyframes;
 exports.SummaryGraphHelper = SummaryGraphHelper;
 exports.toPathString = toPathString;

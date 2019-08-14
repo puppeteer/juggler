@@ -4,9 +4,31 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from moztest.resolve import TestResolver
-from mozversioncontrol import HgRepository, GitRepository
+import os
+
 import pytest
+import yaml
+from mock import MagicMock
+from moztest.resolve import TestResolver
+from taskgraph.graph import Graph
+from taskgraph.task import Task
+from taskgraph.taskgraph import TaskGraph
+
+from tryselect import push
+
+
+@pytest.fixture
+def tg(request):
+    if not hasattr(request.module, 'TASKS'):
+        pytest.fail("'tg' fixture used from a module that didn't define the TASKS variable")
+
+    tasks = request.module.TASKS
+    for task in tasks:
+        task.setdefault('task', {})
+        task['task'].setdefault('tags', {})
+
+    tasks = {t['label']: Task(**t) for t in tasks}
+    return TaskGraph(tasks, Graph(tasks.keys(), set()))
 
 
 @pytest.fixture
@@ -19,17 +41,28 @@ def patch_resolver(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def patch_vcs(monkeypatch, tmpdir):
-    # Make sure we don't accidentally push to try
-    def fake_push_to_try(*args, **kwargs):
-        pass
+def patch_vcs(monkeypatch):
+    attrs = {
+        'path': push.vcs.path,
+    }
+    mock = MagicMock()
+    mock.configure_mock(**attrs)
+    monkeypatch.setattr(push, 'vcs', mock)
 
-    def fake_working_directory_clean(*args, **kwargs):
-        return True
 
-    for cls in (HgRepository, GitRepository):
-        monkeypatch.setattr(cls, 'push_to_try', fake_push_to_try)
-        monkeypatch.setattr(cls, 'working_directory_clean', fake_working_directory_clean)
+@pytest.fixture(scope='session')
+def run_mach():
+    import mach_bootstrap
+    from mach.config import ConfigSettings
+    from tryselect.tasks import build
+
+    mach = mach_bootstrap.bootstrap(build.topsrcdir)
+
+    def inner(args):
+        mach.settings = ConfigSettings()
+        return mach.run(args)
+
+    return inner
 
 
 def pytest_generate_tests(metafunc):
@@ -42,3 +75,18 @@ def pytest_generate_tests(metafunc):
         tests = list(load_tests())
         ids = ['{} {}'.format(t[0], ' '.join(t[1])).strip() for t in tests]
         metafunc.parametrize('template,args,expected', tests, ids=ids)
+
+    elif all(fixture in metafunc.fixturenames for fixture in ('shared_name', 'shared_preset')):
+        preset_path = os.path.join(push.build.topsrcdir, 'tools', 'tryselect', 'try_presets.yml')
+        with open(preset_path, 'r') as fh:
+            presets = yaml.safe_load(fh).items()
+
+        ids = [p[0] for p in presets]
+
+        # Mark fuzzy presets on Windows xfail due to fzf not being installed.
+        if os.name == 'nt':
+            for i, preset in enumerate(presets):
+                if preset[1]['selector'] == 'fuzzy':
+                    presets[i] = pytest.param(*preset, marks=pytest.mark.xfail)
+
+        metafunc.parametrize('shared_name,shared_preset', presets, ids=ids)

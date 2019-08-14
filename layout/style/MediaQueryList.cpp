@@ -12,14 +12,14 @@
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/EventTargetBinding.h"
 #include "nsPresContext.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 #define ONCHANGE_STRING NS_LITERAL_STRING("change")
 
 namespace mozilla {
 namespace dom {
 
-MediaQueryList::MediaQueryList(nsIDocument* aDocument,
+MediaQueryList::MediaQueryList(Document* aDocument,
                                const nsAString& aMediaQueryList,
                                CallerType aCallerType)
     : DOMEventTargetHelper(aDocument->GetInnerWindow()),
@@ -118,32 +118,13 @@ void MediaQueryList::RecomputeMatches() {
     return;
   }
 
-  // FIXME(emilio, bug 1490401): We shouldn't need a pres context to evaluate
-  // media queries.
-  nsPresContext* presContext = mDocument->GetPresContext();
-  if (!presContext && mDocument->GetParentDocument()) {
-    // Flush frames on the parent so our prescontext will get
-    // created if needed.
-    mDocument->GetParentDocument()->FlushPendingNotifications(
-        FlushType::Frames);
-    // That might have killed our document, so recheck that.
-    if (!mDocument) {
-      return;
-    }
-
-    presContext = mDocument->GetPresContext();
-  }
-
-  if (!presContext) {
-    // XXXbz What's the right behavior here?  Spec doesn't say.
-    return;
-  }
-
-  mMatches = mMediaList->Matches(presContext);
+  mMatches = mMediaList->Matches(*mDocument);
   mMatchesValid = true;
 }
 
-nsISupports* MediaQueryList::GetParentObject() const { return mDocument; }
+nsISupports* MediaQueryList::GetParentObject() const {
+  return ToSupports(mDocument);
+}
 
 JSObject* MediaQueryList::WrapObject(JSContext* aCx,
                                      JS::Handle<JSObject*> aGivenProto) {

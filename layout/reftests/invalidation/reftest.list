@@ -101,3 +101,6 @@ skip-if(/^Windows\x20NT\x2010\.0/.test(http.oscpu)) != fractional-transform-2.ht
 != fractional-transform-3.html about:blank
 
 == partially-scrolled-svg-group.html partially-scrolled-svg-group-ref.html
+
+== paintedlayer-recycling-8.html paintedlayer-recycling-8-ref.html
+pref(image.downscale-during-decode.enabled,true) == jetstream-scroll.html jetstream-scroll-ref.html

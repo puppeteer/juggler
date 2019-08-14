@@ -47,18 +47,17 @@ uniform HIGHP_SAMPLER_FLOAT isampler2D sPrimitiveHeadersI;
 // Instanced attributes
 in ivec4 aData;
 
-#define VECS_PER_PRIM_HEADER_F 2U
+#define VECS_PER_PRIM_HEADER_F 3U
 #define VECS_PER_PRIM_HEADER_I 2U
 
 struct PrimitiveHeader {
     RectWithSize local_rect;
     RectWithSize local_clip_rect;
+    vec4 snap_offsets;
     float z;
     int specific_prim_address;
-    int render_task_index;
-    int clip_task_index;
     int transform_id;
-    ivec3 user_data;
+    ivec4 user_data;
 };
 
 PrimitiveHeader fetch_prim_header(int index) {
@@ -67,6 +66,7 @@ PrimitiveHeader fetch_prim_header(int index) {
     ivec2 uv_f = get_fetch_uv(index, VECS_PER_PRIM_HEADER_F);
     vec4 local_rect = TEXEL_FETCH(sPrimitiveHeadersF, uv_f, 0, ivec2(0, 0));
     vec4 local_clip_rect = TEXEL_FETCH(sPrimitiveHeadersF, uv_f, 0, ivec2(1, 0));
+    ph.snap_offsets = TEXEL_FETCH(sPrimitiveHeadersF, uv_f, 0, ivec2(2, 0));
     ph.local_rect = RectWithSize(local_rect.xy, local_rect.zw);
     ph.local_clip_rect = RectWithSize(local_clip_rect.xy, local_clip_rect.zw);
 
@@ -74,11 +74,9 @@ PrimitiveHeader fetch_prim_header(int index) {
     ivec4 data0 = TEXEL_FETCH(sPrimitiveHeadersI, uv_i, 0, ivec2(0, 0));
     ivec4 data1 = TEXEL_FETCH(sPrimitiveHeadersI, uv_i, 0, ivec2(1, 0));
     ph.z = float(data0.x);
-    ph.render_task_index = data0.y;
-    ph.specific_prim_address = data0.z;
-    ph.clip_task_index = data0.w;
-    ph.transform_id = data1.x;
-    ph.user_data = data1.yzw;
+    ph.specific_prim_address = data0.y;
+    ph.transform_id = data0.z;
+    ph.user_data = data1;
 
     return ph;
 }
@@ -94,7 +92,8 @@ VertexInfo write_vertex(RectWithSize instance_rect,
                         float z,
                         Transform transform,
                         PictureTask task,
-                        RectWithSize snap_rect) {
+                        RectWithSize snap_rect,
+                        vec4 snap_offsets) {
 
     // Select the corner of the local rect that we are processing.
     vec2 local_pos = instance_rect.p0 + instance_rect.size * aPosition.xy;
@@ -105,16 +104,15 @@ VertexInfo write_vertex(RectWithSize instance_rect,
     /// Compute the snapping offset.
     vec2 snap_offset = compute_snap_offset(
         clamped_local_pos,
-        transform.m,
         snap_rect,
-        task.common_data.device_pixel_scale
+        snap_offsets
     );
 
     // Transform the current vertex to world space.
     vec4 world_pos = transform.m * vec4(clamped_local_pos, 0.0, 1.0);
 
     // Convert the world positions to device pixel space.
-    vec2 device_pos = world_pos.xy * task.common_data.device_pixel_scale;
+    vec2 device_pos = world_pos.xy * task.device_pixel_scale;
 
     // Apply offsets for the render task to get correct screen location.
     vec2 final_offset = snap_offset - task.content_origin + task.common_data.task_rect.p0;
@@ -191,7 +189,7 @@ VertexInfo write_transform_vertex(RectWithSize local_segment_rect,
     // Transform the current vertex to the world cpace.
     vec4 world_pos = transform.m * vec4(local_pos, 0.0, 1.0);
     vec4 final_pos = vec4(
-        world_pos.xy * task.common_data.device_pixel_scale + task_offset * world_pos.w,
+        world_pos.xy * task.device_pixel_scale + task_offset * world_pos.w,
         z * world_pos.w,
         world_pos.w
     );
@@ -214,13 +212,23 @@ VertexInfo write_transform_vertex(RectWithSize local_segment_rect,
 }
 
 void write_clip(vec4 world_pos, vec2 snap_offset, ClipArea area) {
-    vec2 uv = world_pos.xy * area.common_data.device_pixel_scale +
+    vec2 uv = world_pos.xy * area.device_pixel_scale +
         world_pos.w * (snap_offset + area.common_data.task_rect.p0 - area.screen_origin);
     vClipMaskUvBounds = vec4(
         area.common_data.task_rect.p0,
         area.common_data.task_rect.p0 + area.common_data.task_rect.size
     );
     vClipMaskUv = vec4(uv, area.common_data.texture_layer_index, world_pos.w);
+}
+
+// Read the exta image data containing the homogeneous screen space coordinates
+// of the corners, interpolate between them, and return real screen space UV.
+vec2 get_image_quad_uv(int address, vec2 f) {
+    ImageResourceExtra extra_data = fetch_image_resource_extra(address);
+    vec4 x = mix(extra_data.st_tl, extra_data.st_tr, f.x);
+    vec4 y = mix(extra_data.st_bl, extra_data.st_br, f.x);
+    vec4 z = mix(x, y, f.y);
+    return z.xy / z.w;
 }
 #endif //WR_VERTEX_SHADER
 
@@ -264,7 +272,7 @@ vec4 dither(vec4 color) {
 }
 #endif //WR_FEATURE_DITHERING
 
-vec4 sample_gradient(int address, float offset, float gradient_repeat) {
+vec4 sample_gradient(HIGHP_FS_ADDRESS int address, float offset, float gradient_repeat) {
     // Modulo the offset if the gradient repeats.
     float x = mix(offset, fract(offset), gradient_repeat);
 

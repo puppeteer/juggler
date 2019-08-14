@@ -46,8 +46,11 @@ with Files("AsanReporter.jsm"):
 with Files('AsyncTabSwitcher.jsm'):
     BUG_COMPONENT = ('Firefox', 'Tabbed Browser')
 
+with Files('NewTabPagePreloading.jsm'):
+    BUG_COMPONENT = ('Firefox', 'Tabbed Browser')
+
 with Files("BrowserWindowTracker.jsm"):
-    BUG_COMPONENT = ("Core", "Networking")
+    BUG_COMPONENT = ("Firefox", "General")
 
 with Files("*Telemetry.jsm"):
     BUG_COMPONENT = ("Toolkit", "Telemetry")
@@ -58,6 +61,9 @@ with Files("ContentCrashHandlers.jsm"):
 with Files("ContentSearch.jsm"):
     BUG_COMPONENT = ("Firefox", "Search")
 
+with Files("EveryWindow.jsm"):
+    BUG_COMPONENT = ("Firefox", "General")
+
 with Files("ExtensionsUI.jsm"):
     BUG_COMPONENT = ("WebExtensions", "General")
 
@@ -65,12 +71,15 @@ with Files("LaterRun.jsm"):
     BUG_COMPONENT = ("Firefox", "Tours")
 
 with Files("LiveBookmarkMigrator.jsm"):
-    BUG_COMPONENT = ("Firefox", "RSS Discovery and Preview")
+    BUG_COMPONENT = ("Firefox", "General")
 
 with Files("OpenInTabsUtils.jsm"):
     BUG_COMPONENT = ("Firefox", "Tabbed Browser")
 
 with Files("PermissionUI.jsm"):
+   BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
+
+with Files("PermissionUITelemetry.jsm"):
    BUG_COMPONENT = ("Firefox", "Site Identity and Permission Panels")
 
 with Files("ProcessHangMonitor.jsm"):
@@ -125,7 +134,6 @@ XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
 EXTRA_JS_MODULES += [
     'AboutNewTab.jsm',
     'AsyncTabSwitcher.jsm',
-    'BrowserErrorReporter.jsm',
     'BrowserUsageTelemetry.jsm',
     'BrowserWindowTracker.jsm',
     'ContentClick.jsm',
@@ -134,16 +142,18 @@ EXTRA_JS_MODULES += [
     'ContentObservers.js',
     'ContentSearch.jsm',
     'Discovery.jsm',
+    'EveryWindow.jsm',
     'ExtensionsUI.jsm',
     'FaviconLoader.jsm',
-    'Feeds.jsm',
     'FormValidationHandler.jsm',
     'HomePage.jsm',
     'LaterRun.jsm',
     'LiveBookmarkMigrator.jsm',
+    'NewTabPagePreloading.jsm',
     'OpenInTabsUtils.jsm',
     'PageActions.jsm',
     'PermissionUI.jsm',
+    'PermissionUITelemetry.jsm',
     'PingCentre.jsm',
     'ProcessHangMonitor.jsm',
     'ReaderParent.jsm',
@@ -153,6 +163,7 @@ EXTRA_JS_MODULES += [
     'SiteDataManager.jsm',
     'SitePermissions.jsm',
     'TabsList.jsm',
+    'TabUnloader.jsm',
     'ThemeVariableMap.jsm',
     'TransientPrefs.jsm',
     'webrtcUI.jsm',

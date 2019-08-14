@@ -9,16 +9,13 @@
 
 const SEARCH_APP_DIR = 1;
 
-function run_test() {
-  do_load_manifest("data/chrome.manifest");
-
+add_task(async function setup() {
   configureToLoadJarEngines();
-
-  run_next_test();
-}
+  await AddonTestUtils.promiseStartupManager();
+});
 
 add_test(function test_identifier() {
-  Services.search.init(async function initComplete(aResult) {
+  Services.search.init().then(async function initComplete(aResult) {
     info("init'd search service");
     Assert.ok(Components.isSuccessCode(aResult));
 

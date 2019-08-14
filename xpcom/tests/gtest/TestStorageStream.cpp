@@ -16,17 +16,15 @@
 
 namespace {
 
-void
-WriteData(nsIOutputStream* aOut, nsTArray<char>& aData, uint32_t aNumBytes,
-          nsACString& aDataWritten)
-{
+void WriteData(nsIOutputStream* aOut, nsTArray<char>& aData, uint32_t aNumBytes,
+               nsACString& aDataWritten) {
   uint32_t n;
   nsresult rv = aOut->Write(aData.Elements(), aNumBytes, &n);
   EXPECT_TRUE(NS_SUCCEEDED(rv));
   aDataWritten.Append(aData.Elements(), aNumBytes);
 }
 
-} // namespace
+}  // namespace
 
 TEST(StorageStreams, Main)
 {

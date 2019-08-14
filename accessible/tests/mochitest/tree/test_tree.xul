@@ -6,8 +6,7 @@
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         title="Accessible XUL tree hierarchy tests">
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
 
   <script type="application/javascript"
           src="../treeview.js" />
@@ -71,9 +70,8 @@
         ]
       };
 
-      var treeBoxObject = aTree.treeBoxObject;
       var view = aTree.view;
-      var columnCount = treeBoxObject.columns.count;
+      var columnCount = aTree.columns.count;
 
       for (var idx = 0; idx < columnCount; idx++)
         accTreeForColumns.children.push({ COLUMNHEADER: [ ] });

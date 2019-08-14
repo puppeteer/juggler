@@ -8,6 +8,7 @@
 #define TextDrawTarget_h
 
 #include "mozilla/gfx/2D.h"
+#include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -52,9 +53,10 @@ class TextDrawTarget : public DrawTarget {
   explicit TextDrawTarget(wr::DisplayListBuilder& aBuilder,
                           wr::IpcResourceUpdateQueue& aResources,
                           const layers::StackingContextHelper& aSc,
-                          layers::WebRenderLayerManager* aManager,
-                          nsDisplayItem* aItem, nsRect& aBounds)
-      : mBuilder(aBuilder) {
+                          layers::RenderRootStateManager* aManager,
+                          nsDisplayItem* aItem, nsRect& aBounds,
+                          bool aCallerDoesSaveRestore = false)
+      : mCallerDoesSaveRestore(aCallerDoesSaveRestore), mBuilder(aBuilder) {
     Reinitialize(aResources, aSc, aManager, aItem, aBounds);
   }
 
@@ -62,11 +64,11 @@ class TextDrawTarget : public DrawTarget {
   TextDrawTarget(const TextDrawTarget& src) = delete;
   TextDrawTarget& operator=(const TextDrawTarget&) = delete;
 
-  ~TextDrawTarget() {}
+  ~TextDrawTarget() { MOZ_ASSERT(mFinished); }
 
   void Reinitialize(wr::IpcResourceUpdateQueue& aResources,
                     const layers::StackingContextHelper& aSc,
-                    layers::WebRenderLayerManager* aManager,
+                    layers::RenderRootStateManager* aManager,
                     nsDisplayItem* aItem, nsRect& aBounds) {
     mResources = &aResources;
     mSc = &aSc;
@@ -93,12 +95,26 @@ class TextDrawTarget : public DrawTarget {
 
     mBackfaceVisible = !aItem->BackfaceIsHidden();
 
-    mBuilder.Save();
+    if (!mCallerDoesSaveRestore) {
+      mBuilder.Save();
+    }
   }
 
   void FoundUnsupportedFeature() { mHasUnsupportedFeatures = true; }
+  bool CheckHasUnsupportedFeatures() {
+    MOZ_ASSERT(mCallerDoesSaveRestore);
+#ifdef DEBUG
+    MOZ_ASSERT(!mFinished);
+    mFinished = true;
+#endif
+    return mHasUnsupportedFeatures;
+  }
 
   bool Finish() {
+    MOZ_ASSERT(!mCallerDoesSaveRestore);
+#ifdef DEBUG
+    mFinished = true;
+#endif
     if (mHasUnsupportedFeatures) {
       mBuilder.Restore();
       return false;
@@ -106,6 +122,8 @@ class TextDrawTarget : public DrawTarget {
     mBuilder.ClearSave();
     return true;
   }
+
+  wr::RenderRoot GetRenderRoot() { return mResources->GetRenderRoot(); }
 
   wr::FontInstanceFlags GetWRGlyphFlags() const { return mWRGlyphFlags; }
   void SetWRGlyphFlags(wr::FontInstanceFlags aFlags) { mWRGlyphFlags = aFlags; }
@@ -210,8 +228,9 @@ class TextDrawTarget : public DrawTarget {
 
   IntSize GetSize() const override { return mSize; }
 
-  void AppendShadow(const wr::Shadow& aShadow) {
-    mBuilder.PushShadow(mBoundsRect, ClipRect(), mBackfaceVisible, aShadow);
+  void AppendShadow(const wr::Shadow& aShadow, bool aInflate) {
+    mBuilder.PushShadow(mBoundsRect, ClipRect(), mBackfaceVisible, aShadow,
+                        aInflate);
     mHasShadows = true;
   }
 
@@ -302,7 +321,9 @@ class TextDrawTarget : public DrawTarget {
   }
 
   layers::WebRenderBridgeChild* WrBridge() { return mManager->WrBridge(); }
-  layers::WebRenderLayerManager* WrLayerManager() { return mManager; }
+  layers::WebRenderLayerManager* WrLayerManager() {
+    return mManager->LayerManager();
+  }
 
   Maybe<wr::ImageKey> DefineImage(const IntSize& aSize, uint32_t aStride,
                                   SurfaceFormat aFormat, const uint8_t* aData) {
@@ -315,16 +336,20 @@ class TextDrawTarget : public DrawTarget {
     return Nothing();
   }
 
-  void PushImage(wr::ImageKey aKey, const wr::LayoutRect& aBounds,
-                 const wr::LayoutRect& aClip, wr::ImageRendering aFilter,
-                 const wr::ColorF& aColor) {
-    mBuilder.PushImage(aBounds, aClip, true, aFilter, aKey, true, aColor);
+  void PushImage(wr::ImageKey aKey, const Rect& aBounds, const Rect& aClip,
+                 wr::ImageRendering aFilter, const wr::ColorF& aColor) {
+    if (!aClip.Intersects(GeckoClipRect().ToUnknownRect())) {
+      return;
+    }
+    mBuilder.PushImage(wr::ToLayoutRect(aBounds), wr::ToLayoutRect(aClip), true,
+                       aFilter, aKey, true, aColor);
   }
 
  private:
   wr::LayoutRect ClipRect() {
     return wr::ToRoundedLayoutRect(mClipStack.LastElement());
   }
+  LayoutDeviceRect GeckoClipRect() { return mClipStack.LastElement(); }
   // Whether anything unsupported was encountered. Currently:
   //
   // * Synthetic bold/italics
@@ -336,6 +361,12 @@ class TextDrawTarget : public DrawTarget {
   // * Text stroke
   bool mHasUnsupportedFeatures = false;
 
+  // The caller promises to call Save/Restore on the builder as needed.
+  bool mCallerDoesSaveRestore = false;
+#ifdef DEBUG
+  bool mFinished = false;
+#endif
+
   // Whether PopAllShadows needs to be called
   bool mHasShadows = false;
 
@@ -343,7 +374,7 @@ class TextDrawTarget : public DrawTarget {
   wr::DisplayListBuilder& mBuilder;
   wr::IpcResourceUpdateQueue* mResources;
   const layers::StackingContextHelper* mSc;
-  layers::WebRenderLayerManager* mManager;
+  layers::RenderRootStateManager* mManager;
 
   // Computed facts
   IntSize mSize;
@@ -417,6 +448,9 @@ class TextDrawTarget : public DrawTarget {
                 const DrawOptions& aOptions = DrawOptions()) override {
     MOZ_RELEASE_ASSERT(aPattern.GetType() == PatternType::COLOR);
 
+    if (!aRect.Intersects(GeckoClipRect().ToUnknownRect())) {
+      return;
+    }
     auto rect =
         wr::ToRoundedLayoutRect(LayoutDeviceRect::FromUnknownRect(aRect));
     auto color =
@@ -440,10 +474,12 @@ class TextDrawTarget : public DrawTarget {
                                {color, wr::BorderStyle::Solid},
                                {color, wr::BorderStyle::Solid}};
     wr::BorderRadius radius = {{0, 0}, {0, 0}, {0, 0}, {0, 0}};
-    Rect rect(aRect);
+    LayoutDeviceRect rect = LayoutDeviceRect::FromUnknownRect(aRect);
     rect.Inflate(aStrokeOptions.mLineWidth / 2);
-    wr::LayoutRect bounds =
-        wr::ToRoundedLayoutRect(LayoutDeviceRect::FromUnknownRect(rect));
+    if (!rect.Intersects(GeckoClipRect())) {
+      return;
+    }
+    wr::LayoutRect bounds = wr::ToRoundedLayoutRect(rect);
     mBuilder.PushBorder(bounds, ClipRect(), true, widths,
                         Range<const wr::BorderSide>(sides, 4), radius);
   }
@@ -535,6 +571,12 @@ class TextDrawTarget : public DrawTarget {
                                   SurfaceFormat aFormat) const override {
     MOZ_CRASH("TextDrawTarget: Method shouldn't be called");
     return false;
+  }
+
+  virtual RefPtr<DrawTarget> CreateClippedDrawTarget(
+      const Rect& aBounds, SurfaceFormat aFormat) override {
+    MOZ_CRASH("TextDrawTarget: Method shouldn't be called");
+    return nullptr;
   }
 
   already_AddRefed<PathBuilder> CreatePathBuilder(

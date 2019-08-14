@@ -16,15 +16,13 @@
 using namespace js;
 using namespace js::frontend;
 
-NameOpEmitter::NameOpEmitter(BytecodeEmitter* bce, JSAtom* name, Kind kind)
-    : bce_(bce),
-      kind_(kind),
-      name_(bce_->cx, name),
-      loc_(bce_->lookupName(name_)) {}
+NameOpEmitter::NameOpEmitter(BytecodeEmitter* bce, Handle<JSAtom*> name,
+                             Kind kind)
+    : bce_(bce), kind_(kind), name_(name), loc_(bce_->lookupName(name_)) {}
 
-NameOpEmitter::NameOpEmitter(BytecodeEmitter* bce, JSAtom* name,
+NameOpEmitter::NameOpEmitter(BytecodeEmitter* bce, Handle<JSAtom*> name,
                              const NameLocation& loc, Kind kind)
-    : bce_(bce), kind_(kind), name_(bce_->cx, name), loc_(loc) {}
+    : bce_(bce), kind_(kind), name_(name), loc_(loc) {}
 
 bool NameOpEmitter::emitGet() {
   MOZ_ASSERT(state_ == State::Start);
@@ -352,12 +350,12 @@ bool NameOpEmitter::emitAssignment() {
 bool NameOpEmitter::emitIncDec() {
   MOZ_ASSERT(state_ == State::Start);
 
-  JSOp binOp = isInc() ? JSOP_ADD : JSOP_SUB;
+  JSOp incOp = isInc() ? JSOP_INC : JSOP_DEC;
   if (!prepareForRhs()) {
     //              [stack] ENV? V
     return false;
   }
-  if (!bce_->emit1(JSOP_POS)) {
+  if (!bce_->emit1(JSOP_TONUMERIC)) {
     //              [stack] ENV? N
     return false;
   }
@@ -367,11 +365,7 @@ bool NameOpEmitter::emitIncDec() {
       return false;
     }
   }
-  if (!bce_->emit1(JSOP_ONE)) {
-    //              [stack] ENV? N? N 1
-    return false;
-  }
-  if (!bce_->emit1(binOp)) {
+  if (!bce_->emit1(incOp)) {
     //              [stack] ENV? N? N+1
     return false;
   }

@@ -48,19 +48,14 @@ nsLayoutHistoryState::GetHasStates(bool* aHasStates) {
 }
 
 NS_IMETHODIMP
-nsLayoutHistoryState::GetKeys(uint32_t* aCount, char*** aKeys) {
+nsLayoutHistoryState::GetKeys(nsTArray<nsCString>& aKeys) {
   if (!HasStates()) {
     return NS_ERROR_FAILURE;
   }
 
-  char** keys =
-      static_cast<char**>(moz_xmalloc(sizeof(char*) * mStates.Count()));
-  *aCount = mStates.Count();
-  *aKeys = keys;
-
+  aKeys.SetCapacity(mStates.Count());
   for (auto iter = mStates.Iter(); !iter.Done(); iter.Next()) {
-    *keys = ToNewCString(iter.Key());
-    keys++;
+    aKeys.AppendElement(iter.Key());
   }
 
   return NS_OK;
@@ -70,7 +65,7 @@ NS_IMETHODIMP
 nsLayoutHistoryState::GetPresState(const nsACString& aKey, float* aScrollX,
                                    float* aScrollY,
                                    bool* aAllowScrollOriginDowngrade,
-                                   float* aRes, bool* aScaleToRes) {
+                                   float* aRes) {
   PresState* state = GetState(nsCString(aKey));
 
   if (!state) {
@@ -81,7 +76,6 @@ nsLayoutHistoryState::GetPresState(const nsACString& aKey, float* aScrollX,
   *aScrollY = state->scrollState().y;
   *aAllowScrollOriginDowngrade = state->allowScrollOriginDowngrade();
   *aRes = state->resolution();
-  *aScaleToRes = state->scaleToResolution();
 
   return NS_OK;
 }
@@ -90,12 +84,11 @@ NS_IMETHODIMP
 nsLayoutHistoryState::AddNewPresState(const nsACString& aKey, float aScrollX,
                                       float aScrollY,
                                       bool aAllowScrollOriginDowngrade,
-                                      float aRes, bool aScaleToRes) {
+                                      float aRes) {
   UniquePtr<PresState> newState = NewPresState();
   newState->scrollState() = nsPoint(aScrollX, aScrollY);
   newState->allowScrollOriginDowngrade() = aAllowScrollOriginDowngrade;
   newState->resolution() = aRes;
-  newState->scaleToResolution() = aScaleToRes;
 
   mStates.Put(nsCString(aKey), std::move(newState));
 
@@ -149,7 +142,6 @@ UniquePtr<PresState> NewPresState() {
       /* scrollState */ nsPoint(0, 0),
       /* allowScrollOriginDowngrade */ true,
       /* resolution */ 1.0,
-      /* scaleToResolution */ false,
       /* disabledSet */ false,
       /* disabled */ false,
       /* droppedDown */ false);

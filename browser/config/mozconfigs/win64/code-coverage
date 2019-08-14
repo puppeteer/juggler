@@ -13,9 +13,6 @@ ac_add_options --enable-rust-tests
 # Needed to enable breakpad in application.ini
 export MOZILLA_OFFICIAL=1
 
-# Enable Telemetry
-export MOZ_TELEMETRY_REPORTING=1
-
 . $topsrcdir/build/win64/mozconfig.vs-latest
 
 # Package js shell.
@@ -25,13 +22,10 @@ if [ -d "$topsrcdir/clang" ]; then
     CLANG_LIB_DIR="$(cd $topsrcdir/clang/lib/clang/* && cd lib/windows && pwd)"
 
     export LIB=$LIB:$CLANG_LIB_DIR
-    mk_export_correct_style LIB
     export LDFLAGS="clang_rt.profile-x86_64.lib"
 fi
 
-export CFLAGS="--coverage -Xclang -coverage-no-function-names-in-data"
-export CXXFLAGS="--coverage -Xclang -coverage-no-function-names-in-data"
-export RUSTFLAGS="-Ccodegen-units=1 -Zprofile -Zno-landing-pads"
+export RUSTFLAGS="-Ccodegen-units=1 -Zprofile -Zno-landing-pads -Clink-dead-code -Coverflow-checks=off"
 
 . "$topsrcdir/build/mozconfig.common.override"
 . "$topsrcdir/build/mozconfig.clang-cl"

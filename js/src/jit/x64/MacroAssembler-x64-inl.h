@@ -53,6 +53,13 @@ void MacroAssembler::move32To64SignExtend(Register src, Register64 dest) {
   movslq(src, dest.reg);
 }
 
+// ===============================================================
+// Load instructions
+
+void MacroAssembler::load32SignExtendToPtr(const Address& src, Register dest) {
+  movslq(Operand(src), dest);
+}
+
 void MacroAssembler::andPtr(Register src, Register dest) { andq(src, dest); }
 
 void MacroAssembler::andPtr(Imm32 imm, Register dest) { andq(imm, dest); }
@@ -256,6 +263,8 @@ void MacroAssembler::inc64(AbsoluteAddress dest) {
 }
 
 void MacroAssembler::neg64(Register64 reg) { negq(reg.reg); }
+
+void MacroAssembler::negPtr(Register reg) { negq(reg); }
 
 // ===============================================================
 // Shift functions
@@ -807,7 +816,7 @@ void MacroAssemblerX64::loadInt32OrDouble(const T& src, FloatRegister dest) {
   convertInt32ToDouble(src, dest);
   jump(&end);
   bind(&notInt32);
-  loadDouble(src, dest);
+  unboxDouble(src, dest);
   bind(&end);
 }
 
@@ -823,9 +832,11 @@ void MacroAssemblerX64::ensureDouble(const ValueOperand& source,
     asMasm().branchTestInt32(Assembler::NotEqual, tag, failure);
   }
 
-  ScratchRegisterScope scratch(asMasm());
-  unboxInt32(source, scratch);
-  convertInt32ToDouble(scratch, dest);
+  {
+    ScratchRegisterScope scratch(asMasm());
+    unboxInt32(source, scratch);
+    convertInt32ToDouble(scratch, dest);
+  }
   jump(&done);
 
   bind(&isDouble);

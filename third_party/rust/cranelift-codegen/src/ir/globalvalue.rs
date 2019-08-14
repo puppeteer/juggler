@@ -1,9 +1,9 @@
 //! Global values.
 
-use ir::immediates::{Imm64, Offset32};
-use ir::{ExternalName, GlobalValue, Type};
-use isa::TargetIsa;
-use std::fmt;
+use crate::ir::immediates::{Imm64, Offset32};
+use crate::ir::{ExternalName, GlobalValue, Type};
+use crate::isa::TargetIsa;
+use core::fmt;
 
 /// Information about a global value declaration.
 #[derive(Clone)]
@@ -27,7 +27,8 @@ pub enum GlobalValueData {
         /// Type of the loaded value.
         global_type: Type,
 
-        /// Specifies whether the memory that this refers to is readonly, allowing for the elimination of redundant loads.
+        /// Specifies whether the memory that this refers to is readonly, allowing for the
+        /// elimination of redundant loads.
         readonly: bool,
     },
 
@@ -75,7 +76,7 @@ impl GlobalValueData {
     }
 
     /// Return the type of this global.
-    pub fn global_type(&self, isa: &TargetIsa) -> Type {
+    pub fn global_type(&self, isa: &dyn TargetIsa) -> Type {
         match *self {
             GlobalValueData::VMContext { .. } | GlobalValueData::Symbol { .. } => {
                 isa.pointer_type()
@@ -113,10 +114,12 @@ impl fmt::Display for GlobalValueData {
                 offset,
                 colocated,
             } => {
-                if colocated {
-                    write!(f, "colocated ")?;
-                }
-                write!(f, "symbol {}", name)?;
+                write!(
+                    f,
+                    "symbol {}{}",
+                    if colocated { "colocated " } else { "" },
+                    name
+                )?;
                 let offset_val: i64 = offset.into();
                 if offset_val > 0 {
                     write!(f, "+")?;

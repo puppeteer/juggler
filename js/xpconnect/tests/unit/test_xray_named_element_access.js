@@ -2,14 +2,14 @@
 "use strict"
 
 ChromeUtils.import("resource://gre/modules/Preferences.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 add_task(async function() {
   let webnav = Services.appShell.createWindowlessBrowser(false);
 
   let docShell = webnav.docShell;
 
-  docShell.createAboutBlankContentViewer(null);
+  docShell.createAboutBlankContentViewer(null, null);
 
   let window = webnav.document.defaultView;
   let unwrapped = Cu.waiveXrays(window);

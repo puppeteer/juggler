@@ -1,12 +1,13 @@
+// |jit-test| skip-if: !wasmDebugSupport()
 var evalInFrame = (function(global) {
-    var dbgGlobal = newGlobal();
+    var dbgGlobal = newGlobal({newCompartment: true});
     var dbg = new dbgGlobal.Debugger();
     dbg.addDebuggee(global);
 })(this);
 const Module = WebAssembly.Module;
 const Instance = WebAssembly.Instance;
 var m = new Module(wasmTextToBinary(`(module
-    (table 3 anyfunc)
+    (table 3 funcref)
     (import $foo "" "foo" (result i32))
     (import $bar "" "bar" (result i32))
     (func $baz (result i32) (i32.const 13))

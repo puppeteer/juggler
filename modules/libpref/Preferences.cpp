@@ -17,19 +17,20 @@
 #include "mozilla/ArenaAllocator.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Components.h"
 #include "mozilla/dom/PContent.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/HashTable.h"
 #include "mozilla/Logging.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/ModuleUtils.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/ServoStyleSet.h"
+#include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefs.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/SystemGroup.h"
@@ -86,38 +87,43 @@
 #include "PLDHashTable.h"
 #include "plstr.h"
 #include "prlink.h"
+#include "xpcpublic.h"
+
+#ifdef DEBUG
+#  include <map>
+#endif
 
 #ifdef MOZ_MEMORY
-#include "mozmemory.h"
+#  include "mozmemory.h"
 #endif
 
 #ifdef XP_WIN
-#include "windows.h"
+#  include "windows.h"
 #endif
 
 using namespace mozilla;
 
-using mozilla::ipc::FileDescriptor;
+using ipc::FileDescriptor;
 
 #ifdef DEBUG
 
-#define ENSURE_PARENT_PROCESS(func, pref)                                   \
-  do {                                                                      \
-    if (MOZ_UNLIKELY(!XRE_IsParentProcess())) {                             \
-      nsPrintfCString msg(                                                  \
-          "ENSURE_PARENT_PROCESS: called %s on %s in a non-parent process", \
-          func, pref);                                                      \
-      NS_ERROR(msg.get());                                                  \
-      return NS_ERROR_NOT_AVAILABLE;                                        \
-    }                                                                       \
-  } while (0)
+#  define ENSURE_PARENT_PROCESS(func, pref)                                   \
+    do {                                                                      \
+      if (MOZ_UNLIKELY(!XRE_IsParentProcess())) {                             \
+        nsPrintfCString msg(                                                  \
+            "ENSURE_PARENT_PROCESS: called %s on %s in a non-parent process", \
+            func, pref);                                                      \
+        NS_ERROR(msg.get());                                                  \
+        return NS_ERROR_NOT_AVAILABLE;                                        \
+      }                                                                       \
+    } while (0)
 
 #else  // DEBUG
 
-#define ENSURE_PARENT_PROCESS(func, pref)     \
-  if (MOZ_UNLIKELY(!XRE_IsParentProcess())) { \
-    return NS_ERROR_NOT_AVAILABLE;            \
-  }
+#  define ENSURE_PARENT_PROCESS(func, pref)     \
+    if (MOZ_UNLIKELY(!XRE_IsParentProcess())) { \
+      return NS_ERROR_NOT_AVAILABLE;            \
+    }
 
 #endif  // DEBUG
 
@@ -276,31 +282,31 @@ union PrefValue {
   }
 
   static char* Deserialize(PrefType aType, char* aStr,
-                           dom::MaybePrefValue* aDomValue) {
+                           Maybe<dom::PrefValue>* aDomValue) {
     char* p = aStr;
 
     switch (aType) {
       case PrefType::Bool:
         if (*p == 'T') {
-          *aDomValue = true;
+          *aDomValue = Some(true);
         } else if (*p == 'F') {
-          *aDomValue = false;
+          *aDomValue = Some(false);
         } else {
-          *aDomValue = false;
+          *aDomValue = Some(false);
           NS_ERROR("bad bool pref value");
         }
         p++;
         return p;
 
       case PrefType::Int: {
-        *aDomValue = int32_t(strtol(p, &p, 10));
+        *aDomValue = Some(int32_t(strtol(p, &p, 10)));
         return p;
       }
 
       case PrefType::String: {
         nsCString str;
         p = DeserializeString(p, str);
-        *aDomValue = str;
+        *aDomValue = Some(str);
         return p;
       }
 
@@ -432,6 +438,7 @@ class Pref {
         mDefaultChanged(false),
         mHasDefaultValue(false),
         mHasUserValue(false),
+        mIsSkippedByIteration(false),
         mDefaultValue(),
         mUserValue() {}
 
@@ -461,6 +468,8 @@ class Pref {
 
   bool IsLocked() const { return mIsLocked; }
   void SetIsLocked(bool aValue) { mIsLocked = aValue; }
+  bool IsSkippedByIteration() const { return mIsSkippedByIteration; }
+  void SetIsSkippedByIteration(bool aValue) { mIsSkippedByIteration = aValue; }
 
   bool DefaultChanged() const { return mDefaultChanged; }
 
@@ -473,7 +482,7 @@ class Pref {
   void AddToMap(SharedPrefMapBuilder& aMap) {
     aMap.Add(Name(),
              {HasDefaultValue(), HasUserValue(), IsSticky(), IsLocked(),
-              DefaultChanged()},
+              DefaultChanged(), IsSkippedByIteration()},
              HasDefaultValue() ? mDefaultValue.Get<T>() : T(),
              HasUserValue() ? mUserValue.Get<T>() : T());
   }
@@ -533,25 +542,23 @@ class Pref {
     aDomPref->isLocked() = mIsLocked;
 
     if (mHasDefaultValue) {
-      aDomPref->defaultValue() = dom::PrefValue();
-      mDefaultValue.ToDomPrefValue(Type(),
-                                   &aDomPref->defaultValue().get_PrefValue());
+      aDomPref->defaultValue() = Some(dom::PrefValue());
+      mDefaultValue.ToDomPrefValue(Type(), &aDomPref->defaultValue().ref());
     } else {
-      aDomPref->defaultValue() = null_t();
+      aDomPref->defaultValue() = Nothing();
     }
 
     if (mHasUserValue) {
-      aDomPref->userValue() = dom::PrefValue();
-      mUserValue.ToDomPrefValue(Type(), &aDomPref->userValue().get_PrefValue());
+      aDomPref->userValue() = Some(dom::PrefValue());
+      mUserValue.ToDomPrefValue(Type(), &aDomPref->userValue().ref());
     } else {
-      aDomPref->userValue() = null_t();
+      aDomPref->userValue() = Nothing();
     }
 
-    MOZ_ASSERT(aDomPref->defaultValue().type() ==
-                   dom::MaybePrefValue::Tnull_t ||
-               aDomPref->userValue().type() == dom::MaybePrefValue::Tnull_t ||
-               (aDomPref->defaultValue().get_PrefValue().type() ==
-                aDomPref->userValue().get_PrefValue().type()));
+    MOZ_ASSERT(aDomPref->defaultValue().isNothing() ||
+               aDomPref->userValue().isNothing() ||
+               (aDomPref->defaultValue().ref().type() ==
+                aDomPref->userValue().ref().type()));
   }
 
   void FromDomPref(const dom::Pref& aDomPref, bool* aValueChanged) {
@@ -560,11 +567,11 @@ class Pref {
 
     mIsLocked = aDomPref.isLocked();
 
-    const dom::MaybePrefValue& defaultValue = aDomPref.defaultValue();
+    const Maybe<dom::PrefValue>& defaultValue = aDomPref.defaultValue();
     bool defaultValueChanged = false;
-    if (defaultValue.type() == dom::MaybePrefValue::TPrefValue) {
+    if (defaultValue.isSome()) {
       PrefValue value;
-      PrefType type = value.FromDomPrefValue(defaultValue.get_PrefValue());
+      PrefType type = value.FromDomPrefValue(defaultValue.ref());
       if (!ValueMatches(PrefValueKind::Default, type, value)) {
         // Type() is PrefType::None if it's a newly added pref. This is ok.
         mDefaultValue.Replace(mHasDefaultValue, Type(), type, value);
@@ -575,11 +582,11 @@ class Pref {
     }
     // Note: we never clear a default value.
 
-    const dom::MaybePrefValue& userValue = aDomPref.userValue();
+    const Maybe<dom::PrefValue>& userValue = aDomPref.userValue();
     bool userValueChanged = false;
-    if (userValue.type() == dom::MaybePrefValue::TPrefValue) {
+    if (userValue.isSome()) {
       PrefValue value;
-      PrefType type = value.FromDomPrefValue(userValue.get_PrefValue());
+      PrefType type = value.FromDomPrefValue(userValue.ref());
       if (!ValueMatches(PrefValueKind::User, type, value)) {
         // Type() is PrefType::None if it's a newly added pref. This is ok.
         mUserValue.Replace(mHasUserValue, Type(), type, value);
@@ -831,7 +838,7 @@ class Pref {
     MOZ_ASSERT(*p == ':');
     p++;  // move past the ':' preceding the default value
 
-    dom::MaybePrefValue maybeDefaultValue;
+    Maybe<dom::PrefValue> maybeDefaultValue;
     if (*p != ':') {
       dom::PrefValue defaultValue;
       p = PrefValue::Deserialize(type, p, &maybeDefaultValue);
@@ -840,7 +847,7 @@ class Pref {
     MOZ_ASSERT(*p == ':');
     p++;  // move past the ':' between the default and user values
 
-    dom::MaybePrefValue maybeUserValue;
+    Maybe<dom::PrefValue> maybeUserValue;
     if (*p != '\n') {
       dom::PrefValue userValue;
       p = PrefValue::Deserialize(type, p, &maybeUserValue);
@@ -876,13 +883,14 @@ class Pref {
   uint32_t mDefaultChanged : 1;
   uint32_t mHasDefaultValue : 1;
   uint32_t mHasUserValue : 1;
+  uint32_t mIsSkippedByIteration : 1;
 
   PrefValue mDefaultValue;
   PrefValue mUserValue;
 };
 
 struct PrefHasher {
-  using Key = mozilla::UniquePtr<Pref>;
+  using Key = UniquePtr<Pref>;
   using Lookup = const char*;
 
   static HashNumber hash(const Lookup& aLookup) { return HashString(aLookup); }
@@ -914,13 +922,13 @@ class MOZ_STACK_CLASS PrefWrapper : public PrefWrapperBase {
   bool IsTypeInt() const { return IsType(PrefType::Int); }
   bool IsTypeBool() const { return IsType(PrefType::Bool); }
 
-#define FORWARD(retType, method)                                   \
-  retType method() const {                                         \
-    struct Matcher {                                               \
-      retType match(const Pref* aPref) { return aPref->method(); } \
-      retType match(SharedPref& aPref) { return aPref.method(); }  \
-    };                                                             \
-    return match(Matcher());                                       \
+#define FORWARD(retType, method)                                        \
+  retType method() const {                                              \
+    struct Matcher {                                                    \
+      retType operator()(const Pref* aPref) { return aPref->method(); } \
+      retType operator()(SharedPref& aPref) { return aPref.method(); }  \
+    };                                                                  \
+    return match(Matcher());                                            \
   }
 
   FORWARD(bool, DefaultChanged)
@@ -933,15 +941,15 @@ class MOZ_STACK_CLASS PrefWrapper : public PrefWrapperBase {
   FORWARD(PrefType, Type)
 #undef FORWARD
 
-#define FORWARD(retType, method)                                        \
-  retType method(PrefValueKind aKind = PrefValueKind::User) const {     \
-    struct Matcher {                                                    \
-      PrefValueKind mKind;                                              \
-                                                                        \
-      retType match(const Pref* aPref) { return aPref->method(mKind); } \
-      retType match(SharedPref& aPref) { return aPref.method(mKind); }  \
-    };                                                                  \
-    return match(Matcher{aKind});                                       \
+#define FORWARD(retType, method)                                             \
+  retType method(PrefValueKind aKind = PrefValueKind::User) const {          \
+    struct Matcher {                                                         \
+      PrefValueKind mKind;                                                   \
+                                                                             \
+      retType operator()(const Pref* aPref) { return aPref->method(mKind); } \
+      retType operator()(SharedPref& aPref) { return aPref.method(mKind); }  \
+    };                                                                       \
+    return match(Matcher{aKind});                                            \
   }
 
   FORWARD(bool, GetBoolValue)
@@ -979,7 +987,7 @@ class MOZ_STACK_CLASS PrefWrapper : public PrefWrapperBase {
     return PrefValueKind::User;
   }
 
-  nsresult GetBoolValue(PrefValueKind aKind, bool* aResult) const {
+  nsresult GetValue(PrefValueKind aKind, bool* aResult) const {
     PrefValueKind kind;
     MOZ_TRY_VAR(kind, WantValueKind(PrefType::Bool, aKind));
 
@@ -987,7 +995,7 @@ class MOZ_STACK_CLASS PrefWrapper : public PrefWrapperBase {
     return NS_OK;
   }
 
-  nsresult GetIntValue(PrefValueKind aKind, int32_t* aResult) const {
+  nsresult GetValue(PrefValueKind aKind, int32_t* aResult) const {
     PrefValueKind kind;
     MOZ_TRY_VAR(kind, WantValueKind(PrefType::Int, aKind));
 
@@ -995,7 +1003,21 @@ class MOZ_STACK_CLASS PrefWrapper : public PrefWrapperBase {
     return NS_OK;
   }
 
-  nsresult GetCStringValue(PrefValueKind aKind, nsACString& aResult) const {
+  nsresult GetValue(PrefValueKind aKind, uint32_t* aResult) const {
+    return GetValue(aKind, reinterpret_cast<int32_t*>(aResult));
+  }
+
+  nsresult GetValue(PrefValueKind aKind, float* aResult) const {
+    nsAutoCString result;
+    nsresult rv = GetValue(aKind, result);
+    if (NS_SUCCEEDED(rv)) {
+      // ToFloat() does a locale-independent conversion.
+      *aResult = result.ToFloat(&rv);
+    }
+    return rv;
+  }
+
+  nsresult GetValue(PrefValueKind aKind, nsACString& aResult) const {
     PrefValueKind kind;
     MOZ_TRY_VAR(kind, WantValueKind(PrefType::String, aKind));
 
@@ -1172,9 +1194,23 @@ class CallbackNode {
   uintptr_t mNextAndMatchKind;
 };
 
-using PrefsHashTable = mozilla::HashSet<mozilla::UniquePtr<Pref>, PrefHasher>;
+using PrefsHashTable = HashSet<UniquePtr<Pref>, PrefHasher>;
 
 static PrefsHashTable* gHashTable;
+
+#ifdef DEBUG
+// This defines the datatype used to store our `Once` StaticPrefs checker.
+// We can't use HashMap for now due to alignment restrictions when dealing with
+// std::function<void()> (see bug 1557617).
+typedef std::function<void()> AntiFootgunCallback;
+struct CompareStr {
+  bool operator()(char const* a, char const* b) const {
+    return std::strcmp(a, b) < 0;
+  }
+};
+typedef std::map<const char*, AntiFootgunCallback, CompareStr> AntiFootgunMap;
+static AntiFootgunMap* gOnceStaticPrefsAntiFootgun;
+#endif
 
 // The callback list contains all the priority callbacks followed by the
 // non-priority callbacks. gLastPriorityNode records where the first part ends.
@@ -1182,7 +1218,7 @@ static CallbackNode* gFirstCallback = nullptr;
 static CallbackNode* gLastPriorityNode = nullptr;
 
 #ifdef DEBUG
-#define ACCESS_COUNTS
+#  define ACCESS_COUNTS
 #endif
 
 #ifdef ACCESS_COUNTS
@@ -1301,11 +1337,11 @@ class PrefsIter {
   do {                                                                  \
     struct Matcher {                                                    \
       PrefsIter& mIter;                                                 \
-      type match(HashElem& pos) {                                       \
+      type operator()(HashElem& pos) {                                  \
         HashElem& end MOZ_MAYBE_UNUSED = mIter.mEnd.as<HashElem>();     \
         __VA_ARGS__;                                                    \
       }                                                                 \
-      type match(SharedElem& pos) {                                     \
+      type operator()(SharedElem& pos) {                                \
         SharedElem& end MOZ_MAYBE_UNUSED = mIter.mEnd.as<SharedElem>(); \
         __VA_ARGS__;                                                    \
       }                                                                 \
@@ -1473,7 +1509,7 @@ static bool gContentProcessPrefsAreInited = false;
 #endif  // DEBUG
 
 static Pref* pref_HashTableLookup(const char* aPrefName) {
-  MOZ_ASSERT(NS_IsMainThread() || mozilla::ServoStyleSet::IsInServoTraversal());
+  MOZ_ASSERT(NS_IsMainThread() || ServoStyleSet::IsInServoTraversal());
 
   MOZ_ASSERT_IF(!XRE_IsParentProcess(), gContentProcessPrefsAreInited);
 
@@ -1492,28 +1528,32 @@ static Pref* pref_HashTableLookup(const char* aPrefName) {
 // to use without locking.
 static const PrefWrapper* gCallbackPref;
 
+Maybe<PrefWrapper> pref_SharedLookup(const char* aPrefName) {
+  MOZ_DIAGNOSTIC_ASSERT(gSharedMap, "gSharedMap must be initialized");
+  if (Maybe<SharedPrefMap::Pref> pref = gSharedMap->Get(aPrefName)) {
+    return Some(*pref);
+  }
+  return Nothing();
+}
+
 Maybe<PrefWrapper> pref_Lookup(const char* aPrefName,
                                bool aIncludeTypeNone = false) {
-  Maybe<PrefWrapper> result;
-
-  MOZ_ASSERT(NS_IsMainThread() || mozilla::ServoStyleSet::IsInServoTraversal());
+  MOZ_ASSERT(NS_IsMainThread() || ServoStyleSet::IsInServoTraversal());
 
   AddAccessCount(aPrefName);
 
   if (gCallbackPref && strcmp(aPrefName, gCallbackPref->Name()) == 0) {
-    result.emplace(*gCallbackPref);
-  } else if (Pref* pref = pref_HashTableLookup(aPrefName)) {
+    return Some(*gCallbackPref);
+  }
+  if (Pref* pref = pref_HashTableLookup(aPrefName)) {
     if (aIncludeTypeNone || !pref->IsTypeNone()) {
-      result.emplace(pref);
+      return Some(pref);
     }
   } else if (gSharedMap) {
-    Maybe<SharedPrefMap::Pref> pref = gSharedMap->Get(aPrefName);
-    if (pref.isSome()) {
-      result.emplace(*pref);
-    }
+    return pref_SharedLookup(aPrefName);
   }
 
-  return result;
+  return Nothing();
 }
 
 static Result<Pref*, nsresult> pref_LookupForModify(
@@ -1664,6 +1704,22 @@ static void NotifyCallbacks(const char* aPrefName, const PrefWrapper* aPref) {
     }
     gShouldCleanupDeadNodes = false;
   }
+
+#ifdef DEBUG
+  if (XRE_IsParentProcess() &&
+      !StaticPrefs::preferences_force_disable_check_once_policy() &&
+      (StaticPrefs::preferences_check_once_policy() || xpc::IsInAutomation())) {
+    // Check that we aren't modifying a `Once` pref using that prefName.
+    // We have about 100 `Once` StaticPrefs defined. std::map performs a search
+    // in O(log n), so this is fast enough for our case.
+    MOZ_ASSERT(gOnceStaticPrefsAntiFootgun);
+    auto search = gOnceStaticPrefsAntiFootgun->find(aPrefName);
+    if (search != gOnceStaticPrefsAntiFootgun->end()) {
+      // Run the callback.
+      (search->second)();
+    }
+  }
+#endif
 }
 
 //===========================================================================
@@ -1810,8 +1866,8 @@ class PrefCallback : public PLDHashEntryHdr {
   static const PrefCallback* KeyToPointer(PrefCallback* aKey) { return aKey; }
 
   static PLDHashNumber HashKey(const PrefCallback* aKey) {
-    uint32_t hash = mozilla::HashString(aKey->mDomain);
-    return mozilla::AddToHash(hash, aKey->mCanonical);
+    uint32_t hash = HashString(aKey->mDomain);
+    return AddToHash(hash, aKey->mCanonical);
   }
 
  public:
@@ -1949,7 +2005,7 @@ class nsPrefBranch final : public nsIPrefBranch,
 
  private:
   // Helper class for either returning a raw cstring or nsCString.
-  typedef mozilla::Variant<const char*, const nsCString> PrefNameBase;
+  typedef Variant<const char*, const nsCString> PrefNameBase;
   class PrefName : public PrefNameBase {
    public:
     explicit PrefName(const char* aName) : PrefNameBase(aName) {}
@@ -1962,8 +2018,8 @@ class nsPrefBranch final : public nsIPrefBranch,
     PrefName& operator=(const PrefName&) = delete;
 
     struct PtrMatcher {
-      static const char* match(const char* aVal) { return aVal; }
-      static const char* match(const nsCString& aVal) { return aVal.get(); }
+      const char* operator()(const char* aVal) { return aVal; }
+      const char* operator()(const nsCString& aVal) { return aVal.get(); }
     };
 
     struct CStringMatcher {
@@ -1971,26 +2027,20 @@ class nsPrefBranch final : public nsIPrefBranch,
       // method argument through to our matcher methods.
       nsACString& mStr;
 
-      void match(const char* aVal) { mStr.Assign(aVal); }
-      void match(const nsCString& aVal) { mStr.Assign(aVal); }
+      void operator()(const char* aVal) { mStr.Assign(aVal); }
+      void operator()(const nsCString& aVal) { mStr.Assign(aVal); }
     };
 
     struct LenMatcher {
-      static size_t match(const char* aVal) { return strlen(aVal); }
-      static size_t match(const nsCString& aVal) { return aVal.Length(); }
+      size_t operator()(const char* aVal) { return strlen(aVal); }
+      size_t operator()(const nsCString& aVal) { return aVal.Length(); }
     };
 
-    const char* get() const {
-      static PtrMatcher m;
-      return match(m);
-    }
+    const char* get() const { return match(PtrMatcher{}); }
 
     void get(nsACString& aStr) const { match(CStringMatcher{aStr}); }
 
-    size_t Length() const {
-      static LenMatcher m;
-      return match(m);
-    }
+    size_t Length() const { return match(LenMatcher{}); }
   };
 
   virtual ~nsPrefBranch();
@@ -2054,8 +2104,7 @@ nsPrefBranch::nsPrefBranch(const char* aPrefRoot, PrefValueKind aKind)
       mKind(aKind),
       mFreeingObserverList(false),
       mObservers() {
-  nsCOMPtr<nsIObserverService> observerService =
-      mozilla::services::GetObserverService();
+  nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
   if (observerService) {
     ++mRefCnt;  // must be > 0 when we call this, or we'll get deleted!
 
@@ -2065,15 +2114,7 @@ nsPrefBranch::nsPrefBranch(const char* aPrefRoot, PrefValueKind aKind)
   }
 }
 
-nsPrefBranch::~nsPrefBranch() {
-  FreeObserverList();
-
-  nsCOMPtr<nsIObserverService> observerService =
-      mozilla::services::GetObserverService();
-  if (observerService) {
-    observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
-  }
-}
+nsPrefBranch::~nsPrefBranch() { FreeObserverList(); }
 
 NS_IMPL_ISUPPORTS(nsPrefBranch, nsIPrefBranch, nsIObserver,
                   nsISupportsWeakReference)
@@ -2591,24 +2632,15 @@ nsPrefBranch::DeleteBranch(const char* aStartingAt) {
 }
 
 NS_IMETHODIMP
-nsPrefBranch::GetChildList(const char* aStartingAt, uint32_t* aCount,
-                           char*** aChildArray) {
-  char** outArray;
-  int32_t numPrefs;
-  int32_t dwIndex;
-  AutoTArray<nsCString, 32> prefArray;
-
+nsPrefBranch::GetChildList(const char* aStartingAt,
+                           nsTArray<nsCString>& aChildArray) {
   NS_ENSURE_ARG(aStartingAt);
-  NS_ENSURE_ARG_POINTER(aCount);
-  NS_ENSURE_ARG_POINTER(aChildArray);
 
   MOZ_ASSERT(NS_IsMainThread());
 
-  *aChildArray = nullptr;
-  *aCount = 0;
-
   // This will contain a list of all the pref name strings. Allocated on the
   // stack for speed.
+  AutoTArray<nsCString, 32> prefArray;
 
   const PrefName& parent = GetPrefName(aStartingAt);
   size_t parentLen = parent.Length();
@@ -2620,22 +2652,12 @@ nsPrefBranch::GetChildList(const char* aStartingAt, uint32_t* aCount,
 
   // Now that we've built up the list, run the callback on all the matching
   // elements.
-  numPrefs = prefArray.Length();
-
-  if (numPrefs) {
-    outArray = (char**)moz_xmalloc(numPrefs * sizeof(char*));
-
-    for (dwIndex = 0; dwIndex < numPrefs; ++dwIndex) {
-      // we need to lop off mPrefRoot in case the user is planning to pass this
-      // back to us because if they do we are going to add mPrefRoot again.
-      const nsCString& element = prefArray[dwIndex];
-      outArray[dwIndex] =
-          (char*)moz_xmemdup(element.get() + mPrefRoot.Length(),
-                             element.Length() - mPrefRoot.Length() + 1);
-    }
-    *aChildArray = outArray;
+  aChildArray.SetCapacity(prefArray.Length());
+  for (auto& element : prefArray) {
+    // we need to lop off mPrefRoot in case the user is planning to pass this
+    // back to us because if they do we are going to add mPrefRoot again.
+    aChildArray.AppendElement(Substring(element, mPrefRoot.Length()));
   }
-  *aCount = numPrefs;
 
   return NS_OK;
 }
@@ -2732,8 +2754,8 @@ nsPrefBranch::Observe(nsISupports* aSubject, const char* aTopic,
   return NS_OK;
 }
 
-/* static */ void nsPrefBranch::NotifyObserver(const char* aNewPref,
-                                               void* aData) {
+/* static */
+void nsPrefBranch::NotifyObserver(const char* aNewPref, void* aData) {
   PrefCallback* pCallback = (PrefCallback*)aData;
 
   nsCOMPtr<nsIObserver> observer = pCallback->GetObserver();
@@ -2780,6 +2802,12 @@ void nsPrefBranch::FreeObserverList() {
                                     Preferences::PrefixMatch);
     iter.Remove();
   }
+
+  nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
+  if (observerService) {
+    observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
+  }
+
   mFreeingObserverList = false;
 }
 
@@ -2800,7 +2828,7 @@ nsresult nsPrefBranch::GetDefaultFromPropertiesFile(const char* aPrefName,
   }
 
   nsCOMPtr<nsIStringBundleService> bundleService =
-      mozilla::services::GetStringBundleService();
+      services::GetStringBundleService();
   if (!bundleService) {
     return NS_ERROR_FAILURE;
   }
@@ -2908,9 +2936,9 @@ void Preferences::HandleDirty() {
       sPreferences->mSavePending = true;
       static const int PREF_DELAY_MS = 500;
       NS_DelayedDispatchToCurrentThread(
-          mozilla::NewRunnableMethod("Preferences::SavePrefFileAsynchronous",
-                                     sPreferences.get(),
-                                     &Preferences::SavePrefFileAsynchronous),
+          NewRunnableMethod("Preferences::SavePrefFileAsynchronous",
+                            sPreferences.get(),
+                            &Preferences::SavePrefFileAsynchronous),
           PREF_DELAY_MS);
     }
   }
@@ -3044,7 +3072,7 @@ class PWRunnable : public Runnable {
   NS_IMETHOD Run() override {
     // If we get a nullptr on the exchange, it means that somebody
     // else has already processed the request, and we can just return.
-    mozilla::UniquePtr<PrefSaveData> prefs(
+    UniquePtr<PrefSaveData> prefs(
         PreferencesWriter::sPendingWriteData.exchange(nullptr));
     nsresult rv = NS_OK;
     if (prefs) {
@@ -3073,14 +3101,47 @@ class PWRunnable : public Runnable {
 };
 
 struct CacheData {
-  void* mCacheLocation;
+  CacheData(void* aCacheLocation, bool aValue)
+      : mCacheLocation(aCacheLocation), mDefaultValueBool(aValue) {}
+  CacheData(void* aCacheLocation, int32_t aValue)
+      : mCacheLocation(aCacheLocation), mDefaultValueInt(aValue) {}
+  CacheData(void* aCacheLocation, uint32_t aValue)
+      : mCacheLocation(aCacheLocation), mDefaultValueUint(aValue) {}
+  CacheData(void* aCacheLocation, float aValue)
+      : mCacheLocation(aCacheLocation), mDefaultValueFloat(aValue) {}
+
+  template <typename T>
+  T GetDefault() const;
+
+  void* const mCacheLocation;
+
+ private:
   union {
-    bool mDefaultValueBool;
-    int32_t mDefaultValueInt;
-    uint32_t mDefaultValueUint;
-    float mDefaultValueFloat;
+    const bool mDefaultValueBool;
+    const int32_t mDefaultValueInt;
+    const uint32_t mDefaultValueUint;
+    const float mDefaultValueFloat;
   };
 };
+
+// We specialise the CacheData::GetDefault() here, as somehow you can't do it
+// inline within CacheData definition.
+template <>
+bool CacheData::GetDefault() const {
+  return mDefaultValueBool;
+}
+template <>
+int32_t CacheData::GetDefault() const {
+  return mDefaultValueInt;
+}
+template <>
+uint32_t CacheData::GetDefault() const {
+  return mDefaultValueUint;
+}
+template <>
+float CacheData::GetDefault() const {
+  return mDefaultValueFloat;
+}
 
 // gCacheDataDesc holds information about prefs startup. It's being used for
 // diagnosing prefs startup problems in bug 1276488.
@@ -3128,8 +3189,9 @@ static void AssertNotAlreadyCached(const char* aPrefType,
 
 // Although this is a member of Preferences, it measures sPreferences and
 // several other global structures.
-/* static */ void Preferences::AddSizeOfIncludingThis(
-    MallocSizeOf aMallocSizeOf, PrefsSizes& aSizes) {
+/* static */
+void Preferences::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
+                                         PrefsSizes& aSizes) {
   if (!sPreferences) {
     return;
   }
@@ -3346,17 +3408,18 @@ static Maybe<bool> TelemetryPrefValue() {
   // build has MOZ_TELEMETRY_ON_BY_DEFAULT *or* we're on the beta channel,
   // telemetry is on by default, otherwise not. This is necessary so that
   // beta users who are testing final release builds don't flipflop defaults.
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
+#  ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
   return Some(true);
-#else
+#  else
   nsAutoCString channelPrefValue;
   Unused << Preferences::GetCString(kChannelPref, channelPrefValue,
                                     PrefValueKind::Default);
   return Some(channelPrefValue.EqualsLiteral("beta"));
-#endif
+#  endif
 }
 
-/* static */ void Preferences::SetupTelemetryPref() {
+/* static */
+void Preferences::SetupTelemetryPref() {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   Maybe<bool> telemetryPrefValue = TelemetryPrefValue();
@@ -3381,12 +3444,12 @@ static bool TelemetryPrefValue() {
     return true;
   }
 
-#ifndef MOZILLA_OFFICIAL
+#  ifndef MOZILLA_OFFICIAL
   // Local developer builds: non-official builds on the "default" channel.
   if (channel.EqualsLiteral("default")) {
     return true;
   }
-#endif
+#  endif
 
   // Release Candidate builds: builds that think they are release builds, but
   // are shipped to beta users.
@@ -3402,7 +3465,8 @@ static bool TelemetryPrefValue() {
   return false;
 }
 
-/* static */ void Preferences::SetupTelemetryPref() {
+/* static */
+void Preferences::SetupTelemetryPref() {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   Preferences::SetBool(kTelemetryPref, TelemetryPrefValue(),
@@ -3422,8 +3486,8 @@ static void CheckTelemetryPref() {
 
 #endif  // MOZ_WIDGET_ANDROID
 
-/* static */ already_AddRefed<Preferences>
-Preferences::GetInstanceForService() {
+/* static */
+already_AddRefed<Preferences> Preferences::GetInstanceForService() {
   if (sPreferences) {
     return do_AddRef(sPreferences);
   }
@@ -3442,6 +3506,10 @@ Preferences::GetInstanceForService() {
 
   gTelemetryLoadData =
       new nsDataHashtable<nsCStringHashKey, TelemetryLoadData>();
+
+#ifdef DEBUG
+  gOnceStaticPrefsAntiFootgun = new AntiFootgunMap();
+#endif
 
 #ifdef ACCESS_COUNTS
   MOZ_ASSERT(!gAccessCounts);
@@ -3484,7 +3552,7 @@ Preferences::GetInstanceForService() {
     }
 
     nsCOMPtr<nsIObserverService> observerService =
-        mozilla::services::GetObserverService();
+        services::GetObserverService();
     if (!observerService) {
       sPreferences = nullptr;
       gCacheDataDesc = "GetObserverService() failed (1)";
@@ -3524,10 +3592,12 @@ Preferences::GetInstanceForService() {
   return do_AddRef(sPreferences);
 }
 
-/* static */ bool Preferences::IsServiceAvailable() { return !!sPreferences; }
+/* static */
+bool Preferences::IsServiceAvailable() { return !!sPreferences; }
 
-/* static */ bool Preferences::InitStaticMembers() {
-  MOZ_ASSERT(NS_IsMainThread() || mozilla::ServoStyleSet::IsInServoTraversal());
+/* static */
+bool Preferences::InitStaticMembers() {
+  MOZ_ASSERT(NS_IsMainThread() || ServoStyleSet::IsInServoTraversal());
 
   if (MOZ_LIKELY(sPreferences)) {
     return true;
@@ -3542,7 +3612,8 @@ Preferences::GetInstanceForService() {
   return sPreferences != nullptr;
 }
 
-/* static */ void Preferences::Shutdown() {
+/* static */
+void Preferences::Shutdown() {
   if (!sShutdown) {
     sShutdown = true;  // Don't create the singleton instance after here.
     sPreferences = nullptr;
@@ -3575,6 +3646,11 @@ Preferences::~Preferences() {
   delete gTelemetryLoadData;
   gTelemetryLoadData = nullptr;
 
+#ifdef DEBUG
+  delete gOnceStaticPrefsAntiFootgun;
+  gOnceStaticPrefsAntiFootgun = nullptr;
+#endif
+
 #ifdef ACCESS_COUNTS
   delete gAccessCounts;
 #endif
@@ -3587,7 +3663,8 @@ Preferences::~Preferences() {
 NS_IMPL_ISUPPORTS(Preferences, nsIPrefService, nsIObserver, nsIPrefBranch,
                   nsISupportsWeakReference)
 
-/* static */ void Preferences::SerializePreferences(nsCString& aStr) {
+/* static */
+void Preferences::SerializePreferences(nsCString& aStr) {
   MOZ_RELEASE_ASSERT(InitStaticMembers());
 
   aStr.Truncate();
@@ -3602,8 +3679,8 @@ NS_IMPL_ISUPPORTS(Preferences, nsIPrefService, nsIObserver, nsIPrefBranch,
   aStr.Append('\0');
 }
 
-/* static */ void Preferences::DeserializePreferences(char* aStr,
-                                                      size_t aPrefsLen) {
+/* static */
+void Preferences::DeserializePreferences(char* aStr, size_t aPrefsLen) {
   MOZ_ASSERT(!XRE_IsParentProcess());
 
   MOZ_ASSERT(!gChangedDomPrefs);
@@ -3626,7 +3703,18 @@ NS_IMPL_ISUPPORTS(Preferences, nsIPrefService, nsIObserver, nsIPrefBranch,
 #endif
 }
 
-/* static */ FileDescriptor Preferences::EnsureSnapshot(size_t* aSize) {
+// Forward declarations.
+namespace StaticPrefs {
+
+static void InitAll(bool aIsStartup);
+static void InitOncePrefs();
+static void InitStaticPrefsFromShared();
+static void RegisterOncePrefs(SharedPrefMapBuilder& aBuilder);
+
+}  // namespace StaticPrefs
+
+/* static */
+FileDescriptor Preferences::EnsureSnapshot(size_t* aSize) {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   if (!gSharedMap) {
@@ -3635,6 +3723,10 @@ NS_IMPL_ISUPPORTS(Preferences, nsIPrefService, nsIObserver, nsIPrefBranch,
     for (auto iter = gHashTable->iter(); !iter.done(); iter.next()) {
       iter.get()->AddToMap(builder);
     }
+
+    // Store the current value of Once StaticPrefs. Following this those
+    // StaticPrefs will become immutable.
+    StaticPrefs::RegisterOncePrefs(builder);
 
     gSharedMap = new SharedPrefMap(std::move(builder));
 
@@ -3657,15 +3749,18 @@ NS_IMPL_ISUPPORTS(Preferences, nsIPrefService, nsIObserver, nsIPrefBranch,
   return gSharedMap->CloneFileDescriptor();
 }
 
-/* static */ void Preferences::InitSnapshot(const FileDescriptor& aHandle,
-                                            size_t aSize) {
+/* static */
+void Preferences::InitSnapshot(const FileDescriptor& aHandle, size_t aSize) {
   MOZ_ASSERT(!XRE_IsParentProcess());
   MOZ_ASSERT(!gSharedMap);
 
   gSharedMap = new SharedPrefMap(aHandle, aSize);
+
+  StaticPrefs::InitStaticPrefsFromShared();
 }
 
-/* static */ void Preferences::InitializeUserPrefs() {
+/* static */
+void Preferences::InitializeUserPrefs() {
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT(!sPreferences->mCurrentFile, "Should only initialize prefs once");
 
@@ -3839,7 +3934,8 @@ Preferences::SavePrefFile(nsIFile* aFile) {
   return SavePrefFileInternal(aFile, SaveMethod::Asynchronous);
 }
 
-/* static */ void Preferences::SetPreference(const dom::Pref& aDomPref) {
+/* static */
+void Preferences::SetPreference(const dom::Pref& aDomPref) {
   MOZ_ASSERT(!XRE_IsParentProcess());
   NS_ENSURE_TRUE(InitStaticMembers(), (void)0);
 
@@ -3893,7 +3989,8 @@ Preferences::SavePrefFile(nsIFile* aFile) {
   }
 }
 
-/* static */ void Preferences::GetPreference(dom::Pref* aDomPref) {
+/* static */
+void Preferences::GetPreference(dom::Pref* aDomPref) {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   Pref* pref = pref_HashTableLookup(aDomPref->name().get());
@@ -3976,8 +4073,7 @@ Preferences::GetDirty(bool* aRetVal) {
 }
 
 nsresult Preferences::NotifyServiceObservers(const char* aTopic) {
-  nsCOMPtr<nsIObserverService> observerService =
-      mozilla::services::GetObserverService();
+  nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
   if (!observerService) {
     return NS_ERROR_FAILURE;
   }
@@ -4118,8 +4214,7 @@ nsresult Preferences::WritePrefFile(nsIFile* aFile, SaveMethod aSaveMethod) {
 
   if (AllowOffMainThreadSave()) {
     nsresult rv = NS_OK;
-    mozilla::UniquePtr<PrefSaveData> prefs =
-        MakeUnique<PrefSaveData>(pref_savePrefs());
+    UniquePtr<PrefSaveData> prefs = MakeUnique<PrefSaveData>(pref_savePrefs());
 
     // Put the newly constructed preference data into sPendingWriteData
     // for the next request to pick up
@@ -4310,70 +4405,122 @@ static nsresult pref_ReadPrefFromJar(nsZipArchive* aJarReader,
   return NS_OK;
 }
 
+static nsresult pref_ReadDefaultPrefs(const RefPtr<nsZipArchive> jarReader,
+                                      const char* path) {
+  nsZipFind* findPtr;
+  nsAutoPtr<nsZipFind> find;
+  nsTArray<nsCString> prefEntries;
+  const char* entryName;
+  uint16_t entryNameLen;
+
+  nsresult rv = jarReader->FindInit(path, &findPtr);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  find = findPtr;
+  while (NS_SUCCEEDED(find->FindNext(&entryName, &entryNameLen))) {
+    prefEntries.AppendElement(Substring(entryName, entryNameLen));
+  }
+
+  prefEntries.Sort();
+  for (uint32_t i = prefEntries.Length(); i--;) {
+    rv = pref_ReadPrefFromJar(jarReader, prefEntries[i].get());
+    if (NS_FAILED(rv)) {
+      NS_WARNING("Error parsing preferences.");
+    }
+  }
+
+  return NS_OK;
+}
+
 // These preference getter wrappers allow us to look up the value for static
 // preferences based on their native types, rather than manually mapping them to
 // the appropriate Preferences::Get* functions.
-template <typename T>
-static T GetPref(const char* aName, T aDefaultValue);
+// We define these methods in a struct which is made friend of Preferences in
+// order to access private members.
+struct PreferencesInternalMethods {
+  template <typename T>
+  static nsresult GetPrefValue(const char* aPrefName, T&& aResult,
+                               PrefValueKind aKind) {
+    NS_ENSURE_TRUE(Preferences::InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
-template <>
-bool MOZ_MAYBE_UNUSED GetPref<bool>(const char* aName, bool aDefaultValue) {
-  return Preferences::GetBool(aName, aDefaultValue);
-}
+    if (Maybe<PrefWrapper> pref = pref_Lookup(aPrefName)) {
+      return pref->GetValue(aKind, std::forward<T>(aResult));
+    }
+    return NS_ERROR_UNEXPECTED;
+  }
 
-template <>
-int32_t MOZ_MAYBE_UNUSED GetPref<int32_t>(const char* aName,
-                                          int32_t aDefaultValue) {
-  return Preferences::GetInt(aName, aDefaultValue);
-}
+  template <typename T>
+  static nsresult GetSharedPrefValue(const char* aName, T* aResult) {
+    if (Maybe<PrefWrapper> pref = pref_SharedLookup(aName)) {
+      return pref->GetValue(PrefValueKind::User, aResult);
+    }
+    return NS_ERROR_UNEXPECTED;
+  }
 
-template <>
-uint32_t MOZ_MAYBE_UNUSED GetPref<uint32_t>(const char* aName,
-                                            uint32_t aDefaultValue) {
-  return Preferences::GetInt(aName, aDefaultValue);
-}
+  template <typename T>
+  static T GetPref(const char* aPrefName, T aFallback,
+                   PrefValueKind aKind = PrefValueKind::User) {
+    T result = aFallback;
+    GetPrefValue(aPrefName, &result, aKind);
+    return result;
+  }
 
-template <>
-float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
-  return Preferences::GetFloat(aName, aDefaultValue);
-}
+  template <typename T>
+  static void VarChanged(const char* aPref, void* aClosure) {
+    CacheData* cache = static_cast<CacheData*>(aClosure);
+    *static_cast<T*>(cache->mCacheLocation) =
+        GetPref(aPref, cache->GetDefault<StripAtomic<T>>());
+  }
+
+  template <typename T>
+  static nsresult RegisterCallback(CacheData* aCacheData,
+                                   const nsACString& aPref) {
+    return Preferences::RegisterCallback(VarChanged<T>, aPref, aCacheData,
+                                         Preferences::ExactMatch,
+                                         /* isPriority */ true);
+  }
+};
 
 // Initialize default preference JavaScript buffers from appropriate TEXT
 // resources.
-/* static */ Result<Ok, const char*> Preferences::InitInitialObjects(
-    bool aIsStartup) {
+/* static */
+Result<Ok, const char*> Preferences::InitInitialObjects(bool aIsStartup) {
   // Initialize static prefs before prefs from data files so that the latter
   // will override the former.
   StaticPrefs::InitAll(aIsStartup);
 
   if (!XRE_IsParentProcess()) {
-    MOZ_ASSERT(gSharedMap);
-
-    // We got our initial preference values from the content process, so we
-    // don't need to add them to the DB. For static var caches, though, the
-    // current preference values may differ from their static defaults. So we
-    // still need to notify callbacks for each of our shared prefs which have
-    // user values, of whose default values have changed since they were
-    // initialized.
-    for (auto& pref : gSharedMap->Iter()) {
-      if (pref.HasUserValue() || pref.DefaultChanged()) {
-        NotifyCallbacks(pref.Name(), PrefWrapper(pref));
-      }
-    }
+    MOZ_DIAGNOSTIC_ASSERT(gSharedMap);
 
 #ifdef DEBUG
-    // Check that all varcache preferences match their current values. This
-    // can currently fail if the default value of a static varcache preference
-    // is changed in a preference file or at runtime, rather than in
-    // StaticPrefList.h.
-
-#define PREF(name, cpp_type, value)
-#define VARCACHE_PREF(name, id, cpp_type, value)                               \
-  MOZ_ASSERT(GetPref<StripAtomic<cpp_type>>(name, value) == StaticPrefs::id(), \
-             "Incorrect cached value for " name);
-#include "mozilla/StaticPrefList.h"
-#undef PREF
-#undef VARCACHE_PREF
+    // For a VarCache pref like this:
+    //
+    //   VARCACHE_PREF($POLICY, "my.pref", my_pref, int32_t, 99)
+    //
+    // we generate checking code like this:
+    //
+    //   MOZ_ASSERT(StaticPrefs::UpdatePolicy::$POLICY ==
+    //                StaticPrefs::UpdatePolicy::Skip ||
+    //              PreferencesInternalMethods::GetPref<int32_t>(name, value) ==
+    //              StaticPrefs::my_pref(),
+    //              "Incorrect cached value for my.pref");
+    //
+    // This checks that all VarCache preferences match their current values.
+    // This can currently fail if the default value of a static VarCache
+    // preference is changed in a preference file or at runtime, rather than in
+    // StaticPrefList_*.h. StaticPrefs with a Skip policy aren't updated with
+    // an overridden value, and shouldn't be checked.
+    //
+#  define PREF(name, cpp_type, value)
+#  define VARCACHE_PREF(policy, name, id, cpp_type, value)                     \
+    MOZ_ASSERT(StaticPrefs::UpdatePolicy::policy ==                            \
+                       StaticPrefs::UpdatePolicy::Skip ||                      \
+                   PreferencesInternalMethods::GetPref<StripAtomic<cpp_type>>( \
+                       name, value) == StaticPrefs::id(),                      \
+               "Incorrect cached value for " name);
+#  include "mozilla/StaticPrefList.h"
+#  undef PREF
+#  undef VARCACHE_PREF
 #endif
 
     return Ok();
@@ -4407,37 +4554,47 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   // Thus, in the omni.jar case, we always load app-specific default
   // preferences from omni.jar, whether or not `$app == $gre`.
 
-  nsresult rv;
+  nsresult rv = NS_ERROR_FAILURE;
   nsZipFind* findPtr;
   nsAutoPtr<nsZipFind> find;
   nsTArray<nsCString> prefEntries;
   const char* entryName;
   uint16_t entryNameLen;
 
-  RefPtr<nsZipArchive> jarReader =
-      mozilla::Omnijar::GetReader(mozilla::Omnijar::GRE);
+  RefPtr<nsZipArchive> jarReader = Omnijar::GetReader(Omnijar::GRE);
   if (jarReader) {
+#ifdef MOZ_WIDGET_ANDROID
+    // Try to load an architecture-specific greprefs.js first. This will be
+    // present in FAT AAR builds of GeckoView on Android.
+    const char* abi = getenv("MOZ_ANDROID_CPU_ABI");
+    if (abi) {
+      nsAutoCString path;
+      path.AppendPrintf("%s/greprefs.js", abi);
+      rv = pref_ReadPrefFromJar(jarReader, path.get());
+    }
+
+    if (NS_FAILED(rv)) {
+      // Fallback to toplevel greprefs.js if arch-specific load fails.
+      rv = pref_ReadPrefFromJar(jarReader, "greprefs.js");
+    }
+#else
     // Load jar:$gre/omni.jar!/greprefs.js.
     rv = pref_ReadPrefFromJar(jarReader, "greprefs.js");
+#endif
     NS_ENSURE_SUCCESS(rv, Err("pref_ReadPrefFromJar() failed"));
 
     // Load jar:$gre/omni.jar!/defaults/pref/*.js.
-    rv = jarReader->FindInit("defaults/pref/*.js$", &findPtr);
-    NS_ENSURE_SUCCESS(rv, Err("jarReader->FindInit() failed"));
+    rv = pref_ReadDefaultPrefs(jarReader, "defaults/pref/*.js$");
+    NS_ENSURE_SUCCESS(rv, Err("pref_ReadDefaultPrefs() failed"));
 
-    find = findPtr;
-    while (NS_SUCCEEDED(find->FindNext(&entryName, &entryNameLen))) {
-      prefEntries.AppendElement(Substring(entryName, entryNameLen));
-    }
-
-    prefEntries.Sort();
-    for (uint32_t i = prefEntries.Length(); i--;) {
-      rv = pref_ReadPrefFromJar(jarReader, prefEntries[i].get());
-      if (NS_FAILED(rv)) {
-        NS_WARNING("Error parsing preferences.");
-      }
-    }
-
+#ifdef MOZ_WIDGET_ANDROID
+    // Load jar:$gre/omni.jar!/defaults/pref/$MOZ_ANDROID_CPU_ABI/*.js.
+    nsAutoCString path;
+    path.AppendPrintf("jar:$gre/omni.jar!/defaults/pref/%s/*.js$", abi);
+    pref_ReadDefaultPrefs(jarReader, path.get());
+    NS_ENSURE_SUCCESS(
+        rv, Err("architecture-specific pref_ReadDefaultPrefs() failed"));
+#endif
   } else {
     // Load $gre/greprefs.js.
     nsCOMPtr<nsIFile> greprefsFile;
@@ -4471,10 +4628,10 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
     "winpref.js"
 #elif defined(XP_UNIX)
     "unix.js"
-#if defined(_AIX)
+#  if defined(_AIX)
     ,
     "aix.js"
-#endif
+#  endif
 #elif defined(XP_BEOS)
     "beos.js"
 #endif
@@ -4488,13 +4645,12 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
 
   // Load jar:$app/omni.jar!/defaults/preferences/*.js
   // or jar:$gre/omni.jar!/defaults/preferences/*.js.
-  RefPtr<nsZipArchive> appJarReader =
-      mozilla::Omnijar::GetReader(mozilla::Omnijar::APP);
+  RefPtr<nsZipArchive> appJarReader = Omnijar::GetReader(Omnijar::APP);
 
-  // GetReader(mozilla::Omnijar::APP) returns null when `$app == $gre`, in
+  // GetReader(Omnijar::APP) returns null when `$app == $gre`, in
   // which case we look for app-specific default preferences in $gre.
   if (!appJarReader) {
-    appJarReader = mozilla::Omnijar::GetReader(mozilla::Omnijar::GRE);
+    appJarReader = Omnijar::GetReader(Omnijar::GRE);
   }
 
   if (appJarReader) {
@@ -4548,8 +4704,7 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   NS_CreateServicesFromCategory(NS_PREFSERVICE_APPDEFAULTS_TOPIC_ID, nullptr,
                                 NS_PREFSERVICE_APPDEFAULTS_TOPIC_ID);
 
-  nsCOMPtr<nsIObserverService> observerService =
-      mozilla::services::GetObserverService();
+  nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
   NS_ENSURE_SUCCESS(rv, Err("GetObserverService() failed (2)"));
 
   observerService->NotifyObservers(nullptr, NS_PREFSERVICE_APPDEFAULTS_TOPIC_ID,
@@ -4558,56 +4713,37 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   return Ok();
 }
 
-/* static */ nsresult Preferences::GetBool(const char* aPrefName, bool* aResult,
-                                           PrefValueKind aKind) {
+/* static */
+nsresult Preferences::GetBool(const char* aPrefName, bool* aResult,
+                              PrefValueKind aKind) {
   MOZ_ASSERT(aResult);
-  NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
-
-  Maybe<PrefWrapper> pref = pref_Lookup(aPrefName);
-  return pref.isSome() ? pref->GetBoolValue(aKind, aResult)
-                       : NS_ERROR_UNEXPECTED;
+  return PreferencesInternalMethods::GetPrefValue(aPrefName, aResult, aKind);
 }
 
-/* static */ nsresult Preferences::GetInt(const char* aPrefName,
-                                          int32_t* aResult,
-                                          PrefValueKind aKind) {
+/* static */
+nsresult Preferences::GetInt(const char* aPrefName, int32_t* aResult,
+                             PrefValueKind aKind) {
   MOZ_ASSERT(aResult);
-  NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
-
-  Maybe<PrefWrapper> pref = pref_Lookup(aPrefName);
-  return pref.isSome() ? pref->GetIntValue(aKind, aResult)
-                       : NS_ERROR_UNEXPECTED;
+  return PreferencesInternalMethods::GetPrefValue(aPrefName, aResult, aKind);
 }
 
-/* static */ nsresult Preferences::GetFloat(const char* aPrefName,
-                                            float* aResult,
-                                            PrefValueKind aKind) {
+/* static */
+nsresult Preferences::GetFloat(const char* aPrefName, float* aResult,
+                               PrefValueKind aKind) {
   MOZ_ASSERT(aResult);
-
-  nsAutoCString result;
-  nsresult rv = Preferences::GetCString(aPrefName, result, aKind);
-  if (NS_SUCCEEDED(rv)) {
-    // ToFloat() does a locale-independent conversion.
-    *aResult = result.ToFloat(&rv);
-  }
-  return rv;
+  return PreferencesInternalMethods::GetPrefValue(aPrefName, aResult, aKind);
 }
 
-/* static */ nsresult Preferences::GetCString(const char* aPrefName,
-                                              nsACString& aResult,
-                                              PrefValueKind aKind) {
-  NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
-
+/* static */
+nsresult Preferences::GetCString(const char* aPrefName, nsACString& aResult,
+                                 PrefValueKind aKind) {
   aResult.SetIsVoid(true);
-
-  Maybe<PrefWrapper> pref = pref_Lookup(aPrefName);
-  return pref.isSome() ? pref->GetCStringValue(aKind, aResult)
-                       : NS_ERROR_UNEXPECTED;
+  return PreferencesInternalMethods::GetPrefValue(aPrefName, aResult, aKind);
 }
 
-/* static */ nsresult Preferences::GetString(const char* aPrefName,
-                                             nsAString& aResult,
-                                             PrefValueKind aKind) {
+/* static */
+nsresult Preferences::GetString(const char* aPrefName, nsAString& aResult,
+                                PrefValueKind aKind) {
   nsAutoCString result;
   nsresult rv = Preferences::GetCString(aPrefName, result, aKind);
   if (NS_SUCCEEDED(rv)) {
@@ -4616,9 +4752,10 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   return rv;
 }
 
-/* static */ nsresult Preferences::GetLocalizedCString(const char* aPrefName,
-                                                       nsACString& aResult,
-                                                       PrefValueKind aKind) {
+/* static */
+nsresult Preferences::GetLocalizedCString(const char* aPrefName,
+                                          nsACString& aResult,
+                                          PrefValueKind aKind) {
   nsAutoString result;
   nsresult rv = GetLocalizedString(aPrefName, result, aKind);
   if (NS_SUCCEEDED(rv)) {
@@ -4627,9 +4764,10 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   return rv;
 }
 
-/* static */ nsresult Preferences::GetLocalizedString(const char* aPrefName,
-                                                      nsAString& aResult,
-                                                      PrefValueKind aKind) {
+/* static */
+nsresult Preferences::GetLocalizedString(const char* aPrefName,
+                                         nsAString& aResult,
+                                         PrefValueKind aKind) {
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
   nsCOMPtr<nsIPrefLocalizedString> prefLocalString;
   nsresult rv = GetRootBranch(aKind)->GetComplexValue(
@@ -4642,17 +4780,41 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   return rv;
 }
 
-/* static */ nsresult Preferences::GetComplex(const char* aPrefName,
-                                              const nsIID& aType,
-                                              void** aResult,
-                                              PrefValueKind aKind) {
+/* static */
+nsresult Preferences::GetComplex(const char* aPrefName, const nsIID& aType,
+                                 void** aResult, PrefValueKind aKind) {
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
   return GetRootBranch(aKind)->GetComplexValue(aPrefName, aType, aResult);
 }
 
-/* static */ nsresult Preferences::SetCString(const char* aPrefName,
-                                              const nsACString& aValue,
-                                              PrefValueKind aKind) {
+/* static */
+bool Preferences::GetBool(const char* aPrefName, bool aFallback,
+                          PrefValueKind aKind) {
+  return PreferencesInternalMethods::GetPref(aPrefName, aFallback, aKind);
+}
+
+/* static */
+int32_t Preferences::GetInt(const char* aPrefName, int32_t aFallback,
+                            PrefValueKind aKind) {
+  return PreferencesInternalMethods::GetPref(aPrefName, aFallback, aKind);
+}
+
+/* static */
+uint32_t Preferences::GetUint(const char* aPrefName, uint32_t aFallback,
+                              PrefValueKind aKind) {
+  return PreferencesInternalMethods::GetPref(aPrefName, aFallback, aKind);
+}
+
+/* static */
+float Preferences::GetFloat(const char* aPrefName, float aFallback,
+                            PrefValueKind aKind) {
+  return PreferencesInternalMethods::GetPref(aPrefName, aFallback, aKind);
+}
+
+/* static */
+nsresult Preferences::SetCString(const char* aPrefName,
+                                 const nsACString& aValue,
+                                 PrefValueKind aKind) {
   ENSURE_PARENT_PROCESS("SetCString", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
@@ -4671,8 +4833,9 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
                       /* fromInit */ false);
 }
 
-/* static */ nsresult Preferences::SetBool(const char* aPrefName, bool aValue,
-                                           PrefValueKind aKind) {
+/* static */
+nsresult Preferences::SetBool(const char* aPrefName, bool aValue,
+                              PrefValueKind aKind) {
   ENSURE_PARENT_PROCESS("SetBool", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
@@ -4684,8 +4847,9 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
                       /* fromInit */ false);
 }
 
-/* static */ nsresult Preferences::SetInt(const char* aPrefName, int32_t aValue,
-                                          PrefValueKind aKind) {
+/* static */
+nsresult Preferences::SetInt(const char* aPrefName, int32_t aValue,
+                             PrefValueKind aKind) {
   ENSURE_PARENT_PROCESS("SetInt", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
@@ -4697,15 +4861,15 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
                       /* fromInit */ false);
 }
 
-/* static */ nsresult Preferences::SetComplex(const char* aPrefName,
-                                              const nsIID& aType,
-                                              nsISupports* aValue,
-                                              PrefValueKind aKind) {
+/* static */
+nsresult Preferences::SetComplex(const char* aPrefName, const nsIID& aType,
+                                 nsISupports* aValue, PrefValueKind aKind) {
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
   return GetRootBranch(aKind)->SetComplexValue(aPrefName, aType, aValue);
 }
 
-/* static */ nsresult Preferences::Lock(const char* aPrefName) {
+/* static */
+nsresult Preferences::Lock(const char* aPrefName) {
   ENSURE_PARENT_PROCESS("Lock", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
@@ -4723,7 +4887,8 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   return NS_OK;
 }
 
-/* static */ nsresult Preferences::Unlock(const char* aPrefName) {
+/* static */
+nsresult Preferences::Unlock(const char* aPrefName) {
   ENSURE_PARENT_PROCESS("Unlock", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
@@ -4741,14 +4906,16 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   return NS_OK;
 }
 
-/* static */ bool Preferences::IsLocked(const char* aPrefName) {
+/* static */
+bool Preferences::IsLocked(const char* aPrefName) {
   NS_ENSURE_TRUE(InitStaticMembers(), false);
 
   Maybe<PrefWrapper> pref = pref_Lookup(aPrefName);
   return pref.isSome() && pref->IsLocked();
 }
 
-/* static */ nsresult Preferences::ClearUser(const char* aPrefName) {
+/* static */
+nsresult Preferences::ClearUser(const char* aPrefName) {
   ENSURE_PARENT_PROCESS("ClearUser", aPrefName);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
@@ -4778,14 +4945,16 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   return NS_OK;
 }
 
-/* static */ bool Preferences::HasUserValue(const char* aPrefName) {
+/* static */
+bool Preferences::HasUserValue(const char* aPrefName) {
   NS_ENSURE_TRUE(InitStaticMembers(), false);
 
   Maybe<PrefWrapper> pref = pref_Lookup(aPrefName);
   return pref.isSome() && pref->HasUserValue();
 }
 
-/* static */ int32_t Preferences::GetType(const char* aPrefName) {
+/* static */
+int32_t Preferences::GetType(const char* aPrefName) {
   NS_ENSURE_TRUE(InitStaticMembers(), nsIPrefBranch::PREF_INVALID);
 
   if (!gHashTable) {
@@ -4812,22 +4981,25 @@ float MOZ_MAYBE_UNUSED GetPref<float>(const char* aName, float aDefaultValue) {
   }
 }
 
-/* static */ nsresult Preferences::AddStrongObserver(nsIObserver* aObserver,
-                                                     const nsACString& aPref) {
+/* static */
+nsresult Preferences::AddStrongObserver(nsIObserver* aObserver,
+                                        const nsACString& aPref) {
   MOZ_ASSERT(aObserver);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
   return sPreferences->mRootBranch->AddObserver(aPref, aObserver, false);
 }
 
-/* static */ nsresult Preferences::AddWeakObserver(nsIObserver* aObserver,
-                                                   const nsACString& aPref) {
+/* static */
+nsresult Preferences::AddWeakObserver(nsIObserver* aObserver,
+                                      const nsACString& aPref) {
   MOZ_ASSERT(aObserver);
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
   return sPreferences->mRootBranch->AddObserver(aPref, aObserver, true);
 }
 
-/* static */ nsresult Preferences::RemoveObserver(nsIObserver* aObserver,
-                                                  const nsACString& aPref) {
+/* static */
+nsresult Preferences::RemoveObserver(nsIObserver* aObserver,
+                                     const nsACString& aPref) {
   MOZ_ASSERT(aObserver);
   if (sShutdown) {
     MOZ_ASSERT(!sPreferences);
@@ -4846,8 +5018,9 @@ static void AssertNotMallocAllocated(T* aPtr) {
 #endif
 }
 
-/* static */ nsresult Preferences::AddStrongObservers(nsIObserver* aObserver,
-                                                      const char** aPrefs) {
+/* static */
+nsresult Preferences::AddStrongObservers(nsIObserver* aObserver,
+                                         const char** aPrefs) {
   MOZ_ASSERT(aObserver);
   for (uint32_t i = 0; aPrefs[i]; i++) {
     AssertNotMallocAllocated(aPrefs[i]);
@@ -4860,8 +5033,9 @@ static void AssertNotMallocAllocated(T* aPtr) {
   return NS_OK;
 }
 
-/* static */ nsresult Preferences::AddWeakObservers(nsIObserver* aObserver,
-                                                    const char** aPrefs) {
+/* static */
+nsresult Preferences::AddWeakObservers(nsIObserver* aObserver,
+                                       const char** aPrefs) {
   MOZ_ASSERT(aObserver);
   for (uint32_t i = 0; aPrefs[i]; i++) {
     AssertNotMallocAllocated(aPrefs[i]);
@@ -4874,8 +5048,9 @@ static void AssertNotMallocAllocated(T* aPtr) {
   return NS_OK;
 }
 
-/* static */ nsresult Preferences::RemoveObservers(nsIObserver* aObserver,
-                                                   const char** aPrefs) {
+/* static */
+nsresult Preferences::RemoveObservers(nsIObserver* aObserver,
+                                      const char** aPrefs) {
   MOZ_ASSERT(aObserver);
   if (sShutdown) {
     MOZ_ASSERT(!sPreferences);
@@ -4891,9 +5066,11 @@ static void AssertNotMallocAllocated(T* aPtr) {
 }
 
 template <typename T>
-/* static */ nsresult Preferences::RegisterCallbackImpl(
-    PrefChangedFunc aCallback, T& aPrefNode, void* aData, MatchKind aMatchKind,
-    bool aIsPriority) {
+/* static */
+nsresult Preferences::RegisterCallbackImpl(PrefChangedFunc aCallback,
+                                           T& aPrefNode, void* aData,
+                                           MatchKind aMatchKind,
+                                           bool aIsPriority) {
   NS_ENSURE_ARG(aCallback);
 
   NS_ENSURE_TRUE(InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
@@ -4921,25 +5098,26 @@ template <typename T>
   return NS_OK;
 }
 
-/* static */ nsresult Preferences::RegisterCallback(PrefChangedFunc aCallback,
-                                                    const nsACString& aPrefNode,
-                                                    void* aData,
-                                                    MatchKind aMatchKind,
-                                                    bool aIsPriority) {
+/* static */
+nsresult Preferences::RegisterCallback(PrefChangedFunc aCallback,
+                                       const nsACString& aPrefNode, void* aData,
+                                       MatchKind aMatchKind, bool aIsPriority) {
   return RegisterCallbackImpl(aCallback, aPrefNode, aData, aMatchKind,
                               aIsPriority);
 }
 
-/* static */ nsresult Preferences::RegisterCallbacks(PrefChangedFunc aCallback,
-                                                     const char** aPrefs,
-                                                     void* aData,
-                                                     MatchKind aMatchKind) {
+/* static */
+nsresult Preferences::RegisterCallbacks(PrefChangedFunc aCallback,
+                                        const char** aPrefs, void* aData,
+                                        MatchKind aMatchKind) {
   return RegisterCallbackImpl(aCallback, aPrefs, aData, aMatchKind);
 }
 
-/* static */ nsresult Preferences::RegisterCallbackAndCall(
-    PrefChangedFunc aCallback, const nsACString& aPref, void* aClosure,
-    MatchKind aMatchKind) {
+/* static */
+nsresult Preferences::RegisterCallbackAndCall(PrefChangedFunc aCallback,
+                                              const nsACString& aPref,
+                                              void* aClosure,
+                                              MatchKind aMatchKind) {
   MOZ_ASSERT(aCallback);
   nsresult rv = RegisterCallback(aCallback, aPref, aClosure, aMatchKind);
   if (NS_SUCCEEDED(rv)) {
@@ -4948,8 +5126,10 @@ template <typename T>
   return rv;
 }
 
-/* static */ nsresult Preferences::RegisterCallbacksAndCall(
-    PrefChangedFunc aCallback, const char** aPrefs, void* aClosure) {
+/* static */
+nsresult Preferences::RegisterCallbacksAndCall(PrefChangedFunc aCallback,
+                                               const char** aPrefs,
+                                               void* aClosure) {
   MOZ_ASSERT(aCallback);
 
   nsresult rv =
@@ -4963,9 +5143,10 @@ template <typename T>
 }
 
 template <typename T>
-/* static */ nsresult Preferences::UnregisterCallbackImpl(
-    PrefChangedFunc aCallback, T& aPrefNode, void* aData,
-    MatchKind aMatchKind) {
+/* static */
+nsresult Preferences::UnregisterCallbackImpl(PrefChangedFunc aCallback,
+                                             T& aPrefNode, void* aData,
+                                             MatchKind aMatchKind) {
   MOZ_ASSERT(aCallback);
   if (sShutdown) {
     MOZ_ASSERT(!sPreferences);
@@ -4999,16 +5180,18 @@ template <typename T>
   return rv;
 }
 
-/* static */ nsresult Preferences::UnregisterCallback(
-    PrefChangedFunc aCallback, const nsACString& aPrefNode, void* aData,
-    MatchKind aMatchKind) {
+/* static */
+nsresult Preferences::UnregisterCallback(PrefChangedFunc aCallback,
+                                         const nsACString& aPrefNode,
+                                         void* aData, MatchKind aMatchKind) {
   return UnregisterCallbackImpl<const nsACString&>(aCallback, aPrefNode, aData,
                                                    aMatchKind);
 }
 
-/* static */ nsresult Preferences::UnregisterCallbacks(
-    PrefChangedFunc aCallback, const char** aPrefs, void* aData,
-    MatchKind aMatchKind) {
+/* static */
+nsresult Preferences::UnregisterCallbacks(PrefChangedFunc aCallback,
+                                          const char** aPrefs, void* aData,
+                                          MatchKind aMatchKind) {
   return UnregisterCallbackImpl(aCallback, aPrefs, aData, aMatchKind);
 }
 
@@ -5019,150 +5202,68 @@ static void CacheDataAppendElement(CacheData* aData) {
   gCacheData->AppendElement(aData);
 }
 
-static void BoolVarChanged(const char* aPref, void* aClosure) {
-  CacheData* cache = static_cast<CacheData*>(aClosure);
-  *static_cast<bool*>(cache->mCacheLocation) =
-      Preferences::GetBool(aPref, cache->mDefaultValueBool);
+template <typename T>
+static nsresult AddVarCache(T* aCache, const nsACString& aPref,
+                            StripAtomic<T> aDefault, bool aSkipAssignment) {
+  if (!aSkipAssignment) {
+    *aCache = PreferencesInternalMethods::GetPref(
+        PromiseFlatCString(aPref).get(), aDefault);
+  }
+  CacheData* data = new CacheData(aCache, aDefault);
+  CacheDataAppendElement(data);
+  PreferencesInternalMethods::RegisterCallback<T>(data, aPref);
+  return NS_OK;
 }
 
-/* static */ nsresult Preferences::AddBoolVarCache(bool* aCache,
-                                                   const nsACString& aPref,
-                                                   bool aDefault,
-                                                   bool aSkipAssignment) {
+/* static */
+nsresult Preferences::AddBoolVarCache(bool* aCache, const nsACString& aPref,
+                                      bool aDefault, bool aSkipAssignment) {
   AssertNotAlreadyCached("bool", aPref, aCache);
-  if (!aSkipAssignment) {
-    *aCache = GetBool(PromiseFlatCString(aPref).get(), aDefault);
-  }
-  CacheData* data = new CacheData();
-  data->mCacheLocation = aCache;
-  data->mDefaultValueBool = aDefault;
-  CacheDataAppendElement(data);
-  Preferences::RegisterCallback(BoolVarChanged, aPref, data,
-                                Preferences::ExactMatch,
-                                /* isPriority */ true);
-  return NS_OK;
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
 }
 
 template <MemoryOrdering Order>
-static void AtomicBoolVarChanged(const char* aPref, void* aClosure) {
-  CacheData* cache = static_cast<CacheData*>(aClosure);
-  *static_cast<Atomic<bool, Order>*>(cache->mCacheLocation) =
-      Preferences::GetBool(aPref, cache->mDefaultValueBool);
-}
-
-template <MemoryOrdering Order>
-/* static */ nsresult Preferences::AddAtomicBoolVarCache(
-    Atomic<bool, Order>* aCache, const nsACString& aPref, bool aDefault,
-    bool aSkipAssignment) {
+/* static */
+nsresult Preferences::AddAtomicBoolVarCache(Atomic<bool, Order>* aCache,
+                                            const nsACString& aPref,
+                                            bool aDefault,
+                                            bool aSkipAssignment) {
   AssertNotAlreadyCached("bool", aPref, aCache);
-  if (!aSkipAssignment) {
-    *aCache = GetBool(PromiseFlatCString(aPref).get(), aDefault);
-  }
-  CacheData* data = new CacheData();
-  data->mCacheLocation = aCache;
-  data->mDefaultValueBool = aDefault;
-  CacheDataAppendElement(data);
-  Preferences::RegisterCallback(AtomicBoolVarChanged<Order>, aPref, data,
-                                Preferences::ExactMatch,
-                                /* isPriority */ true);
-  return NS_OK;
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
 }
 
-static void IntVarChanged(const char* aPref, void* aClosure) {
-  CacheData* cache = static_cast<CacheData*>(aClosure);
-  *static_cast<int32_t*>(cache->mCacheLocation) =
-      Preferences::GetInt(aPref, cache->mDefaultValueInt);
-}
-
-/* static */ nsresult Preferences::AddIntVarCache(int32_t* aCache,
-                                                  const nsACString& aPref,
-                                                  int32_t aDefault,
-                                                  bool aSkipAssignment) {
+/* static */
+nsresult Preferences::AddIntVarCache(int32_t* aCache, const nsACString& aPref,
+                                     int32_t aDefault, bool aSkipAssignment) {
   AssertNotAlreadyCached("int", aPref, aCache);
-  if (!aSkipAssignment) {
-    *aCache = GetInt(PromiseFlatCString(aPref).get(), aDefault);
-  }
-  CacheData* data = new CacheData();
-  data->mCacheLocation = aCache;
-  data->mDefaultValueInt = aDefault;
-  CacheDataAppendElement(data);
-  Preferences::RegisterCallback(IntVarChanged, aPref, data,
-                                Preferences::ExactMatch, /* isPriority */ true);
-  return NS_OK;
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
 }
 
 template <MemoryOrdering Order>
-static void AtomicIntVarChanged(const char* aPref, void* aClosure) {
-  CacheData* cache = static_cast<CacheData*>(aClosure);
-  *static_cast<Atomic<int32_t, Order>*>(cache->mCacheLocation) =
-      Preferences::GetInt(aPref, cache->mDefaultValueUint);
-}
-
-template <MemoryOrdering Order>
-/* static */ nsresult Preferences::AddAtomicIntVarCache(
-    Atomic<int32_t, Order>* aCache, const nsACString& aPref, int32_t aDefault,
-    bool aSkipAssignment) {
+/* static */
+nsresult Preferences::AddAtomicIntVarCache(Atomic<int32_t, Order>* aCache,
+                                           const nsACString& aPref,
+                                           int32_t aDefault,
+                                           bool aSkipAssignment) {
   AssertNotAlreadyCached("int", aPref, aCache);
-  if (!aSkipAssignment) {
-    *aCache = GetInt(PromiseFlatCString(aPref).get(), aDefault);
-  }
-  CacheData* data = new CacheData();
-  data->mCacheLocation = aCache;
-  data->mDefaultValueUint = aDefault;
-  CacheDataAppendElement(data);
-  Preferences::RegisterCallback(AtomicIntVarChanged<Order>, aPref, data,
-                                Preferences::ExactMatch,
-                                /* isPriority */ true);
-  return NS_OK;
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
 }
 
-static void UintVarChanged(const char* aPref, void* aClosure) {
-  CacheData* cache = static_cast<CacheData*>(aClosure);
-  *static_cast<uint32_t*>(cache->mCacheLocation) =
-      Preferences::GetUint(aPref, cache->mDefaultValueUint);
-}
-
-/* static */ nsresult Preferences::AddUintVarCache(uint32_t* aCache,
-                                                   const nsACString& aPref,
-                                                   uint32_t aDefault,
-                                                   bool aSkipAssignment) {
+/* static */
+nsresult Preferences::AddUintVarCache(uint32_t* aCache, const nsACString& aPref,
+                                      uint32_t aDefault, bool aSkipAssignment) {
   AssertNotAlreadyCached("uint", aPref, aCache);
-  if (!aSkipAssignment) {
-    *aCache = GetUint(PromiseFlatCString(aPref).get(), aDefault);
-  }
-  CacheData* data = new CacheData();
-  data->mCacheLocation = aCache;
-  data->mDefaultValueUint = aDefault;
-  CacheDataAppendElement(data);
-  Preferences::RegisterCallback(UintVarChanged, aPref, data,
-                                Preferences::ExactMatch,
-                                /* isPriority */ true);
-  return NS_OK;
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
 }
 
 template <MemoryOrdering Order>
-static void AtomicUintVarChanged(const char* aPref, void* aClosure) {
-  CacheData* cache = static_cast<CacheData*>(aClosure);
-  *static_cast<Atomic<uint32_t, Order>*>(cache->mCacheLocation) =
-      Preferences::GetUint(aPref, cache->mDefaultValueUint);
-}
-
-template <MemoryOrdering Order>
-/* static */ nsresult Preferences::AddAtomicUintVarCache(
-    Atomic<uint32_t, Order>* aCache, const nsACString& aPref, uint32_t aDefault,
-    bool aSkipAssignment) {
+/* static */
+nsresult Preferences::AddAtomicUintVarCache(Atomic<uint32_t, Order>* aCache,
+                                            const nsACString& aPref,
+                                            uint32_t aDefault,
+                                            bool aSkipAssignment) {
   AssertNotAlreadyCached("uint", aPref, aCache);
-  if (!aSkipAssignment) {
-    *aCache = GetUint(PromiseFlatCString(aPref).get(), aDefault);
-  }
-  CacheData* data = new CacheData();
-  data->mCacheLocation = aCache;
-  data->mDefaultValueUint = aDefault;
-  CacheDataAppendElement(data);
-  Preferences::RegisterCallback(AtomicUintVarChanged<Order>, aPref, data,
-                                Preferences::ExactMatch,
-                                /* isPriority */ true);
-  return NS_OK;
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
 }
 
 // Since the definition of template functions is not in a header file, we
@@ -5193,44 +5294,21 @@ template nsresult Preferences::AddAtomicUintVarCache(
     Atomic<uint32_t, SequentiallyConsistent>*, const nsACString&, uint32_t,
     bool);
 
-static void FloatVarChanged(const char* aPref, void* aClosure) {
-  CacheData* cache = static_cast<CacheData*>(aClosure);
-  *static_cast<float*>(cache->mCacheLocation) =
-      Preferences::GetFloat(aPref, cache->mDefaultValueFloat);
-}
-
-/* static */ nsresult Preferences::AddFloatVarCache(float* aCache,
-                                                    const nsACString& aPref,
-                                                    float aDefault,
-                                                    bool aSkipAssignment) {
+/* static */
+nsresult Preferences::AddFloatVarCache(float* aCache, const nsACString& aPref,
+                                       float aDefault, bool aSkipAssignment) {
   AssertNotAlreadyCached("float", aPref, aCache);
-  if (!aSkipAssignment) {
-    *aCache = GetFloat(PromiseFlatCString(aPref).get(), aDefault);
-  }
-  CacheData* data = new CacheData();
-  data->mCacheLocation = aCache;
-  data->mDefaultValueFloat = aDefault;
-  CacheDataAppendElement(data);
-  Preferences::RegisterCallback(FloatVarChanged, aPref, data,
-                                Preferences::ExactMatch,
-                                /* isPriority */ true);
-  return NS_OK;
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
 }
 
-// For a VarCache pref like this:
-//
-//   VARCACHE_PREF("my.varcache", my_varcache, int32_t, 99)
-//
-// we generate a static variable definition:
-//
-//   int32_t StaticPrefs::sVarCache_my_varcache(99);
-//
-#define PREF(name, cpp_type, value)
-#define VARCACHE_PREF(name, id, cpp_type, value) \
-  cpp_type StaticPrefs::sVarCache_##id(value);
-#include "mozilla/StaticPrefList.h"
-#undef PREF
-#undef VARCACHE_PREF
+/* static */
+nsresult Preferences::AddAtomicFloatVarCache(std::atomic<float>* aCache,
+                                             const nsACString& aPref,
+                                             float aDefault,
+                                             bool aSkipAssignment) {
+  AssertNotAlreadyCached("float", aPref, aCache);
+  return AddVarCache(aCache, aPref, aDefault, aSkipAssignment);
+}
 
 // The SetPref_*() functions below end in a `_<type>` suffix because they are
 // used by the PREF macro definition in InitAll() below.
@@ -5276,111 +5354,111 @@ MOZ_MAYBE_UNUSED static void SetPref_String(const char* aName,
                /* fromInit */ true);
 }
 
-static void InitVarCachePref(const nsACString& aName, bool* aCache,
-                             bool aDefaultValue, bool aIsStartup,
+static void SetPref(const char* aName, bool aDefaultValue) {
+  SetPref_bool(aName, aDefaultValue);
+}
+static void SetPref(const char* aName, int32_t aDefaultValue) {
+  SetPref_int32_t(aName, aDefaultValue);
+}
+static void SetPref(const char* aName, uint32_t aDefaultValue) {
+  SetPref_int32_t(aName, int32_t(aDefaultValue));
+}
+static void SetPref(const char* aName, float aDefaultValue) {
+  SetPref_float(aName, aDefaultValue);
+}
+MOZ_MAYBE_UNUSED static void SetPref(const char* aName,
+                                     const char* aDefaultValue) {
+  SetPref_String(aName, aDefaultValue);
+}
+
+template <typename T>
+static void InitVarCachePref(StaticPrefs::UpdatePolicy aPolicy,
+                             const nsACString& aName, T* aCache,
+                             StripAtomic<T> aDefaultValue, bool aIsStartup,
                              bool aSetValue) {
-  if (aSetValue) {
-    SetPref_bool(PromiseFlatCString(aName).get(), aDefaultValue);
+  // aSetValue is set when we are running in the parent process.
+  // aIsStartup will be true when we first initialize the StaticPrefs and false
+  // when we want to reset the Preferences/StaticPrefs to their default value.
+
+  // InitVarCachePref is called under the following scenarios:
+  // aSetValue | aIsStartup | Action
+  // true      | true       | Set underlying preference and StaticPrefs to
+  //           |            | their default value, set callback for Live pref.
+  // true      | false      | reset underlying preference and StaticPref to
+  //           |            | default value.
+  // false     | true       | set callback for Live pref.
+  // false     | false      | none.
+  //
+  // We only set *aCache if the policy is Live as:
+  // 1- On startup, `Once` prefs will be initialized lazily in InitOncePrefs(),
+  // 2- After that, `Once` prefs are immutable.
+
+  if (aSetValue && MOZ_LIKELY(aPolicy != StaticPrefs::UpdatePolicy::Skip)) {
+    SetPref(PromiseFlatCString(aName).get(), aDefaultValue);
+    if (MOZ_LIKELY(aPolicy == StaticPrefs::UpdatePolicy::Live)) {
+      *aCache = aDefaultValue;
+    }
   }
-  *aCache = aDefaultValue;
-  if (aIsStartup) {
-    Preferences::AddBoolVarCache(aCache, aName, aDefaultValue, true);
+
+  if (MOZ_LIKELY(aPolicy == StaticPrefs::UpdatePolicy::Live) &&
+      MOZ_LIKELY(aIsStartup)) {
+    AddVarCache(aCache, aName, aDefaultValue, true);
   }
 }
 
-template <MemoryOrdering Order>
-static void InitVarCachePref(const nsACString& aName,
-                             Atomic<bool, Order>* aCache, bool aDefaultValue,
-                             bool aIsStartup, bool aSetValue) {
-  if (aSetValue) {
-    SetPref_bool(PromiseFlatCString(aName).get(), aDefaultValue);
+static Atomic<bool> sOncePrefRead(false);
+static StaticMutex sOncePrefMutex;
+
+namespace StaticPrefs {
+
+void MaybeInitOncePrefs() {
+  if (MOZ_LIKELY(sOncePrefRead)) {
+    // `Once` StaticPrefs have already been initialized to their default value.
+    return;
   }
-  *aCache = aDefaultValue;
-  if (aIsStartup) {
-    Preferences::AddAtomicBoolVarCache(aCache, aName, aDefaultValue, true);
+  StaticMutexAutoLock lock(sOncePrefMutex);
+  if (NS_IsMainThread()) {
+    InitOncePrefs();
+  } else {
+    RefPtr<Runnable> runnable = NS_NewRunnableFunction(
+        "Preferences::MaybeInitOncePrefs", [&]() { InitOncePrefs(); });
+    // This logic needs to run on the main thread
+    SyncRunnable::DispatchToThread(
+        SystemGroup::EventTargetFor(TaskCategory::Other), runnable);
   }
+  sOncePrefRead = true;
 }
 
-// XXX: this will eventually become used
-MOZ_MAYBE_UNUSED static void InitVarCachePref(const nsACString& aName,
-                                              int32_t* aCache,
-                                              int32_t aDefaultValue,
-                                              bool aIsStartup, bool aSetValue) {
-  if (aSetValue) {
-    SetPref_int32_t(PromiseFlatCString(aName).get(), aDefaultValue);
-  }
-  *aCache = aDefaultValue;
-  if (aIsStartup) {
-    Preferences::AddIntVarCache(aCache, aName, aDefaultValue, true);
-  }
-}
+// For a pref like this:
+//
+//   VARCACHE_PREF($POLICY, "my.pref", my_pref, int32_t, 99)
+//
+// we generate a variable definition like this:
+//
+//   int32_t sVarCache_my_pref(99);
+//
+#define PREF(name, cpp_type, value)
+#define VARCACHE_PREF(policy, name, id, cpp_type, default_value) \
+  cpp_type sVarCache_##id(default_value);
+#include "mozilla/StaticPrefList.h"
+#undef PREF
+#undef VARCACHE_PREF
 
-template <MemoryOrdering Order>
-static void InitVarCachePref(const nsACString& aName,
-                             Atomic<int32_t, Order>* aCache,
-                             int32_t aDefaultValue, bool aIsStartup,
-                             bool aSetValue) {
-  if (aSetValue) {
-    SetPref_int32_t(PromiseFlatCString(aName).get(), aDefaultValue);
-  }
-  *aCache = aDefaultValue;
-  if (aIsStartup) {
-    Preferences::AddAtomicIntVarCache(aCache, aName, aDefaultValue, true);
-  }
-}
+static void InitAll(bool aIsStartup) {
+  bool isParent = XRE_IsParentProcess();
 
-static void InitVarCachePref(const nsACString& aName, uint32_t* aCache,
-                             uint32_t aDefaultValue, bool aIsStartup,
-                             bool aSetValue) {
-  if (aSetValue) {
-    SetPref_int32_t(PromiseFlatCString(aName).get(),
-                    static_cast<int32_t>(aDefaultValue));
-  }
-  *aCache = aDefaultValue;
-  if (aIsStartup) {
-    Preferences::AddUintVarCache(aCache, aName, aDefaultValue, true);
-  }
-}
-
-template <MemoryOrdering Order>
-static void InitVarCachePref(const nsACString& aName,
-                             Atomic<uint32_t, Order>* aCache,
-                             uint32_t aDefaultValue, bool aIsStartup,
-                             bool aSetValue) {
-  if (aSetValue) {
-    SetPref_int32_t(PromiseFlatCString(aName).get(),
-                    static_cast<int32_t>(aDefaultValue));
-  }
-  *aCache = aDefaultValue;
-  if (aIsStartup) {
-    Preferences::AddAtomicUintVarCache(aCache, aName, aDefaultValue, true);
-  }
-}
-
-static void InitVarCachePref(const nsACString& aName, float* aCache,
-                             float aDefaultValue, bool aIsStartup,
-                             bool aSetValue) {
-  if (aSetValue) {
-    SetPref_float(PromiseFlatCString(aName).get(), aDefaultValue);
-  }
-  *aCache = aDefaultValue;
-  if (aIsStartup) {
-    Preferences::AddFloatVarCache(aCache, aName, aDefaultValue, true);
-  }
-}
-
-/* static */ void StaticPrefs::InitAll(bool aIsStartup) {
   // For prefs like these:
   //
   //   PREF("foo.bar.baz", bool, true)
-  //   VARCACHE_PREF("my.varcache", my_varcache, int32_t, 99)
+  //   VARCACHE_PREF($POLICY, "my.pref", my_pref, int32_t, 99)
   //
-  // we generate registration calls:
+  // we generate registration calls like this:
   //
-  //   if (isParent)
+  //   if (isParent) {
   //     SetPref_bool("foo.bar.baz", true);
-  //   InitVarCachePref("my.varcache", &StaticPrefs::sVarCache_my_varcache, 99,
-  //                    aIsStartup);
+  //   }
+  //   InitVarCachePref(UpdatePolicy::Live, "my.pref", &sVarCache_my_pref,
+  //                    99, aIsStartup, isParent);
   //
   // The SetPref_*() functions have a type suffix to avoid ambiguity between
   // prefs having int32_t and float default values. That suffix is not needed
@@ -5389,16 +5467,210 @@ static void InitVarCachePref(const nsACString& aName, float* aCache,
   //
   // In content processes, we rely on the parent to send us the correct initial
   // values via shared memory, so we do not re-initialize them here.
-  bool isParent = XRE_IsParentProcess();
-#define PREF(name, cpp_type, value) \
-  if (isParent) SetPref_##cpp_type(name, value);
-#define VARCACHE_PREF(name, id, cpp_type, value)                           \
-  InitVarCachePref(NS_LITERAL_CSTRING(name), &StaticPrefs::sVarCache_##id, \
-                   value, aIsStartup, isParent);
+#define PREF(name, cpp_type, value)  \
+  if (isParent) {                    \
+    SetPref_##cpp_type(name, value); \
+  }
+#define VARCACHE_PREF(policy, name, id, cpp_type, value)           \
+  InitVarCachePref(UpdatePolicy::policy, NS_LITERAL_CSTRING(name), \
+                   &sVarCache_##id, value, aIsStartup, isParent);
 #include "mozilla/StaticPrefList.h"
 #undef PREF
 #undef VARCACHE_PREF
 }
+
+static void InitOncePrefs() {
+  // For a pref like this:
+  //
+  //   VARCACHE_PREF($POLICY, "my.pref", my_pref, int32_t, 99)
+  //
+  // we generate an initialization (in a non-DEBUG build) like this:
+  //
+  //   if (UpdatePolicy::$POLICY == UpdatePolicy::Once) {
+  //     sVarCache_my_pref = PreferencesInternalMethods::GetPref("my.pref", 99);
+  //   }
+  //
+  // This is done to get the potentially updated Preference value as we didn't
+  // register a callback method for the `Once` policy.
+  //
+  // On debug build, we also install a mechanism that allows to check if the
+  // original Preference is being modified once `Once` StaticPrefs have been
+  // initialized as this would indicate a likely misuse of `Once` StaticPrefs
+  // and that maybe instead they should have been made `Live`.
+  //
+#define PREF(name, cpp_type, value)
+#ifdef DEBUG
+#  define VARCACHE_PREF(policy, name, id, cpp_type, value)                     \
+    if (UpdatePolicy::policy == UpdatePolicy::Once) {                          \
+      MOZ_ASSERT(gOnceStaticPrefsAntiFootgun);                                 \
+      sVarCache_##id = PreferencesInternalMethods::GetPref(                    \
+          name, StripAtomic<cpp_type>(value));                                 \
+      auto checkPref = [&]() {                                                 \
+        MOZ_ASSERT(sOncePrefRead);                                             \
+        StripAtomic<cpp_type> staticPrefValue = id();                          \
+        StripAtomic<cpp_type> preferenceValue =                                \
+            PreferencesInternalMethods::GetPref(GetPrefName_##id(),            \
+                                                StripAtomic<cpp_type>(value)); \
+        MOZ_ASSERT(                                                            \
+            staticPrefValue == preferenceValue,                                \
+            "Preference '" name "' got modified since StaticPrefs::" #id       \
+            " got initialized. Consider using a `Live` StaticPrefs instead");  \
+      };                                                                       \
+      gOnceStaticPrefsAntiFootgun->insert(                                     \
+          std::pair<const char*, AntiFootgunCallback>(GetPrefName_##id(),      \
+                                                      std::move(checkPref)));  \
+    }
+#else
+#  define VARCACHE_PREF(policy, name, id, cpp_type, value)  \
+    if (UpdatePolicy::policy == UpdatePolicy::Once) {       \
+      sVarCache_##id = PreferencesInternalMethods::GetPref( \
+          name, StripAtomic<cpp_type>(value));              \
+    }
+#endif
+
+#include "mozilla/StaticPrefList.h"
+#undef PREF
+#undef VARCACHE_PREF
+}
+
+}  // namespace StaticPrefs
+
+static MOZ_MAYBE_UNUSED void SaveOncePrefToSharedMap(
+    SharedPrefMapBuilder& aBuilder, const char* aName, bool aValue) {
+  auto oncePref = MakeUnique<Pref>(aName);
+  oncePref->SetType(PrefType::Bool);
+  oncePref->SetIsSkippedByIteration(true);
+  bool valueChanged = false;
+  MOZ_ALWAYS_SUCCEEDS(
+      oncePref->SetDefaultValue(PrefType::Bool, PrefValue(aValue),
+                                /* isSticky */ true,
+                                /* isLocked */ true, &valueChanged));
+  oncePref->AddToMap(aBuilder);
+}
+
+static MOZ_MAYBE_UNUSED void SaveOncePrefToSharedMap(
+    SharedPrefMapBuilder& aBuilder, const char* aName, int32_t aValue) {
+  auto oncePref = MakeUnique<Pref>(aName);
+  oncePref->SetType(PrefType::Int);
+  oncePref->SetIsSkippedByIteration(true);
+  bool valueChanged = false;
+  MOZ_ALWAYS_SUCCEEDS(
+      oncePref->SetDefaultValue(PrefType::Int, PrefValue(aValue),
+                                /* isSticky */ true,
+                                /* isLocked */ true, &valueChanged));
+  oncePref->AddToMap(aBuilder);
+}
+
+static MOZ_MAYBE_UNUSED void SaveOncePrefToSharedMap(
+    SharedPrefMapBuilder& aBuilder, const char* aName, uint32_t aValue) {
+  SaveOncePrefToSharedMap(aBuilder, aName, int32_t(aValue));
+}
+
+static MOZ_MAYBE_UNUSED void SaveOncePrefToSharedMap(
+    SharedPrefMapBuilder& aBuilder, const char* aName, float aValue) {
+  auto oncePref = MakeUnique<Pref>(aName);
+  oncePref->SetType(PrefType::String);
+  oncePref->SetIsSkippedByIteration(true);
+  nsAutoCString value;
+  value.AppendFloat(aValue);
+  bool valueChanged = false;
+  // It's ok to stash a pointer to the temporary PromiseFlatCString's chars in
+  // pref because pref_SetPref() duplicates those chars.
+  const nsCString& flat = PromiseFlatCString(value);
+  MOZ_ALWAYS_SUCCEEDS(
+      oncePref->SetDefaultValue(PrefType::String, PrefValue(flat.get()),
+                                /* isSticky */ true,
+                                /* isLocked */ true, &valueChanged));
+  oncePref->AddToMap(aBuilder);
+}
+
+#define ONCE_PREF_NAME(name) ("$$$" name "$$$")
+
+namespace StaticPrefs {
+
+static void RegisterOncePrefs(SharedPrefMapBuilder& aBuilder) {
+  MOZ_ASSERT(XRE_IsParentProcess());
+  MOZ_DIAGNOSTIC_ASSERT(!gSharedMap,
+                        "Must be called before gSharedMap has been created");
+  MaybeInitOncePrefs();
+
+  // For a pref like this:
+  //
+  //   VARCACHE_PREF($POLICY, "my.pref", my_pref, int32_t, 99)
+  //
+  // we generate a save call like this:
+  //
+  //   if (UpdatePolicy::$POLICY == UpdatePolicy::Once) {
+  //     SaveOncePrefToSharedMap(aBuilder, ONCE_PREF_NAME(my.pref),
+  //                             sVarCache_my_pref);
+  //   }
+  //
+  // `Once` StaticPrefs values will be stored in a hidden and locked preferences
+  // in the global SharedPreferenceMap. In order for those preferences to be
+  // hidden and not appear in about:config nor ever be stored to disk, we add
+  // the "$$$" prefix and suffix to the preference name and set the IsVisible
+  // flag to false.
+  //
+#define PREF(name, cpp_type, value)
+#define VARCACHE_PREF(policy, name, id, cpp_type, value)            \
+  if (UpdatePolicy::policy == UpdatePolicy::Once) {                 \
+    SaveOncePrefToSharedMap(aBuilder, ONCE_PREF_NAME(name),         \
+                            StripAtomic<cpp_type>(sVarCache_##id)); \
+  }
+#include "mozilla/StaticPrefList.h"
+#undef PREF
+#undef VARCACHE_PREF
+}
+
+static void InitStaticPrefsFromShared() {
+  MOZ_ASSERT(!XRE_IsParentProcess());
+  MOZ_DIAGNOSTIC_ASSERT(gSharedMap,
+                        "Must be called once gSharedMap has been created");
+
+  // For a prefs like this:
+  //
+  //   VARCACHE_PREF($POLICY, "my.pref", my_pref, int32_t, 99)
+  //
+  // we generate an initialization like this:
+  //
+  //   if (UpdatePolicy::$POLICY != UpdatePolicy::Skip) {
+  //     int32_t val;
+  //     nsresult rv;
+  //     if (UpdatePolicy::$POLICY == UpdatePolicy::Once) {
+  //       rv = PreferencesInternalMethods::GetSharedPrefValue(
+  //              "$$$my.pref$$$", &val);
+  //     } else if (UpdatePolicy::Once == UpdatePolicy::Live) {
+  //       rv = PreferencesInternalMethods::GetSharedPrefValue("my.pref", &val);
+  //     }
+  //     MOZ_DIAGNOSTIC_ALWAYS_TRUE(NS_SUCCEEDED(rv));
+  //     sVarCache_my_pref = val;
+  //   }
+  //
+#define PREF(name, cpp_type, value)
+#define VARCACHE_PREF(policy, name, id, cpp_type, value)               \
+  if (UpdatePolicy::policy != UpdatePolicy::Skip) {                    \
+    StripAtomic<cpp_type> val;                                         \
+    nsresult rv;                                                       \
+    if (UpdatePolicy::policy == UpdatePolicy::Once) {                  \
+      rv = PreferencesInternalMethods::GetSharedPrefValue(             \
+          ONCE_PREF_NAME(name), &val);                                 \
+    } else {                                                           \
+      rv = PreferencesInternalMethods::GetSharedPrefValue(name, &val); \
+    }                                                                  \
+    MOZ_DIAGNOSTIC_ALWAYS_TRUE(NS_SUCCEEDED(rv));                      \
+    StaticPrefs::sVarCache_##id = val;                                 \
+  }
+#include "mozilla/StaticPrefList.h"
+#undef PREF
+#undef VARCACHE_PREF
+
+  // `Once` StaticPrefs have been set to their value in the step above and
+  // outside the parent process they are immutable. So we set sOncePrefRead
+  // so that we can directly skip any lazy initializations.
+  sOncePrefRead = true;
+}
+
+}  // namespace StaticPrefs
 
 }  // namespace mozilla
 
@@ -5408,32 +5680,16 @@ static void InitVarCachePref(const nsACString& aName, float* aCache,
 // Module and factory stuff
 //===========================================================================
 
-NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(Preferences,
-                                         Preferences::GetInstanceForService)
-NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrefLocalizedString, Init)
+NS_IMPL_COMPONENT_FACTORY(nsPrefLocalizedString) {
+  auto str = MakeRefPtr<nsPrefLocalizedString>();
+  if (NS_SUCCEEDED(str->Init())) {
+    return str.forget().downcast<nsISupports>();
+  }
+  return nullptr;
+}
 
-static NS_DEFINE_CID(kPrefServiceCID, NS_PREFSERVICE_CID);
-static NS_DEFINE_CID(kPrefLocalizedStringCID, NS_PREFLOCALIZEDSTRING_CID);
+namespace mozilla {
 
-static mozilla::Module::CIDEntry kPrefCIDs[] = {
-    {&kPrefServiceCID, true, nullptr, PreferencesConstructor},
-    {&kPrefLocalizedStringCID, false, nullptr,
-     nsPrefLocalizedStringConstructor},
-    {nullptr}};
+void UnloadPrefsModule() { Preferences::Shutdown(); }
 
-static mozilla::Module::ContractIDEntry kPrefContracts[] = {
-    {NS_PREFSERVICE_CONTRACTID, &kPrefServiceCID},
-    {NS_PREFLOCALIZEDSTRING_CONTRACTID, &kPrefLocalizedStringCID},
-    {nullptr}};
-
-static void UnloadPrefsModule() { Preferences::Shutdown(); }
-
-static const mozilla::Module kPrefModule = {mozilla::Module::kVersion,
-                                            kPrefCIDs,
-                                            kPrefContracts,
-                                            nullptr,
-                                            nullptr,
-                                            nullptr,
-                                            UnloadPrefsModule};
-
-NSMODULE_DEFN(nsPrefModule) = &kPrefModule;
+}  // namespace mozilla

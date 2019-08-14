@@ -9,6 +9,7 @@ import errno
 import os
 import re
 import subprocess
+import sys
 
 from distutils.spawn import find_executable
 from distutils.version import LooseVersion
@@ -71,9 +72,19 @@ class Repository(object):
     def __init__(self, path, tool):
         self.path = os.path.abspath(path)
         self._tool = get_tool_path(tool)
-        self._env = os.environ.copy()
         self._version = None
         self._valid_diff_filter = ('m', 'a', 'd')
+
+        if os.name == 'nt' and sys.version_info[0] == 2:
+            self._env = {}
+            for k, v in os.environ.iteritems():
+                if isinstance(k, unicode):
+                    k = k.encode('utf8')
+                if isinstance(v, unicode):
+                    v = v.encode('utf8')
+                self._env[k] = v
+        else:
+            self._env = os.environ.copy()
 
     def __enter__(self):
         return self
@@ -202,6 +213,28 @@ class Repository(object):
         extension is not installed. On git, MissingVCSExtension will be raised
         if git cinnabar is not present.
         """
+
+    def commit(self, message, author=None, date=None, paths=None):
+        """Create a commit using the provided commit message. The author, date,
+        and files/paths to be included may also be optionally provided. The
+        message, author and date arguments must be strings, and are passed as-is
+        to the commit command. Multiline commit messages are supported. The
+        paths argument must be None or an array of strings that represents the
+        set of files and folders to include in the commit.
+        """
+        args = ['commit', '-m', message]
+        if author is not None:
+            if isinstance(self, HgRepository):
+                args = args + ['--user', author]
+            elif isinstance(self, GitRepository):
+                args = args + ['--author', author]
+            else:
+                raise MissingVCSInfo('Unknown repo type')
+        if date is not None:
+            args = args + ['--date', date]
+        if paths is not None:
+            args = args + paths
+        self._run(*args)
 
 
 class HgRepository(Repository):
@@ -337,7 +370,8 @@ class HgRepository(Repository):
 
     def push_to_try(self, message):
         try:
-            subprocess.check_call((self._tool, 'push-to-try', '-m', message), cwd=self.path)
+            subprocess.check_call((self._tool, 'push-to-try', '-m', message), cwd=self.path,
+                                  env=self._env)
         except subprocess.CalledProcessError:
             try:
                 self._run('showconfig', 'extensions.push-to-try')
@@ -442,7 +476,7 @@ class GitRepository(Repository):
         if not self.has_git_cinnabar:
             raise MissingVCSExtension('cinnabar')
 
-        self._run('commit', '--allow-empty', '-m', message)
+        self._run('-c', 'commit.gpgSign=false', 'commit', '--allow-empty', '-m', message)
         try:
             subprocess.check_call((self._tool, 'push', 'hg::ssh://hg.mozilla.org/try',
                                    '+HEAD:refs/heads/branches/default/tip'), cwd=self.path)

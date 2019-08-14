@@ -18,7 +18,6 @@ function run_test() {
   runHttpTests(tests, testComplete(srv));
 }
 
-
 /** **********
  * HANDLERS *
  ************/
@@ -47,12 +46,15 @@ function pathHandler(request, response) {
 
 XPCOMUtils.defineLazyGetter(this, "tests", function() {
   return [
-    new Test("http://localhost:" + srv.identity.primaryPort + "/path-handler",
-             null, check),
+    new Test(
+      "http://localhost:" + srv.identity.primaryPort + "/path-handler",
+      null,
+      check
+    ),
   ];
 });
 
-function check(ch, cx) {
+function check(ch) {
   var headerValue;
 
   headerValue = ch.getResponseHeader("Proxy-Authenticate");

@@ -9,8 +9,11 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/UIEventBinding.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "nsDeviceContext.h"
+#include "nsDocShell.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 
@@ -47,16 +50,18 @@ class UIEvent : public Event {
                    bool cancelableArg, nsGlobalWindowInner* viewArg,
                    int32_t detailArg);
 
-  nsPIDOMWindowOuter* GetView() const { return mView; }
+  Nullable<WindowProxyHolder> GetView() const {
+    if (!mView) {
+      return nullptr;
+    }
+    return WindowProxyHolder(mView->GetBrowsingContext());
+  }
 
   int32_t Detail() const { return mDetail; }
 
   int32_t LayerX() const { return GetLayerPoint().x; }
 
   int32_t LayerY() const { return GetLayerPoint().y; }
-
-  int32_t PageX() const;
-  int32_t PageY() const;
 
   virtual uint32_t Which(CallerType aCallerType = CallerType::System) {
     MOZ_ASSERT(mEvent->mClass != eKeyboardEventClass,

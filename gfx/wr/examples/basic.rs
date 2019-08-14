@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-extern crate app_units;
 extern crate euclid;
 extern crate gleam;
 extern crate glutin;
@@ -12,12 +11,14 @@ extern crate winit;
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
-use boilerplate::{Example, HandyDandyRectBuilder};
+use crate::boilerplate::{Example, HandyDandyRectBuilder};
 use euclid::vec2;
 use winit::TouchPhase;
 use std::collections::HashMap;
 use webrender::ShaderPrecacheFlags;
 use webrender::api::*;
+use webrender::api::units::*;
+
 
 #[derive(Debug)]
 enum Gesture {
@@ -186,18 +187,17 @@ impl Example for App {
         builder: &mut DisplayListBuilder,
         txn: &mut Transaction,
         _: DeviceIntSize,
-        _pipeline_id: PipelineId,
+        pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
-        let bounds = LayoutRect::new(LayoutPoint::zero(), builder.content_size());
-        let info = LayoutPrimitiveInfo::new(bounds);
-        builder.push_stacking_context(
-            &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+        let content_bounds = LayoutRect::new(LayoutPoint::zero(), builder.content_size());
+        let root_space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+        let spatial_id = root_space_and_clip.spatial_id;
+
+        builder.push_simple_stacking_context(
+            content_bounds.origin,
+            spatial_id,
+            true,
         );
 
         let image_mask_key = api.generate_image_key();
@@ -217,14 +217,28 @@ impl Example for App {
             BorderRadius::uniform(20.0),
             ClipMode::Clip
         );
-        let id = builder.define_clip(bounds, vec![complex], Some(mask));
-        builder.push_clip_id(id);
+        let clip_id = builder.define_clip(
+            &root_space_and_clip,
+            content_bounds,
+            vec![complex],
+            Some(mask)
+        );
 
-        let info = LayoutPrimitiveInfo::new((100, 100).to(200, 200));
-        builder.push_rect(&info, ColorF::new(0.0, 1.0, 0.0, 1.0));
+        builder.push_rect(
+            &CommonItemProperties::new(
+                (100, 100).to(200, 200),
+                SpaceAndClipInfo { spatial_id, clip_id },
+            ),
+            ColorF::new(0.0, 1.0, 0.0, 1.0),
+        );
 
-        let info = LayoutPrimitiveInfo::new((250, 100).to(350, 200));
-        builder.push_rect(&info, ColorF::new(0.0, 1.0, 0.0, 1.0));
+        builder.push_rect(
+            &CommonItemProperties::new(
+                (250, 100).to(350, 200),
+                SpaceAndClipInfo { spatial_id, clip_id },
+            ),
+            ColorF::new(0.0, 1.0, 0.0, 1.0),
+        );
         let border_side = BorderSide {
             color: ColorF::new(0.0, 0.0, 1.0, 1.0),
             style: BorderStyle::Groove,
@@ -239,13 +253,19 @@ impl Example for App {
             do_aa: true,
         });
 
-        let info = LayoutPrimitiveInfo::new((100, 100).to(200, 200));
-        builder.push_border(&info, border_widths, border_details);
-        builder.pop_clip_id();
+        let bounds = (100, 100).to(200, 200);
+        builder.push_border(
+            &CommonItemProperties::new(
+                bounds,
+                SpaceAndClipInfo { spatial_id, clip_id },
+            ),
+            bounds,
+            border_widths,
+            border_details,
+        );
 
         if false {
             // draw box shadow?
-            let rect = LayoutRect::zero();
             let simple_box_bounds = (20, 200).by(50, 50);
             let offset = vec2(10.0, 10.0);
             let color = ColorF::new(1.0, 1.0, 1.0, 1.0);
@@ -253,10 +273,9 @@ impl Example for App {
             let spread_radius = 0.0;
             let simple_border_radius = 8.0;
             let box_shadow_type = BoxShadowClipMode::Inset;
-            let info = LayoutPrimitiveInfo::with_clip_rect(rect, bounds);
 
             builder.push_box_shadow(
-                &info,
+                &CommonItemProperties::new(content_bounds, root_space_and_clip),
                 simple_box_bounds,
                 offset,
                 color,

@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 with Files("APZTestData.webidl"):
     BUG_COMPONENT = ("Core", "Panning and Zooming")
@@ -38,7 +38,7 @@ with Files("BiquadFilterNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
 
 with Files("BrowserElement*"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 with Files("CSP*"):
     BUG_COMPONENT = ("Core", "DOM: Security")
@@ -71,7 +71,7 @@ with Files("ConvolverNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
 
 with Files("Coordinates.webidl"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("Crypto.webidl"):
     BUG_COMPONENT = ("Core", "DOM: Security")
@@ -113,7 +113,7 @@ with Files("FormData.webidl"):
     BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 with Files("Geolocation.webidl"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("GainNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
@@ -146,7 +146,7 @@ with Files("IIRFilterNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
 
 with Files("Image*"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 with Files("ImageCapture*"):
     BUG_COMPONENT = ("Core", "Audio/Video")
@@ -177,6 +177,9 @@ with Files("Media*Source*"):
 
 with Files("MediaStream*"):
     BUG_COMPONENT = ("Core", "WebRTC")
+
+with Files("MediaStreamTrackAudio*"):
+    BUG_COMPONENT = ("Core", "Web Audio")
 
 with Files("MediaStreamAudio*"):
     BUG_COMPONENT = ("Core", "Web Audio")
@@ -236,7 +239,7 @@ with Files("PopStateEvent.webidl*"):
     BUG_COMPONENT = ("Core", "DOM: Events")
 
 with Files("Position*"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("ProfileTimelineMarker.webidl"):
     BUG_COMPONENT = ("DevTools", "Performance Tools (Profiler/Timeline)")
@@ -328,9 +331,6 @@ with Files("WebGL*"):
 with Files("WebGPU*"):
     BUG_COMPONENT = ("Core", "Canvas: WebGL")
 
-with Files("WebKitCSSMatrix.webidl"):
-    BUG_COMPONENT = ("Core", "DOM: CSS Object Model")
-
 with Files("Webrtc*"):
     BUG_COMPONENT = ("Core", "WebRTC")
 
@@ -358,6 +358,7 @@ PREPROCESSED_WEBIDL_FILES = [
 WEBIDL_FILES = [
     'AbortController.webidl',
     'AbortSignal.webidl',
+    'AbstractRange.webidl',
     'AbstractWorker.webidl',
     'AddonManager.webidl',
     'AnalyserNode.webidl',
@@ -378,6 +379,7 @@ WEBIDL_FILES = [
     'AudioListener.webidl',
     'AudioNode.webidl',
     'AudioParam.webidl',
+    'AudioParamDescriptor.webidl',
     'AudioParamMap.webidl',
     'AudioProcessingEvent.webidl',
     'AudioScheduledSourceNode.webidl',
@@ -396,12 +398,12 @@ WEBIDL_FILES = [
     'BeforeUnloadEvent.webidl',
     'BiquadFilterNode.webidl',
     'Blob.webidl',
-    'BoxObject.webidl',
     'BroadcastChannel.webidl',
     'BrowserElement.webidl',
     'BrowserElementDictionaries.webidl',
     'Cache.webidl',
     'CacheStorage.webidl',
+    'CancelContentJSOptions.webidl',
     'CanvasCaptureMediaStream.webidl',
     'CanvasRenderingContext2D.webidl',
     'CaretPosition.webidl',
@@ -462,11 +464,9 @@ WEBIDL_FILES = [
     'Directory.webidl',
     'Document.webidl',
     'DocumentFragment.webidl',
-    'DocumentL10n.webidl',
     'DocumentOrShadowRoot.webidl',
     'DocumentTimeline.webidl',
     'DocumentType.webidl',
-    'DOMError.webidl',
     'DOMException.webidl',
     'DOMImplementation.webidl',
     'DOMMatrix.webidl',
@@ -489,6 +489,7 @@ WEBIDL_FILES = [
     'EventTarget.webidl',
     'ExtendableEvent.webidl',
     'ExtendableMessageEvent.webidl',
+    'FailedCertSecurityInfo.webidl',
     'FakePluginTagInit.webidl',
     'FeaturePolicy.webidl',
     'Fetch.webidl',
@@ -514,8 +515,10 @@ WEBIDL_FILES = [
     'GainNode.webidl',
     'Gamepad.webidl',
     'GamepadHapticActuator.webidl',
+    'GamepadLightIndicator.webidl',
     'GamepadPose.webidl',
     'GamepadServiceTest.webidl',
+    'GamepadTouch.webidl',
     'Geolocation.webidl',
     'GeometryUtils.webidl',
     'GetUserMediaRequest.webidl',
@@ -629,11 +632,12 @@ WEBIDL_FILES = [
     'KeyframeAnimationOptions.webidl',
     'KeyframeEffect.webidl',
     'KeyIdsInitData.webidl',
-    'L10nUtils.webidl',
     'LegacyQueryInterface.webidl',
     'LinkStyle.webidl',
+    'LoadURIOptions.webidl',
     'Location.webidl',
     'MediaCapabilities.webidl',
+    'MediaDebugInfo.webidl',
     'MediaDeviceInfo.webidl',
     'MediaDevices.webidl',
     'MediaElementAudioSourceNode.webidl',
@@ -655,6 +659,7 @@ WEBIDL_FILES = [
     'MediaStreamAudioSourceNode.webidl',
     'MediaStreamError.webidl',
     'MediaStreamTrack.webidl',
+    'MediaStreamTrackAudioSourceNode.webidl',
     'MediaTrackConstraintSet.webidl',
     'MediaTrackSettings.webidl',
     'MediaTrackSupportedConstraints.webidl',
@@ -742,6 +747,7 @@ WEBIDL_FILES = [
     'Range.webidl',
     'Reporting.webidl',
     'Request.webidl',
+    'ResizeObserver.webidl',
     'Response.webidl',
     'RTCStatsReport.webidl',
     'Screen.webidl',
@@ -760,6 +766,7 @@ WEBIDL_FILES = [
     'SocketCommon.webidl',
     'SourceBuffer.webidl',
     'SourceBufferList.webidl',
+    'StaticRange.webidl',
     'StereoPannerNode.webidl',
     'Storage.webidl',
     'StorageEvent.webidl',
@@ -897,7 +904,6 @@ WEBIDL_FILES = [
     'TouchEvent.webidl',
     'TouchList.webidl',
     'TransitionEvent.webidl',
-    'TreeBoxObject.webidl',
     'TreeColumn.webidl',
     'TreeColumns.webidl',
     'TreeContentView.webidl',
@@ -926,7 +932,6 @@ WEBIDL_FILES = [
     'WebGLRenderingContext.webidl',
     'WebGPU.webidl',
     'WebGPUExtras.webidl',
-    'WebKitCSSMatrix.webidl',
     'WebSocket.webidl',
     'WheelEvent.webidl',
     'WidevineCDMManifest.webidl',
@@ -958,7 +963,6 @@ WEBIDL_FILES = [
 if CONFIG['MOZ_WEBRTC']:
     WEBIDL_FILES += [
         'PeerConnectionImpl.webidl',
-        'PeerConnectionImplEnums.webidl',
         'PeerConnectionObserver.webidl',
         'PeerConnectionObserverEnums.webidl',
         'RTCCertificate.webidl',
@@ -1039,6 +1043,7 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'DeviceProximityEvent.webidl',
     'ErrorEvent.webidl',
     'FontFaceSetLoadEvent.webidl',
+    'FrameCrashedEvent.webidl',
     'GamepadAxisMoveEvent.webidl',
     'GamepadButtonEvent.webidl',
     'GamepadEvent.webidl',

@@ -1,7 +1,10 @@
 "use strict";
 
+var FormAutofillUtils;
 add_task(async function seutp() {
-  ChromeUtils.import("resource://formautofill/FormAutofillUtils.jsm");
+  ({ FormAutofillUtils } = ChromeUtils.import(
+    "resource://formautofill/FormAutofillUtils.jsm"
+  ));
 });
 
 const TESTCASES = [
@@ -72,10 +75,14 @@ TESTCASES.forEach(testcase => {
     info("Starting testcase: " + testcase.document);
 
     let doc = MockDocument.createTestDocument(
-      "http://localhost:8080/test/", testcase.document);
+      "http://localhost:8080/test/",
+      testcase.document
+    );
 
     let field = doc.getElementById(testcase.fieldId);
-    Assert.equal(FormAutofillUtils.isFieldEligibleForAutofill(field),
-                 testcase.expectedResult);
+    Assert.equal(
+      FormAutofillUtils.isFieldEligibleForAutofill(field),
+      testcase.expectedResult
+    );
   });
 });

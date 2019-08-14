@@ -9,11 +9,20 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs.h"
 
+#include "ProcessUtils.h"
 #include "RDDChild.h"
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+#  include "mozilla/Sandbox.h"
+#endif
 
 namespace mozilla {
 
 using namespace ipc;
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+bool RDDProcessHost::sLaunchWithMacSandbox = false;
+#endif
 
 RDDProcessHost::RDDProcessHost(Listener* aListener)
     : GeckoChildProcessHost(GeckoProcessType_RDD),
@@ -24,6 +33,17 @@ RDDProcessHost::RDDProcessHost(Listener* aListener)
       mShutdownRequested(false),
       mChannelClosed(false) {
   MOZ_COUNT_CTOR(RDDProcessHost);
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+  // sLaunchWithMacSandbox is statically initialized to false.
+  // Once we've set it to true due to the pref, avoid checking the
+  // pref on subsequent calls. As a result, changing the earlyinit
+  // pref requires restarting the browser to take effect.
+  if (!sLaunchWithMacSandbox) {
+    sLaunchWithMacSandbox =
+        Preferences::GetBool("security.sandbox.rdd.mac.earlyinit");
+  }
+#endif
 }
 
 RDDProcessHost::~RDDProcessHost() { MOZ_COUNT_DTOR(RDDProcessHost); }
@@ -31,6 +51,12 @@ RDDProcessHost::~RDDProcessHost() { MOZ_COUNT_DTOR(RDDProcessHost); }
 bool RDDProcessHost::Launch(StringVector aExtraOpts) {
   MOZ_ASSERT(mLaunchPhase == LaunchPhase::Unlaunched);
   MOZ_ASSERT(!mRDDChild);
+
+  mPrefSerializer = MakeUnique<ipc::SharedPreferenceSerializer>();
+  if (!mPrefSerializer->SerializeToSharedMemory()) {
+    return false;
+  }
+  mPrefSerializer->AddSharedPrefCmdLineArgs(*this, aExtraOpts);
 
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
   mSandboxLevel = Preferences::GetInt("security.sandbox.rdd.level");
@@ -41,6 +67,7 @@ bool RDDProcessHost::Launch(StringVector aExtraOpts) {
 
   if (!GeckoChildProcessHost::AsyncLaunch(aExtraOpts)) {
     mLaunchPhase = LaunchPhase::Complete;
+    mPrefSerializer = nullptr;
     return false;
   }
   return true;
@@ -51,7 +78,7 @@ bool RDDProcessHost::WaitForLaunch() {
     return !!mRDDChild;
   }
 
-  int32_t timeoutMs = StaticPrefs::MediaRddProcessStartupTimeoutMs();
+  int32_t timeoutMs = StaticPrefs::media_rdd_process_startup_timeout_ms();
 
   // If one of the following environment variables are set we can
   // effectively ignore the timeout - as we can guarantee the RDD
@@ -128,7 +155,30 @@ void RDDProcessHost::InitAfterConnect(bool aSucceeded) {
         mRDDChild->Open(GetChannel(), base::GetProcId(GetChildProcessHandle()));
     MOZ_ASSERT(rv);
 
-    mRDDChild->Init();
+    // Only clear mPrefSerializer in the success case to avoid a
+    // possible race in the case case of a timeout on Windows launch.
+    // See Bug 1555076 comment 7:
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1555076#c7
+    mPrefSerializer = nullptr;
+
+    bool startMacSandbox = false;
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+    // If the sandbox was started at launch time,
+    // do not start the sandbox again.
+    startMacSandbox = !sLaunchWithMacSandbox;
+#endif
+
+    if (!mRDDChild->Init(startMacSandbox)) {
+      // Can't just kill here because it will create a timing race that
+      // will crash the tab. We don't really want to crash the tab just
+      // because RDD linux sandbox failed to initialize.  In this case,
+      // we'll close the child channel which will cause the RDD process
+      // to shutdown nicely avoiding the tab crash (which manifests as
+      // Bug 1535335).
+      mRDDChild->Close();
+      return;
+    }
   }
 
   if (mListener) {
@@ -195,11 +245,6 @@ void RDDProcessHost::KillHard(const char* aReason) {
 
 uint64_t RDDProcessHost::GetProcessToken() const { return mProcessToken; }
 
-static void RDDDelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess) {
-  XRE_GetIOMessageLoop()->PostTask(
-      mozilla::MakeAndAddRef<DeleteTask<GeckoChildProcessHost>>(aSubprocess));
-}
-
 void RDDProcessHost::KillProcess() { KillHard("DiagnosticKill"); }
 
 void RDDProcessHost::DestroyProcess() {
@@ -210,8 +255,28 @@ void RDDProcessHost::DestroyProcess() {
     mTaskFactory.RevokeAll();
   }
 
-  MessageLoop::current()->PostTask(NewRunnableFunction(
-      "DestroyProcessRunnable", RDDDelayedDeleteSubprocess, this));
+  MessageLoop::current()->PostTask(
+      NS_NewRunnableFunction("DestroyProcessRunnable", [this] { Destroy(); }));
 }
+
+#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+/* static */
+bool RDDProcessHost::StaticFillMacSandboxInfo(MacSandboxInfo& aInfo) {
+  GeckoChildProcessHost::StaticFillMacSandboxInfo(aInfo);
+  if (!aInfo.shouldLog && PR_GetEnv("MOZ_SANDBOX_RDD_LOGGING")) {
+    aInfo.shouldLog = true;
+  }
+  return true;
+}
+
+bool RDDProcessHost::FillMacSandboxInfo(MacSandboxInfo& aInfo) {
+  return RDDProcessHost::StaticFillMacSandboxInfo(aInfo);
+}
+
+/* static */
+MacSandboxType RDDProcessHost::GetMacSandboxType() {
+  return GeckoChildProcessHost::GetDefaultMacSandboxType();
+}
+#endif
 
 }  // namespace mozilla

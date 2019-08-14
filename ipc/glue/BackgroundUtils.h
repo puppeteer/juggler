@@ -13,6 +13,7 @@
 #include "nsCOMPtr.h"
 #include "nscore.h"
 
+class nsIContentSecurityPolicy;
 class nsILoadInfo;
 class nsIPrincipal;
 class nsIRedirectHistoryEntry;
@@ -48,13 +49,15 @@ struct ParamTraits<mozilla::OriginAttributes>
 namespace mozilla {
 namespace net {
 class ChildLoadInfoForwarderArgs;
-class OptionalLoadInfoArgs;
+class LoadInfoArgs;
 class ParentLoadInfoForwarderArgs;
 class RedirectHistoryEntryInfo;
 }  // namespace net
 
 namespace ipc {
 
+class ContentSecurityPolicy;
+class CSPInfo;
 class PrincipalInfo;
 
 /**
@@ -71,7 +74,29 @@ already_AddRefed<nsIPrincipal> PrincipalInfoToPrincipal(
  * MUST be called on the main thread only.
  */
 nsresult PrincipalToPrincipalInfo(nsIPrincipal* aPrincipal,
-                                  PrincipalInfo* aPrincipalInfo);
+                                  PrincipalInfo* aPrincipalInfo,
+                                  bool aSkipBaseDomain = false);
+
+/**
+ * Convert a CSPInfo to an nsIContentSecurityPolicy.
+ *
+ * MUST be called on the main thread only.
+ *
+ * If possible, provide a requesting doc, so policy violation events can
+ * be dispatched correctly. If aRequestingDoc is null, then the CSPInfo holds
+ * the necessary fallback information, like a serialized requestPrincipal,
+ * to generate a valid nsIContentSecurityPolicy.
+ */
+already_AddRefed<nsIContentSecurityPolicy> CSPInfoToCSP(
+    const CSPInfo& aCSPInfo, mozilla::dom::Document* aRequestingDoc,
+    nsresult* aOptionalResult = nullptr);
+
+/**
+ * Convert an nsIContentSecurityPolicy to a CSPInfo.
+ *
+ * MUST be called on the main thread only.
+ */
+nsresult CSPToCSPInfo(nsIContentSecurityPolicy* aCSP, CSPInfo* aCSPInfo);
 
 /**
  * Return true if this PrincipalInfo is a content principal and it has
@@ -99,13 +124,13 @@ nsresult RHEntryToRHEntryInfo(
  */
 nsresult LoadInfoToLoadInfoArgs(
     nsILoadInfo* aLoadInfo,
-    mozilla::net::OptionalLoadInfoArgs* outOptionalLoadInfoArgs);
+    Maybe<mozilla::net::LoadInfoArgs>* outOptionalLoadInfoArgs);
 
 /**
  * Convert LoadInfoArgs to a LoadInfo.
  */
 nsresult LoadInfoArgsToLoadInfo(
-    const mozilla::net::OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
+    const Maybe<mozilla::net::LoadInfoArgs>& aOptionalLoadInfoArgs,
     nsILoadInfo** outLoadInfo);
 
 /**

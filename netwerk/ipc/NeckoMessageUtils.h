@@ -10,11 +10,13 @@
 
 #include "ipc/IPCMessageUtils.h"
 #include "nsExceptionHandler.h"
+#include "nsIHttpChannel.h"
 #include "nsPrintfCString.h"
 #include "nsString.h"
 #include "prio.h"
 #include "mozilla/net/DNS.h"
 #include "TimingStruct.h"
+#include "nsILoadInfo.h"
 
 namespace IPC {
 
@@ -27,7 +29,7 @@ struct Permission {
 
   Permission() : capability(0), expireType(0), expireTime(0) {}
 
-  Permission(const nsCString& aOrigin, const nsCString& aType,
+  Permission(const nsCString& aOrigin, const nsACString& aType,
              const uint32_t aCapability, const uint32_t aExpireType,
              const int64_t aExpireTime)
       : origin(aOrigin),
@@ -178,6 +180,12 @@ struct ParamTraits<mozilla::net::ResourceTimingStruct> {
            ReadParam(aMsg, aIter, &aResult->cacheReadEnd);
   }
 };
+
+template <>
+struct ParamTraits<nsIHttpChannel::FlashPluginState>
+    : public ContiguousEnumSerializerInclusive<
+          nsIHttpChannel::FlashPluginState, nsIHttpChannel::FlashPluginUnknown,
+          nsIHttpChannel::FlashPluginLastValue> {};
 
 }  // namespace IPC
 

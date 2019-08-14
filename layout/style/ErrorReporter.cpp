@@ -15,7 +15,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/SystemGroup.h"
 #include "nsIConsoleService.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIDocShell.h"
 #include "nsIFactory.h"
 #include "nsINode.h"
@@ -29,6 +29,7 @@
 
 using namespace mozilla;
 using namespace mozilla::css;
+using namespace mozilla::dom;
 
 namespace {
 class ShortTermURISpecCache : public Runnable {
@@ -110,7 +111,8 @@ void ErrorReporter::InitGlobals() {
 namespace mozilla {
 namespace css {
 
-/* static */ void ErrorReporter::ReleaseGlobals() {
+/* static */
+void ErrorReporter::ReleaseGlobals() {
   NS_IF_RELEASE(sConsoleService);
   NS_IF_RELEASE(sScriptErrorFactory);
   NS_IF_RELEASE(sStringBundle);
@@ -124,7 +126,7 @@ static uint64_t FindInnerWindowID(const StyleSheet* aSheet,
     innerWindowID = aSheet->FindOwningWindowInnerID();
   }
   if (innerWindowID == 0 && aLoader) {
-    if (nsIDocument* doc = aLoader->GetDocument()) {
+    if (Document* doc = aLoader->GetDocument()) {
       innerWindowID = doc->InnerWindowID();
     }
   }
@@ -160,7 +162,7 @@ ErrorReporter::~ErrorReporter() {
   }
 }
 
-bool ErrorReporter::ShouldReportErrors(const nsIDocument& aDoc) {
+bool ErrorReporter::ShouldReportErrors(const Document& aDoc) {
   MOZ_ASSERT(NS_IsMainThread());
   nsIDocShell* shell = aDoc.GetDocShell();
   if (!shell) {
@@ -236,7 +238,9 @@ void ErrorReporter::OutputError() {
         mError, mFileName, mErrorLine, mErrorLineNumber, mErrorColNumber,
         nsIScriptError::warningFlag, "CSS Parser",
         FindInnerWindowID(mSheet, mLoader));
+
     if (NS_SUCCEEDED(rv)) {
+      errorObject->SetCssSelectors(mSelectors);
       sConsoleService->LogMessage(errorObject);
     }
   }
@@ -251,7 +255,8 @@ void ErrorReporter::OutputError() {
 // - the complete source line containing the invalid CSS
 
 void ErrorReporter::OutputError(uint32_t aLineNumber, uint32_t aColNumber,
-                                const nsACString& aSourceLine) {
+                                const nsACString& aSourceLine,
+                                const nsACString& aSelectors) {
   mErrorLineNumber = aLineNumber;
   mErrorColNumber = aColNumber;
 
@@ -267,6 +272,10 @@ void ErrorReporter::OutputError(uint32_t aLineNumber, uint32_t aColNumber,
     }
 
     mPrevErrorLineNumber = aLineNumber;
+  }
+
+  if (!AppendUTF8toUTF16(aSelectors, mSelectors, fallible)) {
+    mSelectors.Truncate();
   }
 
   OutputError();
@@ -293,15 +302,12 @@ void ErrorReporter::ReportUnexpected(const char* aMessage) {
   AddToError(str);
 }
 
-void ErrorReporter::ReportUnexpectedUnescaped(const char* aMessage,
-                                              const nsAutoString& aParam) {
+void ErrorReporter::ReportUnexpectedUnescaped(
+    const char* aMessage, const nsTArray<nsString>& aParam) {
   MOZ_ASSERT(ShouldReportErrors(mSheet, mLoader));
 
-  const char16_t* params[1] = {aParam.get()};
-
   nsAutoString str;
-  sStringBundle->FormatStringFromName(aMessage, params, ArrayLength(params),
-                                      str);
+  sStringBundle->FormatStringFromName(aMessage, aParam, str);
   AddToError(str);
 }
 

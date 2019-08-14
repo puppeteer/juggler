@@ -9,8 +9,6 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Binder;
 import android.os.IBinder;
-import android.os.RemoteException;
-import android.util.Log;
 
 public final class SurfaceAllocatorService extends Service {
 
@@ -21,8 +19,9 @@ public final class SurfaceAllocatorService extends Service {
     }
 
     private Binder mBinder = new ISurfaceAllocator.Stub() {
-        public GeckoSurface acquireSurface(int width, int height, boolean singleBufferMode) {
-            GeckoSurfaceTexture gst = GeckoSurfaceTexture.acquire(singleBufferMode);
+        public GeckoSurface acquireSurface(final int width, final int height,
+                                           final boolean singleBufferMode) {
+            GeckoSurfaceTexture gst = GeckoSurfaceTexture.acquire(singleBufferMode, 0);
 
             if (gst == null) {
                 return null;
@@ -35,10 +34,24 @@ public final class SurfaceAllocatorService extends Service {
             return new GeckoSurface(gst);
         }
 
-        public void releaseSurface(int handle) {
+        public void releaseSurface(final int handle) {
             final GeckoSurfaceTexture gst = GeckoSurfaceTexture.lookup(handle);
             if (gst != null) {
                 gst.decrementUse();
+            }
+        }
+
+        public void configureSync(final SyncConfig config) {
+            final GeckoSurfaceTexture gst = GeckoSurfaceTexture.lookup(config.sourceTextureHandle);
+            if (gst != null) {
+                gst.configureSnapshot(config.targetSurface, config.width, config.height);
+            }
+        }
+
+        public void sync(final int handle) {
+            final GeckoSurfaceTexture gst = GeckoSurfaceTexture.lookup(handle);
+            if (gst != null) {
+                gst.takeSnapshot();
             }
         }
     };
@@ -47,7 +60,7 @@ public final class SurfaceAllocatorService extends Service {
         return mBinder;
     }
 
-    public boolean onUnbind(Intent intent) {
+    public boolean onUnbind(final Intent intent) {
         return false;
     }
 }

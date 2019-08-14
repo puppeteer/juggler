@@ -6,7 +6,7 @@
 #include "mozilla/dom/PGamepadEventChannelChild.h"
 
 #ifndef mozilla_dom_GamepadEventChannelChild_h_
-#define mozilla_dom_GamepadEventChannelChild_h_
+#  define mozilla_dom_GamepadEventChannelChild_h_
 
 namespace mozilla {
 namespace dom {
@@ -15,10 +15,9 @@ class GamepadEventChannelChild final : public PGamepadEventChannelChild {
  public:
   GamepadEventChannelChild() {}
   ~GamepadEventChannelChild() {}
-  virtual mozilla::ipc::IPCResult RecvGamepadUpdate(
-      const GamepadChangeEvent& aGamepadEvent) override;
-  virtual mozilla::ipc::IPCResult RecvReplyGamepadVibrateHaptic(
-      const uint32_t& aPromiseID) override;
+  mozilla::ipc::IPCResult RecvGamepadUpdate(
+      const GamepadChangeEvent& aGamepadEvent);
+  mozilla::ipc::IPCResult RecvReplyGamepadPromise(const uint32_t& aPromiseID);
   void AddPromise(const uint32_t& aID, dom::Promise* aPromise);
 
  private:

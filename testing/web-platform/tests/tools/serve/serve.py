@@ -16,6 +16,7 @@ import traceback
 from six.moves import urllib
 import uuid
 from collections import defaultdict, OrderedDict
+from itertools import chain, product
 from multiprocessing import Process, Event
 
 from localpaths import repo_root
@@ -29,6 +30,12 @@ from wptserve.logger import set_logger
 from wptserve.handlers import filesystem_path, wrap_pipeline
 from wptserve.utils import get_port, HTTPException, http2_compatible
 from mod_pywebsocket import standalone as pywebsocket
+
+
+EDIT_HOSTS_HELP = ("Please ensure all the necessary WPT subdomains "
+                   "are mapped to a loopback device in /etc/hosts. "
+                   "See https://github.com/web-platform-tests/wpt#running-the-tests "
+                   "for instructions.")
 
 
 def replace_end(s, old, new):
@@ -301,6 +308,7 @@ done();
 
 rewrites = [("GET", "/resources/WebIDLParser.js", "/resources/webidl2/lib/webidl2.js")]
 
+
 class RoutesBuilder(object):
     def __init__(self):
         self.forbidden_override = [("GET", "/tools/runner/*", handlers.file_handler),
@@ -309,8 +317,7 @@ class RoutesBuilder(object):
 
         self.forbidden = [("*", "/_certs/*", handlers.ErrorHandler(404)),
                           ("*", "/tools/*", handlers.ErrorHandler(404)),
-                          ("*", "{spec}/tools/*", handlers.ErrorHandler(404)),
-                          ("*", "/serve.py", handlers.ErrorHandler(404))]
+                          ("*", "{spec}/tools/*", handlers.ErrorHandler(404))]
 
         self.extra = []
 
@@ -444,18 +451,19 @@ def check_subdomains(config):
     wrapper.start(start_http_server, host, port, paths, build_routes(aliases),
                   bind_address, config)
 
+    url = "http://{}:{}/".format(host, port)
     connected = False
     for i in range(10):
         try:
-            urllib.request.urlopen("http://%s:%d/" % (host, port))
+            urllib.request.urlopen(url)
             connected = True
             break
         except urllib.error.URLError:
             time.sleep(1)
 
     if not connected:
-        logger.critical("Failed to connect to test server on http://%s:%s. "
-                        "You may need to edit /etc/hosts or similar, see README.md." % (host, port))
+        logger.critical("Failed to connect to test server "
+                        "on {}. {}".format(url, EDIT_HOSTS_HELP))
         sys.exit(1)
 
     for domain in config.domains_set:
@@ -465,8 +473,7 @@ def check_subdomains(config):
         try:
             urllib.request.urlopen("http://%s:%d/" % (domain, port))
         except Exception:
-            logger.critical("Failed probing domain %s. "
-                            "You may need to edit /etc/hosts or similar, see README.md." % domain)
+            logger.critical("Failed probing domain {}. {}".format(domain, EDIT_HOSTS_HELP))
             sys.exit(1)
 
     wrapper.wait()
@@ -495,7 +502,7 @@ def make_hosts_file(config, host):
 def start_servers(host, ports, paths, routes, bind_address, config, **kwargs):
     servers = defaultdict(list)
     for scheme, ports in ports.items():
-        assert len(ports) == {"http":2}.get(scheme, 1)
+        assert len(ports) == {"http": 2}.get(scheme, 1)
 
         # If trying to start HTTP/2.0 server, check compatibility
         if scheme == 'http2' and not http2_compatible():
@@ -506,11 +513,11 @@ def start_servers(host, ports, paths, routes, bind_address, config, **kwargs):
         for port in ports:
             if port is None:
                 continue
-            init_func = {"http":start_http_server,
-                         "https":start_https_server,
-                         "http2":start_http2_server,
-                         "ws":start_ws_server,
-                         "wss":start_wss_server}[scheme]
+            init_func = {"http": start_http_server,
+                         "https": start_https_server,
+                         "http2": start_http2_server,
+                         "ws": start_ws_server,
+                         "wss": start_wss_server}[scheme]
 
             server_proc = ServerProc(scheme=scheme)
             server_proc.start(init_func, host, port, paths, routes, bind_address,
@@ -597,6 +604,21 @@ class WebSocketDaemon(object):
         opts, args = pywebsocket._parse_args_and_config(cmd_args)
         opts.cgi_directories = []
         opts.is_executable_method = None
+
+        # Logging needs to be configured both before and after reloading,
+        # because some modules store loggers as global variables.
+        # GECKO PATCH: disable logging from pywebsocket until it interops
+        # correctly with mozlog
+        # pywebsocket._configure_logging(opts)
+        # Ensure that when we start this in a new process we have the global
+        # lock in the logging module unlocked.
+        reload_module(logging)
+        release_mozlog_lock()
+        # GECKO PATCH: disable logging from pywebsocket until it interops
+        # correctly with mozlog
+        # pywebsocket._configure_logging(opts)
+        # DO NOT LOG BEFORE THIS LINE.
+
         self.server = pywebsocket.WebSocketServer(opts)
         ports = [item[0].getsockname()[1] for item in self.server._sockets]
         assert all(item == ports[0] for item in ports)
@@ -643,29 +665,21 @@ def release_mozlog_lock():
 
 
 def start_ws_server(host, port, paths, routes, bind_address, config, **kwargs):
-    # Ensure that when we start this in a new process we have the global lock
-    # in the logging module unlocked
-    reload_module(logging)
-    release_mozlog_lock()
     return WebSocketDaemon(host,
                            str(port),
                            repo_root,
                            config.paths["ws_doc_root"],
-                           "debug",
+                           config.log_level.lower(),
                            bind_address,
-                           ssl_config = None)
+                           ssl_config=None)
 
 
 def start_wss_server(host, port, paths, routes, bind_address, config, **kwargs):
-    # Ensure that when we start this in a new process we have the global lock
-    # in the logging module unlocked
-    reload_module(logging)
-    release_mozlog_lock()
     return WebSocketDaemon(host,
                            str(port),
                            repo_root,
                            config.paths["ws_doc_root"],
-                           "debug",
+                           config.log_level.lower(),
                            bind_address,
                            config.ssl_config)
 
@@ -722,6 +736,11 @@ def build_config(override_path=None, **kwargs):
 
     return rv
 
+
+def _make_subdomains_product(s, depth=2):
+    return {u".".join(x) for x in chain(*(product(s, repeat=i) for i in range(1, depth+1)))}
+
+
 _subdomains = {u"www",
                u"www1",
                u"www2",
@@ -730,11 +749,16 @@ _subdomains = {u"www",
 
 _not_subdomains = {u"nonexistent"}
 
+_subdomains = _make_subdomains_product(_subdomains)
+
+_not_subdomains = _make_subdomains_product(_not_subdomains)
+
 
 class ConfigBuilder(config.ConfigBuilder):
     """serve config
 
-    this subclasses wptserve.config.ConfigBuilder to add serve config options"""
+    This subclasses wptserve.config.ConfigBuilder to add serve config options.
+    """
 
     _default = {
         "browser_host": "web-platform.test",
@@ -759,7 +783,9 @@ class ConfigBuilder(config.ConfigBuilder):
             "openssl": {
                 "openssl_binary": "openssl",
                 "base_path": "_certs",
+                "password": "web-platform-tests",
                 "force_regenerate": False,
+                "duration": 30,
                 "base_conf_path": None
             },
             "pregenerated": {

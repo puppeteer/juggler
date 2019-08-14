@@ -47,7 +47,7 @@ struct InvokeMemberFunction {
       : args{std::forward<ActualArgs>(actualArgs)...} {}
 
   template <class Parser>
-  auto match(Parser* parser)
+  auto operator()(Parser* parser)
       -> decltype(this->matchInternal(GetThis<Parser>::get(parser),
                                       std::index_sequence_for<Args...>{})) {
     return this->matchInternal(GetThis<Parser>::get(parser),
@@ -64,53 +64,45 @@ struct GetParser {
 
 template <class Parser>
 struct GetTokenStream {
-  static auto get(Parser* parser) -> decltype(&parser->tokenStream) {
-    return &parser->tokenStream;
-  }
+  static auto get(Parser* parser) { return &parser->tokenStream; }
 };
 
 // Member function-computing templates.
 
 template <class Parser>
 struct ParserOptions {
-  static constexpr auto get() -> decltype(&Parser::options) {
-    return &Parser::options;
-  }
+  static constexpr auto get() { return &Parser::options; }
 };
 
 template <class Parser>
 struct ParserNewObjectBox {
-  static constexpr auto get() -> decltype(&Parser::newObjectBox) {
-    return &Parser::newObjectBox;
-  }
+  static constexpr auto get() { return &Parser::newObjectBox; }
+};
+
+template <class TokenStream>
+struct TokenStreamComputeLineAndColumn {
+  static constexpr auto get() { return &TokenStream::computeLineAndColumn; }
 };
 
 // Generic matchers.
 
 struct ParseHandlerMatcher {
   template <class Parser>
-  frontend::FullParseHandler& match(Parser* parser) {
-    return parser->handler;
+  frontend::FullParseHandler& operator()(Parser* parser) {
+    return parser->handler_;
   }
 };
 
-struct AnyCharsMatcher {
+struct ParserSharedBaseMatcher {
   template <class Parser>
-  frontend::TokenStreamAnyChars& match(Parser* parser) {
-    return parser->anyChars;
-  }
-};
-
-struct ParserBaseMatcher {
-  template <class Parser>
-  frontend::ParserBase& match(Parser* parser) {
-    return *static_cast<frontend::ParserBase*>(parser);
+  frontend::ParserSharedBase& operator()(Parser* parser) {
+    return *static_cast<frontend::ParserSharedBase*>(parser);
   }
 };
 
 struct ErrorReporterMatcher {
   template <class Parser>
-  frontend::ErrorReporter& match(Parser* parser) {
+  frontend::ErrorReporter& operator()(Parser* parser) {
     return parser->tokenStream;
   }
 };
@@ -162,13 +154,13 @@ class EitherParser : public BCEParserHandle {
     return parser.match(std::move(matcher));
   }
 
-  const TokenStreamAnyChars& anyChars() const {
-    return parser.match(detail::AnyCharsMatcher());
-  }
-
   void computeLineAndColumn(uint32_t offset, uint32_t* line,
                             uint32_t* column) const {
-    return anyChars().lineAndColumnAt(offset, line, column);
+    InvokeMemberFunction<detail::GetTokenStream,
+                         detail::TokenStreamComputeLineAndColumn, uint32_t,
+                         uint32_t*, uint32_t*>
+        matcher{offset, line, column};
+    return parser.match(std::move(matcher));
   }
 };
 

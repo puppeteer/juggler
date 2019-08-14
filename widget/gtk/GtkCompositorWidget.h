@@ -6,6 +6,7 @@
 #ifndef widget_gtk_GtkCompositorWidget_h
 #define widget_gtk_GtkCompositorWidget_h
 
+#include "GLDefs.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "WindowSurfaceProvider.h"
 
@@ -19,6 +20,10 @@ class PlatformCompositorWidgetDelegate : public CompositorWidgetDelegate {
  public:
   virtual void NotifyClientSizeChanged(
       const LayoutDeviceIntSize& aClientSize) = 0;
+
+#ifdef MOZ_WAYLAND
+  virtual void RequestsUpdatingEGLSurface() = 0;
+#endif
 
   // CompositorWidgetDelegate Overrides
 
@@ -58,15 +63,24 @@ class GtkCompositorWidget : public CompositorWidget,
   Display* XDisplay() const { return mXDisplay; }
   Window XWindow() const { return mXWindow; }
 
+  EGLNativeWindowType GetEGLNativeWindow();
+
   // PlatformCompositorWidgetDelegate Overrides
 
   void NotifyClientSizeChanged(const LayoutDeviceIntSize& aClientSize) override;
 
+#ifdef MOZ_WAYLAND
+  void RequestsUpdatingEGLSurface() override;
+  bool WaylandRequestsUpdatingEGLSurface();
+#endif
  protected:
   nsWindow* mWidget;
 
  private:
   LayoutDeviceIntSize mClientSize;
+#ifdef MOZ_WAYLAND
+  bool mWaylandRequestsUpdatingEGLSurface = false;
+#endif
 
   Display* mXDisplay;
   Window mXWindow;

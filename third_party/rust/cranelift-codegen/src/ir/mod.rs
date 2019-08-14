@@ -23,32 +23,36 @@ mod trapcode;
 pub mod types;
 mod valueloc;
 
-pub use ir::builder::{InsertBuilder, InstBuilder, InstBuilderBase, InstInserterBase};
-pub use ir::dfg::{DataFlowGraph, ValueDef};
-pub use ir::entities::{
+pub use crate::ir::builder::{InsertBuilder, InstBuilder, InstBuilderBase, InstInserterBase};
+pub use crate::ir::dfg::{DataFlowGraph, ValueDef};
+pub use crate::ir::entities::{
     Ebb, FuncRef, GlobalValue, Heap, Inst, JumpTable, SigRef, StackSlot, Table, Value,
 };
-pub use ir::extfunc::{AbiParam, ArgumentExtension, ArgumentPurpose, ExtFuncData, Signature};
-pub use ir::extname::ExternalName;
-pub use ir::function::Function;
-pub use ir::globalvalue::GlobalValueData;
-pub use ir::heap::{HeapData, HeapStyle};
-pub use ir::instructions::{InstructionData, Opcode, ValueList, ValueListPool, VariableArgs};
-pub use ir::jumptable::JumpTableData;
-pub use ir::layout::Layout;
-pub use ir::libcall::{get_libcall_funcref, get_probestack_funcref, LibCall};
-pub use ir::memflags::MemFlags;
-pub use ir::progpoint::{ExpandedProgramPoint, ProgramOrder, ProgramPoint};
-pub use ir::sourceloc::SourceLoc;
-pub use ir::stackslot::{StackSlotData, StackSlotKind, StackSlots};
-pub use ir::table::TableData;
-pub use ir::trapcode::TrapCode;
-pub use ir::types::Type;
-pub use ir::valueloc::{ArgumentLoc, ValueLoc};
+pub use crate::ir::extfunc::{
+    AbiParam, ArgumentExtension, ArgumentPurpose, ExtFuncData, Signature,
+};
+pub use crate::ir::extname::ExternalName;
+pub use crate::ir::function::{DisplayFunctionAnnotations, Function};
+pub use crate::ir::globalvalue::GlobalValueData;
+pub use crate::ir::heap::{HeapData, HeapStyle};
+pub use crate::ir::instructions::{
+    InstructionData, Opcode, ValueList, ValueListPool, VariableArgs,
+};
+pub use crate::ir::jumptable::JumpTableData;
+pub use crate::ir::layout::Layout;
+pub use crate::ir::libcall::{get_libcall_funcref, get_probestack_funcref, LibCall};
+pub use crate::ir::memflags::MemFlags;
+pub use crate::ir::progpoint::{ExpandedProgramPoint, ProgramOrder, ProgramPoint};
+pub use crate::ir::sourceloc::SourceLoc;
+pub use crate::ir::stackslot::{StackSlotData, StackSlotKind, StackSlots};
+pub use crate::ir::table::TableData;
+pub use crate::ir::trapcode::TrapCode;
+pub use crate::ir::types::Type;
+pub use crate::ir::valueloc::{ArgumentLoc, ValueLoc};
 
-use binemit;
-use entity::{PrimaryMap, SecondaryMap};
-use isa;
+use crate::binemit;
+use crate::entity::{entity_impl, PrimaryMap, SecondaryMap};
+use crate::isa;
 
 /// Map of value locations.
 pub type ValueLocations = SecondaryMap<Value, ValueLoc>;
@@ -67,3 +71,34 @@ pub type JumpTableOffsets = SecondaryMap<JumpTable, binemit::CodeOffset>;
 
 /// Source locations for instructions.
 pub type SourceLocs = SecondaryMap<Inst, SourceLoc>;
+
+/// Marked with a label value.
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+pub struct ValueLabel(u32);
+entity_impl!(ValueLabel, "val");
+
+/// A label of a Value.
+#[derive(Debug, Clone)]
+pub struct ValueLabelStart {
+    /// Source location when it is in effect
+    pub from: SourceLoc,
+
+    /// The label index.
+    pub label: ValueLabel,
+}
+
+/// Value label assignements: label starts or value aliases.
+#[derive(Debug, Clone)]
+pub enum ValueLabelAssignments {
+    /// Original value labels assigned at transform.
+    Starts(std::vec::Vec<ValueLabelStart>),
+
+    /// A value alias to original value.
+    Alias {
+        /// Source location when it is in effect
+        from: SourceLoc,
+
+        /// The label index.
+        value: Value,
+    },
+}

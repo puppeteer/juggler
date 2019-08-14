@@ -11,7 +11,9 @@
 #include "ServoBindings.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/NullPrincipalURI.h"
+#include "mozilla/css/SheetParsingMode.h"
 #include "mozilla/net/ReferrerPolicy.h"
+#include "nsCSSValue.h"
 
 using namespace mozilla;
 using namespace mozilla::css;
@@ -21,9 +23,9 @@ using namespace mozilla::net;
 // Bug 1436018 - Disable Stylo microbenchmark on Windows
 #if !defined(_WIN32) && !defined(_WIN64)
 
-#define PARSING_REPETITIONS 20
-#define SETPROPERTY_REPETITIONS (1000 * 1000)
-#define GETPROPERTY_REPETITIONS (1000 * 1000)
+#  define PARSING_REPETITIONS 20
+#  define SETPROPERTY_REPETITIONS (1000 * 1000)
+#  define GETPROPERTY_REPETITIONS (1000 * 1000)
 
 static void ServoParsingBench(const StyleUseCounters* aCounters) {
   auto css = AsBytes(MakeStringSpan(EXAMPLE_STYLESHEET));
@@ -85,7 +87,7 @@ MOZ_GTEST_BENCH(Stylo, Servo_StyleSheet_FromUTF8Bytes_Bench,
                 [] { ServoParsingBench(nullptr); });
 
 MOZ_GTEST_BENCH(Stylo, Servo_StyleSheet_FromUTF8Bytes_Bench_UseCounters, [] {
-  UniquePtr<StyleUseCounters> counters(Servo_UseCounters_Create());
+  UniquePtr<StyleUseCounters> counters = Servo_UseCounters_Create().Consume();
   ServoParsingBench(counters.get());
 });
 

@@ -2,13 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#![cfg_attr(feature = "oom_with_global_alloc",
-            feature(global_allocator, alloc, alloc_system, allocator_api))]
 #![cfg_attr(feature = "oom_with_hook", feature(alloc_error_hook))]
 
 #[cfg(feature="servo")]
 extern crate geckoservo;
 
+extern crate kvstore;
 extern crate mp4parse_capi;
 extern crate nsstring;
 extern crate nserror;
@@ -29,14 +28,27 @@ extern crate audioipc_client;
 #[cfg(feature = "cubeb-remoting")]
 extern crate audioipc_server;
 extern crate env_logger;
-extern crate u2fhid;
+extern crate authenticator;
+extern crate gkrust_utils;
 extern crate log;
+#[cfg(feature = "new_cert_storage")]
+extern crate cert_storage;
 extern crate cosec;
 extern crate rsdparsa_capi;
+#[cfg(feature = "new_xulstore")]
+extern crate xulstore;
 #[cfg(feature = "spidermonkey_rust")]
 extern crate jsrust_shared;
+#[cfg(feature = "bitsdownload")]
+extern crate bitsdownload;
+extern crate storage;
+#[cfg(feature = "moz_places")]
+extern crate bookmark_sync;
+extern crate shift_or_euc_c;
 
 extern crate arrayvec;
+
+extern crate audio_thread_priority;
 
 use std::boxed::Box;
 use std::env;
@@ -156,9 +168,9 @@ pub extern "C" fn intentional_panic(message: *const c_char) {
 }
 
 extern "C" {
-    // We can't use MOZ_CrashOOL directly because it may be weakly linked
+    // We can't use MOZ_Crash directly because it may be weakly linked
     // to libxul, and rust can't handle that.
-    fn GeckoCrashOOL(filename: *const c_char, line: c_int, reason: *const c_char) -> !;
+    fn GeckoCrash(filename: *const c_char, line: c_int, reason: *const c_char) -> !;
 }
 
 /// Truncate a string at the closest unicode character boundary
@@ -227,76 +239,20 @@ fn panic_hook(info: &panic::PanicInfo) {
     };
     // Copy the message and filename to the stack in order to safely add
     // a terminating nul character (since rust strings don't come with one
-    // and GeckoCrashOOL wants one).
+    // and GeckoCrash wants one).
     let message = ArrayCString::<[_; 512]>::from(message);
     let filename = ArrayCString::<[_; 512]>::from(filename);
     unsafe {
-        GeckoCrashOOL(filename.as_ptr() as *const c_char, line as c_int,
-                      message.as_ptr() as *const c_char);
+        GeckoCrash(filename.as_ptr() as *const c_char, line as c_int,
+                   message.as_ptr() as *const c_char);
     }
 }
 
-/// Configure a panic hook to redirect rust panics to Gecko's MOZ_CrashOOL.
+/// Configure a panic hook to redirect rust panics to Gecko's MOZ_Crash.
 #[no_mangle]
 pub extern "C" fn install_rust_panic_hook() {
     panic::set_hook(Box::new(panic_hook));
 }
-
-// Wrap the rust system allocator to override the OOM handler, redirecting
-// to Gecko's, which interacts with the crash reporter.
-// This relies on unstable APIs that have not changed between 1.24 and 1.27.
-// In 1.27, the API changed, so we'll need to adapt to those changes before
-// we can ship with 1.27. As of writing, there might still be further changes
-// to those APIs before 1.27 is released, so we wait for those.
-#[cfg(feature = "oom_with_global_alloc")]
-mod global_alloc {
-    extern crate alloc;
-    extern crate alloc_system;
-
-    use self::alloc::allocator::{Alloc, AllocErr, Layout};
-    use self::alloc_system::System;
-
-    pub struct GeckoHeap;
-
-    extern "C" {
-        fn GeckoHandleOOM(size: usize) -> !;
-    }
-
-    unsafe impl<'a> Alloc for &'a GeckoHeap {
-        unsafe fn alloc(&mut self, layout: Layout) -> Result<*mut u8, AllocErr> {
-            System.alloc(layout)
-        }
-
-        unsafe fn dealloc(&mut self, ptr: *mut u8, layout: Layout) {
-            System.dealloc(ptr, layout)
-        }
-
-        fn oom(&mut self, e: AllocErr) -> ! {
-            match e {
-                AllocErr::Exhausted { request } => unsafe { GeckoHandleOOM(request.size()) },
-                _ => System.oom(e),
-            }
-        }
-
-        unsafe fn realloc(
-            &mut self,
-            ptr: *mut u8,
-            layout: Layout,
-            new_layout: Layout,
-        ) -> Result<*mut u8, AllocErr> {
-            System.realloc(ptr, layout, new_layout)
-        }
-
-        unsafe fn alloc_zeroed(&mut self, layout: Layout) -> Result<*mut u8, AllocErr> {
-            System.alloc_zeroed(layout)
-        }
-    }
-
-}
-
-#[cfg(feature = "oom_with_global_alloc")]
-#[global_allocator]
-static HEAP: global_alloc::GeckoHeap = global_alloc::GeckoHeap;
 
 #[cfg(feature = "oom_with_hook")]
 mod oom_hook {
@@ -322,3 +278,84 @@ pub extern "C" fn install_rust_oom_hook() {
     #[cfg(feature = "oom_with_hook")]
     oom_hook::install();
 }
+
+#[cfg(feature = "moz_memory")]
+mod moz_memory {
+    use std::alloc::{GlobalAlloc, Layout};
+    use std::os::raw::c_void;
+
+    extern "C" {
+        fn malloc(size: usize) -> *mut c_void;
+
+        fn free(ptr: *mut c_void);
+
+        fn calloc(nmemb: usize, size: usize) -> *mut c_void;
+
+        fn realloc(ptr: *mut c_void, size: usize) -> *mut c_void;
+
+        #[cfg(windows)]
+        fn _aligned_malloc(size: usize, align: usize) -> *mut c_void;
+
+        #[cfg(not(windows))]
+        fn memalign(align: usize, size: usize) -> *mut c_void;
+    }
+
+    #[cfg(windows)]
+    unsafe fn memalign(align: usize, size: usize) -> *mut c_void {
+        _aligned_malloc(size, align)
+    }
+
+    pub struct GeckoAlloc;
+
+    #[inline(always)]
+    fn need_memalign(layout: Layout) -> bool {
+        // mozjemalloc guarantees a minimum alignment of 16 for all sizes, except
+        // for size classes below 16 (4 and 8).
+        layout.align() > layout.size() || layout.align() > 16
+    }
+
+    unsafe impl GlobalAlloc for GeckoAlloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if need_memalign(layout) {
+                memalign(layout.align(), layout.size()) as *mut u8
+            } else {
+                malloc(layout.size()) as *mut u8
+            }
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
+            free(ptr as *mut c_void)
+        }
+
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            if need_memalign(layout) {
+                let ptr = self.alloc(layout);
+                if !ptr.is_null() {
+                    std::ptr::write_bytes(ptr, 0, layout.size());
+                }
+                ptr
+            } else {
+                calloc(1, layout.size()) as *mut u8
+            }
+        }
+
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let new_layout = Layout::from_size_align_unchecked(new_size, layout.align());
+            if need_memalign(new_layout) {
+                let new_ptr = self.alloc(new_layout);
+                if !new_ptr.is_null() {
+                    let size = std::cmp::min(layout.size(), new_size);
+                    std::ptr::copy_nonoverlapping(ptr, new_ptr, size);
+                    self.dealloc(ptr, layout);
+                }
+                new_ptr
+            } else {
+                realloc(ptr as *mut c_void, new_size) as *mut u8
+            }
+        }
+    }
+}
+
+#[cfg(feature = "moz_memory")]
+#[global_allocator]
+static A: moz_memory::GeckoAlloc = moz_memory::GeckoAlloc;

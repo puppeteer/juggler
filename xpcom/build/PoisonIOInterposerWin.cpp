@@ -24,7 +24,7 @@
 #include "plstr.h"
 
 #ifdef MOZ_REPLACE_MALLOC
-#include "replace_malloc_bridge.h"
+#  include "replace_malloc_bridge.h"
 #endif
 
 using namespace mozilla;
@@ -133,8 +133,11 @@ class WinIOAutoObservation : public IOInterposeObserver::Observation {
       nsAutoString dosPath;
       if (NtPathToDosPath(aFilename, dosPath)) {
         mFilename = dosPath;
-        mHasQueriedFilename = true;
+      } else {
+        // If we can't get a dosPath, what we have is better than nothing.
+        mFilename = aFilename;
       }
+      mHasQueriedFilename = true;
       mOffset.QuadPart = 0;
     }
   }
@@ -160,10 +163,11 @@ void WinIOAutoObservation::Filename(nsAString& aFilename) {
   // mFilename
   if (mHasQueriedFilename) {
     aFilename = mFilename;
+    return;
   }
 
   nsAutoString filename;
-  if (HandleToFilename(mFileHandle, mOffset, filename)) {
+  if (mFileHandle && HandleToFilename(mFileHandle, mOffset, filename)) {
     mFilename = filename;
   }
   mHasQueriedFilename = true;

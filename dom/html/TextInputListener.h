@@ -47,7 +47,8 @@ class TextInputListener final : public nsIDOMEventListener,
   /**
    * OnSelectionChange() is called when selection is changed in the editor.
    */
-  void OnSelectionChange(Selection& aSelection, int16_t aReason);
+  MOZ_CAN_RUN_SCRIPT
+  void OnSelectionChange(dom::Selection& aSelection, int16_t aReason);
 
   /**
    * Start to listen or end listening to selection change in the editor.

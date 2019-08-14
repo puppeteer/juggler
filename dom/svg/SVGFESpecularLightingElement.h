@@ -7,7 +7,7 @@
 #ifndef mozilla_dom_SVGFESpecularLightingElement_h
 #define mozilla_dom_SVGFESpecularLightingElement_h
 
-#include "nsSVGFilters.h"
+#include "SVGFilters.h"
 
 nsresult NS_NewSVGFESpecularLightingElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -17,7 +17,7 @@ namespace dom {
 
 //---------------------SpecularLighting------------------------
 
-typedef nsSVGFELightingElement SVGFESpecularLightingElementBase;
+typedef SVGFELightingElement SVGFESpecularLightingElementBase;
 
 class SVGFESpecularLightingElement : public SVGFESpecularLightingElementBase {
   friend nsresult(::NS_NewSVGFESpecularLightingElement(
@@ -42,12 +42,12 @@ class SVGFESpecularLightingElement : public SVGFESpecularLightingElementBase {
                                          nsAtom* aAttribute) const override;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedString> In1();
-  already_AddRefed<SVGAnimatedNumber> SurfaceScale();
-  already_AddRefed<SVGAnimatedNumber> SpecularConstant();
-  already_AddRefed<SVGAnimatedNumber> SpecularExponent();
-  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthX();
-  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthY();
+  already_AddRefed<DOMSVGAnimatedString> In1();
+  already_AddRefed<DOMSVGAnimatedNumber> SurfaceScale();
+  already_AddRefed<DOMSVGAnimatedNumber> SpecularConstant();
+  already_AddRefed<DOMSVGAnimatedNumber> SpecularExponent();
+  already_AddRefed<DOMSVGAnimatedNumber> KernelUnitLengthX();
+  already_AddRefed<DOMSVGAnimatedNumber> KernelUnitLengthY();
 };
 
 }  // namespace dom

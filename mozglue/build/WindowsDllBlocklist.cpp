@@ -3,21 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_MEMORY
-#define MOZ_MEMORY_IMPL
-#include "mozmemory_wrap.h"
-#define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
-// See mozmemory_wrap.h for more details. This file is part of libmozglue, so
-// it needs to use _impl suffixes.
-#define MALLOC_DECL(name, return_type, ...) \
-  MOZ_MEMORY_API return_type name##_impl(__VA_ARGS__);
-#include "malloc_decls.h"
-#include "mozilla/mozalloc.h"
-#endif
-
 #include <windows.h>
 #include <winternl.h>
-#include <io.h>
 
 #pragma warning(push)
 #pragma warning(disable : 4275 4530)  // See msvc-stl-wrapper.template.h
@@ -30,15 +17,18 @@
 #include "UntrustedDllsHandler.h"
 #include "nsAutoPtr.h"
 #include "nsWindowsDllInterceptor.h"
+#include "mozilla/CmdLineAndEnvUtils.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/ScopeExit.h"
-#include "mozilla/Sprintf.h"
 #include "mozilla/StackWalk_windows.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
 #include "mozilla/WindowsVersion.h"
 #include "nsWindowsHelpers.h"
 #include "WindowsDllBlocklist.h"
 #include "mozilla/AutoProfilerLabel.h"
+#include "mozilla/glue/Debug.h"
 #include "mozilla/glue/WindowsDllServices.h"
 
 using namespace mozilla;
@@ -46,7 +36,7 @@ using namespace mozilla;
 using CrashReporter::Annotation;
 using CrashReporter::AnnotationToString;
 
-static SRWLOCK gDllServicesLock = SRWLOCK_INIT;
+static glue::Win32SRWLock gDllServicesLock;
 static glue::detail::DllServicesBase* gDllServices;
 
 #define DLL_BLOCKLIST_ENTRY(name, ...) {name, __VA_ARGS__},
@@ -60,28 +50,6 @@ static uint32_t sInitFlags;
 static bool sBlocklistInitAttempted;
 static bool sBlocklistInitFailed;
 static bool sUser32BeforeBlocklist;
-
-// Duplicated from xpcom glue. Ideally this should be shared.
-void printf_stderr(const char* fmt, ...) {
-  if (IsDebuggerPresent()) {
-    char buf[2048];
-    va_list args;
-    va_start(args, fmt);
-    VsprintfLiteral(buf, fmt, args);
-    va_end(args);
-    OutputDebugStringA(buf);
-  }
-
-  FILE* fp = _fdopen(_dup(2), "a");
-  if (!fp) return;
-
-  va_list args;
-  va_start(args, fmt);
-  vfprintf(fp, fmt, args);
-  va_end(args);
-
-  fclose(fp);
-}
 
 // This feature is enabled only on NIGHTLY, only for the main process.
 inline static bool IsUntrustedDllsHandlerEnabled() {
@@ -364,81 +332,6 @@ static wchar_t* lastslash(wchar_t* s, int len) {
   return nullptr;
 }
 
-#ifdef ENABLE_TESTS
-DllLoadHookType gDllLoadHook = nullptr;
-
-void DllBlocklist_SetDllLoadHook(DllLoadHookType aHook) {
-  gDllLoadHook = aHook;
-}
-
-void CallDllLoadHook(bool aDllLoaded, NTSTATUS aStatus, HANDLE aDllBase,
-                     PUNICODE_STRING aDllName) {
-  if (gDllLoadHook) {
-    gDllLoadHook(aDllLoaded, aStatus, aDllBase, aDllName);
-  }
-}
-
-CreateThreadHookType gCreateThreadHook = nullptr;
-
-void DllBlocklist_SetCreateThreadHook(CreateThreadHookType aHook) {
-  gCreateThreadHook = aHook;
-}
-
-void CallCreateThreadHook(bool aWasAllowed, void* aStartAddress) {
-  if (gCreateThreadHook) {
-    gCreateThreadHook(aWasAllowed, aStartAddress);
-  }
-}
-
-// This function does the work for gtest TestDllBlocklist.BlocklistIntegrity.
-// If the test fails, the return value is the pointer to a string description
-// of the failure. If the test passes, the return value is nullptr.
-const char* DllBlocklist_TestBlocklistIntegrity() {
-  mozilla::Vector<DLL_BLOCKLIST_STRING_TYPE> dupes;
-  DECLARE_POINTER_TO_FIRST_DLL_BLOCKLIST_ENTRY(pFirst);
-  DECLARE_POINTER_TO_LAST_DLL_BLOCKLIST_ENTRY(pLast);
-
-  if (pLast->name || pLast->maxVersion || pLast->flags) {
-    return "The last dll blocklist entry must be all-null.";
-  }
-
-  for (size_t i = 0; i < mozilla::ArrayLength(gWindowsDllBlocklist) - 1; ++i) {
-    auto pEntry = pFirst + i;
-
-    // Validate name
-    if (!pEntry->name) {
-      return "A dll blocklist entry contains a null name.";
-    }
-
-    if (strlen(pEntry->name) <= 2) {
-      return "Dll blocklist entry names must be longer than 2 characters.";
-    }
-    // Check the filename for valid characters.
-    for (auto pch = pEntry->name; *pch != 0; ++pch) {
-      if (*pch >= 'A' && *pch <= 'Z') {
-        return "Dll blocklist entry names cannot contain uppercase characters.";
-      }
-    }
-
-    // Check for duplicate entries
-    for (auto dupe : dupes) {
-      if (!stricmp(dupe, pEntry->name)) {
-        return "At least one duplicate dll blocklist entry was found.";
-      }
-    }
-    if (!dupes.append(pEntry->name)) {
-      return "Failed to append to duplicates list; test unable to continue.";
-    }
-  }
-
-  return nullptr;
-}
-
-#else  // ENABLE_TESTS
-#define CallDllLoadHook(...)
-#define CallCreateThreadHook(...)
-#endif  // ENABLE_TESTS
-
 static NTSTATUS NTAPI patched_LdrLoadDll(PWCHAR filePath, PULONG flags,
                                          PUNICODE_STRING moduleFileName,
                                          PHANDLE handle) {
@@ -527,7 +420,6 @@ static NTSTATUS NTAPI patched_LdrLoadDll(PWCHAR filePath, PULONG flags,
       char* end = nullptr;
       _strtoui64(dot + 1, &end, 16);
       if (end == dot + 13) {
-        CallDllLoadHook(false, STATUS_DLL_NOT_FOUND, 0, moduleFileName);
         return STATUS_DLL_NOT_FOUND;
       }
     }
@@ -538,7 +430,6 @@ static NTSTATUS NTAPI patched_LdrLoadDll(PWCHAR filePath, PULONG flags,
         current++;
       }
       if (current == dot) {
-        CallDllLoadHook(false, STATUS_DLL_NOT_FOUND, 0, moduleFileName);
         return STATUS_DLL_NOT_FOUND;
       }
     }
@@ -588,7 +479,6 @@ static NTSTATUS NTAPI patched_LdrLoadDll(PWCHAR filePath, PULONG flags,
               "LdrLoadDll: Blocking load of '%s' (SearchPathW didn't find "
               "it?)\n",
               dllName);
-          CallDllLoadHook(false, STATUS_DLL_NOT_FOUND, 0, moduleFileName);
           return STATUS_DLL_NOT_FOUND;
         }
 
@@ -629,7 +519,6 @@ static NTSTATUS NTAPI patched_LdrLoadDll(PWCHAR filePath, PULONG flags,
             "http://www.mozilla.com/en-US/blocklist/\n",
             dllName);
         DllBlockSet::Add(info->name, fVersion);
-        CallDllLoadHook(false, STATUS_DLL_NOT_FOUND, 0, moduleFileName);
         return STATUS_DLL_NOT_FOUND;
       }
     }
@@ -651,28 +540,37 @@ continue_loading:
   // holds the RtlLookupFunctionEntry lock.
   AutoSuppressStackWalking suppress;
 #endif
+
   NTSTATUS ret;
   HANDLE myHandle;
-  ret = stub_LdrLoadDll(filePath, flags, moduleFileName, &myHandle);
+
+  if (IsUntrustedDllsHandlerEnabled()) {
+    TimeStamp loadStart = TimeStamp::Now();
+    ret = stub_LdrLoadDll(filePath, flags, moduleFileName, &myHandle);
+    TimeStamp loadEnd = TimeStamp::Now();
+
+    if (NT_SUCCESS(ret)) {
+      double loadDurationMS = (loadEnd - loadStart).ToMilliseconds();
+      // Win32 HMODULEs use the bottom two bits as flags. Ensure those bits are
+      // cleared so we're left with the base address value.
+      glue::UntrustedDllsHandler::OnAfterModuleLoad(
+          (uintptr_t)myHandle & ~(uintptr_t)3, moduleFileName, loadDurationMS);
+      glue::AutoSharedLock lock(gDllServicesLock);
+      if (gDllServices) {
+        Vector<glue::ModuleLoadEvent, 0, InfallibleAllocPolicy> events;
+        if (glue::UntrustedDllsHandler::TakePendingEvents(events)) {
+          gDllServices->NotifyUntrustedModuleLoads(events);
+        }
+      }
+    }
+  } else {
+    ret = stub_LdrLoadDll(filePath, flags, moduleFileName, &myHandle);
+  }
+
   if (handle) {
     *handle = myHandle;
   }
 
-  if (IsUntrustedDllsHandlerEnabled() && NT_SUCCESS(ret)) {
-    // Win32 HMODULEs use the bottom two bits as flags. Ensure those bits are
-    // cleared so we're left with the base address value.
-    glue::UntrustedDllsHandler::OnAfterModuleLoad(
-        (uintptr_t)myHandle & ~(uintptr_t)3, moduleFileName);
-    glue::AutoSharedLock lock(gDllServicesLock);
-    if (gDllServices) {
-      Vector<glue::ModuleLoadEvent, 0, InfallibleAllocPolicy> events;
-      if (glue::UntrustedDllsHandler::TakePendingEvents(events)) {
-        gDllServices->NotifyUntrustedModuleLoads(events);
-      }
-    }
-  }
-
-  CallDllLoadHook(NT_SUCCESS(ret), ret, handle ? *handle : 0, moduleFileName);
   return ret;
 }
 
@@ -713,10 +611,7 @@ static DWORD WINAPI NopThreadProc(void* /* aThreadParam */) { return 0; }
 static MOZ_NORETURN void __fastcall patched_BaseThreadInitThunk(
     BOOL aIsInitialThread, void* aStartAddress, void* aThreadParam) {
   if (ShouldBlockThread(aStartAddress)) {
-    CallCreateThreadHook(false, aStartAddress);
     aStartAddress = (void*)NopThreadProc;
-  } else {
-    CallCreateThreadHook(true, aStartAddress);
   }
 
   stub_BaseThreadInitThunk(aIsInitialThread, aStartAddress, aThreadParam);
@@ -743,6 +638,39 @@ MFBT_API void DllBlocklist_Initialize(uint32_t aInitFlags) {
 #endif
 
   if (IsUntrustedDllsHandlerEnabled()) {
+#ifdef ENABLE_TESTS
+    // Check whether we are running as an xpcshell test.
+    if (mozilla::EnvHasValue("XPCSHELL_TEST_PROFILE_DIR")) {
+      // For xpcshell tests, load this untrusted DLL early enough that the
+      // untrusted module evaluator counts it as a startup module.
+      // It is located in the current directory; the full path must be specified
+      // or LoadLibrary() fails during xpcshell tests with ERROR_MOD_NOT_FOUND.
+
+      // This buffer will hold current directory + dll name
+      wchar_t dllFullPath[MAX_PATH] = {};
+      static const wchar_t kTestDllName[] = L"\\untrusted-startup-test-dll.dll";
+
+      // The amount of the buffer available to store the current directory,
+      // leaving room for the dll name.
+      static const DWORD kBufferDirLen =
+          ArrayLength(dllFullPath) - ArrayLength(kTestDllName);
+
+      DWORD ret = ::GetCurrentDirectoryW(kBufferDirLen, dllFullPath);
+      if ((ret > kBufferDirLen) || !ret) {
+        // Buffer too small or the call failed
+        printf_stderr("Unable to load %S; GetCurrentDirectoryW  failed: %lu",
+                      kTestDllName, GetLastError());
+      } else {
+        wcscat_s(dllFullPath, kTestDllName);
+        HMODULE hTestDll = ::LoadLibraryW(dllFullPath);
+        if (!hTestDll) {
+          printf_stderr("Unable to load %S; LoadLibraryW failed: %lu",
+                        kTestDllName, GetLastError());
+        }
+      }
+    }
+#endif
+
     glue::UntrustedDllsHandler::Init();
   }
 
@@ -949,7 +877,7 @@ namespace mozilla {
 Authenticode* GetAuthenticode();
 }  // namespace mozilla
 
-MFBT_API void DllBlocklist_SetDllServices(
+MFBT_API void DllBlocklist_SetFullDllServices(
     mozilla::glue::detail::DllServicesBase* aSvc) {
   glue::AutoExclusiveLock lock(gDllServicesLock);
   if (aSvc) {
@@ -963,9 +891,9 @@ MFBT_API void DllBlocklist_SetDllServices(
 
       MOZ_DIAGNOSTIC_ASSERT(pLdrRegisterDllNotification);
 
-      NTSTATUS ntStatus = pLdrRegisterDllNotification(
+      mozilla::DebugOnly<NTSTATUS> ntStatus = pLdrRegisterDllNotification(
           0, &DllLoadNotification, nullptr, &gNotificationCookie);
-      MOZ_DIAGNOSTIC_ASSERT(NT_SUCCESS(ntStatus));
+      MOZ_ASSERT(NT_SUCCESS(ntStatus));
     }
   }
 
@@ -977,4 +905,13 @@ MFBT_API void DllBlocklist_SetDllServices(
       gDllServices->NotifyUntrustedModuleLoads(events);
     }
   }
+}
+
+MFBT_API void DllBlocklist_SetBasicDllServices(
+    mozilla::glue::detail::DllServicesBase* aSvc) {
+  if (!aSvc) {
+    return;
+  }
+
+  aSvc->SetAuthenticodeImpl(GetAuthenticode());
 }

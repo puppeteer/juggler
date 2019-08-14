@@ -8,7 +8,7 @@
 
 #include "mozilla/dom/ContentProcessManager.h"
 #include "mozilla/dom/ImageBitmap.h"
-#include "mozilla/dom/TabParent.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/gfx/DrawEventRecorder.h"
 #include "mozilla/gfx/InlineTranslator.h"
 #include "mozilla/PresShell.h"
@@ -24,11 +24,11 @@
 // #define ENABLE_PAINT_LOG 1
 
 #if ENABLE_PAINT_LOG
-#define PF_LOG(...) printf_stderr("PaintFragment: " __VA_ARGS__)
-#define CPP_LOG(...) printf_stderr("CrossProcessPaint: " __VA_ARGS__)
+#  define PF_LOG(...) printf_stderr("PaintFragment: " __VA_ARGS__)
+#  define CPP_LOG(...) printf_stderr("CrossProcessPaint: " __VA_ARGS__)
 #else
-#define PF_LOG(...)
-#define CPP_LOG(...)
+#  define PF_LOG(...)
+#  define CPP_LOG(...)
 #endif
 
 namespace mozilla {
@@ -39,10 +39,10 @@ using namespace mozilla::ipc;
 /// The minimum scale we allow tabs to be rasterized at.
 static const float kMinPaintScale = 0.05f;
 
-/* static */ PaintFragment PaintFragment::Record(nsIDocShell* aDocShell,
-                                                 const IntRect& aRect,
-                                                 float aScale,
-                                                 nscolor aBackgroundColor) {
+/* static */
+PaintFragment PaintFragment::Record(nsIDocShell* aDocShell,
+                                    const IntRect& aRect, float aScale,
+                                    nscolor aBackgroundColor) {
   IntSize surfaceSize = aRect.Size();
   surfaceSize.width *= aScale;
   surfaceSize.height *= aScale;
@@ -98,8 +98,9 @@ static const float kMinPaintScale = 0.05f;
 
     RefPtr<gfxContext> thebes = gfxContext::CreateOrNull(dt);
     thebes->SetMatrix(Matrix::Scaling(aScale, aScale));
-    nsCOMPtr<nsIPresShell> shell = presContext->PresShell();
-    Unused << shell->RenderDocument(r, 0, aBackgroundColor, thebes);
+    RefPtr<PresShell> presShell = presContext->PresShell();
+    Unused << presShell->RenderDocument(r, RenderDocumentFlags::None,
+                                        aBackgroundColor, thebes);
   }
 
   ByteBuf recording = ByteBuf((uint8_t*)recorder->mOutputStream.mData,
@@ -126,11 +127,10 @@ PaintFragment::PaintFragment(IntSize aSize, ByteBuf&& aRecording,
       mRecording(std::move(aRecording)),
       mDependencies(std::move(aDependencies)) {}
 
-/* static */ void CrossProcessPaint::StartLocal(nsIDocShell* aRoot,
-                                                const IntRect& aRect,
-                                                float aScale,
-                                                nscolor aBackgroundColor,
-                                                dom::Promise* aPromise) {
+/* static */
+void CrossProcessPaint::StartLocal(nsIDocShell* aRoot, const IntRect& aRect,
+                                   float aScale, nscolor aBackgroundColor,
+                                   dom::Promise* aPromise) {
   MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
   aScale = std::max(aScale, kMinPaintScale);
 
@@ -151,11 +151,10 @@ PaintFragment::PaintFragment(IntSize aSize, ByteBuf&& aRecording,
       PaintFragment::Record(aRoot, aRect, aScale, aBackgroundColor));
 }
 
-/* static */ void CrossProcessPaint::StartRemote(dom::TabId aRoot,
-                                                 const IntRect& aRect,
-                                                 float aScale,
-                                                 nscolor aBackgroundColor,
-                                                 dom::Promise* aPromise) {
+/* static */
+void CrossProcessPaint::StartRemote(dom::TabId aRoot, const IntRect& aRect,
+                                    float aScale, nscolor aBackgroundColor,
+                                    dom::Promise* aPromise) {
   MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
   aScale = std::max(aScale, kMinPaintScale);
 
@@ -240,7 +239,8 @@ void CrossProcessPaint::QueueRootPaint(dom::TabId aId, const IntRect& aRect,
   dom::ContentProcessManager* cpm = dom::ContentProcessManager::GetSingleton();
 
   dom::ContentParentId cpId = cpm->GetTabProcessId(aId);
-  RefPtr<dom::TabParent> tab = cpm->GetTabParentByProcessAndTabId(cpId, aId);
+  RefPtr<dom::BrowserParent> tab =
+      cpm->GetBrowserParentByProcessAndTabId(cpId, aId);
   tab->RequestRootPaint(this, aRect, aScale, aBackgroundColor);
 
   // This will always be the first paint, so the constructor will already have
@@ -255,7 +255,8 @@ void CrossProcessPaint::QueueSubPaint(dom::TabId aId) {
   dom::ContentProcessManager* cpm = dom::ContentProcessManager::GetSingleton();
 
   dom::ContentParentId cpId = cpm->GetTabProcessId(aId);
-  RefPtr<dom::TabParent> tab = cpm->GetTabParentByProcessAndTabId(cpId, aId);
+  RefPtr<dom::BrowserParent> tab =
+      cpm->GetBrowserParentByProcessAndTabId(cpId, aId);
   tab->RequestSubPaint(this, mScale, mBackgroundColor);
 
   mPendingFragments += 1;

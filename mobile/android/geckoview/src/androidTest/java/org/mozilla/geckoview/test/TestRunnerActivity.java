@@ -5,6 +5,7 @@
 
 package org.mozilla.geckoview.test;
 
+import org.json.JSONObject;
 import org.mozilla.geckoview.AllowOrDeny;
 import org.mozilla.geckoview.GeckoDisplay;
 import org.mozilla.geckoview.GeckoResult;
@@ -113,6 +114,10 @@ public class TestRunnerActivity extends Activity {
         @Override
         public void onFirstComposite(final GeckoSession session) {
         }
+
+        @Override
+        public void onWebAppManifest(final GeckoSession session, final JSONObject manifest) {
+        }
     };
 
     private GeckoSession createSession() {
@@ -162,7 +167,16 @@ public class TestRunnerActivity extends Activity {
         if (sRuntime == null) {
             final GeckoRuntimeSettings.Builder runtimeSettingsBuilder =
                 new GeckoRuntimeSettings.Builder();
-            runtimeSettingsBuilder.arguments(new String[] { "-purgecaches" });
+
+            // Mochitest and reftest encounter rounding errors if we have a
+            // a window.devicePixelRation like 3.625, so simplify that here.
+            runtimeSettingsBuilder
+                    .arguments(new String[] { "-purgecaches" })
+                    .displayDpiOverride(160)
+                    .displayDensityOverride(1.0f)
+                    .remoteDebuggingEnabled(true)
+                    .autoplayDefault(GeckoRuntimeSettings.AUTOPLAY_DEFAULT_ALLOWED);
+
             final Bundle extras = intent.getExtras();
             if (extras != null) {
                 runtimeSettingsBuilder.extras(extras);

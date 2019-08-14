@@ -26,25 +26,25 @@ NS_IMPL_ISUPPORTS(nsViewSourceHandler, nsIProtocolHandler,
 // nsIProtocolHandler methods:
 
 NS_IMETHODIMP
-nsViewSourceHandler::GetScheme(nsACString &result) {
+nsViewSourceHandler::GetScheme(nsACString& result) {
   result.AssignLiteral(VIEW_SOURCE);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsViewSourceHandler::GetDefaultPort(int32_t *result) {
+nsViewSourceHandler::GetDefaultPort(int32_t* result) {
   *result = -1;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsViewSourceHandler::GetProtocolFlags(uint32_t *result) {
+nsViewSourceHandler::GetProtocolFlags(uint32_t* result) {
   *result = DEFAULT_FLAGS;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsViewSourceHandler::GetFlagsForURI(nsIURI *aURI, uint32_t *result) {
+nsViewSourceHandler::GetFlagsForURI(nsIURI* aURI, uint32_t* result) {
   *result = DEFAULT_FLAGS;
   nsCOMPtr<nsINestedURI> nestedURI(do_QueryInterface(aURI));
   if (!nestedURI) {
@@ -64,9 +64,10 @@ nsViewSourceHandler::GetFlagsForURI(nsIURI *aURI, uint32_t *result) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsViewSourceHandler::NewURI(const nsACString &aSpec, const char *aCharset,
-                            nsIURI *aBaseURI, nsIURI **aResult) {
+// static
+nsresult nsViewSourceHandler::CreateNewURI(const nsACString& aSpec,
+                                           const char* aCharset,
+                                           nsIURI* aBaseURI, nsIURI** aResult) {
   *aResult = nullptr;
 
   // Extract inner URL and normalize to ASCII.  This is done to properly
@@ -102,39 +103,30 @@ nsViewSourceHandler::NewURI(const nsACString &aSpec, const char *aCharset,
 }
 
 NS_IMETHODIMP
-nsViewSourceHandler::NewChannel2(nsIURI *uri, nsILoadInfo *aLoadInfo,
-                                 nsIChannel **result) {
+nsViewSourceHandler::NewChannel(nsIURI* uri, nsILoadInfo* aLoadInfo,
+                                nsIChannel** result) {
   NS_ENSURE_ARG_POINTER(uri);
-  nsViewSourceChannel *channel = new nsViewSourceChannel();
-  if (!channel) return NS_ERROR_OUT_OF_MEMORY;
-  NS_ADDREF(channel);
+  RefPtr<nsViewSourceChannel> channel = new nsViewSourceChannel();
 
   nsresult rv = channel->Init(uri);
   if (NS_FAILED(rv)) {
-    NS_RELEASE(channel);
     return rv;
   }
 
   // set the loadInfo on the new channel
   rv = channel->SetLoadInfo(aLoadInfo);
   if (NS_FAILED(rv)) {
-    NS_RELEASE(channel);
     return rv;
   }
 
-  *result = static_cast<nsIViewSourceChannel *>(channel);
+  *result = channel.forget().downcast<nsIViewSourceChannel>().take();
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsViewSourceHandler::NewChannel(nsIURI *uri, nsIChannel **result) {
-  return NewChannel2(uri, nullptr, result);
-}
-
-nsresult nsViewSourceHandler::NewSrcdocChannel(nsIURI *aURI, nsIURI *aBaseURI,
-                                               const nsAString &aSrcdoc,
-                                               nsILoadInfo *aLoadInfo,
-                                               nsIChannel **outChannel) {
+nsresult nsViewSourceHandler::NewSrcdocChannel(nsIURI* aURI, nsIURI* aBaseURI,
+                                               const nsAString& aSrcdoc,
+                                               nsILoadInfo* aLoadInfo,
+                                               nsIChannel** outChannel) {
   NS_ENSURE_ARG_POINTER(aURI);
   RefPtr<nsViewSourceChannel> channel = new nsViewSourceChannel();
 
@@ -143,13 +135,13 @@ nsresult nsViewSourceHandler::NewSrcdocChannel(nsIURI *aURI, nsIURI *aBaseURI,
     return rv;
   }
 
-  *outChannel = static_cast<nsIViewSourceChannel *>(channel.forget().take());
+  *outChannel = static_cast<nsIViewSourceChannel*>(channel.forget().take());
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsViewSourceHandler::AllowPort(int32_t port, const char *scheme,
-                               bool *_retval) {
+nsViewSourceHandler::AllowPort(int32_t port, const char* scheme,
+                               bool* _retval) {
   // don't override anything.
   *_retval = false;
   return NS_OK;
@@ -159,9 +151,9 @@ nsViewSourceHandler::nsViewSourceHandler() { gInstance = this; }
 
 nsViewSourceHandler::~nsViewSourceHandler() { gInstance = nullptr; }
 
-nsViewSourceHandler *nsViewSourceHandler::gInstance = nullptr;
+nsViewSourceHandler* nsViewSourceHandler::gInstance = nullptr;
 
-nsViewSourceHandler *nsViewSourceHandler::GetInstance() { return gInstance; }
+nsViewSourceHandler* nsViewSourceHandler::GetInstance() { return gInstance; }
 
 }  // namespace net
 }  // namespace mozilla

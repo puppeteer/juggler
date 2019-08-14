@@ -42,14 +42,13 @@ class CompileRuntime {
   const JSAtomState& names();
   const PropertyName* emptyString();
   const StaticStrings& staticStrings();
-  const Value& NaNValue();
-  const Value& positiveInfinityValue();
   const WellKnownSymbols& wellKnownSymbols();
 
   const void* mainContextPtr();
   uint32_t* addressOfTenuredAllocCount();
   const void* addressOfJitStackLimit();
   const void* addressOfInterruptBits();
+  const void* addressOfZone();
 
 #ifdef DEBUG
   bool isInsideNursery(gc::Cell* cell);
@@ -130,17 +129,10 @@ class JitCompileOptions {
     return offThreadCompilationAvailable_;
   }
 
-#ifdef ENABLE_WASM_GC
-  bool wasmGcEnabled() const { return wasmGcEnabled_; }
-#endif
-
  private:
   bool cloneSingletons_;
   bool profilerSlowAssertionsEnabled_;
   bool offThreadCompilationAvailable_;
-#ifdef ENABLE_WASM_GC
-  bool wasmGcEnabled_;
-#endif
 };
 
 }  // namespace jit

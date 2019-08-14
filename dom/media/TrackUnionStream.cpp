@@ -36,7 +36,7 @@ using namespace mozilla::gfx;
 namespace mozilla {
 
 #ifdef STREAM_LOG
-#undef STREAM_LOG
+#  undef STREAM_LOG
 #endif
 
 LazyLogModule gTrackUnionStreamLog("TrackUnionStream");
@@ -81,7 +81,6 @@ void TrackUnionStream::ProcessInput(GraphTime aFrom, GraphTime aTo,
   inputs.AppendElements(mSuspendedInputs);
 
   bool allFinished = !inputs.IsEmpty();
-  bool allHaveCurrentData = !inputs.IsEmpty();
   for (uint32_t i = 0; i < inputs.Length(); ++i) {
     MediaStream* stream = inputs[i]->GetSource();
     if (!stream->IsFinishedOnGraphThread()) {
@@ -89,9 +88,6 @@ void TrackUnionStream::ProcessInput(GraphTime aFrom, GraphTime aTo,
       // aTo, not just that it's finishing when all its queued data eventually
       // runs out.
       allFinished = false;
-    }
-    if (!stream->HasCurrentData()) {
-      allHaveCurrentData = false;
     }
     for (StreamTracks::TrackIter tracks(stream->GetStreamTracks());
          !tracks.IsEnded(); tracks.Next()) {
@@ -143,10 +139,6 @@ void TrackUnionStream::ProcessInput(GraphTime aFrom, GraphTime aTo,
     // all our tracks have actually finished and been removed from our map,
     // so we're finished now.
     FinishOnGraphThread();
-  }
-  if (allHaveCurrentData) {
-    // We can make progress if we're not blocked
-    mHasCurrentData = true;
   }
 }
 
@@ -276,10 +268,8 @@ void TrackUnionStream::CopyTrackData(StreamTracks::Track* aInputTrack,
     interval.mEnd = std::min(interval.mEnd, aTo);
     StreamTime inputEnd =
         source->GraphTimeToStreamTimeWithBlocking(interval.mEnd);
-    StreamTime inputTrackEndPoint = STREAM_TIME_MAX;
 
     if (aInputTrack->IsEnded() && aInputTrack->GetEnd() <= inputEnd) {
-      inputTrackEndPoint = aInputTrack->GetEnd();
       *aOutputTrackFinished = true;
       break;
     }
@@ -309,9 +299,7 @@ void TrackUnionStream::CopyTrackData(StreamTracks::Track* aInputTrack,
                    "Samples missing");
         StreamTime inputStart =
             source->GraphTimeToStreamTimeWithBlocking(interval.mStart);
-        segment->AppendSlice(*aInputTrack->GetSegment(),
-                             std::min(inputTrackEndPoint, inputStart),
-                             std::min(inputTrackEndPoint, inputEnd));
+        segment->AppendSlice(*aInputTrack->GetSegment(), inputStart, inputEnd);
       }
     }
     ApplyTrackDisabling(outputTrack->GetID(), segment);

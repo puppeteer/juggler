@@ -5,7 +5,7 @@
 
 /**
  * This file contains an interface to the Permission Manager,
- * used to persistenly store permissions for different object types (cookies, 
+ * used to persistenly store permissions for different object types (cookies,
  * images etc) on a site-by-site basis.
  *
  * This service broadcasts the following notification when the permission list
@@ -98,10 +98,10 @@ interface nsIPermissionManager : nsISupports
    *                    session (EXPIRE_SESSION), or expire at a specified time
    *                    (EXPIRE_TIME).
    * @param expiretime  an integer representation of when this permission
-   *                    should be forgotten (milliseconds since Jan 1 1970 0:00:00). 
+   *                    should be forgotten (milliseconds since Jan 1 1970 0:00:00).
    */
   void add(in nsIURI uri,
-           in string type,
+           in ACString type,
            in uint32_t permission,
            [optional] in uint32_t expireType,
            [optional] in int64_t expireTime);
@@ -142,7 +142,7 @@ interface nsIPermissionManager : nsISupports
    * Passing a system principal will be a no-op because they will always be
    * granted permissions.
    */
-  void addFromPrincipal(in nsIPrincipal principal, in string type,
+  void addFromPrincipal(in nsIPrincipal principal, in ACString type,
                         in uint32_t permission,
                         [optional] in uint32_t expireType,
                         [optional] in int64_t expireTime);
@@ -153,12 +153,12 @@ interface nsIPermissionManager : nsISupports
    * opposite operation to the add() method.
    *
    * @param uri    the uri to remove the permission for
-   * @param type   a case-sensitive ASCII string, identifying the consumer. 
+   * @param type   a case-sensitive ASCII string, identifying the consumer.
    *               The type must have been previously registered using the
    *               add() method.
    */
   void remove(in nsIURI uri,
-              in string type);
+              in ACString type);
 
   /**
    * Remove permission information for a given principal.
@@ -166,7 +166,7 @@ interface nsIPermissionManager : nsISupports
    * Passing system principal will be a no-op because we never add them to the
    * database.
    */
-  void removeFromPrincipal(in nsIPrincipal principal, in string type);
+  void removeFromPrincipal(in nsIPrincipal principal, in ACString type);
 
   /**
    * Remove the given permission from the permission manager.
@@ -188,7 +188,15 @@ interface nsIPermissionManager : nsISupports
   /**
    * Clear all permissions of the passed type.
    */
-  void removeByType(in string type);
+  void removeByType(in ACString type);
+
+  /**
+   * Clear all permissions of the passed type added since the specified time.
+   * @param type    a case-sensitive ASCII string, identifying the permission.
+   * @param since   a unix timestamp representing the number of milliseconds from
+   *                Jan 1, 1970 00:00:00 UTC.
+   */
+  void removeByTypeSince(in ACString type, in int64_t since);
 
   /**
    * Test whether a website has permission to perform the given action.
@@ -200,7 +208,7 @@ interface nsIPermissionManager : nsISupports
    *                there is no stored permission for this uri and / or type.
    */
   uint32_t testPermission(in nsIURI uri,
-                          in string type);
+                          in ACString type);
 
   /**
    * Test whether the principal has the permission to perform a given action.
@@ -209,7 +217,22 @@ interface nsIPermissionManager : nsISupports
    * if the specific permission type is part of the whitelist for that functionality.
    */
   uint32_t testPermissionFromPrincipal(in nsIPrincipal principal,
-                                       in string type);
+                                       in ACString type);
+
+  /**
+   * Test whether a website specified by a given origin string has permission
+   * to perform the given action.  This function is similar to testPermission()
+   * and is intended to be used where the cost of parsing a URI in the common
+   * case is to be avoided.
+   * @param originNoSuffix the origin string to be tested.
+   * @param type           a case-sensitive ASCII string, identifying the
+   *                       permission.
+   * @param return         see add(), param permission. returns UNKNOWN_ACTION
+   *                       when there is no stored permission for this uri and/
+   *                       or type.
+   */
+  uint32_t testPermissionOriginNoSuffix(in ACString originNoSuffix,
+                                        in ACString type);
 
   /**
    * Test whether the principal associated with the window's document has the
@@ -219,7 +242,7 @@ interface nsIPermissionManager : nsISupports
    * if the specific permission type is part of the whitelist for that functionality.
    */
   uint32_t testPermissionFromWindow(in mozIDOMWindow window,
-                                    in string type);
+                                    in ACString type);
 
   /**
    * Test whether a website has permission to perform the given action.
@@ -232,7 +255,7 @@ interface nsIPermissionManager : nsISupports
    *                there is no stored permission for this uri and / or type.
    */
   uint32_t testExactPermission(in nsIURI uri,
-                               in string type);
+                               in ACString type);
 
   /**
    * See testExactPermission() above.
@@ -241,7 +264,7 @@ interface nsIPermissionManager : nsISupports
    * if the specific permission type is part of the whitelist for that functionality.
    */
   uint32_t testExactPermissionFromPrincipal(in nsIPrincipal principal,
-                                            in string type);
+                                            in ACString type);
 
   /**
    * Test whether a website has permission to perform the given action
@@ -256,7 +279,7 @@ interface nsIPermissionManager : nsISupports
    *                  there is no stored permission for this uri and / or type.
    */
   uint32_t testExactPermanentPermission(in nsIPrincipal principal,
-                                        in string type);
+                                        in ACString type);
 
   /**
    * Get the permission object associated with the given URI and action.
@@ -272,7 +295,7 @@ interface nsIPermissionManager : nsISupports
    * @note This method will always return null for the system principal.
    */
   nsIPermission getPermissionObjectForURI(in nsIURI uri,
-                                          in string type,
+                                          in ACString type,
                                           in boolean exactHost);
 
   /**
@@ -289,7 +312,7 @@ interface nsIPermissionManager : nsISupports
    * @note This method will always return null for the system principal.
    */
   nsIPermission getPermissionObject(in nsIPrincipal principal,
-                                    in string type,
+                                    in ACString type,
                                     in boolean exactHost);
 
   /**
@@ -319,7 +342,7 @@ interface nsIPermissionManager : nsISupports
    *                           EXPIRE_TIME.
    */
   void updateExpireTime(in nsIPrincipal principal,
-                        in string type,
+                        in ACString type,
                         in boolean exactHost,
                         in uint64_t sessionExpireTime,
                         in uint64_t persistentExpireTime);

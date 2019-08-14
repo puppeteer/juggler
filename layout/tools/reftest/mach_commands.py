@@ -95,7 +95,7 @@ class ReftestRunner(MozbuildObject):
         return rv
 
     def run_android_test(self, **kwargs):
-        """Runs a reftest, in Firefox for Android."""
+        """Runs a reftest, in an Android application."""
 
         args = Namespace(**kwargs)
         if args.suite not in ('reftest', 'crashtest', 'jstestbrowser'):
@@ -130,7 +130,7 @@ class ReftestRunner(MozbuildObject):
         if not args.xrePath:
             args.xrePath = os.environ.get("MOZ_HOST_BIN")
         if not args.app:
-            args.app = self.substs["ANDROID_PACKAGE_NAME"]
+            args.app = "org.mozilla.geckoview.test"
         if not args.utilityPath:
             args.utilityPath = args.xrePath
         args.ignoreWindowSize = True
@@ -238,7 +238,7 @@ class MachCommands(MachCommandBase):
         reftest.log_manager.enable_unstructured()
         if conditions.is_android(self):
             from mozrunner.devices.android_device import verify_android_device
-            verify_android_device(self, install=True, xre=True, app=kwargs["app"],
-                                  device_serial=kwargs["deviceSerial"])
+            verify_android_device(self, install=True, xre=True, network=True,
+                                  app=kwargs["app"], device_serial=kwargs["deviceSerial"])
             return reftest.run_android_test(**kwargs)
         return reftest.run_desktop_test(**kwargs)

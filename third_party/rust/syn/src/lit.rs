@@ -1,11 +1,3 @@
-// Copyright 2018 Syn Developers
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use proc_macro2::{Literal, Span};
 use std::str;
 
@@ -14,8 +6,6 @@ use proc_macro2::Ident;
 
 #[cfg(feature = "parsing")]
 use proc_macro2::TokenStream;
-#[cfg(feature = "parsing")]
-use Error;
 
 use proc_macro2::TokenTree;
 
@@ -25,7 +15,7 @@ use std::hash::{Hash, Hasher};
 #[cfg(feature = "parsing")]
 use lookahead;
 #[cfg(feature = "parsing")]
-use parse::Parse;
+use parse::{Parse, Parser, Result};
 
 ast_enum_of_structs! {
     /// A Rust literal such as a string or integer or boolean.
@@ -129,54 +119,63 @@ impl LitStr {
     ///
     /// # Example
     ///
-    /// ```
-    /// # extern crate proc_macro2;
-    /// # extern crate syn;
-    /// #
+    /// ```edition2018
     /// use proc_macro2::Span;
-    /// use syn::{Attribute, Ident, Lit, Meta, MetaNameValue, Path};
-    /// use syn::parse::{Error, Result};
+    /// use syn::{Attribute, Error, Ident, Lit, Meta, MetaNameValue, Path, Result};
     ///
     /// // Parses the path from an attribute that looks like:
     /// //
     /// //     #[path = "a::b::c"]
     /// //
-    /// // or returns the path `Self` as a default if the attribute is not of
-    /// // that form.
-    /// fn get_path(attr: &Attribute) -> Result<Path> {
-    ///     let default = || Path::from(Ident::new("Self", Span::call_site()));
-    ///
-    ///     let meta = match attr.interpret_meta() {
-    ///         Some(meta) => meta,
-    ///         None => return Ok(default()),
-    ///     };
-    ///
-    ///     if meta.name() != "path" {
-    ///         return Ok(default());
+    /// // or returns `None` if the input is some other attribute.
+    /// fn get_path(attr: &Attribute) -> Result<Option<Path>> {
+    ///     if !attr.path.is_ident("path") {
+    ///         return Ok(None);
     ///     }
     ///
-    ///     match meta {
+    ///     match attr.parse_meta()? {
     ///         Meta::NameValue(MetaNameValue { lit: Lit::Str(lit_str), .. }) => {
-    ///             lit_str.parse()
+    ///             lit_str.parse().map(Some)
     ///         }
     ///         _ => {
-    ///             let error_span = attr.bracket_token.span;
     ///             let message = "expected #[path = \"...\"]";
-    ///             Err(Error::new(error_span, message))
+    ///             Err(Error::new_spanned(attr, message))
     ///         }
     ///     }
     /// }
     /// ```
     #[cfg(feature = "parsing")]
-    pub fn parse<T: Parse>(&self) -> Result<T, Error> {
-        use proc_macro2::Group;
+    pub fn parse<T: Parse>(&self) -> Result<T> {
+        self.parse_with(T::parse)
+    }
 
-        // Parse string literal into a token stream with every span equal to the
-        // original literal's span.
-        fn spanned_tokens(s: &LitStr) -> Result<TokenStream, Error> {
-            let stream = ::parse_str(&s.value())?;
-            Ok(respan_token_stream(stream, s.span()))
-        }
+    /// Invoke parser on the content of this string literal.
+    ///
+    /// All spans in the syntax tree will point to the span of this `LitStr`.
+    ///
+    /// # Example
+    ///
+    /// ```edition2018
+    /// # use proc_macro2::Span;
+    /// # use syn::{LitStr, Result};
+    /// #
+    /// # fn main() -> Result<()> {
+    /// #     let lit_str = LitStr::new("a::b::c", Span::call_site());
+    /// #
+    /// #     const IGNORE: &str = stringify! {
+    /// let lit_str: LitStr = /* ... */;
+    /// #     };
+    ///
+    /// // Parse a string literal like "a::b::c" into a Path, not allowing
+    /// // generic arguments on any of the path segments.
+    /// let basic_path = lit_str.parse_with(syn::Path::parse_mod_style)?;
+    /// #
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "parsing")]
+    pub fn parse_with<F: Parser>(&self, parser: F) -> Result<F::Output> {
+        use proc_macro2::Group;
 
         // Token stream with every span replaced by the given one.
         fn respan_token_stream(stream: TokenStream, span: Span) -> TokenStream {
@@ -199,7 +198,12 @@ impl LitStr {
             token
         }
 
-        spanned_tokens(self).and_then(::parse2)
+        // Parse string literal into a token stream with every span equal to the
+        // original literal's span.
+        let mut tokens = ::parse_str(&self.value())?;
+        tokens = respan_token_stream(tokens, self.span());
+
+        parser.parse2(tokens)
     }
 
     pub fn span(&self) -> Span {
@@ -656,20 +660,24 @@ mod value {
                     _ => {}
                 },
                 b'\'' => return Lit::Char(LitChar { token: token }),
-                b'0'...b'9' => if number_is_int(&value) {
-                    return Lit::Int(LitInt { token: token });
-                } else if number_is_float(&value) {
-                    return Lit::Float(LitFloat { token: token });
-                } else {
-                    // number overflow
-                    return Lit::Verbatim(LitVerbatim { token: token });
-                },
-                _ => if value == "true" || value == "false" {
-                    return Lit::Bool(LitBool {
-                        value: value == "true",
-                        span: token.span(),
-                    });
-                },
+                b'0'...b'9' => {
+                    if number_is_int(&value) {
+                        return Lit::Int(LitInt { token: token });
+                    } else if number_is_float(&value) {
+                        return Lit::Float(LitFloat { token: token });
+                    } else {
+                        // number overflow
+                        return Lit::Verbatim(LitVerbatim { token: token });
+                    }
+                }
+                _ => {
+                    if value == "true" || value == "false" {
+                        return Lit::Bool(LitBool {
+                            value: value == "true",
+                            span: token.span(),
+                        });
+                    }
+                }
             }
 
             panic!("Unrecognized literal: {}", value);
@@ -954,12 +962,13 @@ mod value {
         let mut ch = 0;
         let b0 = byte(s, 0);
         let b1 = byte(s, 1);
-        ch += 0x10 * match b0 {
-            b'0'...b'9' => b0 - b'0',
-            b'a'...b'f' => 10 + (b0 - b'a'),
-            b'A'...b'F' => 10 + (b0 - b'A'),
-            _ => panic!("unexpected non-hex character after \\x"),
-        };
+        ch += 0x10
+            * match b0 {
+                b'0'...b'9' => b0 - b'0',
+                b'a'...b'f' => 10 + (b0 - b'a'),
+                b'A'...b'F' => 10 + (b0 - b'A'),
+                _ => panic!("unexpected non-hex character after \\x"),
+            };
         ch += match b1 {
             b'0'...b'9' => b1 - b'0',
             b'a'...b'f' => 10 + (b1 - b'a'),

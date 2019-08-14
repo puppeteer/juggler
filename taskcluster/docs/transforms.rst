@@ -155,7 +155,7 @@ Task Descriptions
 
 Every kind needs to create tasks, and all of those tasks have some things in
 common.  They all run on one of a small set of worker implementations, each
-with their own idiosyncracies.  And they all report to TreeHerder in a similar
+with their own idiosyncrasies.  And they all report to TreeHerder in a similar
 way.
 
 The transforms in ``taskcluster/taskgraph/transforms/task.py`` implement
@@ -202,9 +202,10 @@ this common functionality.  They expect a "signing description", and produce a
 task definition.  The schema for a signing description is defined at the top of
 ``signing.py``, with copious comments.
 
-In particular you define a set of upstream artifact urls (that point at the dependent
-task) and can optionally provide a dependent name (defaults to build) for use in
-task-reference. You also need to provide the signing formats to use.
+In particular you define a set of upstream artifact urls (that point at the
+dependent task) and can optionally provide a dependent name (defaults to build)
+for use in ``task-reference``/``artifact-reference``. You also need to provide
+the signing formats to use.
 
 More Detail
 -----------

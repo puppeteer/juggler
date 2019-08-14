@@ -20,11 +20,11 @@ using namespace mozilla;
 
 // Cast the pointer to nsISupports* before doing the QI in order to avoid
 // a static assert intended to prevent trivial QIs.
-template<typename TargetInterface, typename SourcePtr>
-bool TestQITo(SourcePtr& aPtr1)
-{
-  nsCOMPtr<TargetInterface> aPtr2 = do_QueryInterface(static_cast<nsISupports*>(aPtr1.get()));
-  return (bool) aPtr2;
+template <typename TargetInterface, typename SourcePtr>
+bool TestQITo(SourcePtr& aPtr1) {
+  nsCOMPtr<TargetInterface> aPtr2 =
+      do_QueryInterface(static_cast<nsISupports*>(aPtr1.get()));
+  return (bool)aPtr2;
 }
 
 TEST(TestEventTargetQI, ThreadPool)
@@ -40,7 +40,8 @@ TEST(TestEventTargetQI, ThreadPool)
 
 TEST(TestEventTargetQI, SharedThreadPool)
 {
-  nsCOMPtr<nsIThreadPool> thing = SharedThreadPool::Get(NS_LITERAL_CSTRING("TestPool"), 1);
+  nsCOMPtr<nsIThreadPool> thing =
+      SharedThreadPool::Get(NS_LITERAL_CSTRING("TestPool"), 1);
   EXPECT_TRUE(thing);
 
   EXPECT_FALSE(TestQITo<nsISerialEventTarget>(thing));
@@ -61,7 +62,8 @@ TEST(TestEventTargetQI, Thread)
 TEST(TestEventTargetQI, ThrottledEventQueue)
 {
   nsCOMPtr<nsIThread> thread = do_GetCurrentThread();
-  RefPtr<ThrottledEventQueue> thing = ThrottledEventQueue::Create(thread);
+  RefPtr<ThrottledEventQueue> thing =
+      ThrottledEventQueue::Create(thread, "test queue");
   EXPECT_TRUE(thing);
 
   EXPECT_TRUE(TestQITo<nsISerialEventTarget>(thing));
@@ -71,7 +73,8 @@ TEST(TestEventTargetQI, ThrottledEventQueue)
 
 TEST(TestEventTargetQI, LazyIdleThread)
 {
-  nsCOMPtr<nsIThread> thing = new LazyIdleThread(0, NS_LITERAL_CSTRING("TestThread"));
+  nsCOMPtr<nsIThread> thing =
+      new LazyIdleThread(0, NS_LITERAL_CSTRING("TestThread"));
   EXPECT_TRUE(thing);
 
   EXPECT_TRUE(TestQITo<nsISerialEventTarget>(thing));
@@ -83,7 +86,8 @@ TEST(TestEventTargetQI, LazyIdleThread)
 
 TEST(TestEventTargetQI, SchedulerGroup)
 {
-  nsCOMPtr<nsIEventTarget> thing = SystemGroup::EventTargetFor(TaskCategory::Other);
+  nsCOMPtr<nsIEventTarget> thing =
+      SystemGroup::EventTargetFor(TaskCategory::Other);
   EXPECT_TRUE(thing);
 
   EXPECT_TRUE(TestQITo<nsISerialEventTarget>(thing));

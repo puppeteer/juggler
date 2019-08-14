@@ -18,6 +18,18 @@
 #include "nsIScriptObjectPrincipal.h"
 #include "nsThread.h"
 
+/**
+ * Automatically cancel and abort synchronous LocalStorage requests (for example
+ * datastore preparation) if they take this long.  We've chosen a value that is
+ * long enough that it is unlikely for the problem to be falsely triggered by
+ * slow system I/O.  We've also chosen a value long enough so that automated
+ * tests should time out and fail if LocalStorage hangs.  Also, this value is
+ * long enough so that testers can notice the (content process) hang; we want to
+ * know about the hangs, not hide them.  On the other hand this value is less
+ * than 60 seconds which is used by nsTerminator to crash a hung main process.
+ */
+#define FAILSAFE_CANCEL_SYNC_OP_MS 50000
+
 namespace mozilla {
 namespace dom {
 
@@ -26,7 +38,36 @@ namespace {
 class RequestHelper;
 
 StaticMutex gRequestHelperMutex;
-RequestHelper* gRequestHelper = nullptr;
+nsISerialEventTarget* gSyncLoopEventTarget = nullptr;
+/**
+ * Tracks whether a sync message has been received to the main thread but not
+ * yet processed.  Used by RequestHelper logic to abort effectively synchronous
+ * calls if a sync IPC message is received which could result in deadlock.
+ * This is a boolean because, by definition, the parent can only send one sync
+ * message to the child at a time.
+ */
+bool gPendingSyncMessage = false;
+
+/*
+ * Wrapper for the pushed event queue.  The wrapper automatically dispatches
+ * runnables to the main thread when pushed event queue is no longer active.
+ * This exists because the event loop spinning can be aborted.
+ */
+class NestedEventTargetWrapper final : public nsISerialEventTarget {
+  nsCOMPtr<nsISerialEventTarget> mNestedEventTarget;
+  bool mDisconnected;
+
+ public:
+  explicit NestedEventTargetWrapper(nsISerialEventTarget* aNestedEventTarget)
+      : mNestedEventTarget(aNestedEventTarget), mDisconnected(false) {}
+
+ private:
+  ~NestedEventTargetWrapper() {}
+
+  NS_DECL_THREADSAFE_ISUPPORTS
+
+  NS_DECL_NSIEVENTTARGET_FULL
+};
 
 /**
  * Main-thread helper that implements the blocking logic required by
@@ -93,7 +134,11 @@ class RequestHelper final : public Runnable, public LSRequestChildCallback {
   // The pushed event queue that we use to spin the event loop without
   // processing any of the events dispatched at the mOwningEventTarget (which
   // would result in re-entrancy and violate LocalStorage semantics).
-  nsCOMPtr<nsIEventTarget> mNestedEventTarget;
+  nsCOMPtr<nsISerialEventTarget> mNestedEventTarget;
+  // The wrapper for the pushed event queue.  The wrapper automatically
+  // dispatches runnables to the main thread when pushed event queue is no
+  // longer active.  This exists because the event loop spinning can be aborted.
+  nsCOMPtr<nsISerialEventTarget> mNestedEventTargetWrapper;
   // The IPC actor handling the request with standard IPC allocation rules.
   // Our reference is nulled in OnResponse which corresponds to the actor's
   // __destroy__ method.
@@ -104,6 +149,7 @@ class RequestHelper final : public Runnable, public LSRequestChildCallback {
   State mState;
   // Control flag for the nested event loop; once set to false, the loop ends.
   bool mWaiting;
+  bool mCancelled;
 
  public:
   RequestHelper(LSObject* aObject, const LSRequestParams& aParams)
@@ -114,10 +160,8 @@ class RequestHelper final : public Runnable, public LSRequestChildCallback {
         mParams(aParams),
         mResultCode(NS_OK),
         mState(State::Initial),
-        mWaiting(true) {
-    StaticMutexAutoLock lock(gRequestHelperMutex);
-    gRequestHelper = this;
-  }
+        mWaiting(true),
+        mCancelled(false) {}
 
   bool IsOnOwningThread() const {
     MOZ_ASSERT(mOwningEventTarget);
@@ -132,24 +176,10 @@ class RequestHelper final : public Runnable, public LSRequestChildCallback {
     MOZ_ASSERT(IsOnOwningThread());
   }
 
-  // Used for requests from the parent process to the parent process; in that
-  // case we want ActorsParent to know our event-target and this is better than
-  // trying to tunnel the pointer through IPC.
-  const nsCOMPtr<nsIEventTarget>& GetSyncLoopEventTarget() const {
-    MOZ_ASSERT(XRE_IsParentProcess());
-
-    return mNestedEventTarget;
-  }
-
   nsresult StartAndReturnResponse(LSRequestResponse& aResponse);
 
-  nsresult CancelOnAnyThread();
-
  private:
-  ~RequestHelper() {
-    StaticMutexAutoLock lock(gRequestHelperMutex);
-    gRequestHelper = nullptr;
-  }
+  ~RequestHelper() {}
 
   nsresult Start();
 
@@ -165,8 +195,9 @@ class RequestHelper final : public Runnable, public LSRequestChildCallback {
 
 }  // namespace
 
-LSObject::LSObject(nsPIDOMWindowInner* aWindow, nsIPrincipal* aPrincipal)
-    : Storage(aWindow, aPrincipal),
+LSObject::LSObject(nsPIDOMWindowInner* aWindow, nsIPrincipal* aPrincipal,
+                   nsIPrincipal* aStoragePrincipal)
+    : Storage(aWindow, aPrincipal, aStoragePrincipal),
       mPrivateBrowsingId(0),
       mInExplicitSnapshot(false) {
   AssertIsOnOwningThread();
@@ -180,20 +211,52 @@ LSObject::~LSObject() {
 }
 
 // static
+void LSObject::Initialize() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsCOMPtr<nsIEventTarget> domFileThread =
+      IPCBlobInputStreamThread::GetOrCreate();
+  if (NS_WARN_IF(!domFileThread)) {
+    return;
+  }
+
+  RefPtr<Runnable> runnable =
+      NS_NewRunnableFunction("LSObject::Initialize", []() {
+        AssertIsOnDOMFileThread();
+
+        PBackgroundChild* backgroundActor =
+            BackgroundChild::GetOrCreateForCurrentThread();
+
+        if (NS_WARN_IF(!backgroundActor)) {
+          return;
+        }
+      });
+
+  if (NS_WARN_IF(
+          NS_FAILED(domFileThread->Dispatch(runnable, NS_DISPATCH_NORMAL)))) {
+    return;
+  }
+}
+
+// static
 nsresult LSObject::CreateForWindow(nsPIDOMWindowInner* aWindow,
                                    Storage** aStorage) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(aStorage);
   MOZ_ASSERT(NextGenLocalStorageEnabled());
-  MOZ_ASSERT(nsContentUtils::StorageAllowedForWindow(aWindow) >
-             nsContentUtils::StorageAccess::eDeny);
+  MOZ_ASSERT(StorageAllowedForWindow(aWindow) != StorageAccess::eDeny);
 
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aWindow);
   MOZ_ASSERT(sop);
 
   nsCOMPtr<nsIPrincipal> principal = sop->GetPrincipal();
   if (NS_WARN_IF(!principal)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCOMPtr<nsIPrincipal> storagePrincipal = sop->GetEffectiveStoragePrincipal();
+  if (NS_WARN_IF(!storagePrincipal)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -204,10 +267,10 @@ nsresult LSObject::CreateForWindow(nsPIDOMWindowInner* aWindow,
   // localStorage is not available on some pages on purpose, for example
   // about:home. Match the old implementation by using GenerateOriginKey
   // for the check.
-  nsCString dummyOriginAttrSuffix;
-  nsCString dummyOriginKey;
+  nsCString originAttrSuffix;
+  nsCString originKey;
   nsresult rv =
-      GenerateOriginKey(principal, dummyOriginAttrSuffix, dummyOriginKey);
+      GenerateOriginKey(storagePrincipal, originAttrSuffix, originKey);
   if (NS_FAILED(rv)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -220,30 +283,57 @@ nsresult LSObject::CreateForWindow(nsPIDOMWindowInner* aWindow,
 
   MOZ_ASSERT(principalInfo->type() == PrincipalInfo::TContentPrincipalInfo);
 
-  nsCString origin;
-  rv = QuotaManager::GetInfoFromPrincipal(principal, nullptr, nullptr, &origin);
+  nsAutoPtr<PrincipalInfo> storagePrincipalInfo(new PrincipalInfo());
+  rv = PrincipalToPrincipalInfo(storagePrincipal, storagePrincipalInfo);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
+
+  MOZ_ASSERT(storagePrincipalInfo->type() ==
+             PrincipalInfo::TContentPrincipalInfo);
+
+  if (NS_WARN_IF(!QuotaManager::IsPrincipalInfoValid(*storagePrincipalInfo))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCString suffix;
+  nsCString origin;
+  rv = QuotaManager::GetInfoFromPrincipal(storagePrincipal, &suffix, nullptr,
+                                          &origin);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(originAttrSuffix == suffix);
 
   uint32_t privateBrowsingId;
-  rv = principal->GetPrivateBrowsingId(&privateBrowsingId);
+  rv = storagePrincipal->GetPrivateBrowsingId(&privateBrowsingId);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
+  Maybe<ClientInfo> clientInfo = aWindow->GetClientInfo();
+  if (clientInfo.isNothing()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  Maybe<nsID> clientId = Some(clientInfo.ref().Id());
+
   nsString documentURI;
-  if (nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc()) {
+  if (nsCOMPtr<Document> doc = aWindow->GetExtantDoc()) {
     rv = doc->GetDocumentURI(documentURI);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
   }
 
-  RefPtr<LSObject> object = new LSObject(aWindow, principal);
+  RefPtr<LSObject> object = new LSObject(aWindow, principal, storagePrincipal);
   object->mPrincipalInfo = std::move(principalInfo);
+  object->mStoragePrincipalInfo = std::move(storagePrincipalInfo);
   object->mPrivateBrowsingId = privateBrowsingId;
+  object->mClientId = clientId;
   object->mOrigin = origin;
+  object->mOriginKey = originKey;
   object->mDocumentURI = documentURI;
 
   object.forget(aStorage);
@@ -253,16 +343,18 @@ nsresult LSObject::CreateForWindow(nsPIDOMWindowInner* aWindow,
 // static
 nsresult LSObject::CreateForPrincipal(nsPIDOMWindowInner* aWindow,
                                       nsIPrincipal* aPrincipal,
+                                      nsIPrincipal* aStoragePrincipal,
                                       const nsAString& aDocumentURI,
                                       bool aPrivate, LSObject** aObject) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aPrincipal);
+  MOZ_ASSERT(aStoragePrincipal);
   MOZ_ASSERT(aObject);
 
-  nsCString dummyOriginAttrSuffix;
-  nsCString dummyOriginKey;
+  nsCString originAttrSuffix;
+  nsCString originKey;
   nsresult rv =
-      GenerateOriginKey(aPrincipal, dummyOriginAttrSuffix, dummyOriginKey);
+      GenerateOriginKey(aStoragePrincipal, originAttrSuffix, originKey);
   if (NS_FAILED(rv)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -276,22 +368,55 @@ nsresult LSObject::CreateForPrincipal(nsPIDOMWindowInner* aWindow,
   MOZ_ASSERT(principalInfo->type() == PrincipalInfo::TContentPrincipalInfo ||
              principalInfo->type() == PrincipalInfo::TSystemPrincipalInfo);
 
+  nsAutoPtr<PrincipalInfo> storagePrincipalInfo(new PrincipalInfo());
+  rv = PrincipalToPrincipalInfo(aStoragePrincipal, storagePrincipalInfo);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  MOZ_ASSERT(
+      storagePrincipalInfo->type() == PrincipalInfo::TContentPrincipalInfo ||
+      storagePrincipalInfo->type() == PrincipalInfo::TSystemPrincipalInfo);
+
+  if (NS_WARN_IF(!QuotaManager::IsPrincipalInfoValid(*storagePrincipalInfo))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsCString suffix;
   nsCString origin;
 
-  if (principalInfo->type() == PrincipalInfo::TSystemPrincipalInfo) {
-    QuotaManager::GetInfoForChrome(nullptr, nullptr, &origin);
+  if (storagePrincipalInfo->type() == PrincipalInfo::TSystemPrincipalInfo) {
+    QuotaManager::GetInfoForChrome(&suffix, nullptr, &origin);
   } else {
-    rv = QuotaManager::GetInfoFromPrincipal(aPrincipal, nullptr, nullptr,
+    rv = QuotaManager::GetInfoFromPrincipal(aPrincipal, &suffix, nullptr,
                                             &origin);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
   }
 
-  RefPtr<LSObject> object = new LSObject(aWindow, aPrincipal);
+  MOZ_ASSERT(originAttrSuffix == suffix);
+
+  Maybe<nsID> clientId;
+  if (aWindow) {
+    Maybe<ClientInfo> clientInfo = aWindow->GetClientInfo();
+    if (clientInfo.isNothing()) {
+      return NS_ERROR_FAILURE;
+    }
+
+    clientId = Some(clientInfo.ref().Id());
+  } else if (Preferences::GetBool("dom.storage.client_validation")) {
+    return NS_ERROR_FAILURE;
+  }
+
+  RefPtr<LSObject> object =
+      new LSObject(aWindow, aPrincipal, aStoragePrincipal);
   object->mPrincipalInfo = std::move(principalInfo);
+  object->mStoragePrincipalInfo = std::move(storagePrincipalInfo);
   object->mPrivateBrowsingId = aPrivate ? 1 : 0;
+  object->mClientId = clientId;
   object->mOrigin = origin;
+  object->mOriginKey = originKey;
   object->mDocumentURI = aDocumentURI;
 
   object.forget(aObject);
@@ -299,34 +424,42 @@ nsresult LSObject::CreateForPrincipal(nsPIDOMWindowInner* aWindow,
 }
 
 // static
-already_AddRefed<nsIEventTarget> LSObject::GetSyncLoopEventTarget() {
-  RefPtr<RequestHelper> helper;
+already_AddRefed<nsISerialEventTarget> LSObject::GetSyncLoopEventTarget() {
+  MOZ_ASSERT(XRE_IsParentProcess());
+
+  nsCOMPtr<nsISerialEventTarget> target;
 
   {
     StaticMutexAutoLock lock(gRequestHelperMutex);
-    helper = gRequestHelper;
-  }
-
-  nsCOMPtr<nsIEventTarget> target;
-  if (helper) {
-    target = helper->GetSyncLoopEventTarget();
+    target = gSyncLoopEventTarget;
   }
 
   return target.forget();
 }
 
 // static
-void LSObject::CancelSyncLoop() {
-  RefPtr<RequestHelper> helper;
+void LSObject::OnSyncMessageReceived() {
+  nsCOMPtr<nsISerialEventTarget> target;
 
   {
     StaticMutexAutoLock lock(gRequestHelperMutex);
-    helper = gRequestHelper;
+    target = gSyncLoopEventTarget;
+    gPendingSyncMessage = true;
   }
 
-  if (helper) {
-    Unused << NS_WARN_IF(NS_FAILED(helper->CancelOnAnyThread()));
+  if (target) {
+    RefPtr<Runnable> runnable =
+        NS_NewRunnableFunction("LSObject::CheckFlagRunnable", []() {});
+
+    MOZ_ALWAYS_SUCCEEDS(
+        target->Dispatch(runnable.forget(), NS_DISPATCH_NORMAL));
   }
+}
+
+// static
+void LSObject::OnSyncMessageHandled() {
+  StaticMutexAutoLock lock(gRequestHelperMutex);
+  gPendingSyncMessage = false;
 }
 
 LSRequestChild* LSObject::StartRequest(nsIEventTarget* aMainEventTarget,
@@ -335,7 +468,9 @@ LSRequestChild* LSObject::StartRequest(nsIEventTarget* aMainEventTarget,
   AssertIsOnDOMFileThread();
 
   PBackgroundChild* backgroundActor =
-      BackgroundChild::GetOrCreateForCurrentThread(aMainEventTarget);
+      XRE_IsParentProcess()
+          ? BackgroundChild::GetOrCreateForCurrentThread(aMainEventTarget)
+          : BackgroundChild::GetForCurrentThread();
   if (NS_WARN_IF(!backgroundActor)) {
     return nullptr;
   }
@@ -633,6 +768,24 @@ void LSObject::EndExplicitSnapshot(nsIPrincipal& aSubjectPrincipal,
   }
 }
 
+bool LSObject::GetHasActiveSnapshot(nsIPrincipal& aSubjectPrincipal,
+                                    ErrorResult& aError) {
+  AssertIsOnOwningThread();
+
+  if (!CanUseStorage(aSubjectPrincipal)) {
+    aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    return 0;
+  }
+
+  if (mDatabase && mDatabase->HasActiveSnapshot()) {
+    MOZ_ASSERT(!mDatabase->IsAllowedToClose());
+
+    return true;
+  }
+
+  return false;
+}
+
 NS_IMPL_ADDREF_INHERITED(LSObject, Storage)
 NS_IMPL_RELEASE_INHERITED(LSObject, Storage)
 
@@ -708,9 +861,14 @@ nsresult LSObject::EnsureDatabase() {
     return NS_ERROR_FAILURE;
   }
 
+  LSRequestCommonParams commonParams;
+  commonParams.principalInfo() = *mPrincipalInfo;
+  commonParams.storagePrincipalInfo() = *mStoragePrincipalInfo;
+  commonParams.originKey() = mOriginKey;
+
   LSRequestPrepareDatastoreParams params;
-  params.principalInfo() = *mPrincipalInfo;
-  params.createIfNotExists() = true;
+  params.commonParams() = commonParams;
+  params.clientId() = mClientId;
 
   LSRequestResponse response;
 
@@ -725,10 +883,7 @@ nsresult LSObject::EnsureDatabase() {
   const LSRequestPrepareDatastoreResponse& prepareDatastoreResponse =
       response.get_LSRequestPrepareDatastoreResponse();
 
-  const NullableDatastoreId& datastoreId =
-      prepareDatastoreResponse.datastoreId();
-
-  MOZ_ASSERT(datastoreId.type() == NullableDatastoreId::Tuint64_t);
+  uint64_t datastoreId = prepareDatastoreResponse.datastoreId();
 
   // The datastore is now ready on the parent side (prepared by the asynchronous
   // request on the DOM File thread).
@@ -742,7 +897,7 @@ nsresult LSObject::EnsureDatabase() {
   LSDatabaseChild* actor = new LSDatabaseChild(database);
 
   MOZ_ALWAYS_TRUE(backgroundActor->SendPBackgroundLSDatabaseConstructor(
-      actor, *mPrincipalInfo, mPrivateBrowsingId, datastoreId));
+      actor, *mStoragePrincipalInfo, mPrivateBrowsingId, datastoreId));
 
   database->SetActor(actor);
 
@@ -777,6 +932,8 @@ nsresult LSObject::EnsureObserver() {
 
   LSRequestPrepareObserverParams params;
   params.principalInfo() = *mPrincipalInfo;
+  params.storagePrincipalInfo() = *mStoragePrincipalInfo;
+  params.clientId() = mClientId;
 
   LSRequestResponse response;
 
@@ -829,8 +986,8 @@ void LSObject::OnChange(const nsAString& aKey, const nsAString& aOldValue,
                         const nsAString& aNewValue) {
   AssertIsOnOwningThread();
 
-  NotifyChange(/* aStorage */ this, Principal(), aKey, aOldValue, aNewValue,
-               /* aStorageType */ kLocalStorageType, mDocumentURI,
+  NotifyChange(/* aStorage */ this, StoragePrincipal(), aKey, aOldValue,
+               aNewValue, /* aStorageType */ kLocalStorageType, mDocumentURI,
                /* aIsPrivate */ !!mPrivateBrowsingId,
                /* aImmediateDispatch */ false);
 }
@@ -871,6 +1028,67 @@ void LSObject::LastRelease() {
   DropDatabase();
 }
 
+NS_IMPL_ISUPPORTS(NestedEventTargetWrapper, nsIEventTarget,
+                  nsISerialEventTarget);
+
+NS_IMETHODIMP_(bool)
+NestedEventTargetWrapper::IsOnCurrentThreadInfallible() {
+  MOZ_CRASH(
+      "IsOnCurrentThreadInfallible should never be called on "
+      "NestedEventTargetWrapper");
+}
+
+NS_IMETHODIMP
+NestedEventTargetWrapper::IsOnCurrentThread(bool* aResult) {
+  MOZ_CRASH(
+      "IsOnCurrentThread should never be called on "
+      "NestedEventTargetWrapper");
+}
+
+NS_IMETHODIMP
+NestedEventTargetWrapper::Dispatch(already_AddRefed<nsIRunnable> aEvent,
+                                   uint32_t aFlags) {
+  MOZ_ASSERT(mNestedEventTarget);
+
+  if (mDisconnected) {
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(std::move(aEvent), aFlags));
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIRunnable> event(aEvent);
+
+  nsresult rv = mNestedEventTarget->Dispatch(event, aFlags);
+  if (rv == NS_ERROR_UNEXPECTED) {
+    mDisconnected = true;
+
+    // Dispatch leaked the event object on the NS_ERROR_UNEXPECTED failure, so
+    // we explicitly release this object once for that.
+    event.get()->Release();
+
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(event.forget(), aFlags));
+  } else if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+NestedEventTargetWrapper::DispatchFromScript(nsIRunnable* aEvent,
+                                             uint32_t aFlags) {
+  MOZ_CRASH(
+      "DispatchFromScript should never be called on "
+      "NestedEventTargetWrapper");
+}
+
+NS_IMETHODIMP
+NestedEventTargetWrapper::DelayedDispatch(already_AddRefed<nsIRunnable> aEvent,
+                                          uint32_t aDelayMs) {
+  MOZ_CRASH(
+      "DelayedDispatch should never be called on "
+      "NestedEventTargetWrapper");
+}
+
 nsresult RequestHelper::StartAndReturnResponse(LSRequestResponse& aResponse) {
   AssertIsOnOwningThread();
 
@@ -891,27 +1109,118 @@ nsresult RequestHelper::StartAndReturnResponse(LSRequestResponse& aResponse) {
   {
     auto thread = static_cast<nsThread*>(NS_GetCurrentThread());
 
-    auto queue =
-        static_cast<ThreadEventQueue<EventQueue>*>(thread->EventQueue());
-
-    mNestedEventTarget = queue->PushEventQueue();
+    const nsLocalExecutionGuard localExecution(thread->EnterLocalExecution());
+    mNestedEventTarget = localExecution.GetEventTarget();
     MOZ_ASSERT(mNestedEventTarget);
 
-    auto autoPopEventQueue = mozilla::MakeScopeExit(
-        [&] { queue->PopEventQueue(mNestedEventTarget); });
+    mNestedEventTargetWrapper =
+        new NestedEventTargetWrapper(mNestedEventTarget);
 
     nsCOMPtr<nsIEventTarget> domFileThread =
-        IPCBlobInputStreamThread::GetOrCreate();
+        XRE_IsParentProcess() ? IPCBlobInputStreamThread::GetOrCreate()
+                              : IPCBlobInputStreamThread::Get();
     if (NS_WARN_IF(!domFileThread)) {
       return NS_ERROR_FAILURE;
     }
 
-    nsresult rv = domFileThread->Dispatch(this, NS_DISPATCH_NORMAL);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+    nsresult rv;
+
+    {
+      {
+        StaticMutexAutoLock lock(gRequestHelperMutex);
+
+        if (NS_WARN_IF(gPendingSyncMessage)) {
+          return NS_ERROR_FAILURE;
+        }
+
+        gSyncLoopEventTarget = mNestedEventTargetWrapper;
+      }
+
+      auto autoClearSyncLoopEventTarget = mozilla::MakeScopeExit([&] {
+        StaticMutexAutoLock lock(gRequestHelperMutex);
+        gSyncLoopEventTarget = nullptr;
+      });
+
+      rv = domFileThread->Dispatch(this, NS_DISPATCH_NORMAL);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      nsCOMPtr<nsITimer> timer = NS_NewTimer();
+
+      MOZ_ALWAYS_SUCCEEDS(timer->SetTarget(mNestedEventTarget));
+
+      MOZ_ALWAYS_SUCCEEDS(timer->InitWithNamedFuncCallback(
+          [](nsITimer* aTimer, void* aClosure) {
+            auto helper = static_cast<RequestHelper*>(aClosure);
+
+            helper->mCancelled = true;
+          },
+          this, FAILSAFE_CANCEL_SYNC_OP_MS, nsITimer::TYPE_ONE_SHOT,
+          "RequestHelper::StartAndReturnResponse::SpinEventLoopTimer"));
+
+      MOZ_ALWAYS_TRUE(SpinEventLoopUntil(
+          [&]() {
+            if (mCancelled) {
+              return true;
+            }
+
+            if (!mWaiting) {
+              return true;
+            }
+
+            {
+              StaticMutexAutoLock lock(gRequestHelperMutex);
+              if (NS_WARN_IF(gPendingSyncMessage)) {
+                return true;
+              }
+            }
+
+            return false;
+          },
+          thread));
+
+      MOZ_ALWAYS_SUCCEEDS(timer->Cancel());
     }
 
-    MOZ_ALWAYS_TRUE(SpinEventLoopUntil([&]() { return !mWaiting; }));
+    // If mWaiting is still set to true, it means that the event loop spinning
+    // was aborted and we need to cancel the request in the parent since we
+    // don't care about the result anymore.
+    // We can check mWaiting here because it's only ever touched on the main
+    // thread.
+    if (NS_WARN_IF(mWaiting)) {
+      // Don't touch mResponse, mResultCode or mState here! The DOM File Thread
+      // may be accessing them at the same moment.
+
+      RefPtr<RequestHelper> self = this;
+
+      RefPtr<Runnable> runnable =
+          NS_NewRunnableFunction("RequestHelper::SendCancelRunnable", [self]() {
+            LSRequestChild* actor = self->mActor;
+
+            // Start() could fail or it hasn't had a chance to run yet, so we
+            // need to check if actor is not null.
+            // The actor can also be in the final (finishing) state, in that
+            // case we are not allowed to send the cancel message and it
+            // wouldn't make sense because the request is about to be destroyed
+            // anyway.
+            if (actor && !actor->Finishing()) {
+              actor->SendCancel();
+            }
+          });
+
+      rv = domFileThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return rv;
+      }
+
+      return NS_ERROR_FAILURE;
+    }
+
+    // localExecution will be destructed when we leave this scope. If the event
+    // loop spinning was aborted and other threads dispatched new runnables to
+    // the nested event queue, they will be moved to the main event queue here
+    // and later asynchronusly processed.  So nothing will be lost.
   }
 
   if (NS_WARN_IF(NS_FAILED(mResultCode))) {
@@ -922,31 +1231,6 @@ nsresult RequestHelper::StartAndReturnResponse(LSRequestResponse& aResponse) {
   return NS_OK;
 }
 
-nsresult RequestHelper::CancelOnAnyThread() {
-  RefPtr<RequestHelper> self = this;
-
-  RefPtr<Runnable> runnable =
-      NS_NewRunnableFunction("RequestHelper::CancelOnAnyThread", [self]() {
-        LSRequestChild* actor = self->mActor;
-        if (actor && !actor->Finishing()) {
-          actor->SendCancel();
-        }
-      });
-
-  nsCOMPtr<nsIEventTarget> domFileThread =
-      IPCBlobInputStreamThread::GetOrCreate();
-  if (NS_WARN_IF(!domFileThread)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsresult rv = domFileThread->Dispatch(runnable, NS_DISPATCH_NORMAL);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  return NS_OK;
-}
-
 nsresult RequestHelper::Start() {
   AssertIsOnDOMFileThread();
   MOZ_ASSERT(mState == State::Initial);
@@ -954,7 +1238,7 @@ nsresult RequestHelper::Start() {
   mState = State::ResponsePending;
 
   LSRequestChild* actor =
-      mObject->StartRequest(mNestedEventTarget, mParams, this);
+      mObject->StartRequest(mNestedEventTargetWrapper, mParams, this);
   if (NS_WARN_IF(!actor)) {
     return NS_ERROR_FAILURE;
   }
@@ -1005,7 +1289,7 @@ RequestHelper::Run() {
       Finish();
     } else {
       MOZ_ALWAYS_SUCCEEDS(
-          mNestedEventTarget->Dispatch(this, NS_DISPATCH_NORMAL));
+          mNestedEventTargetWrapper->Dispatch(this, NS_DISPATCH_NORMAL));
     }
   }
 
@@ -1021,7 +1305,9 @@ void RequestHelper::OnResponse(const LSRequestResponse& aResponse) {
   mResponse = aResponse;
 
   mState = State::Finishing;
-  MOZ_ALWAYS_SUCCEEDS(mNestedEventTarget->Dispatch(this, NS_DISPATCH_NORMAL));
+
+  MOZ_ALWAYS_SUCCEEDS(
+      mNestedEventTargetWrapper->Dispatch(this, NS_DISPATCH_NORMAL));
 }
 
 }  // namespace dom

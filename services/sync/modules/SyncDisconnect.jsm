@@ -5,7 +5,9 @@
 // This module provides a facility for disconnecting Sync and FxA, optionally
 // sanitizing profile data as part of the process.
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
@@ -14,6 +16,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   fxAccounts: "resource://gre/modules/FxAccounts.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
+  Utils: "resource://services-sync/util.js",
 });
 
 XPCOMUtils.defineLazyGetter(this, "FxAccountsCommon", function() {
@@ -60,7 +63,9 @@ this.SyncDisconnectInternal = {
         }
         attempts += 1;
         if (attempts >= this.lockRetryCount) {
-          log.error("Gave up waiting for the sync lock - going ahead with sanitize anyway");
+          log.error(
+            "Gave up waiting for the sync lock - going ahead with sanitize anyway"
+          );
           resolve(false);
           return;
         }
@@ -118,7 +123,9 @@ this.SyncDisconnectInternal = {
       // sanitize everything other than "open windows" (and we don't do that
       // because it may confuse the user - they probably want to see
       // about:prefs with the disconnection reflected.
-      let itemsToClear = Object.keys(Sanitizer.items).filter(k => k != "openWindows");
+      let itemsToClear = Object.keys(Sanitizer.items).filter(
+        k => k != "openWindows"
+      );
       await Sanitizer.sanitize(itemsToClear);
     } catch (ex) {
       console.error("Failed to sanitize other data", ex);
@@ -148,8 +155,10 @@ this.SyncDisconnectInternal = {
   // Start the sanitization process. Returns a promise that resolves when
   // the sanitize is complete, and an AbortController which can be used to
   // abort the process of waiting for a sync to complete.
-  async _startDisconnect(abortController,
-                         {sanitizeSyncData = false, sanitizeBrowserData = false} = {}) {
+  async _startDisconnect(
+    abortController,
+    { sanitizeSyncData = false, sanitizeBrowserData = false } = {}
+  ) {
     // This is a bit convoluted - we want to wait for a sync to finish before
     // sanitizing, but want to abort that wait if the browser shuts down while
     // we are waiting (in which case we'll charge ahead anyway).
@@ -157,6 +166,17 @@ this.SyncDisconnectInternal = {
     // function that waits for the sync lock - it will immediately resolve
     // if the abort controller is aborted.
     let log = Log.repository.getLogger("Sync.Service");
+
+    // If the master-password is locked then we will fail to fully sanitize,
+    // so prompt for that now. If canceled, we just abort now.
+    log.info("checking master-password state");
+    if (!Utils.ensureMPUnlocked()) {
+      log.warn(
+        "The master-password needs to be unlocked to fully disconnect from sync"
+      );
+      return;
+    }
+
     log.info("waiting for any existing syncs to complete");
     let locked = await this.promiseNotSyncing(abortController);
 
@@ -174,15 +194,17 @@ this.SyncDisconnectInternal = {
     if (sanitizeBrowserData) {
       await this.doSanitizeBrowserData();
     }
-
   },
 
   async disconnect(options) {
     if (this.promiseDisconnectFinished) {
-        throw new Error("A disconnect is already in progress");
+      throw new Error("A disconnect is already in progress");
     }
     let abortController = new AbortController();
-    let promiseDisconnectFinished = this._startDisconnect(abortController, options);
+    let promiseDisconnectFinished = this._startDisconnect(
+      abortController,
+      options
+    );
     this.promiseDisconnectFinished = promiseDisconnectFinished;
     let shutdownBlocker = () => {
       // oh dear - we are sanitizing (probably stuck waiting for a sync to
@@ -193,7 +215,8 @@ this.SyncDisconnectInternal = {
     };
     AsyncShutdown.quitApplicationGranted.addBlocker(
       "SyncDisconnect: removing requested data",
-      shutdownBlocker);
+      shutdownBlocker
+    );
 
     // wait for it to finish - hopefully without the blocker being called.
     await promiseDisconnectFinished;
@@ -206,11 +229,11 @@ this.SyncDisconnectInternal = {
 };
 
 this.SyncDisconnect = {
-    get promiseDisconnectFinished() {
-        return SyncDisconnectInternal.promiseDisconnectFinished;
-    },
+  get promiseDisconnectFinished() {
+    return SyncDisconnectInternal.promiseDisconnectFinished;
+  },
 
-    disconnect(options) {
-      return SyncDisconnectInternal.disconnect(options);
-    },
+  disconnect(options) {
+    return SyncDisconnectInternal.disconnect(options);
+  },
 };

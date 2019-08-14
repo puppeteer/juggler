@@ -15,7 +15,7 @@ namespace mozilla {
 // (RemoteVideoDecoderParent) on the RDD process.
 class RemoteDecoderModule : public PlatformDecoderModule {
  public:
-  RemoteDecoderModule() = default;
+  RemoteDecoderModule();
 
   bool SupportsMimeType(const nsACString& aMimeType,
                         DecoderDoctorDiagnostics* aDiagnostics) const override;
@@ -24,9 +24,13 @@ class RemoteDecoderModule : public PlatformDecoderModule {
       const CreateDecoderParams& aParams) override;
 
   already_AddRefed<MediaDataDecoder> CreateAudioDecoder(
-      const CreateDecoderParams& aParams) override {
-    return nullptr;
-  }
+      const CreateDecoderParams& aParams) override;
+
+ protected:
+  void LaunchRDDProcessIfNeeded();
+
+ private:
+  RefPtr<nsIThread> mManagerThread;
 };
 
 }  // namespace mozilla

@@ -49,6 +49,11 @@ AdapterDeviceID:
     Graphics adapter name.
   type: string
 
+AdapterDriverVendor:
+  description: >
+    Graphics adapter driver vendor.
+  type: string
+
 AdapterDriverVersion:
   description: >
     Graphics adapter driver version.
@@ -99,9 +104,9 @@ AsyncShutdownTimeout:
 
 AvailablePageFile:
   description: >
-    Windows-only, maximum amount of memory that can be committed.  This
-    annotation is populated with the contents of the MEMORYSTATUSEX's structure
-    ullAvailPageFile field.
+    Windows-only, available commit-space in bytes.  This annotation is computed
+    from the PERFORMANCE_INFORMATION structure by substracting the CommitTotal
+    field from the CommitLimit field.
   type: string
   ping: true
 
@@ -152,6 +157,11 @@ Bug_1086977:
   description: >
     Mac-only annotation which should be present only if Firefox crashed when
     loading a facebook plugin.
+  type: string
+
+Bug_1541161:
+  description: >
+    Dump JS Stack in case loadinfo is null within NewChannelFromURIWithProxyFlagsInternal().
   type: string
 
 BuildID:
@@ -250,6 +260,12 @@ DeviceResetReason:
   description: >
     Reason why a DirectX device has been reset, Windows only.
   type: string
+
+DOMFissionEnabled:
+  description: >
+    Set to 1 when DOM fission is enabled, and subframes are potentially loaded
+    in a separate process.
+  type: boolean
 
 DOMIPCEnabled:
   description: >
@@ -351,6 +367,15 @@ IAccessibleConfig:
     the computer's registry. The value is always set to "NoSystemTypeLibOrPS"
   type: string
 
+IndexedDBShutdownTimeout:
+  description: >
+    This annotation is present if IndexedDB shutdown was not finished in time
+    and the browser was crashed instead of waiting for IndexedDB shutdown to
+    finish. The condition that caused the hang is contained in the annotation.
+  type: string
+  content: false
+  ping: true
+
 InstallTime:
   description: >
     The time when Firefox was installed expressed as seconds since the Epoch
@@ -449,6 +474,16 @@ IsGarbageCollecting:
   type: boolean
   ping: true
 
+IsWayland:
+  description: >
+    If true then the Wayland windowing system was in use.
+  type: boolean
+
+IsWaylandDRM:
+  description: >
+    If true then the Wayland DRM backend was in use.
+  type: boolean
+
 JavaStackTrace:
   description: >
     Java stack trace, only present on Firefox for Android if we encounter an
@@ -470,6 +505,32 @@ JSOutOfMemory:
     free some memory, and the last that the GC had managed to free enough memory
     to satisfy the allocation.
   type: string
+
+LauncherProcessState:
+  description: >
+    Launcher process enabled state. The integer value of this annotation must
+    match with one of the values in the
+    mozilla::LauncherRegistryInfo::EnableState enum
+  type: integer
+
+LocalStorageShutdownTimeout:
+  description: >
+    This annotation is present if LocalStorage shutdown was not finished in time
+    and the browser was crashed instead of waiting for LocalStorage shutdown to
+    finish. The condition that caused the hang is contained in the annotation.
+    The condition is constructed by stringifying status of global arrays and
+    hash tables that blocked LocalStorage shutdown (gPrepareDatastoreOps,
+    gDatastores and gLiveDatabases). gDatastores and gLiveDatabases currently
+    only report the number of elements. gPrepareDatastoreOps reports the number
+    of elements and status of individual elements (duplicit entries are removed):
+    "gPrepareDatastoreOps: N (element1, element2, elementN)" where N is the
+    number of elements. Status of individual elements is constructed by taking
+    PrepareDatastoreOp's sanitized origin string, stringified state and
+    stringified nested state. A full example:
+    "gPrepareDatastoreOps: 1 (http://aaa.aaa.aaa*Nesting*DatabaseWorkOpen)"
+  type: string
+  content: false
+  ping: true
 
 LowCommitSpaceEvents:
   description: >
@@ -507,11 +568,6 @@ nsAsyncShutdownComponent:
   description: >
     Holds the contents of the nsAsyncShutdown.js script
   type: string
-
-NumberOfProcessors:
-  description: >
-    Number of logical processors in the system.
-  type: integer
 
 OOMAllocationSize:
   description: >
@@ -554,8 +610,8 @@ PluginVersion:
 
 ProcessType:
   description: >
-    Type of the process that crashed, can hold the values "content", "plugin",
-    "gpu" or "rdd" currently.
+    Type of the process that crashed, the possible values are defined in
+    GeckoProcessTypes.h.
   type: string
 
 ProductName:
@@ -640,12 +696,6 @@ SecondsSinceLastCrash:
 ServerURL:
   description: >
     URL used to post the crash report.
-  type: string
-
-SheetLoadFailure:
-  description: >
-    Set when failing to load a built-in style sheet. This can contain a
-    potentially very large amount of diagnostic information.
   type: string
 
 ShutdownProgress:
@@ -734,9 +784,9 @@ ThreadIdNameMapping:
 
 TotalPageFile:
   description: >
-    Windows-only, current committed memory limit. This annotation is
-    populated with the contents of the MEMORYSTATUSEX's structure
-    ullTotalPageFile field.
+    Windows-only, maximum amount of memory that can be committed.  This
+    annotation is populated with the contents of the PERFORMANCE_INFORMATION's
+    structure CommitLimit field.
   type: string
   ping: true
 
@@ -804,6 +854,11 @@ Vendor:
 Version:
   description: >
     Product version.
+  type: string
+
+VRProcessStatus:
+  description: >
+    Status of the VR process, can be set to "Running" or "Destroyed"
   type: string
 
 Winsock_LSP:

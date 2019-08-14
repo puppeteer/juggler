@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf8">
   <title>Test for the Console API and Workers</title>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript" src="common.js"></script>
   <!-- Any copyright is dedicated to the Public Domain.
      - http://creativecommons.org/publicdomain/zero/1.0/ -->
@@ -54,23 +54,22 @@ let testCachedMessages = async function (state) {
       checkConsoleAPICalls(consoleCalls, expectedCachedConsoleCalls);
       resolve();
     };
-    state.client.getCachedMessages(["ConsoleAPI"], onCachedConsoleAPI);
+    state.client.getCachedMessages(["ConsoleAPI"]).then(onCachedConsoleAPI);
   })
 };
 
 let testConsoleAPI = async function (state) {
   info("testConsoleAPI entered");
   return new Promise(resolve => {
-    let onConsoleAPICall = (type, packet) => {
+    let onConsoleAPICall = (packet) => {
       info("received message level: " + packet.message.level);
-      is(packet.from, state.actor, "console API call actor");
       checkConsoleAPICalls([packet.message], expectedConsoleAPICalls);
-      state.dbgClient.removeListener("consoleAPICall", onConsoleAPICall);
+      state.client.off("consoleAPICall", onConsoleAPICall);
       resolve();
     }
 
     info("testConsoleAPI: adding listener for consoleAPICall");
-    state.dbgClient.addListener("consoleAPICall", onConsoleAPICall);
+    state.client.on("consoleAPICall", onConsoleAPICall);
 
     state.client.evaluateJS("console.log('Log was requested from worker')",
       () => { });

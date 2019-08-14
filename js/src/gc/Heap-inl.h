@@ -15,17 +15,21 @@
 inline void js::gc::Arena::init(JS::Zone* zoneArg, AllocKind kind,
                                 const AutoLockGC& lock) {
   MOZ_ASSERT(firstFreeSpan.isEmpty());
-  MOZ_ASSERT(!zone);
+  MOZ_ASSERT((uintptr_t(zone) & 0xff) == JS_FREED_ARENA_PATTERN);
   MOZ_ASSERT(!allocated());
-  MOZ_ASSERT(!hasDelayedMarking);
-  MOZ_ASSERT(!auxNextLink);
+  MOZ_ASSERT(!onDelayedMarkingList_);
+  MOZ_ASSERT(!hasDelayedBlackMarking_);
+  MOZ_ASSERT(!hasDelayedGrayMarking_);
+  MOZ_ASSERT(!nextDelayedMarkingArena_);
 
   MOZ_MAKE_MEM_UNDEFINED(this, ArenaSize);
 
   zone = zoneArg;
   allocKind = size_t(kind);
-  hasDelayedMarking = 0;
-  auxNextLink = 0;
+  onDelayedMarkingList_ = 0;
+  hasDelayedBlackMarking_ = 0;
+  hasDelayedGrayMarking_ = 0;
+  nextDelayedMarkingArena_ = 0;
   if (zone->isAtomsZone()) {
     zone->runtimeFromAnyThread()->gc.atomMarking.registerArena(this, lock);
   } else {

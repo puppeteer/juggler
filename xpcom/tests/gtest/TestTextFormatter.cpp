@@ -11,22 +11,21 @@ TEST(TextFormatter, Tests)
 {
   nsAutoString fmt(NS_LITERAL_STRING("%3$s %4$S %1$d %2$d %2$d %3$s"));
   char utf8[] = "Hello";
-  char16_t ucs2[]={'W', 'o', 'r', 'l', 'd', 0x4e00, 0xAc00, 0xFF45, 0x0103, 0x00};
-  int d=3;
+  char16_t ucs2[] = {'W',    'o',    'r',    'l',    'd',
+                     0x4e00, 0xAc00, 0xFF45, 0x0103, 0x00};
+  int d = 3;
 
   char16_t buf[256];
   nsTextFormatter::snprintf(buf, 256, fmt.get(), d, 333, utf8, ucs2);
   nsAutoString out(buf);
 
-  const char16_t *uout = out.get();
-  const char16_t expected[] = {0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20,
-                                0x57, 0x6F, 0x72, 0x6C, 0x64, 0x4E00,
-                                0xAC00, 0xFF45, 0x0103, 0x20, 0x33,
-                                0x20, 0x33, 0x33, 0x33, 0x20, 0x33,
-                                0x33, 0x33, 0x20, 0x48, 0x65, 0x6C,
-                                0x6C, 0x6F};
+  const char16_t* uout = out.get();
+  const char16_t expected[] = {
+      0x48,   0x65,   0x6C,   0x6C,   0x6F, 0x20, 0x57, 0x6F, 0x72, 0x6C, 0x64,
+      0x4E00, 0xAC00, 0xFF45, 0x0103, 0x20, 0x33, 0x20, 0x33, 0x33, 0x33, 0x20,
+      0x33,   0x33,   0x33,   0x20,   0x48, 0x65, 0x6C, 0x6C, 0x6F};
 
-  for (uint32_t i=0; i<out.Length(); i++) {
+  for (uint32_t i = 0; i < out.Length(); i++) {
     ASSERT_EQ(uout[i], expected[i]);
   }
 
@@ -36,7 +35,7 @@ TEST(TextFormatter, Tests)
   EXPECT_STREQ("%1m!", NS_ConvertUTF16toUTF8(out2).get());
 
   // Treat NULL the same in both %s cases.
-  nsTextFormatter::ssprintf(out2, u"%s %S", (char*) nullptr, (char16_t*) nullptr);
+  nsTextFormatter::ssprintf(out2, u"%s %S", (char*)nullptr, (char16_t*)nullptr);
   EXPECT_STREQ("(null) (null)", NS_ConvertUTF16toUTF8(out2).get());
 
   nsTextFormatter::ssprintf(out2, u"%lld", INT64_MIN);
@@ -68,11 +67,13 @@ TEST(TextFormatterOrdering, orders)
   // snprintf.
   nsTextFormatter::ssprintf(out, u"%2S %S %1$S", u"1", u"2", u"3");
   nsTextFormatter::ssprintf(out, u"%S %2$S", u"1", u"2");
-  char16_t buffer[1024];            // plenty big
-  EXPECT_EQ(nsTextFormatter::snprintf(buffer, sizeof(buffer), u"%2S %S %1$S", u"1", u"2", u"3"),
+  char16_t buffer[1024];  // plenty big
+  EXPECT_EQ(nsTextFormatter::snprintf(buffer, sizeof(buffer), u"%2S %S %1$S",
+                                      u"1", u"2", u"3"),
             uint32_t(-1));
-  EXPECT_EQ(nsTextFormatter::snprintf(buffer, sizeof(buffer), u"%S %2$S", u"1", u"2"),
-            uint32_t(-1));
+  EXPECT_EQ(
+      nsTextFormatter::snprintf(buffer, sizeof(buffer), u"%S %2$S", u"1", u"2"),
+      uint32_t(-1));
 
   // Referencing an extra param returns empty strings in release.
 #ifndef DEBUG
@@ -224,7 +225,8 @@ TEST(TextFormatterTestResults, Tests)
 {
   char16_t buf[10];
 
-  EXPECT_EQ(nsTextFormatter::snprintf(buf, 10, u"%s", "more than 10 characters"), 9u);
+  EXPECT_EQ(
+      nsTextFormatter::snprintf(buf, 10, u"%s", "more than 10 characters"), 9u);
   EXPECT_EQ(buf[9], '\0');
   EXPECT_STREQ("more than", NS_ConvertUTF16toUTF8(buf).get());
 

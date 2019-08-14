@@ -45,7 +45,7 @@
 #include "ssl.h"
 
 #ifdef XP_WIN
-#include <winsock.h>  // for htonl
+#  include <winsock.h>  // for htonl
 #endif
 
 using namespace mozilla;
@@ -80,7 +80,8 @@ class nsNSSCertListEnumerator : public nsSimpleEnumerator {
 
 NS_IMPL_ISUPPORTS(nsNSSCertificate, nsIX509Cert, nsISerializable, nsIClassInfo)
 
-/*static*/ nsNSSCertificate* nsNSSCertificate::Create(CERTCertificate* cert) {
+/*static*/
+nsNSSCertificate* nsNSSCertificate::Create(CERTCertificate* cert) {
   if (cert)
     return new nsNSSCertificate(cert);
   else
@@ -103,7 +104,15 @@ bool nsNSSCertificate::InitFromDER(char* certDER, int derLen) {
 
   CERTCertificate* aCert = CERT_DecodeCertFromPackage(certDER, derLen);
 
-  if (!aCert) return false;
+  if (!aCert) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (XRE_GetProcessType() == GeckoProcessType_Content) {
+      MOZ_CRASH_UNSAFE_PRINTF("CERT_DecodeCertFromPackage failed in child: %d",
+                              PR_GetError());
+    }
+#endif
+    return false;
+  }
 
   if (!aCert->dbhandle) {
     aCert->dbhandle = CERT_GetDefaultCertDB();
@@ -386,24 +395,18 @@ nsNSSCertificate::GetEmailAddress(nsAString& aEmailAddress) {
 }
 
 NS_IMETHODIMP
-nsNSSCertificate::GetEmailAddresses(uint32_t* aLength, char16_t*** aAddresses) {
-  NS_ENSURE_ARG(aLength);
-  NS_ENSURE_ARG(aAddresses);
-
-  *aLength = 0;
-
+nsNSSCertificate::GetEmailAddresses(nsTArray<nsString>& aAddresses) {
+  uint32_t length = 0;
   for (const char* aAddr = CERT_GetFirstEmailAddress(mCert.get()); aAddr;
        aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr)) {
-    ++(*aLength);
+    ++(length);
   }
 
-  *aAddresses = (char16_t**)moz_xmalloc(sizeof(char16_t*) * (*aLength));
+  aAddresses.SetCapacity(length);
 
-  uint32_t iAddr = 0;
   for (const char* aAddr = CERT_GetFirstEmailAddress(mCert.get()); aAddr;
        aAddr = CERT_GetNextEmailAddress(mCert.get(), aAddr)) {
-    (*aAddresses)[iAddr] = ToNewUnicode(nsDependentCString(aAddr));
-    iAddr++;
+    CopyASCIItoUTF16(MakeStringSpan(aAddr), *aAddresses.AppendElement());
   }
 
   return NS_OK;
@@ -694,14 +697,12 @@ nsNSSCertificate::GetSha256SubjectPublicKeyInfoDigest(
 }
 
 NS_IMETHODIMP
-nsNSSCertificate::GetRawDER(uint32_t* aLength, uint8_t** aArray) {
+nsNSSCertificate::GetRawDER(nsTArray<uint8_t>& aArray) {
   if (mCert) {
-    *aArray = (uint8_t*)moz_xmalloc(mCert->derCert.len);
-    memcpy(*aArray, mCert->derCert.data, mCert->derCert.len);
-    *aLength = mCert->derCert.len;
+    aArray.SetLength(mCert->derCert.len);
+    memcpy(aArray.Elements(), mCert->derCert.data, mCert->derCert.len);
     return NS_OK;
   }
-  *aLength = 0;
   return NS_ERROR_FAILURE;
 }
 
@@ -1227,9 +1228,8 @@ nsNSSCertificate::Read(nsIObjectInputStream* aStream) {
 }
 
 NS_IMETHODIMP
-nsNSSCertificate::GetInterfaces(uint32_t* count, nsIID*** array) {
-  *count = 0;
-  *array = nullptr;
+nsNSSCertificate::GetInterfaces(nsTArray<nsIID>& array) {
+  array.Clear();
   return NS_OK;
 }
 

@@ -8,6 +8,7 @@
 #define mozilla_BlockingResourceBase_h
 
 #include "mozilla/Logging.h"
+#include "mozilla/ThreadLocal.h"
 
 #include "nscore.h"
 #include "nsDebug.h"
@@ -17,17 +18,17 @@
 #ifdef DEBUG
 
 // NB: Comment this out to enable callstack tracking.
-#define MOZ_CALLSTACK_DISABLED
+#  define MOZ_CALLSTACK_DISABLED
 
-#include "prinit.h"
+#  include "prinit.h"
 
-#include "nsString.h"
+#  include "nsString.h"
 
-#ifndef MOZ_CALLSTACK_DISABLED
-#include "nsTArray.h"
-#endif
+#  ifndef MOZ_CALLSTACK_DISABLED
+#    include "nsTArray.h"
+#  endif
 
-#include "nsXPCOM.h"
+#  include "nsXPCOM.h"
 #endif
 
 //
@@ -97,11 +98,16 @@ class BlockingResourceBase {
   typedef DeadlockDetector<BlockingResourceBase> DDT;
 
  protected:
-#ifdef MOZ_CALLSTACK_DISABLED
+#  ifdef MOZ_CALLSTACK_DISABLED
   typedef bool AcquisitionState;
-#else
-  typedef AutoTArray<void*, 24> AcquisitionState;
-#endif
+#  else
+  // Using maybe to use emplacement as the acquisition state flag; we may not
+  // always get a stack trace because of possible stack walk suppression or
+  // errors, hence can't use !IsEmpty() on the array itself as indication.
+  static size_t const kAcquisitionStateStackSize = 24;
+  typedef Maybe<AutoTArray<void*, kAcquisitionStateStackSize> >
+      AcquisitionState;
+#  endif
 
   /**
    * BlockingResourceBase
@@ -152,8 +158,7 @@ class BlockingResourceBase {
    *         resource acquired.
    */
   static BlockingResourceBase* ResourceChainFront() {
-    return (BlockingResourceBase*)PR_GetThreadPrivate(
-        sResourceAcqnChainFrontTPI);
+    return sResourceAcqnChainFront.get();
   }
 
   /**
@@ -175,7 +180,7 @@ class BlockingResourceBase {
    */
   void ResourceChainAppend(BlockingResourceBase* aPrev) {
     mChainPrev = aPrev;
-    PR_SetThreadPrivate(sResourceAcqnChainFrontTPI, this);
+    sResourceAcqnChainFront.set(this);
   }  // NS_NEEDS_RESOURCE(this)
 
   /**
@@ -186,7 +191,7 @@ class BlockingResourceBase {
    */
   void ResourceChainRemove() {
     NS_ASSERTION(this == ResourceChainFront(), "not at chain front");
-    PR_SetThreadPrivate(sResourceAcqnChainFrontTPI, mChainPrev);
+    sResourceAcqnChainFront.set(mChainPrev);
   }  // NS_NEEDS_RESOURCE(this)
 
   /**
@@ -214,11 +219,11 @@ class BlockingResourceBase {
    * *NOT* thread safe.  Requires ownership of underlying resource.
    */
   void ClearAcquisitionState() {
-#ifdef MOZ_CALLSTACK_DISABLED
+#  ifdef MOZ_CALLSTACK_DISABLED
     mAcquired = false;
-#else
-    mAcquired.Clear();
-#endif
+#  else
+    mAcquired.reset();
+#  endif
   }
 
   /**
@@ -227,13 +232,7 @@ class BlockingResourceBase {
    *
    * *NOT* thread safe.  Requires ownership of underlying resource.
    */
-  bool IsAcquired() const {
-#ifdef MOZ_CALLSTACK_DISABLED
-    return mAcquired;
-#else
-    return !mAcquired.IsEmpty();
-#endif
-  }
+  bool IsAcquired() const { return (bool)mAcquired; }
 
   /**
    * mChainPrev
@@ -264,13 +263,13 @@ class BlockingResourceBase {
    */
   AcquisitionState mAcquired;
 
-#ifndef MOZ_CALLSTACK_DISABLED
+#  ifndef MOZ_CALLSTACK_DISABLED
   /**
    * mFirstSeen
    * Inidicates where this resource was first acquired.
    */
   AcquisitionState mFirstSeen;
-#endif
+#  endif
 
   /**
    * sCallOnce
@@ -280,11 +279,10 @@ class BlockingResourceBase {
   static PRCallOnceType sCallOnce;
 
   /**
-   * sResourceAcqnChainFrontTPI
-   * Thread-private index to the front of each thread's resource
+   * Thread-private pointer to the front of each thread's resource
    * acquisition chain.
    */
-  static unsigned sResourceAcqnChainFrontTPI;
+  static MOZ_THREAD_LOCAL(BlockingResourceBase*) sResourceAcqnChainFront;
 
   /**
    * sDeadlockDetector
@@ -313,10 +311,10 @@ class BlockingResourceBase {
                                 void* aClosure);
   static void GetStackTrace(AcquisitionState& aState);
 
-#ifdef MOZILLA_INTERNAL_API
+#  ifdef MOZILLA_INTERNAL_API
   // so it can call BlockingResourceBase::Shutdown()
   friend void LogTerm();
-#endif  // ifdef MOZILLA_INTERNAL_API
+#  endif  // ifdef MOZILLA_INTERNAL_API
 
 #else  // non-DEBUG implementation
 

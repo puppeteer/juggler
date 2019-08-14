@@ -11,13 +11,17 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/net/TimingStruct.h"
 
 #include "nsString.h"
+#include "nsCRTGlue.h"
 #include "GeckoProfiler.h"
 
 #include "js/Utility.h"
+#include "js/AllocationRecording.h"
+#include "js/ProfilingFrameIterator.h"
 #include "gfxASurface.h"
 #include "mozilla/ServoTraversalStatistics.h"
 
@@ -118,15 +122,17 @@ class TracingMarkerPayload : public ProfilerMarkerPayload {
   TracingKind mKind;
 };
 
-class IOMarkerPayload : public ProfilerMarkerPayload {
+class FileIOMarkerPayload : public ProfilerMarkerPayload {
  public:
-  IOMarkerPayload(const char* aSource, const char* aFilename,
-                  const mozilla::TimeStamp& aStartTime,
-                  const mozilla::TimeStamp& aEndTime,
-                  UniqueProfilerBacktrace aStack)
+  FileIOMarkerPayload(const char* aOperation, const char* aSource,
+                      const char* aFilename,
+                      const mozilla::TimeStamp& aStartTime,
+                      const mozilla::TimeStamp& aEndTime,
+                      UniqueProfilerBacktrace aStack)
       : ProfilerMarkerPayload(aStartTime, aEndTime, mozilla::Nothing(),
                               mozilla::Nothing(), std::move(aStack)),
         mSource(aSource),
+        mOperation(aOperation ? strdup(aOperation) : nullptr),
         mFilename(aFilename ? strdup(aFilename) : nullptr) {
     MOZ_ASSERT(aSource);
   }
@@ -135,6 +141,7 @@ class IOMarkerPayload : public ProfilerMarkerPayload {
 
  private:
   const char* mSource;
+  mozilla::UniqueFreePtr<char> mOperation;
   mozilla::UniqueFreePtr<char> mFilename;
 };
 
@@ -357,6 +364,94 @@ class LongTaskMarkerPayload : public ProfilerMarkerPayload {
       : ProfilerMarkerPayload(aStartTime, aEndTime) {}
 
   DECL_STREAM_PAYLOAD
+};
+
+class TextMarkerPayload : public ProfilerMarkerPayload {
+ public:
+  TextMarkerPayload(const nsACString& aText,
+                    const mozilla::TimeStamp& aStartTime)
+      : ProfilerMarkerPayload(aStartTime, aStartTime), mText(aText) {}
+
+  TextMarkerPayload(const nsACString& aText,
+                    const mozilla::TimeStamp& aStartTime,
+                    const mozilla::TimeStamp& aEndTime)
+      : ProfilerMarkerPayload(aStartTime, aEndTime), mText(aText) {}
+
+  TextMarkerPayload(const nsACString& aText,
+                    const mozilla::TimeStamp& aStartTime,
+                    const mozilla::Maybe<nsID>& aDocShellId,
+                    const mozilla::Maybe<uint32_t>& aDocShellHistoryId)
+      : ProfilerMarkerPayload(aStartTime, aStartTime, aDocShellId,
+                              aDocShellHistoryId),
+        mText(aText) {}
+
+  TextMarkerPayload(const nsACString& aText,
+                    const mozilla::TimeStamp& aStartTime,
+                    const mozilla::TimeStamp& aEndTime,
+                    const mozilla::Maybe<nsID>& aDocShellId,
+                    const mozilla::Maybe<uint32_t>& aDocShellHistoryId,
+                    UniqueProfilerBacktrace aCause = nullptr)
+      : ProfilerMarkerPayload(aStartTime, aEndTime, aDocShellId,
+                              aDocShellHistoryId, std::move(aCause)),
+        mText(aText) {}
+
+  DECL_STREAM_PAYLOAD
+
+ private:
+  nsCString mText;
+};
+
+class LogMarkerPayload : public ProfilerMarkerPayload {
+ public:
+  LogMarkerPayload(const char* aModule, const char* aText,
+                   const mozilla::TimeStamp& aStartTime)
+      : ProfilerMarkerPayload(aStartTime, aStartTime),
+        mModule(aModule),
+        mText(aText) {}
+
+  DECL_STREAM_PAYLOAD
+
+ private:
+  nsAutoCStringN<32> mModule;  // longest known LazyLogModule name is ~24
+  nsCString mText;
+};
+
+class JsAllocationMarkerPayload : public ProfilerMarkerPayload {
+ public:
+  JsAllocationMarkerPayload(const mozilla::TimeStamp& aStartTime,
+                            const JS::RecordAllocationInfo& aInfo,
+                            UniqueProfilerBacktrace aStack)
+      : ProfilerMarkerPayload(aStartTime, aStartTime, mozilla::Nothing(),
+                              mozilla::Nothing(), std::move(aStack)),
+        // Copy the strings, and take ownership of them.
+        mTypeName(aInfo.typeName ? NS_xstrdup(aInfo.typeName) : nullptr),
+        mClassName(aInfo.className ? strdup(aInfo.className) : nullptr),
+        mDescriptiveTypeName(aInfo.descriptiveTypeName
+                                 ? NS_xstrdup(aInfo.descriptiveTypeName)
+                                 : nullptr),
+        mScriptFilename(aInfo.scriptFilename ? strdup(aInfo.scriptFilename)
+                                             : nullptr),
+        // The coarseType points to a string literal, so does not need to be
+        // duplicated.
+        mCoarseType(aInfo.coarseType),
+        mSize(aInfo.size),
+        mInNursery(aInfo.inNursery) {}
+
+  DECL_STREAM_PAYLOAD
+
+ private:
+  mozilla::UniqueFreePtr<const char16_t> mTypeName;
+  mozilla::UniqueFreePtr<const char> mClassName;
+  mozilla::UniqueFreePtr<const char16_t> mDescriptiveTypeName;
+  mozilla::UniqueFreePtr<const char> mScriptFilename;
+  // Points to a string literal, so does not need to be freed.
+  const char* mCoarseType;
+
+  // The size in bytes of the allocation.
+  uint64_t mSize;
+
+  // Whether or not the allocation is in the nursery or not.
+  bool mInNursery;
 };
 
 #endif  // ProfilerMarkerPayload_h

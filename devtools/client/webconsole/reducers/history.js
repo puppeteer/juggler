@@ -54,7 +54,7 @@ function history(state = getInitialState(), action, prefsState) {
     case UPDATE_HISTORY_POSITION:
       return updateHistoryPosition(state, action.direction, action.expression);
     case REVERSE_SEARCH_INPUT_TOGGLE:
-      return reverseSearchInputToggle(state);
+      return reverseSearchInputToggle(state, action);
     case REVERSE_SEARCH_INPUT_CHANGE:
       return reverseSearchInputChange(state, action.value);
     case REVERSE_SEARCH_BACK:
@@ -67,7 +67,7 @@ function history(state = getInitialState(), action, prefsState) {
 
 function appendToHistory(state, prefsState, expression) {
   // Clone state
-  state = {...state};
+  state = { ...state };
   state.entries = [...state.entries];
 
   // Append new expression only if it isn't the same as
@@ -120,7 +120,7 @@ function updateHistoryPosition(state, direction, expression) {
     }
 
     // Clone state
-    state = {...state};
+    state = { ...state };
 
     // Store the current input value when the user starts
     // browsing through the history.
@@ -143,14 +143,23 @@ function updateHistoryPosition(state, direction, expression) {
   return state;
 }
 
-function reverseSearchInputToggle(state) {
-  return {
-    ...state,
-    reverseSearchEnabled: !state.reverseSearchEnabled,
-    position: state.reverseSearchEnabled === true ? state.entries.length : undefined,
-    currentReverseSearchResults: null,
-    currentReverseSearchResultsPosition: null,
-  };
+function reverseSearchInputToggle(state, action) {
+  const { initialValue = "" } = action;
+
+  // We're going to close the reverse search, let's clean the state
+  if (state.reverseSearchEnabled) {
+    return {
+      ...state,
+      reverseSearchEnabled: false,
+      position: undefined,
+      currentReverseSearchResults: null,
+      currentReverseSearchResultsPosition: null,
+    };
+  }
+
+  // If we're enabling the reverse search, we treat it as a reverse search input change,
+  // since we can have an initial value.
+  return reverseSearchInputChange(state, initialValue);
 }
 
 function reverseSearchInputChange(state, searchString) {
@@ -165,13 +174,16 @@ function reverseSearchInputChange(state, searchString) {
 
   searchString = searchString.toLocaleLowerCase();
   const matchingEntries = state.entries.filter(entry =>
-    entry.toLocaleLowerCase().includes(searchString));
+    entry.toLocaleLowerCase().includes(searchString)
+  );
   // We only return unique entries, but we want to keep the latest entry in the array if
   // it's duplicated (e.g. if we have [1,2,1], we want to get [2,1], not [1,2]).
   // To do that, we need to reverse the matching entries array, provide it to a Set,
   // transform it back to an array and reverse it again.
   const uniqueEntries = new Set(matchingEntries.reverse());
-  const currentReverseSearchResults = Array.from(new Set(uniqueEntries)).reverse();
+  const currentReverseSearchResults = Array.from(
+    new Set(uniqueEntries)
+  ).reverse();
 
   return {
     ...state,

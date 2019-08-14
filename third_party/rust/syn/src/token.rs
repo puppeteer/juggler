@@ -1,11 +1,3 @@
-// Copyright 2018 Syn Developers
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Tokens representing Rust punctuation, keywords, and delimiters.
 //!
 //! The type names in this module can be difficult to keep straight, so we
@@ -20,11 +12,8 @@
 //!
 //! [`ItemStatic`]: ../struct.ItemStatic.html
 //!
-//! ```
-//! # #[macro_use]
-//! # extern crate syn;
-//! #
-//! # use syn::{Attribute, Expr, Ident, Type, Visibility};
+//! ```edition2018
+//! # use syn::{Attribute, Expr, Ident, Token, Type, Visibility};
 //! #
 //! pub struct ItemStatic {
 //!     pub attrs: Vec<Attribute>,
@@ -38,8 +27,6 @@
 //!     pub expr: Box<Expr>,
 //!     pub semi_token: Token![;],
 //! }
-//! #
-//! # fn main() {}
 //! ```
 //!
 //! # Parsing
@@ -53,11 +40,9 @@
 //! [`bracketed!`]: ../macro.bracketed.html
 //! [`braced!`]: ../macro.braced.html
 //!
-//! ```
-//! # extern crate syn;
-//! #
-//! use syn::Attribute;
-//! use syn::parse::{Parse, ParseStream, Result};
+//! ```edition2018
+//! use syn::{Attribute, Result};
+//! use syn::parse::{Parse, ParseStream};
 //! #
 //! # enum ItemStatic {}
 //!
@@ -82,21 +67,35 @@
 //!         # unimplemented!()
 //!     }
 //! }
-//! #
-//! # fn main() {}
 //! ```
+//!
+//! # Other operations
+//!
+//! Every keyword and punctuation token supports the following operations.
+//!
+//! - [Peeking] — `input.peek(Token![...])`
+//!
+//! - [Parsing] — `input.parse::<Token![...]>()?`
+//!
+//! - [Printing] — `quote!( ... #the_token ... )`
+//!
+//! - Construction from a [`Span`] — `let the_token = Token![...](sp)`
+//!
+//! - Field access to its span — `let sp = the_token.span`
+//!
+//! [Peeking]: ../parse/struct.ParseBuffer.html#method.peek
+//! [Parsing]: ../parse/struct.ParseBuffer.html#method.parse
+//! [Printing]: https://docs.rs/quote/0.6/quote/trait.ToTokens.html
+//! [`Span`]: https://docs.rs/proc-macro2/0.4/proc_macro2/struct.Span.html
 
 use std;
-#[cfg(feature = "parsing")]
-use std::cell::Cell;
 #[cfg(feature = "extra-traits")]
 use std::cmp;
 #[cfg(feature = "extra-traits")]
 use std::fmt::{self, Debug};
 #[cfg(feature = "extra-traits")]
 use std::hash::{Hash, Hasher};
-#[cfg(feature = "parsing")]
-use std::rc::Rc;
+use std::ops::{Deref, DerefMut};
 
 #[cfg(feature = "parsing")]
 use proc_macro2::Delimiter;
@@ -108,6 +107,7 @@ use proc_macro2::TokenStream;
 #[cfg(feature = "printing")]
 use quote::{ToTokens, TokenStreamExt};
 
+use self::private::WithSpan;
 #[cfg(feature = "parsing")]
 use buffer::Cursor;
 #[cfg(feature = "parsing")]
@@ -138,16 +138,29 @@ pub trait Token: private::Sealed {
     fn display() -> &'static str;
 }
 
-#[cfg(feature = "parsing")]
 mod private {
+    use proc_macro2::Span;
+
+    #[cfg(feature = "parsing")]
     pub trait Sealed {}
+
+    /// Support writing `token.span` rather than `token.spans[0]` on tokens that
+    /// hold a single span.
+    #[repr(C)]
+    pub struct WithSpan {
+        pub span: Span,
+    }
 }
 
 #[cfg(feature = "parsing")]
 impl private::Sealed for Ident {}
 
+#[cfg(any(feature = "full", feature = "derive"))]
 #[cfg(feature = "parsing")]
 fn peek_impl(cursor: Cursor, peek: fn(ParseStream) -> bool) -> bool {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
     let scope = Span::call_site();
     let unexpected = Rc::new(Cell::new(None));
     let buffer = ::private::new_parse_buffer(scope, cursor, unexpected);
@@ -272,7 +285,7 @@ macro_rules! define_keywords {
             #[cfg(feature = "printing")]
             impl ToTokens for $name {
                 fn to_tokens(&self, tokens: &mut TokenStream) {
-                    printing::keyword($token, &self.span, tokens);
+                    printing::keyword($token, self.span, tokens);
                 }
             }
 
@@ -302,10 +315,31 @@ macro_rules! define_keywords {
     };
 }
 
+macro_rules! impl_deref_if_len_is_1 {
+    ($name:ident/1) => {
+        impl Deref for $name {
+            type Target = WithSpan;
+
+            fn deref(&self) -> &Self::Target {
+                unsafe { &*(self as *const Self as *const WithSpan) }
+            }
+        }
+
+        impl DerefMut for $name {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                unsafe { &mut *(self as *mut Self as *mut WithSpan) }
+            }
+        }
+    };
+
+    ($name:ident/$len:tt) => {};
+}
+
 macro_rules! define_punctuation_structs {
     ($($token:tt pub struct $name:ident/$len:tt #[$doc:meta])*) => {
         $(
             #[cfg_attr(feature = "clone-impls", derive(Copy, Clone))]
+            #[repr(C)]
             #[$doc]
             ///
             /// Don't try to remember the name of this type -- use the [`Token!`]
@@ -353,6 +387,8 @@ macro_rules! define_punctuation_structs {
             impl Hash for $name {
                 fn hash<H: Hasher>(&self, _state: &mut H) {}
             }
+
+            impl_deref_if_len_is_1!($name/$len);
         )*
     };
 }
@@ -450,7 +486,7 @@ macro_rules! define_delimiters {
                 where
                     F: FnOnce(&mut TokenStream),
                 {
-                    printing::delim($token, &self.span, tokens, f);
+                    printing::delim($token, self.span, tokens, f);
                 }
             }
 
@@ -467,7 +503,7 @@ define_punctuation_structs! {
 #[cfg(feature = "printing")]
 impl ToTokens for Underscore {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        tokens.append(Ident::new("_", self.spans[0]));
+        tokens.append(Ident::new("_", self.span));
     }
 }
 
@@ -562,7 +598,6 @@ define_keywords! {
     "become"      pub struct Become       /// `become`
     "box"         pub struct Box          /// `box`
     "break"       pub struct Break        /// `break`
-    "Self"        pub struct CapSelf      /// `Self`
     "const"       pub struct Const        /// `const`
     "continue"    pub struct Continue     /// `continue`
     "crate"       pub struct Crate        /// `crate`
@@ -591,7 +626,8 @@ define_keywords! {
     "pub"         pub struct Pub          /// `pub`
     "ref"         pub struct Ref          /// `ref`
     "return"      pub struct Return       /// `return`
-    "self"        pub struct Self_        /// `self`
+    "Self"        pub struct SelfType     /// `Self`
+    "self"        pub struct SelfValue    /// `self`
     "static"      pub struct Static       /// `static`
     "struct"      pub struct Struct       /// `struct`
     "super"       pub struct Super        /// `super`
@@ -683,7 +719,6 @@ macro_rules! Token {
     (become)      => { $crate::token::Become };
     (box)         => { $crate::token::Box };
     (break)       => { $crate::token::Break };
-    (Self)        => { $crate::token::CapSelf };
     (const)       => { $crate::token::Const };
     (continue)    => { $crate::token::Continue };
     (crate)       => { $crate::token::Crate };
@@ -712,7 +747,8 @@ macro_rules! Token {
     (pub)         => { $crate::token::Pub };
     (ref)         => { $crate::token::Ref };
     (return)      => { $crate::token::Return };
-    (self)        => { $crate::token::Self_ };
+    (Self)        => { $crate::token::SelfType };
+    (self)        => { $crate::token::SelfValue };
     (static)      => { $crate::token::Static };
     (struct)      => { $crate::token::Struct };
     (super)       => { $crate::token::Super };
@@ -775,6 +811,13 @@ macro_rules! Token {
     (~)           => { $crate::token::Tilde };
     (_)           => { $crate::token::Underscore };
 }
+
+// Old names. TODO: remove these re-exports in a breaking change.
+// https://github.com/dtolnay/syn/issues/486
+#[doc(hidden)]
+pub use self::SelfType as CapSelf;
+#[doc(hidden)]
+pub use self::SelfValue as Self_;
 
 #[cfg(feature = "parsing")]
 mod parsing {
@@ -879,11 +922,11 @@ mod printing {
         tokens.append(op);
     }
 
-    pub fn keyword(s: &str, span: &Span, tokens: &mut TokenStream) {
-        tokens.append(Ident::new(s, *span));
+    pub fn keyword(s: &str, span: Span, tokens: &mut TokenStream) {
+        tokens.append(Ident::new(s, span));
     }
 
-    pub fn delim<F>(s: &str, span: &Span, tokens: &mut TokenStream, f: F)
+    pub fn delim<F>(s: &str, span: Span, tokens: &mut TokenStream, f: F)
     where
         F: FnOnce(&mut TokenStream),
     {
@@ -897,7 +940,7 @@ mod printing {
         let mut inner = TokenStream::new();
         f(&mut inner);
         let mut g = Group::new(delim, inner);
-        g.set_span(*span);
+        g.set_span(span);
         tokens.append(g);
     }
 }

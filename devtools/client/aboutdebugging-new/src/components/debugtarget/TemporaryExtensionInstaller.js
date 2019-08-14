@@ -4,7 +4,10 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createFactory,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
@@ -19,6 +22,7 @@ const Actions = require("../../actions/index");
 class TemporaryExtensionInstaller extends PureComponent {
   static get propTypes() {
     return {
+      className: PropTypes.string,
       dispatch: PropTypes.func.isRequired,
     };
   }
@@ -28,13 +32,15 @@ class TemporaryExtensionInstaller extends PureComponent {
   }
 
   render() {
+    const { className } = this.props;
+
     return Localized(
       {
         id: "about-debugging-tmp-extension-install-button",
       },
       dom.button(
         {
-          className: "default-button js-temporary-extension-install-button",
+          className: `${className} default-button qa-temporary-extension-install-button`,
           onClick: e => this.install(),
         },
         "Load Temporary Add-on…"

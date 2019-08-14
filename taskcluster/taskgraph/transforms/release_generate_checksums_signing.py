@@ -13,15 +13,10 @@ from taskgraph.util.attributes import copy_attributes_from_dependent_job
 from taskgraph.util.scriptworker import (
     get_signing_cert_scope,
     get_worker_type_for_scope,
-    add_scope_prefix,
 )
 from taskgraph.util.taskcluster import get_artifact_path
 from taskgraph.transforms.task import task_description_schema
 from voluptuous import Required, Optional
-
-# Voluptuous uses marker objects as dictionary *keys*, but they are not
-# comparable, so we cast all of the keys back to regular strings
-task_description_schema = {str(k): v for k, v in task_description_schema.schema.iteritems()}
 
 release_generate_checksums_signing_schema = schema.extend({
     Required('depname', default='release-generate-checksums'): basestring,
@@ -55,17 +50,17 @@ def make_release_generate_checksums_signing_description(config, jobs):
         description = "Signing of the overall release-related checksums"
 
         dependencies = {
-            "build": dep_job.label
+            str(dep_job.kind): dep_job.label
         }
 
         upstream_artifacts = [{
-            "taskId": {"task-reference": "<build>"},
+            "taskId": {"task-reference": "<{}>".format(str(dep_job.kind))},
             "taskType": "build",
             "paths": [
                 get_artifact_path(dep_job, "SHA256SUMS"),
                 get_artifact_path(dep_job, "SHA512SUMS"),
             ],
-            "formats": ["gpg"]
+            "formats": ["autograph_gpg"]
         }]
 
         signing_cert_scope = get_signing_cert_scope(config)
@@ -79,7 +74,6 @@ def make_release_generate_checksums_signing_description(config, jobs):
                        'max-run-time': 3600},
             'scopes': [
                 signing_cert_scope,
-                add_scope_prefix(config, 'signing:format:gpg'),
             ],
             'dependencies': dependencies,
             'attributes': attributes,

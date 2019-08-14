@@ -18,7 +18,6 @@
 #include "mozilla/Vector.h"
 
 #include <algorithm>
-#include <ctype.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
@@ -179,9 +178,8 @@ static MOZ_MUST_USE bool DumpPCCounts(JSContext* cx, HandleScript script,
 
 bool js::DumpRealmPCCounts(JSContext* cx) {
   Rooted<GCVector<JSScript*>> scripts(cx, GCVector<JSScript*>(cx));
-  for (auto iter = cx->zone()->cellIter<JSScript>(); !iter.done();
-       iter.next()) {
-    JSScript* script = iter;
+  for (auto script = cx->zone()->cellIter<JSScript>(); !script.done();
+       script.next()) {
     if (script->realm() != cx->realm()) {
       continue;
     }
@@ -1429,6 +1427,14 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       break;
     }
 
+    case JOF_CODE_OFFSET: {
+      ptrdiff_t off = GET_CODE_OFFSET(pc);
+      if (!sp->jsprintf(" %u (%+d)", unsigned(loc + int(off)), int(off))) {
+        return 0;
+      }
+      break;
+    }
+
     case JOF_SCOPE: {
       RootedScope scope(cx, script->getScope(GET_UINT32_INDEX(pc)));
       UniqueChars bytes;
@@ -1442,8 +1448,7 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
     }
 
     case JOF_ENVCOORD: {
-      RootedValue v(cx, StringValue(EnvironmentCoordinateName(
-                            cx->caches().envCoordinateNameCache, script, pc)));
+      RootedValue v(cx, StringValue(EnvironmentCoordinateNameSlow(script, pc)));
       UniqueChars bytes = ToDisassemblySource(cx, v);
       if (!bytes) {
         return 0;
@@ -1468,12 +1473,16 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       break;
     }
 
-#ifdef ENABLE_BIGINT
-    case JOF_BIGINT:
-      // Fallthrough.
-#endif
     case JOF_DOUBLE: {
-      RootedValue v(cx, script->getConst(GET_UINT32_INDEX(pc)));
+      double d = GET_INLINE_VALUE(pc).toDouble();
+      if (!sp->jsprintf(" %lf", d)) {
+        return 0;
+      }
+      break;
+    }
+
+    case JOF_BIGINT: {
+      RootedValue v(cx, BigIntValue(script->getBigInt(pc)));
       UniqueChars bytes = ToDisassemblySource(cx, v);
       if (!bytes) {
         return 0;
@@ -1563,6 +1572,19 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
 
     case JOF_UINT32:
       if (!sp->jsprintf(" %u", GET_UINT32(pc))) {
+        return 0;
+      }
+      break;
+
+    case JOF_ICINDEX:
+      if (!sp->jsprintf(" (ic: %u)", GET_ICINDEX(pc))) {
+        return 0;
+      }
+      break;
+
+    case JOF_LOOPENTRY:
+      if (!sp->jsprintf(" (ic: %u, data: %u,%u)", GET_ICINDEX(pc),
+                        LoopEntryCanIonOsr(pc), LoopEntryDepthHint(pc))) {
         return 0;
       }
       break;
@@ -1770,8 +1792,7 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
       return write(atom);
     }
     case JSOP_GETALIASEDVAR: {
-      JSAtom* atom = EnvironmentCoordinateName(
-          cx->caches().envCoordinateNameCache, script, pc);
+      JSAtom* atom = EnvironmentCoordinateNameSlow(script, pc);
       MOZ_ASSERT(atom);
       return write(atom);
     }
@@ -1946,6 +1967,25 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
 #endif
       break;
 
+    case JSOP_TONUMERIC:
+      return write("(tonumeric ") && decompilePCForStackOperand(pc, -1) &&
+             write(")");
+
+    case JSOP_INC:
+      return write("(inc ") && decompilePCForStackOperand(pc, -1) && write(")");
+
+    case JSOP_DEC:
+      return write("(dec ") && decompilePCForStackOperand(pc, -1) && write(")");
+
+    case JSOP_BIGINT:
+#if defined(DEBUG) || defined(JS_JITSPEW)
+      // BigInt::dump() only available in this configuration.
+      script->getBigInt(pc)->dump(sprinter);
+      return !sprinter.hadOutOfMemory();
+#else
+      return write("[bigint]");
+#endif
+
     default:
       break;
   }
@@ -1978,8 +2018,7 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
         return write("CONSTRUCTOR");
 
       case JSOP_DOUBLE:
-        return sprinter.printf(
-            "%lf", script->getConst(GET_UINT32_INDEX(pc)).toDouble());
+        return sprinter.printf("%lf", GET_INLINE_VALUE(pc).toDouble());
 
       case JSOP_EXCEPTION:
         return write("EXCEPTION");
@@ -2029,8 +2068,6 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
 
       case JSOP_LAMBDA:
       case JSOP_LAMBDA_ARROW:
-      case JSOP_TOASYNC:
-      case JSOP_TOASYNCGEN:
         return write("FUN");
 
       case JSOP_TOASYNCITER:
@@ -2079,6 +2116,10 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
         // match to the syntax, since the stack operand for "yield 10" is
         // the result object, not 10.
         return write("RVAL");
+
+      case JSOP_ASYNCAWAIT:
+      case JSOP_ASYNCRESOLVE:
+        return write("PROMISE");
 
       default:
         break;
@@ -2182,6 +2223,9 @@ UniqueChars ExpressionDecompiler::getOutput() {
 static bool DecompileAtPCForStackDump(
     JSContext* cx, HandleScript script,
     const OffsetAndDefIndex& offsetAndDefIndex, Sprinter* sp) {
+  // The expression decompiler asserts the script is in the current realm.
+  AutoRealm ar(cx, script);
+
   LifoAllocScope allocScope(&cx->tempLifoAlloc());
   BytecodeParser parser(cx, allocScope.alloc(), script);
   parser.setStackDump();
@@ -2487,11 +2531,10 @@ extern bool js::IsValidBytecodeOffset(JSContext* cx, JSScript* script,
  * PurgePCCounts            None      None      None
  */
 
-static void ReleaseScriptCounts(FreeOp* fop) {
-  JSRuntime* rt = fop->runtime();
+static void ReleaseScriptCounts(JSRuntime* rt) {
   MOZ_ASSERT(rt->scriptAndCountsVector);
 
-  fop->delete_(rt->scriptAndCountsVector.ref());
+  js_delete(rt->scriptAndCountsVector.ref());
   rt->scriptAndCountsVector = nullptr;
 }
 
@@ -2503,7 +2546,7 @@ JS_FRIEND_API void js::StartPCCountProfiling(JSContext* cx) {
   }
 
   if (rt->scriptAndCountsVector) {
-    ReleaseScriptCounts(rt->defaultFreeOp());
+    ReleaseScriptCounts(rt);
   }
 
   ReleaseAllJITCode(rt->defaultFreeOp());
@@ -2522,7 +2565,7 @@ JS_FRIEND_API void js::StopPCCountProfiling(JSContext* cx) {
   ReleaseAllJITCode(rt->defaultFreeOp());
 
   auto* vec = cx->new_<PersistentRooted<ScriptAndCountsVector>>(
-      cx, ScriptAndCountsVector(SystemAllocPolicy()));
+      cx, ScriptAndCountsVector());
   if (!vec) {
     return;
   }
@@ -2530,8 +2573,7 @@ JS_FRIEND_API void js::StopPCCountProfiling(JSContext* cx) {
   for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
     for (auto script = zone->cellIter<JSScript>(); !script.done();
          script.next()) {
-      AutoSweepTypeScript sweep(script);
-      if (script->hasScriptCounts() && script->types(sweep)) {
+      if (script->hasScriptCounts() && script->jitScript()) {
         if (!vec->append(script)) {
           return;
         }
@@ -2551,7 +2593,7 @@ JS_FRIEND_API void js::PurgePCCounts(JSContext* cx) {
   }
   MOZ_ASSERT(!rt->profilingScripts);
 
-  ReleaseScriptCounts(rt->defaultFreeOp());
+  ReleaseScriptCounts(rt);
 }
 
 JS_FRIEND_API size_t js::GetPCCountScriptCount(JSContext* cx) {
@@ -2819,6 +2861,8 @@ static bool GenerateLcovInfo(JSContext* cx, JS::Realm* realm,
                              GenericPrinter& out) {
   JSRuntime* rt = cx->runtime();
 
+  AutoRealmUnchecked ar(cx, realm);
+
   // Collect the list of scripts which are part of the current realm.
   { js::gc::AutoPrepareForTracing apft(cx); }
 
@@ -2869,12 +2913,14 @@ static bool GenerateLcovInfo(JSContext* cx, JS::Realm* realm,
     // the functions them visited in the opposite order when popping
     // elements from the stack of remaining scripts, such that the
     // functions are more-less listed with increasing line numbers.
-    if (!script->hasObjects()) {
-      continue;
-    }
-    auto objects = script->objects();
-    for (JSObject* obj : mozilla::Reversed(objects)) {
+    auto gcthings = script->gcthings();
+    for (JS::GCCellPtr gcThing : mozilla::Reversed(gcthings)) {
+      if (!gcThing.is<JSObject>()) {
+        continue;
+      }
+
       // Only continue on JSFunction objects.
+      JSObject* obj = &gcThing.as<JSObject>();
       if (!obj->is<JSFunction>()) {
         continue;
       }

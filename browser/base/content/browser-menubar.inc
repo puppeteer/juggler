@@ -11,7 +11,8 @@
             <menu id="file-menu" label="&fileMenu.label;"
                   accesskey="&fileMenu.accesskey;">
               <menupopup id="menu_FilePopup"
-                         onpopupshowing="updateFileMenuUserContextUIVisibility('menu_newUserContext');">
+                         onpopupshowing="updateFileMenuUserContextUIVisibility('menu_newUserContext');
+                                         updateFileMenuImportUIVisibility('cmd_importFromAnotherBrowser');">
                 <menuitem id="menu_newNavigatorTab"
                           label="&tabCmd.label;"
                           command="cmd_newNavigatorTab"
@@ -84,6 +85,11 @@
                           accesskey="&printCmd.accesskey;"
                           key="printKb"
                           command="cmd_print"/>
+                <menuseparator/>
+                <menuitem id="menu_importFromAnotherBrowser"
+                          label="&importFromAnotherBrowserCmd.label;"
+                          accesskey="&importFromAnotherBrowserCmd.accesskey;"
+                          command="cmd_importFromAnotherBrowser"/>
                 <menuseparator/>
                 <menuitem id="goOfflineMenuitem"
                           label="&goOfflineCmd.label;"
@@ -172,7 +178,7 @@
                 <menuitem id="menu_preferences"
                           label="&preferencesCmdUnix.label;"
                           accesskey="&preferencesCmdUnix.accesskey;"
-                          oncommand="openPreferences(undefined, {origin: 'menubar'});"/>
+                          oncommand="openPreferences(undefined);"/>
 #endif
 #endif
               </menupopup>
@@ -309,9 +315,7 @@
                           hidden="true"
                           label="&bidiSwitchPageDirectionItem.label;"
                           accesskey="&bidiSwitchPageDirectionItem.accesskey;"
-                          oncommand="gBrowser.selectedBrowser
-                                             .messageManager
-                                             .sendAsyncMessage('SwitchDocumentDirection');"/>
+                          oncommand="gBrowser.selectedBrowser.sendMessageToActor('SwitchDocumentDirection', {}, 'SwitchDocumentDirection', true);"/>
               </menupopup>
             </menu>
 
@@ -512,7 +516,7 @@
               <menuitem id="menu_preferences"
                         label="&preferencesCmd2.label;"
                         accesskey="&preferencesCmd2.accesskey;"
-                        oncommand="openPreferences(undefined, {origin: 'menubar'});"/>
+                        oncommand="openPreferences(undefined);"/>
 #endif
 #ifdef MOZ_DEBUG
               <menuitem id="menu_layout_debugger"
@@ -523,11 +527,12 @@
 #endif
 #ifdef XP_MACOSX
 <!-- nsMenuBarX hides these and uses them to build the Application menu. -->
-              <menuitem id="menu_preferences" label="&preferencesCmdMac.label;" key="key_preferencesCmdMac" oncommand="openPreferences(undefined, {origin: 'commandLineLegacy'});"/>
+              <menuitem id="menu_preferences" label="&preferencesCmdMac.label;" key="key_preferencesCmdMac" oncommand="openPreferences(undefined);"/>
               <menuitem id="menu_mac_services" label="&servicesMenuMac.label;"/>
               <menuitem id="menu_mac_hide_app" label="&hideThisAppCmdMac2.label;" key="key_hideThisAppCmdMac"/>
               <menuitem id="menu_mac_hide_others" label="&hideOtherAppsCmdMac.label;" key="key_hideOtherAppsCmdMac"/>
               <menuitem id="menu_mac_show_all" label="&showAllAppsCmdMac.label;"/>
+              <menuitem id="menu_mac_touch_bar" label="&touchBarCmdMac.label;"/>
 #endif
               </menupopup>
             </menu>
@@ -600,12 +605,16 @@
                           onclick="checkForMiddleClick(this, event);"
                           hidden="true"/>
                 <menuitem id="menu_HelpPopup_reportPhishingErrortoolmenu"
-                          label="&safeb.palm.notdeceptive.label;"
-                          accesskey="&safeb.palm.notdeceptive.accesskey;"
                           disabled="true"
                           oncommand="ReportFalseDeceptiveSite();"
                           onclick="checkForMiddleClick(this, event);"
                           hidden="true"/>
+                <menuseparator id="helpPolicySeparator"
+                          hidden="true"/>
+                <menuitem id="helpPolicySupport"
+                          hidden="true"
+                          oncommand="openUILinkIn(Services.policies.getSupportMenu().URL.href, 'tab', {triggeringPrincipal: Services.scriptSecurityManager.createNullPrincipal({})});"
+                          onclick="checkForMiddleClick(this, event);"/>
                 <menuseparator id="aboutSeparator"/>
                 <menuitem id="aboutName"
                           accesskey="&aboutProduct2.accesskey;"

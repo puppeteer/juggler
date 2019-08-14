@@ -9,10 +9,11 @@
 #include "base/message_loop.h"
 #include "base/task.h"
 #include "MainThreadUtils.h"
-#include "mozilla/dom/TabParent.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZCTreeManagerParent.h"  // for APZCTreeManagerParent
 #include "mozilla/layers/APZThreadUtils.h"
+#include "mozilla/layers/MatrixMessage.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/Unused.h"
 #include "Units.h"
@@ -26,6 +27,21 @@ RemoteContentController::RemoteContentController()
     : mCompositorThread(MessageLoop::current()), mCanSend(true) {}
 
 RemoteContentController::~RemoteContentController() {}
+
+void RemoteContentController::NotifyLayerTransforms(
+    const nsTArray<MatrixMessage>& aTransforms) {
+  if (MessageLoop::current() != mCompositorThread) {
+    // We have to send messages from the compositor thread
+    mCompositorThread->PostTask(NewRunnableMethod<nsTArray<MatrixMessage>>(
+        "layers::RemoteContentController::NotifyLayerTransforms", this,
+        &RemoteContentController::NotifyLayerTransforms, aTransforms));
+    return;
+  }
+
+  if (mCanSend) {
+    Unused << SendLayerTransforms(aTransforms);
+  }
+}
 
 void RemoteContentController::RequestContentRepaint(
     const RepaintRequest& aRequest) {
@@ -43,8 +59,8 @@ void RemoteContentController::HandleTapOnMainThread(TapType aTapType,
                                                     uint64_t aInputBlockId) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  dom::TabParent* tab =
-      dom::TabParent::GetTabParentFromLayersId(aGuid.mLayersId);
+  dom::BrowserParent* tab =
+      dom::BrowserParent::GetBrowserParentFromLayersId(aGuid.mLayersId);
   if (tab) {
     tab->SendHandleTap(aTapType, aPoint, aModifiers, aGuid, aInputBlockId);
   }
@@ -94,9 +110,9 @@ void RemoteContentController::HandleTap(TapType aTapType,
   if (NS_IsMainThread()) {
     HandleTapOnMainThread(aTapType, aPoint, aModifiers, aGuid, aInputBlockId);
   } else {
-    // We don't want to get the TabParent or call TabParent::SendHandleTap()
-    // from a non-main thread (this might happen on Android, where this is
-    // called from the Java UI thread)
+    // We don't want to get the BrowserParent or call
+    // BrowserParent::SendHandleTap() from a non-main thread (this might happen
+    // on Android, where this is called from the Java UI thread)
     NS_DispatchToMainThread(
         NewRunnableMethod<TapType, LayoutDevicePoint, Modifiers,
                           ScrollableLayerGuid, uint64_t>(
@@ -353,6 +369,15 @@ void RemoteContentController::Destroy() {
     Unused << SendDestroy();
   }
 }
+
+mozilla::ipc::IPCResult RemoteContentController::RecvDestroy() {
+  // The actor on the other side is about to get destroyed, so let's not send
+  // it any more messages.
+  mCanSend = false;
+  return IPC_OK();
+}
+
+bool RemoteContentController::IsRemote() { return true; }
 
 }  // namespace layers
 }  // namespace mozilla

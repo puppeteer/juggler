@@ -7,15 +7,22 @@
 
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/ipc/CrashReporterHost.h"
+#include "mozilla/gfx/gfxVars.h"
+
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
+#  include "mozilla/SandboxBroker.h"
+#  include "mozilla/SandboxBrokerPolicyFactory.h"
+#endif
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerParent.h"
+#  include "ProfilerParent.h"
 #endif
 #include "RDDProcessHost.h"
 
 namespace mozilla {
 
 using namespace layers;
+using namespace gfx;
 
 RDDChild::RDDChild(RDDProcessHost* aHost) : mHost(aHost), mRDDReady(false) {
   MOZ_COUNT_CTOR(RDDChild);
@@ -23,12 +30,35 @@ RDDChild::RDDChild(RDDProcessHost* aHost) : mHost(aHost), mRDDReady(false) {
 
 RDDChild::~RDDChild() { MOZ_COUNT_DTOR(RDDChild); }
 
-void RDDChild::Init() {
-  SendInit();
+bool RDDChild::Init(bool aStartMacSandbox) {
+  Maybe<FileDescriptor> brokerFd;
+
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
+  auto policy = SandboxBrokerPolicyFactory::GetUtilityPolicy(OtherPid());
+  if (policy != nullptr) {
+    brokerFd = Some(FileDescriptor());
+    mSandboxBroker =
+        SandboxBroker::Create(std::move(policy), OtherPid(), brokerFd.ref());
+    // This is unlikely to fail and probably indicates OS resource
+    // exhaustion, but we can at least try to recover.
+    if (NS_WARN_IF(mSandboxBroker == nullptr)) {
+      return false;
+    }
+    MOZ_ASSERT(brokerFd.ref().IsValid());
+  }
+#endif  // XP_LINUX && MOZ_SANDBOX
+
+  nsTArray<GfxVarUpdate> updates = gfxVars::FetchNonDefaultVars();
+
+  SendInit(updates, brokerFd, aStartMacSandbox);
 
 #ifdef MOZ_GECKO_PROFILER
   Unused << SendInitProfiler(ProfilerParent::CreateForProcess(OtherPid()));
 #endif
+
+  gfxVars::AddReceiver(this);
+
+  return true;
 }
 
 bool RDDChild::EnsureRDDReady() {
@@ -61,12 +91,14 @@ mozilla::ipc::IPCResult RDDChild::RecvInitCrashReporter(
 bool RDDChild::SendRequestMemoryReport(const uint32_t& aGeneration,
                                        const bool& aAnonymize,
                                        const bool& aMinimizeMemoryUsage,
-                                       const MaybeFileDesc& aDMDFile) {
+                                       const Maybe<FileDescriptor>& aDMDFile) {
   mMemoryReportRequest = MakeUnique<MemoryReportRequestHost>(aGeneration);
   Unused << PRDDChild::SendRequestMemoryReport(aGeneration, aAnonymize,
                                                aMinimizeMemoryUsage, aDMDFile);
   return true;
 }
+
+void RDDChild::OnVarChanged(const GfxVarUpdate& aVar) { SendUpdateVar(aVar); }
 
 mozilla::ipc::IPCResult RDDChild::RecvAddMemoryReport(
     const MemoryReport& aReport) {
@@ -93,6 +125,7 @@ void RDDChild::ActorDestroy(ActorDestroyReason aWhy) {
     }
   }
 
+  gfxVars::RemoveReceiver(this);
   mHost->OnChannelClosed();
 }
 
@@ -107,7 +140,8 @@ class DeferredDeleteRDDChild : public Runnable {
   UniquePtr<RDDChild> mChild;
 };
 
-/* static */ void RDDChild::Destroy(UniquePtr<RDDChild>&& aChild) {
+/* static */
+void RDDChild::Destroy(UniquePtr<RDDChild>&& aChild) {
   NS_DispatchToMainThread(new DeferredDeleteRDDChild(std::move(aChild)));
 }
 

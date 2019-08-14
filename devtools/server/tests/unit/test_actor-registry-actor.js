@@ -42,15 +42,18 @@ function registerNewActor() {
 }
 
 function talkToNewActor() {
-  gClient.listTabs().then(({ helloActor }) => {
+  gClient.mainRoot.getRoot().then(({ helloActor }) => {
     Assert.ok(!!helloActor);
-    gClient.request({
-      to: helloActor,
-      type: "hello",
-    }, response => {
-      Assert.ok(!response.error);
-      unregisterNewActor();
-    });
+    gClient.request(
+      {
+        to: helloActor,
+        type: "hello",
+      },
+      response => {
+        Assert.ok(!response.error);
+        unregisterNewActor();
+      }
+    );
   });
 }
 
@@ -65,7 +68,7 @@ function unregisterNewActor() {
 }
 
 function testActorIsUnregistered() {
-  gClient.listTabs().then(({ helloActor }) => {
+  gClient.mainRoot.rootForm.then(({ helloActor }) => {
     Assert.ok(!helloActor);
 
     finishClient(gClient);

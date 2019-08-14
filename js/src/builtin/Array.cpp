@@ -10,6 +10,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/TextUtils.h"
 
 #include <algorithm>
@@ -25,6 +26,7 @@
 #include "jit/InlinableNatives.h"
 #include "js/Class.h"
 #include "js/Conversions.h"
+#include "js/PropertySpec.h"
 #include "util/StringBuffer.h"
 #include "util/Text.h"
 #include "vm/ArgumentsObject.h"
@@ -46,7 +48,6 @@
 #include "vm/Interpreter-inl.h"
 #include "vm/JSAtom-inl.h"
 #include "vm/NativeObject-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 
@@ -56,6 +57,7 @@ using mozilla::CeilingLog2;
 using mozilla::CheckedInt;
 using mozilla::DebugOnly;
 using mozilla::IsAsciiDigit;
+using mozilla::Maybe;
 
 using JS::AutoCheckCannotGC;
 using JS::IsArrayAnswer;
@@ -89,6 +91,10 @@ bool JS::IsArray(JSContext* cx, HandleObject obj, bool* isArray) {
 
   *isArray = answer == IsArrayAnswer::Array;
   return true;
+}
+
+bool js::IsArrayFromJit(JSContext* cx, HandleObject obj, bool* isArray) {
+  return JS::IsArray(cx, obj, isArray);
 }
 
 // ES2017 7.1.15 ToLength, but clamped to the [0,2^32-2] range.
@@ -221,7 +227,7 @@ static bool StringIsArrayIndexHelper(const CharT* s, uint32_t length,
   }
 
   uint32_t c = 0, previous = 0;
-  uint32_t index = JS7_UNDEC(*s++);
+  uint32_t index = AsciiDigitToNumber(*s++);
 
   /* Don't allow leading zeros. */
   if (index == 0 && s != end) {
@@ -234,7 +240,7 @@ static bool StringIsArrayIndexHelper(const CharT* s, uint32_t length,
     }
 
     previous = index;
-    c = JS7_UNDEC(*s);
+    c = AsciiDigitToNumber(*s);
     index = 10 * index + c;
   }
 
@@ -444,10 +450,9 @@ bool js::GetElements(JSContext* cx, HandleObject aobj, uint32_t length,
   }
 
   if (aobj->is<TypedArrayObject>()) {
-    TypedArrayObject* typedArray = &aobj->as<TypedArrayObject>();
+    Handle<TypedArrayObject*> typedArray = aobj.as<TypedArrayObject>();
     if (typedArray->length() == length) {
-      typedArray->getElements(vp);
-      return true;
+      return TypedArrayObject::getElements(cx, typedArray, vp);
     }
   }
 
@@ -877,7 +882,7 @@ bool js::ArraySetLength(JSContext* cx, Handle<ArrayObject*> arr, HandleId id,
 
       Vector<uint32_t> indexes(cx);
       {
-        AutoIdVector props(cx);
+        RootedIdVector props(cx);
         if (!GetPropertyKeys(cx, arr, JSITER_OWNONLY | JSITER_HIDDEN, &props)) {
           return false;
         }
@@ -1077,7 +1082,7 @@ bool js::IsCrossRealmArrayConstructor(JSContext* cx, const Value& v,
 
   JSObject* obj = &v.toObject();
   if (obj->is<WrapperObject>()) {
-    obj = CheckedUnwrap(obj);
+    obj = CheckedUnwrapDynamic(obj, cx);
     if (!obj) {
       ReportAccessDenied(cx);
       return false;
@@ -1183,7 +1188,7 @@ static bool array_toSource(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
 
   if (detector.foundCycle()) {
     if (!sb.append("[]")) {
@@ -1311,7 +1316,7 @@ static bool ArrayJoinDenseKernel(JSContext* cx, SeparatorOp sepOp,
        * with those as well.
        */
       break;
-    } else if (IF_BIGINT(elem.isBigInt(), false)) {
+    } else if (elem.isBigInt()) {
       // ToString(bigint) doesn't access bigint.toString or
       // anything like that, so it can't mutate the array we're
       // walking through, so it *could* be handled here. We don't
@@ -1381,7 +1386,7 @@ bool js::array_join(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.join", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.join", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -1443,7 +1448,7 @@ bool js::array_join(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   // Step 5.
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (sepstr->hasTwoByteChars() && !sb.ensureTwoByteChars()) {
     return false;
   }
@@ -1656,7 +1661,7 @@ static DenseElementResult ArrayReverseDenseKernel(JSContext* cx,
 // 22.1.3.21 Array.prototype.reverse ( )
 bool js::array_reverse(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.reverse", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.reverse", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -2380,7 +2385,7 @@ bool js::NewbornArrayPush(JSContext* cx, HandleObject obj, const Value& v) {
 // 22.1.3.18 Array.prototype.push ( ...items )
 bool js::array_push(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.push", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.push", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -2441,7 +2446,7 @@ bool js::array_push(JSContext* cx, unsigned argc, Value* vp) {
 // 22.1.3.17 Array.prototype.pop ( )
 bool js::array_pop(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.pop", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.pop", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -2561,7 +2566,7 @@ static DenseElementResult ArrayShiftDenseKernel(JSContext* cx, HandleObject obj,
 // 22.1.3.22 Array.prototype.shift ( )
 bool js::array_shift(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.shift", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.shift", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -2647,7 +2652,7 @@ bool js::array_shift(JSContext* cx, unsigned argc, Value* vp) {
 // 22.1.3.29 Array.prototype.unshift ( ...items )
 bool js::array_unshift(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.unshift", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.unshift", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -2907,7 +2912,7 @@ static bool CopyArrayElements(JSContext* cx, HandleObject obj, uint64_t begin,
 static bool array_splice_impl(JSContext* cx, unsigned argc, Value* vp,
                               bool returnValueIsUsed) {
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.splice", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.splice", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -3503,7 +3508,7 @@ static bool ArraySliceOrdinary(JSContext* cx, HandleObject obj, uint64_t begin,
 /* ES 2016 draft Mar 25, 2016 22.1.3.23. */
 bool js::array_slice(JSContext* cx, unsigned argc, Value* vp) {
   AutoGeckoProfilerEntry pseudoFrame(
-      cx, "Array.prototype.slice", ProfilingStackFrame::Category::JS,
+      cx, "Array.prototype.slice", JS::ProfilingCategoryPair::JS,
       uint32_t(ProfilingStackFrame::Flags::RELEVANT_FOR_JS));
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -3626,8 +3631,8 @@ static bool ArraySliceDenseKernel(JSContext* cx, ArrayObject* arr,
   return true;
 }
 
-JSObject* js::array_slice_dense(JSContext* cx, HandleObject obj, int32_t begin,
-                                int32_t end, HandleObject result) {
+JSObject* js::ArraySliceDense(JSContext* cx, HandleObject obj, int32_t begin,
+                              int32_t end, HandleObject result) {
   if (result && IsArraySpecies(cx, obj)) {
     if (!ArraySliceDenseKernel(cx, &obj->as<ArrayObject>(), begin, end,
                                &result->as<ArrayObject>())) {
@@ -3676,9 +3681,13 @@ static bool ArrayFromCallArgs(JSContext* cx, CallArgs& args,
 static bool array_of(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (IsArrayConstructor(args.thisv()) || !IsConstructor(args.thisv())) {
-    // IsArrayConstructor(this) will usually be true in practice. This is
-    // the most common path.
+  bool isArrayConstructor =
+      IsArrayConstructor(args.thisv()) &&
+      args.thisv().toObject().nonCCWRealm() == cx->realm();
+
+  if (isArrayConstructor || !IsConstructor(args.thisv())) {
+    // isArrayConstructor will usually be true in practice. This is the most
+    // common path.
     return ArrayFromCallArgs(cx, args);
   }
 
@@ -3756,10 +3765,10 @@ static const JSFunctionSpec array_methods[] = {
 
     JS_SELF_HOSTED_FN("fill", "ArrayFill", 3, 0),
 
-    JS_SELF_HOSTED_SYM_FN(iterator, "ArrayValues", 0, 0),
+    JS_SELF_HOSTED_SYM_FN(iterator, "$ArrayValues", 0, 0),
     JS_SELF_HOSTED_FN("entries", "ArrayEntries", 0, 0),
     JS_SELF_HOSTED_FN("keys", "ArrayKeys", 0, 0),
-    JS_SELF_HOSTED_FN("values", "ArrayValues", 0, 0),
+    JS_SELF_HOSTED_FN("values", "$ArrayValues", 0, 0),
 
     /* ES7 additions */
     JS_SELF_HOSTED_FN("includes", "ArrayIncludes", 2, 0),
@@ -3797,13 +3806,13 @@ static const JSFunctionSpec array_static_methods[] = {
     JS_FS_END};
 
 const JSPropertySpec array_static_props[] = {
-    JS_SELF_HOSTED_SYM_GET(species, "ArraySpecies", 0), JS_PS_END};
+    JS_SELF_HOSTED_SYM_GET(species, "$ArraySpecies", 0), JS_PS_END};
 
 static inline bool ArrayConstructorImpl(JSContext* cx, CallArgs& args,
                                         bool isConstructor) {
   RootedObject proto(cx);
   if (isConstructor) {
-    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Array, &proto)) {
       return false;
     }
   } else {
@@ -3864,6 +3873,14 @@ bool js::array_construct(JSContext* cx, unsigned argc, Value* vp) {
 
 ArrayObject* js::ArrayConstructorOneArg(JSContext* cx, HandleObjectGroup group,
                                         int32_t lengthInt) {
+  // Ion can call this with a group from a different realm when calling
+  // another realm's Array constructor.
+  Maybe<AutoRealm> ar;
+  if (cx->realm() != group->realm()) {
+    MOZ_ASSERT(cx->compartment() == group->compartment());
+    ar.emplace(cx, group);
+  }
+
   if (lengthInt < 0) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_BAD_ARRAY_LENGTH);
@@ -3871,7 +3888,9 @@ ArrayObject* js::ArrayConstructorOneArg(JSContext* cx, HandleObjectGroup group,
   }
 
   uint32_t length = uint32_t(lengthInt);
-  return NewPartlyAllocatedArrayTryUseGroup(cx, group, length);
+  ArrayObject* res = NewPartlyAllocatedArrayTryUseGroup(cx, group, length);
+  MOZ_ASSERT_IF(res, res->realm() == group->realm());
+  return res;
 }
 
 static JSObject* CreateArrayPrototype(JSContext* cx, JSProtoKey key) {
@@ -3936,6 +3955,8 @@ static bool array_proto_finish(JSContext* cx, JS::HandleObject ctor,
       !DefineDataProperty(cx, unscopables, cx->names().fill, value) ||
       !DefineDataProperty(cx, unscopables, cx->names().find, value) ||
       !DefineDataProperty(cx, unscopables, cx->names().findIndex, value) ||
+      !DefineDataProperty(cx, unscopables, cx->names().flat, value) ||
+      !DefineDataProperty(cx, unscopables, cx->names().flatMap, value) ||
       !DefineDataProperty(cx, unscopables, cx->names().includes, value) ||
       !DefineDataProperty(cx, unscopables, cx->names().keys, value) ||
       !DefineDataProperty(cx, unscopables, cx->names().values, value)) {
@@ -4055,10 +4076,9 @@ static MOZ_ALWAYS_INLINE ArrayObject* NewArray(
   }
 
   AutoSetNewObjectMetadata metadata(cx);
-  RootedArrayObject arr(
-      cx, ArrayObject::createArray(
-              cx, allocKind, GetInitialHeap(newKind, &ArrayObject::class_),
-              shape, group, length, metadata));
+  RootedArrayObject arr(cx, ArrayObject::createArray(
+                                cx, allocKind, GetInitialHeap(newKind, group),
+                                shape, group, length, metadata));
   if (!arr) {
     return nullptr;
   }
@@ -4146,7 +4166,7 @@ ArrayObject* js::NewDenseFullyAllocatedArrayWithTemplate(
   RootedObjectGroup group(cx, templateObject->group());
   RootedShape shape(cx, templateObject->as<ArrayObject>().lastProperty());
 
-  gc::InitialHeap heap = GetInitialHeap(GenericObject, &ArrayObject::class_);
+  gc::InitialHeap heap = GetInitialHeap(GenericObject, group);
   Rooted<ArrayObject*> arr(
       cx, ArrayObject::createArray(cx, allocKind, heap, shape, group, length,
                                    metadata));
@@ -4164,9 +4184,10 @@ ArrayObject* js::NewDenseFullyAllocatedArrayWithTemplate(
 }
 
 ArrayObject* js::NewDenseCopyOnWriteArray(JSContext* cx,
-                                          HandleArrayObject templateObject,
-                                          gc::InitialHeap heap) {
+                                          HandleArrayObject templateObject) {
   MOZ_ASSERT(!gc::IsInsideNursery(templateObject));
+
+  gc::InitialHeap heap = GetInitialHeap(GenericObject, templateObject->group());
 
   ArrayObject* arr =
       ArrayObject::createCopyOnWriteArray(cx, heap, templateObject);
@@ -4317,6 +4338,29 @@ ArrayObject* js::NewCopiedArrayForCallingAllocationSite(
   return NewCopiedArrayTryUseGroup(cx, group, vp, length);
 }
 
+ArrayObject* js::NewArrayWithGroup(JSContext* cx, uint32_t length,
+                                   HandleObjectGroup group,
+                                   bool convertDoubleElements) {
+  // Ion can call this with a group from a different realm when calling
+  // another realm's Array constructor.
+  Maybe<AutoRealm> ar;
+  if (cx->realm() != group->realm()) {
+    MOZ_ASSERT(cx->compartment() == group->compartment());
+    ar.emplace(cx, group);
+  }
+
+  ArrayObject* res = NewFullyAllocatedArrayTryUseGroup(cx, group, length);
+  if (!res) {
+    return nullptr;
+  }
+
+  if (convertDoubleElements) {
+    res->setShouldConvertDoubleElements();
+  }
+
+  return res;
+}
+
 #ifdef DEBUG
 bool js::ArrayInfo(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -4423,7 +4467,8 @@ void js::ArraySpeciesLookup::initialize(JSContext* cx) {
 }
 
 void js::ArraySpeciesLookup::reset() {
-  JS_POISON(this, 0xBB, sizeof(*this), MemCheckKind::MakeUndefined);
+  AlwaysPoison(this, JS_RESET_VALUE_PATTERN, sizeof(*this),
+               MemCheckKind::MakeUndefined);
   state_ = State::Uninitialized;
 }
 

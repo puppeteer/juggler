@@ -9,9 +9,15 @@ with Files("**"):
 
 XPIDL_SOURCES += [
     'nsIHangReport.idl',
+    'nsIRemoteWebProgress.idl',
+    'nsIRemoteWebProgressRequest.idl',
 ]
 
 XPIDL_MODULE = 'dom'
+
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
 
 EXTRA_JS_MODULES += [
     'ManifestMessagesChild.jsm',
@@ -28,27 +34,39 @@ EXPORTS.mozilla.dom.ipc += [
 ]
 
 EXPORTS.mozilla.dom += [
+    'BrowserBridgeChild.h',
+    'BrowserBridgeHost.h',
+    'BrowserBridgeParent.h',
+    'BrowserChild.h',
+    'BrowserHost.h',
+    'BrowserParent.h',
     'CoalescedInputData.h',
     'CoalescedMouseData.h',
     'CoalescedWheelData.h',
-    'ContentBridgeChild.h',
-    'ContentBridgeParent.h',
     'ContentChild.h',
     'ContentParent.h',
     'ContentProcess.h',
     'ContentProcessManager.h',
     'CPOWManagerGetter.h',
+    'CSPMessageUtils.h',
+    'DocShellMessageUtils.h',
+    'EffectsInfo.h',
     'FilePickerParent.h',
+    'JSWindowActor.h',
+    'JSWindowActorChild.h',
+    'JSWindowActorParent.h',
+    'JSWindowActorService.h',
     'MemoryReportRequest.h',
-    'nsIContentChild.h',
-    'nsIContentParent.h',
     'PermissionMessageUtils.h',
-    'TabChild.h',
+    'ReferrerInfoUtils.h',
+    'RemoteBrowser.h',
+    'RemoteWebProgress.h',
+    'RemoteWebProgressRequest.h',
     'TabContext.h',
     'TabMessageUtils.h',
-    'TabParent.h',
     'URLClassifierChild.h',
     'URLClassifierParent.h',
+    'WindowGlobalActor.h',
     'WindowGlobalChild.h',
     'WindowGlobalParent.h',
 ]
@@ -61,30 +79,42 @@ EXPORTS.mozilla += [
 ]
 
 UNIFIED_SOURCES += [
+    'BrowserBridgeChild.cpp',
+    'BrowserBridgeHost.cpp',
+    'BrowserBridgeParent.cpp',
+    'BrowserChild.cpp',
+    'BrowserHost.cpp',
+    'BrowserParent.cpp',
     'CoalescedMouseData.cpp',
     'CoalescedWheelData.cpp',
     'ColorPickerParent.cpp',
-    'ContentBridgeChild.cpp',
-    'ContentBridgeParent.cpp',
     'ContentParent.cpp',
     'ContentProcess.cpp',
     'ContentProcessManager.cpp',
+    'CSPMessageUtils.cpp',
+    'DocShellMessageUtils.cpp',
     'FilePickerParent.cpp',
+    'JSWindowActor.cpp',
+    'JSWindowActorChild.cpp',
+    'JSWindowActorParent.cpp',
+    'JSWindowActorService.cpp',
     'MemMapSnapshot.cpp',
     'MemoryReportRequest.cpp',
-    'nsIContentChild.cpp',
-    'nsIContentParent.cpp',
+    'MMPrinter.cpp',
     'PermissionMessageUtils.cpp',
     'PreallocatedProcessManager.cpp',
     'ProcessPriorityManager.cpp',
+    'ReferrerInfoUtils.cpp',
+    'RemoteBrowser.cpp',
+    'RemoteWebProgress.cpp',
+    'RemoteWebProgressRequest.cpp',
     'SharedMap.cpp',
     'SharedStringMap.cpp',
     'StructuredCloneData.cpp',
-    'TabChild.cpp',
     'TabContext.cpp',
     'TabMessageUtils.cpp',
-    'TabParent.cpp',
     'URLClassifierParent.cpp',
+    'WindowGlobalActor.cpp',
     'WindowGlobalChild.cpp',
     'WindowGlobalParent.cpp',
 ]
@@ -99,10 +129,10 @@ IPDL_SOURCES += [
     'DOMTypes.ipdlh',
     'MemoryReportTypes.ipdlh',
     'PBrowser.ipdl',
+    'PBrowserBridge.ipdl',
     'PBrowserOrId.ipdlh',
     'PColorPicker.ipdl',
     'PContent.ipdl',
-    'PContentBridge.ipdl',
     'PContentPermission.ipdlh',
     'PContentPermissionRequest.ipdl',
     'PCycleCollectWithLogs.ipdl',
@@ -110,6 +140,7 @@ IPDL_SOURCES += [
     'PLoginReputation.ipdl',
     'PPluginWidget.ipdl',
     'PProcessHangMonitor.ipdl',
+    'PrefsTypes.ipdlh',
     'PTabContext.ipdlh',
     'PURLClassifier.ipdl',
     'PURLClassifierInfo.ipdlh',
@@ -122,12 +153,7 @@ include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
 
-if CONFIG['MOZ_SANDBOX'] and CONFIG['OS_TARGET'] == 'Darwin':
-    USE_LIBS += [
-        'mozsandbox',
-    ]
-
-if CONFIG['MOZ_CONTENT_SANDBOX'] and CONFIG['OS_ARCH'] == 'Linux':
+if CONFIG['MOZ_SANDBOX'] and (CONFIG['OS_TARGET'] in ['Darwin', 'Linux']):
     USE_LIBS += [
         'mozsandbox',
     ]
@@ -143,14 +169,17 @@ LOCAL_INCLUDES += [
     '/dom/geolocation',
     '/dom/media/webspeech/synth/ipc',
     '/dom/security',
-    '/extensions/cookie',
+    '/dom/storage',
+    '/extensions/permissions',
     '/extensions/spellcheck/src',
     '/gfx/2d',
     '/hal/sandbox',
     '/js/xpconnect/loader',
+    '/js/xpconnect/src',
     '/layout/base',
     '/media/webrtc',
     '/netwerk/base',
+    '/netwerk/protocol/http',
     '/toolkit/components/printingui/ipc',
     '/toolkit/crashreporter',
     '/toolkit/xre',
@@ -176,12 +205,13 @@ DEFINES['BIN_SUFFIX'] = '"%s"' % CONFIG['BIN_SUFFIX']
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
     DEFINES['MOZ_ENABLE_FREETYPE'] = True
 
-if CONFIG['MOZ_TOOLKIT_SEARCH']:
-    DEFINES['MOZ_TOOLKIT_SEARCH'] = True
-
 JAR_MANIFESTS += ['jar.mn']
 
-BROWSER_CHROME_MANIFESTS += ['tests/browser.ini']
+BROWSER_CHROME_MANIFESTS += [
+    'tests/browser.ini',
+    'tests/JSWindowActor/browser.ini',
+]
+
 MOCHITEST_CHROME_MANIFESTS += ['tests/chrome.ini']
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']
 XPCSHELL_TESTS_MANIFESTS += ['tests/xpcshell.ini']

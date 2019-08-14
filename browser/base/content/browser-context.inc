@@ -22,7 +22,7 @@
                   class="menuitem-iconic"
                   tooltip="dynamic-shortcut-tooltip"
                   aria-label="&reloadCmd.label;"
-                  oncommand="gContextMenu.reload(event);"
+                  command="Browser:ReloadOrDuplicate"
                   accesskey="&reloadCmd.accesskey;"
                   onclick="checkForMiddleClick(this, event);"/>
         <menuitem id="context-stop"
@@ -90,6 +90,10 @@
                 label="&saveLinkCmd.label;"
                 accesskey="&saveLinkCmd.accesskey;"
                 oncommand="gContextMenu.saveLink();"/>
+      <menuitem id="context-savelinktopocket"
+                label="&saveLinkToPocketCmd.label;"
+                accesskey="&saveLinkToPocketCmd.accesskey;"
+                oncommand= "Pocket.savePage(gContextMenu.browser, gContextMenu.linkURL);"/>
       <menuitem id="context-copyemail"
                 label="&copyEmailCmd.label;"
                 accesskey="&copyEmailCmd.accesskey;"
@@ -171,6 +175,11 @@
                 accesskey="&leaveDOMFullScreen.accesskey;"
                 label="&leaveDOMFullScreen.label;"
                 oncommand="gContextMenu.leaveDOMFullScreen();"/>
+      <menuitem id="context-video-pictureinpicture"
+                accesskey="&pictureInPicture.accesskey;"
+                label="&pictureInPicture.label;"
+                type="checkbox"
+                oncommand="gContextMenu.mediaCommand('pictureinpicture');"/>
       <menuseparator id="context-media-sep-commands"/>
       <menuitem id="context-reloadimage"
                 label="&reloadImageCmd.label;"
@@ -259,6 +268,10 @@
                 label="&savePageCmd.label;"
                 accesskey="&savePageCmd.accesskey2;"
                 oncommand="gContextMenu.savePageAs();"/>
+      <menuitem id="context-pocket"
+                label="&saveToPocketCmd.label;"
+                accesskey="&saveToPocketCmd.accesskey;"
+                oncommand="Pocket.savePage(gContextMenu.browser, gContextMenu.browser.currentURI.spec, gContextMenu.browser.contentTitle);"/>
       <menuseparator id="context-sep-sendpagetodevice" class="sync-ui-item"
                      hidden="true"/>
       <menu id="context-sendpagetodevice"
@@ -307,7 +320,7 @@
                 accesskey="&keywordfield.accesskey;"
                 oncommand="AddKeywordForSearchField();"/>
       <menuitem id="context-searchselect"
-                oncommand="BrowserSearch.loadSearchFromContext(this.searchTerms, this.principal);"/>
+                oncommand="BrowserSearch.loadSearchFromContext(this.searchTerms, this.principal, this.csp);"/>
       <menuseparator id="context-sep-sendlinktodevice" class="sync-ui-item"
                      hidden="true"/>
       <menu id="context-sendlinktodevice"
@@ -361,6 +374,11 @@
                     label="&viewFrameInfoCmd.label;"
                     accesskey="&viewFrameInfoCmd.accesskey;"
                     oncommand="gContextMenu.viewFrameInfo();"/>
+#ifdef NIGHTLY_BUILD
+          <menuitem id="context-frameOsPid"
+                    label="PID: Unknown"
+                    disabled="true"/>
+#endif
         </menupopup>
       </menu>
       <menuitem id="context-viewpartialsource-selection"
@@ -422,6 +440,11 @@
                     label="&noLoginSuggestions.label;"
                     disabled="true"
                     hidden="true"/>
+          <menuseparator id="generated-password-separator"/>
+          <menuitem id="fill-login-generated-password"
+                    label="&fillSuggestedPassword.label;"
+                    hidden="true"
+                    oncommand="gContextMenu.fillGeneratedPassword();"/>
           <menuseparator id="saved-logins-separator"/>
           <menuitem id="fill-login-saved-passwords"
                     label="&viewSavedLogins.label;"

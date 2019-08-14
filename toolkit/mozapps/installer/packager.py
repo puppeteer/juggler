@@ -82,17 +82,6 @@ class ToolLauncher(object):
         for e in extra_env:
             env[e] = extra_env[e]
 
-        # For VC12+, make sure we can find the right bitness of pgort1x0.dll
-        if not buildconfig.substs.get('HAVE_64BIT_BUILD'):
-            for e in ('VS140COMNTOOLS', 'VS120COMNTOOLS'):
-                if e not in env:
-                    continue
-
-                vcdir = os.path.abspath(os.path.join(env[e], '../../VC/bin'))
-                if os.path.exists(vcdir):
-                    env['PATH'] = '%s;%s' % (vcdir, env['PATH'])
-                    break
-
         # Work around a bug in Python 2.7.2 and lower where unicode types in
         # environment variables aren't handled by subprocess.
         for k, v in env.items():
@@ -200,6 +189,8 @@ def main():
                         help='removed-files source file')
     parser.add_argument('--ignore-errors', action='store_true', default=False,
                         help='Transform errors into warnings.')
+    parser.add_argument('--ignore-broken-symlinks', action='store_true', default=False,
+                        help='Do not fail when processing broken symlinks.')
     parser.add_argument('--minify', action='store_true', default=False,
                         help='Make some files more compact while packaging')
     parser.add_argument('--minify-js', action='store_true',
@@ -210,8 +201,6 @@ def main():
                         'minification verification will not be performed.')
     parser.add_argument('--jarlog', default='', help='File containing jar ' +
                         'access logs')
-    parser.add_argument('--optimizejars', action='store_true', default=False,
-                        help='Enable jar optimizations')
     parser.add_argument('--compress', choices=('none', 'deflate', 'brotli'),
                         default='deflate',
                         help='Use given jar compression (default: deflate)')
@@ -242,12 +231,11 @@ def main():
     if args.format == 'flat':
         formatter = FlatFormatter(copier)
     elif args.format == 'jar':
-        formatter = JarFormatter(copier, compress=compress, optimize=args.optimizejars)
+        formatter = JarFormatter(copier, compress=compress)
     elif args.format == 'omni':
         formatter = OmniJarFormatter(copier,
                                      buildconfig.substs['OMNIJAR_NAME'],
                                      compress=compress,
-                                     optimize=args.optimizejars,
                                      non_resources=args.non_resource)
     else:
         errors.fatal('Unknown format: %s' % args.format)
@@ -271,6 +259,7 @@ def main():
         finder_args = dict(
             minify=args.minify,
             minify_js=args.minify_js,
+            ignore_broken_symlinks=args.ignore_broken_symlinks,
         )
         if args.js_binary:
             finder_args['minify_js_verify_command'] = [
@@ -321,15 +310,25 @@ def main():
                     copier.add(os.path.basename(pdbname), File(pdbname))
 
     # Setup preloading
-    if args.jarlog and os.path.exists(args.jarlog):
+    if args.jarlog:
+        if not os.path.exists(args.jarlog):
+            raise Exception('Cannot find jar log: %s' % args.jarlog)
+        omnijars = []
+        if isinstance(formatter, OmniJarFormatter):
+            omnijars = [mozpath.join(base, buildconfig.substs['OMNIJAR_NAME'])
+                        for base in sink.packager.get_bases(addons=False)]
+
         from mozpack.mozjar import JarLog
         log = JarLog(args.jarlog)
         for p, f in copier:
             if not isinstance(f, Jarrer):
                 continue
-            key = JarLog.canonicalize(os.path.join(args.destination, p))
-            if key in log:
-                f.preload(log[key])
+            if respath:
+                p = mozpath.relpath(p, respath)
+            if p in log:
+                f.preload(log[p])
+            elif p in omnijars:
+                raise Exception('No jar log data for %s' % p)
 
     copier.copy(args.destination)
     generate_precomplete(os.path.normpath(os.path.join(args.destination,

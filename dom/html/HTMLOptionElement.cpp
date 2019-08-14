@@ -15,7 +15,7 @@
 
 // Notify/query select frame for selected state
 #include "nsIFormControlFrame.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsNodeInfoManager.h"
 #include "nsCOMPtr.h"
 #include "mozilla/EventStates.h"
@@ -243,11 +243,9 @@ void HTMLOptionElement::SetText(const nsAString& aText, ErrorResult& aRv) {
   aRv = nsContentUtils::SetNodeTextContent(this, aText, true);
 }
 
-nsresult HTMLOptionElement::BindToTree(nsIDocument* aDocument,
-                                       nsIContent* aParent,
-                                       nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult HTMLOptionElement::BindToTree(BindContext& aContext,
+                                       nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // Our new parent might change :disabled/:enabled state.
@@ -256,8 +254,8 @@ nsresult HTMLOptionElement::BindToTree(nsIDocument* aDocument,
   return NS_OK;
 }
 
-void HTMLOptionElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
+void HTMLOptionElement::UnbindFromTree(bool aNullParent) {
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 
   // Our previous parent could have been involved in :disabled/:enabled state.
   UpdateDisabledState(false);
@@ -299,7 +297,7 @@ already_AddRefed<HTMLOptionElement> HTMLOptionElement::Option(
     const Optional<nsAString>& aValue, bool aDefaultSelected, bool aSelected,
     ErrorResult& aError) {
   nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(aGlobal.GetAsSupports());
-  nsIDocument* doc;
+  Document* doc;
   if (!win || !(doc = win->GetExtantDoc())) {
     aError.Throw(NS_ERROR_FAILURE);
     return nullptr;

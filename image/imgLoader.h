@@ -246,7 +246,7 @@ class imgLoader final : public imgILoader,
             ReferrerPolicy aReferrerPolicy, nsIPrincipal* aLoadingPrincipal,
             uint64_t aRequestContextID, nsILoadGroup* aLoadGroup,
             imgINotificationObserver* aObserver, nsINode* aContext,
-            nsIDocument* aLoadingDocument, nsLoadFlags aLoadFlags,
+            mozilla::dom::Document* aLoadingDocument, nsLoadFlags aLoadFlags,
             nsISupports* aCacheKey, nsContentPolicyType aContentPolicyType,
             const nsAString& initiatorType, bool aUseUrgentStartForChannel,
             imgRequestProxy** _retval);
@@ -344,11 +344,14 @@ class imgLoader final : public imgILoader,
  private:  // methods
   static already_AddRefed<imgLoader> CreateImageLoader();
 
+  bool PreferLoadFromCache(nsIURI* aURI) const;
+
   bool ValidateEntry(imgCacheEntry* aEntry, nsIURI* aKey,
                      nsIURI* aInitialDocumentURI, nsIURI* aReferrerURI,
                      ReferrerPolicy aReferrerPolicy, nsILoadGroup* aLoadGroup,
                      imgINotificationObserver* aObserver, nsISupports* aCX,
-                     nsIDocument* aLoadingDocument, nsLoadFlags aLoadFlags,
+                     mozilla::dom::Document* aLoadingDocument,
+                     nsLoadFlags aLoadFlags,
                      nsContentPolicyType aContentPolicyType,
                      bool aCanMakeNewChannel, bool* aNewChannelCreated,
                      imgRequestProxy** aProxyRequest,
@@ -358,14 +361,14 @@ class imgLoader final : public imgILoader,
       imgRequest* request, nsIURI* aURI, nsIURI* aInitialDocumentURI,
       nsIURI* aReferrerURI, ReferrerPolicy aReferrerPolicy,
       nsILoadGroup* aLoadGroup, imgINotificationObserver* aObserver,
-      nsISupports* aCX, nsIDocument* aLoadingDocument, nsLoadFlags aLoadFlags,
-      nsContentPolicyType aContentPolicyType, imgRequestProxy** aProxyRequest,
-      nsIPrincipal* aLoadingPrincipal, int32_t aCORSMode,
-      bool* aNewChannelCreated);
+      nsISupports* aCX, mozilla::dom::Document* aLoadingDocument,
+      nsLoadFlags aLoadFlags, nsContentPolicyType aContentPolicyType,
+      imgRequestProxy** aProxyRequest, nsIPrincipal* aLoadingPrincipal,
+      int32_t aCORSMode, bool* aNewChannelCreated);
 
   nsresult CreateNewProxyForRequest(imgRequest* aRequest,
                                     nsILoadGroup* aLoadGroup,
-                                    nsIDocument* aLoadingDocument,
+                                    mozilla::dom::Document* aLoadingDocument,
                                     imgINotificationObserver* aObserver,
                                     nsLoadFlags aLoadFlags,
                                     imgRequestProxy** _retval);

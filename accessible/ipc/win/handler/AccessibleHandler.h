@@ -9,11 +9,6 @@
 
 #define NEWEST_IA2_BASENAME Accessible2_3
 
-#define __QUOTE(idl) #idl
-#define __GENIDL(base) __QUOTE(base##.idl)
-#define IDLFOR(base) __GENIDL(base)
-#define NEWEST_IA2_IDL IDLFOR(NEWEST_IA2_BASENAME)
-
 #define __GENIFACE(base) I##base
 #define INTERFACEFOR(base) __GENIFACE(base)
 #define NEWEST_IA2_INTERFACE INTERFACEFOR(NEWEST_IA2_BASENAME)
@@ -22,28 +17,28 @@
 #define IIDFOR(iface) __GENIID(iface)
 #define NEWEST_IA2_IID IIDFOR(NEWEST_IA2_INTERFACE)
 
-#if defined(__midl)
+#if defined(__midl) || defined(__WIDL__)
 
-import NEWEST_IA2_IDL;
+import "Accessible2_3.idl";
 
 #else
 
-#include "HandlerData.h"
+#  include "HandlerData.h"
 
-#include <windows.h>
+#  include <windows.h>
 
-#if !defined(MOZILLA_INTERNAL_API)
+#  if !defined(MOZILLA_INTERNAL_API)
 
-#include "Accessible2_3.h"
-#include "AccessibleHyperlink.h"
-#include "AccessibleHypertext2.h"
-#include "AccessibleTableCell.h"
-#include "Handler.h"
-#include "mozilla/mscom/StructStream.h"
-#include "mozilla/UniquePtr.h"
+#    include "Accessible2_3.h"
+#    include "AccessibleHyperlink.h"
+#    include "AccessibleHypertext2.h"
+#    include "AccessibleTableCell.h"
+#    include "Handler.h"
+#    include "mozilla/mscom/StructStream.h"
+#    include "mozilla/UniquePtr.h"
 
-#include <ocidl.h>
-#include <servprov.h>
+#    include <ocidl.h>
+#    include <servprov.h>
 
 namespace mozilla {
 namespace a11y {
@@ -306,7 +301,7 @@ inline static BSTR CopyBSTR(BSTR aSrc) {
 }  // namespace a11y
 }  // namespace mozilla
 
-#endif  // !defined(MOZILLA_INTERNAL_API)
+#  endif  // !defined(MOZILLA_INTERNAL_API)
 
 #endif  // defined(__midl)
 

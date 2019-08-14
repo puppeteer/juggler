@@ -26,7 +26,7 @@ class DeviceRunner(BaseRunner):
            'MOZ_CRASHREPORTER_NO_REPORT': '1',
            'MOZ_CRASHREPORTER_SHUTDOWN': '1',
            'MOZ_HIDE_RESULTS_TABLE': '1',
-           'MOZ_LOG': 'signaling:3,mtransport:4,DataChannel:4,jsep:4,MediaPipelineFactory:4',
+           'MOZ_LOG': 'signaling:3,mtransport:4,DataChannel:4,jsep:4',
            'R_LOG_LEVEL': '6',
            'R_LOG_DESTINATION': 'stderr',
            'R_LOG_VERBOSE': '1', }
@@ -80,7 +80,7 @@ class DeviceRunner(BaseRunner):
         timeout = 10  # seconds
         end_time = datetime.datetime.now() + datetime.timedelta(seconds=timeout)
         while not self.is_running() and datetime.datetime.now() < end_time:
-            time.sleep(.1)
+            time.sleep(.5)
         if not self.is_running():
             print("timed out waiting for '%s' process to start" % self.app_ctx.remote_process)
 
@@ -131,7 +131,7 @@ class DeviceRunner(BaseRunner):
         while self.is_running():
             if end_time is not None and datetime.datetime.now() > end_time:
                 break
-            time.sleep(.1)
+            time.sleep(.5)
 
         return self.returncode
 

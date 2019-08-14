@@ -12,15 +12,6 @@ config = {
     ],
     "replacements": [
         # File, from, to
-        ("{}{}".format(d, f),
-        "ac_add_options --with-branding=mobile/android/branding/beta",
-        "ac_add_options --with-branding=mobile/android/branding/official")
-        for d in ["mobile/android/config/mozconfigs/android-api-16/",
-                  "mobile/android/config/mozconfigs/android-x86/",
-                  "mobile/android/config/mozconfigs/android-aarch64/"]
-        for f in ["debug", "nightly"]
-    ] + [
-        # File, from, to
         ("browser/confvars.sh",
          "ACCEPTED_MAR_CHANNEL_IDS=firefox-mozilla-beta,firefox-mozilla-release",
          "ACCEPTED_MAR_CHANNEL_IDS=firefox-mozilla-release"),
@@ -31,8 +22,6 @@ config = {
 
     "vcs_share_base": os.path.join(ABS_WORK_DIR, 'hg-shared'),
     # "hg_share_base": None,
-    "tools_repo_url": "https://hg.mozilla.org/build/tools",
-    "tools_repo_branch": "default",
     "from_repo_url": "https://hg.mozilla.org/releases/mozilla-beta",
     "to_repo_url": "https://hg.mozilla.org/releases/mozilla-release",
 

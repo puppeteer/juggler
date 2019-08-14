@@ -7,14 +7,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use ffi;
+use std::ffi::{CStr, CString};
 use std::mem;
 use std::mem::size_of;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 use std::rc::Rc;
 use std::str;
-use std::ffi::{CString, CStr};
-use ffi;
+use std::time::{Duration, Instant};
 
 pub use ffi::types::*;
 pub use ffi::*;
@@ -29,11 +30,11 @@ pub enum GlType {
 }
 
 impl Default for GlType {
-    #[cfg(any(target_os="android", target_os="ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     fn default() -> GlType {
         GlType::Gles
     }
-    #[cfg(not(any(target_os="android", target_os="ios")))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn default() -> GlType {
         GlType::Gl
     }
@@ -87,6 +88,29 @@ macro_rules! declare_gl_apis {
                 rv
             })+
         }
+
+        impl<F: Fn(&Gl, &str, GLenum)> Gl for ErrorReactingGl<F> {
+            $($(unsafe $($garbo)*)* fn $name(&self $(, $arg:$t)*) $(-> $retty)* {
+                let rv = self.gl.$name($($arg,)*);
+                let error = self.gl.get_error();
+                if error != 0 {
+                    (self.callback)(&*self.gl, stringify!($name), error);
+                }
+                rv
+            })+
+        }
+
+        impl<F: Fn(&str, Duration)> Gl for ProfilingGl<F> {
+            $($(unsafe $($garbo)*)* fn $name(&self $(, $arg:$t)*) $(-> $retty)* {
+                let start = Instant::now();
+                let rv = self.gl.$name($($arg,)*);
+                let duration = Instant::now() - start;
+                if duration > self.threshold {
+                    (self.callback)(stringify!($name), duration);
+                }
+                rv
+            })+
+        }
     }
 }
 
@@ -102,6 +126,15 @@ declare_gl_apis! {
                                 offset: isize,
                                 size: GLsizeiptr,
                                 data: *const GLvoid);
+    fn map_buffer(&self,
+                  target: GLenum,
+                  access: GLbitfield) -> *mut c_void;
+    fn map_buffer_range(&self,
+                        target: GLenum,
+                        offset: GLintptr,
+                        length: GLsizeiptr,
+                        access: GLbitfield) -> *mut c_void;
+    fn unmap_buffer(&self, target: GLenum) -> GLboolean;
     fn tex_buffer(&self, target: GLenum, internal_format: GLenum, buffer: GLuint);
     fn shader_source(&self, shader: GLuint, strings: &[&[u8]]);
     fn read_buffer(&self, mode: GLenum);
@@ -121,6 +154,13 @@ declare_gl_apis! {
                     format: GLenum,
                     pixel_type: GLenum)
                     -> Vec<u8>;
+    unsafe fn read_pixels_into_pbo(&self,
+                                   x: GLint,
+                                   y: GLint,
+                                   width: GLsizei,
+                                   height: GLsizei,
+                                   format: GLenum,
+                                   pixel_type: GLenum);
     fn sample_coverage(&self, value: GLclampf, invert: bool);
     fn polygon_offset(&self, factor: GLfloat, units: GLfloat);
     fn pixel_store_i(&self, name: GLenum, param: GLint);
@@ -513,6 +553,9 @@ declare_gl_apis! {
     fn insert_event_marker_ext(&self, message: &str);
     fn push_group_marker_ext(&self, message: &str);
     fn pop_group_marker_ext(&self);
+    fn debug_message_insert_khr(&self, source: GLenum, type_: GLenum, id: GLuint, severity: GLenum, message: &str);
+    fn push_debug_group_khr(&self, source: GLenum, id: GLuint, message: &str);
+    fn pop_debug_group_khr(&self);
     fn fence_sync(&self, condition: GLenum, flags: GLbitfield) -> GLsync;
     fn client_wait_sync(&self, sync: GLsync, flags: GLbitfield, timeout: GLuint64);
     fn wait_sync(&self, sync: GLsync, flags: GLbitfield, timeout: GLuint64);
@@ -523,6 +566,10 @@ declare_gl_apis! {
     fn set_fence_apple(&self, fence: GLuint);
     fn finish_fence_apple(&self, fence: GLuint);
     fn test_fence_apple(&self, fence: GLuint);
+    fn test_object_apple(&self, object: GLenum, name: GLuint) -> GLboolean;
+    fn finish_object_apple(&self, object: GLenum, name: GLuint);
+    // GL_KHR_blend_equation_advanced
+    fn blend_barrier_khr(&self);
 
     // GL_ARB_blend_func_extended
     fn bind_frag_data_location_indexed(
@@ -540,8 +587,12 @@ declare_gl_apis! {
 
     // GL_KHR_debug
     fn get_debug_messages(&self) -> Vec<DebugMessage>;
+
+    // GL_ANGLE_provoking_vertex.
+    fn provoking_vertex_angle(&self, mode: GLenum);
 }
 
+//#[deprecated(since = "0.6.11", note = "use ErrorReactingGl instead")]
 pub struct ErrorCheckingGl {
     gl: Rc<Gl>,
 }
@@ -552,28 +603,60 @@ impl ErrorCheckingGl {
     }
 }
 
+/// A wrapper around GL context that calls a specified callback on each GL error.
+pub struct ErrorReactingGl<F> {
+    gl: Rc<Gl>,
+    callback: F,
+}
+
+impl<F: 'static + Fn(&Gl, &str, GLenum)> ErrorReactingGl<F> {
+    pub fn wrap(fns: Rc<Gl>, callback: F) -> Rc<Gl> {
+        Rc::new(ErrorReactingGl { gl: fns, callback }) as Rc<Gl>
+    }
+}
+
+/// A wrapper around GL context that times each call and invokes the callback
+/// if the call takes longer than the threshold.
+pub struct ProfilingGl<F> {
+    gl: Rc<Gl>,
+    threshold: Duration,
+    callback: F,
+}
+
+impl<F: 'static + Fn(&str, Duration)> ProfilingGl<F> {
+    pub fn wrap(fns: Rc<Gl>, threshold: Duration, callback: F) -> Rc<Gl> {
+        Rc::new(ProfilingGl { gl: fns, threshold, callback }) as Rc<Gl>
+    }
+}
+
 #[inline]
 pub fn buffer_data<T>(gl_: &Gl, target: GLenum, data: &[T], usage: GLenum) {
-    gl_.buffer_data_untyped(target,
-                            (data.len() * size_of::<T>()) as GLsizeiptr,
-                            data.as_ptr() as *const GLvoid,
-                            usage)
+    gl_.buffer_data_untyped(
+        target,
+        (data.len() * size_of::<T>()) as GLsizeiptr,
+        data.as_ptr() as *const GLvoid,
+        usage,
+    )
 }
 
 #[inline]
 pub fn buffer_data_raw<T>(gl_: &Gl, target: GLenum, data: &T, usage: GLenum) {
-    gl_.buffer_data_untyped(target,
-                            size_of::<T>() as GLsizeiptr,
-                            data as *const T as *const GLvoid,
-                            usage)
+    gl_.buffer_data_untyped(
+        target,
+        size_of::<T>() as GLsizeiptr,
+        data as *const T as *const GLvoid,
+        usage,
+    )
 }
 
 #[inline]
 pub fn buffer_sub_data<T>(gl_: &Gl, target: GLenum, offset: isize, data: &[T]) {
-    gl_.buffer_sub_data_untyped(target,
-                                offset,
-                                (data.len() * size_of::<T>()) as GLsizeiptr,
-                                data.as_ptr() as *const GLvoid);
+    gl_.buffer_sub_data_untyped(
+        target,
+        offset,
+        (data.len() * size_of::<T>()) as GLsizeiptr,
+        data.as_ptr() as *const GLvoid,
+    );
 }
 
 include!("gl_fns.rs");

@@ -9,11 +9,14 @@
 
 #include "mozilla/Array.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/EnumeratedArray.h"
 #include "mozilla/MemoryReporting.h"
 
 #include <utility>
 
 #include "builtin/TypedObject.h"
+#include "jit/BaselineICList.h"
+#include "jit/BaselineJIT.h"
 #include "jit/CompileInfo.h"
 #include "jit/ICStubSpace.h"
 #include "jit/IonCode.h"
@@ -28,6 +31,10 @@ namespace js {
 namespace jit {
 
 class FrameSizeClass;
+struct VMFunctionData;
+
+enum class TailCallVMFunctionId;
+enum class VMFunctionId;
 
 struct EnterJitData {
   explicit EnterJitData(JSContext* cx)
@@ -57,6 +64,62 @@ struct EnterJitData {
 
   bool constructing;
 };
+
+enum class BaselineICFallbackKind {
+#define DEF_ENUM_KIND(kind) kind,
+  IC_BASELINE_FALLBACK_CODE_KIND_LIST(DEF_ENUM_KIND)
+#undef DEF_ENUM_KIND
+      Count
+};
+
+enum class BailoutReturnKind {
+  GetProp,
+  GetPropSuper,
+  SetProp,
+  GetElem,
+  GetElemSuper,
+  Call,
+  New,
+  Count
+};
+
+// Class storing code and offsets for all Baseline IC fallback trampolines. This
+// is stored in JitRuntime and generated when creating the JitRuntime.
+class BaselineICFallbackCode {
+  JitCode* code_ = nullptr;
+  using OffsetArray =
+      mozilla::EnumeratedArray<BaselineICFallbackKind,
+                               BaselineICFallbackKind::Count, uint32_t>;
+  OffsetArray offsets_ = {};
+
+  // Keep track of offset into various baseline stubs' code at return
+  // point from called script.
+  using BailoutReturnArray =
+      mozilla::EnumeratedArray<BailoutReturnKind, BailoutReturnKind::Count,
+                               uint32_t>;
+  BailoutReturnArray bailoutReturnOffsets_ = {};
+
+ public:
+  BaselineICFallbackCode() = default;
+  BaselineICFallbackCode(const BaselineICFallbackCode&) = delete;
+  void operator=(const BaselineICFallbackCode&) = delete;
+
+  void initOffset(BaselineICFallbackKind kind, uint32_t offset) {
+    offsets_[kind] = offset;
+  }
+  void initCode(JitCode* code) { code_ = code; }
+  void initBailoutReturnOffset(BailoutReturnKind kind, uint32_t offset) {
+    bailoutReturnOffsets_[kind] = offset;
+  }
+  TrampolinePtr addr(BaselineICFallbackKind kind) const {
+    return TrampolinePtr(code_->raw() + offsets_[kind]);
+  }
+  uint8_t* bailoutReturnAddr(BailoutReturnKind kind) const {
+    return code_->raw() + bailoutReturnOffsets_[kind];
+  }
+};
+
+enum class DebugTrapHandlerKind { Interpreter, Compiler, Count };
 
 typedef void (*EnterJitCode)(void* code, unsigned argc, Value* argv,
                              InterpreterFrame* fp, CalleeToken calleeToken,
@@ -115,7 +178,6 @@ class JitRuntime {
   WriteOnceData<uint32_t> objectGroupPreBarrierOffset_;
 
   // Thunk to call malloc/free.
-  WriteOnceData<uint32_t> mallocStubOffset_;
   WriteOnceData<uint32_t> freeStubOffset_;
 
   // Thunk called to finish compilation of an IonScript.
@@ -129,11 +191,16 @@ class JitRuntime {
   WriteOnceData<uint32_t> doubleToInt32ValueStubOffset_;
 
   // Thunk used by the debugger for breakpoint and step mode.
-  WriteOnceData<JitCode*> debugTrapHandler_;
+  mozilla::EnumeratedArray<DebugTrapHandlerKind, DebugTrapHandlerKind::Count,
+                           WriteOnceData<JitCode*>>
+      debugTrapHandlers_;
 
   // Thunk used to fix up on-stack recompile of baseline scripts.
   WriteOnceData<JitCode*> baselineDebugModeOSRHandler_;
   WriteOnceData<void*> baselineDebugModeOSRHandlerNoFrameRegPopAddr_;
+
+  // BaselineInterpreter state.
+  BaselineInterpreter baselineInterpreter_;
 
   // Code for trampolines and VMFunction wrappers.
   WriteOnceData<JitCode*> trampolineCode_;
@@ -142,6 +209,16 @@ class JitRuntime {
   // trampolineCode_.
   using VMWrapperMap = HashMap<const VMFunction*, uint32_t, VMFunction>;
   WriteOnceData<VMWrapperMap*> functionWrappers_;
+
+  // Maps VMFunctionId to the offset of the wrapper code in trampolineCode_.
+  using VMWrapperOffsets = Vector<uint32_t, 0, SystemAllocPolicy>;
+  VMWrapperOffsets functionWrapperOffsets_;
+
+  // Maps TailCallVMFunctionId to the offset of the wrapper code in
+  // trampolineCode_.
+  VMWrapperOffsets tailCallFunctionWrapperOffsets_;
+
+  MainThreadData<BaselineICFallbackCode> baselineICFallbackCode_;
 
   // Global table of jitcode native address => bytecode address mappings.
   UnprotectedData<JitcodeGlobalTable*> jitcodeGlobalTable_;
@@ -169,6 +246,9 @@ class JitRuntime {
   MainThreadData<uint64_t> disambiguationId_;
 
  private:
+  bool generateTrampolines(JSContext* cx);
+  bool generateBaselineICFallbackCode(JSContext* cx);
+
   void generateLazyLinkStub(MacroAssembler& masm);
   void generateInterpreterStub(MacroAssembler& masm);
   void generateDoubleToInt32ValueStub(MacroAssembler& masm);
@@ -185,20 +265,27 @@ class JitRuntime {
   void generateInvalidator(MacroAssembler& masm, Label* bailoutTail);
   uint32_t generatePreBarrier(JSContext* cx, MacroAssembler& masm,
                               MIRType type);
-  void generateMallocStub(MacroAssembler& masm);
   void generateFreeStub(MacroAssembler& masm);
-  JitCode* generateDebugTrapHandler(JSContext* cx);
+  JitCode* generateDebugTrapHandler(JSContext* cx, DebugTrapHandlerKind kind);
   JitCode* generateBaselineDebugModeOSRHandler(
       JSContext* cx, uint32_t* noFrameRegPopOffsetOut);
+
   bool generateVMWrapper(JSContext* cx, MacroAssembler& masm,
-                         const VMFunction& f);
+                         const VMFunctionData& f, void* nativeFun,
+                         uint32_t* wrapperOffset);
 
-  bool generateTLEventVM(MacroAssembler& masm, const VMFunction& f, bool enter);
+  template <typename IdT>
+  bool generateVMWrappers(JSContext* cx, MacroAssembler& masm,
+                          VMWrapperOffsets& offsets);
+  bool generateVMWrappers(JSContext* cx, MacroAssembler& masm);
 
-  inline bool generateTLEnterVM(MacroAssembler& masm, const VMFunction& f) {
+  bool generateTLEventVM(MacroAssembler& masm, const VMFunctionData& f,
+                         bool enter);
+
+  inline bool generateTLEnterVM(MacroAssembler& masm, const VMFunctionData& f) {
     return generateTLEventVM(masm, f, /* enter = */ true);
   }
-  inline bool generateTLExitVM(MacroAssembler& masm, const VMFunction& f) {
+  inline bool generateTLExitVM(MacroAssembler& masm, const VMFunctionData& f) {
     return generateTLEventVM(masm, f, /* enter = */ false);
   }
 
@@ -222,14 +309,30 @@ class JitRuntime {
 
   ExecutableAllocator& execAlloc() { return execAlloc_.ref(); }
 
+  const BaselineICFallbackCode& baselineICFallbackCode() const {
+    return baselineICFallbackCode_.ref();
+  }
+
   IonCompilationId nextCompilationId() {
     return IonCompilationId(nextCompilationId_++);
   }
 
   TrampolinePtr getVMWrapper(const VMFunction& f) const;
-  JitCode* debugTrapHandler(JSContext* cx);
+
+  TrampolinePtr getVMWrapper(VMFunctionId funId) const {
+    MOZ_ASSERT(trampolineCode_);
+    return trampolineCode(functionWrapperOffsets_[size_t(funId)]);
+  }
+  TrampolinePtr getVMWrapper(TailCallVMFunctionId funId) const {
+    MOZ_ASSERT(trampolineCode_);
+    return trampolineCode(tailCallFunctionWrapperOffsets_[size_t(funId)]);
+  }
+
+  JitCode* debugTrapHandler(JSContext* cx, DebugTrapHandlerKind kind);
   JitCode* getBaselineDebugModeOSRHandler(JSContext* cx);
   void* getBaselineDebugModeOSRHandlerAddress(JSContext* cx, bool popFrameReg);
+
+  BaselineInterpreter& baselineInterpreter() { return baselineInterpreter_; }
 
   TrampolinePtr getGenericBailoutHandler() const {
     return trampolineCode(bailoutHandlerOffset_);
@@ -283,8 +386,6 @@ class JitRuntime {
         MOZ_CRASH();
     }
   }
-
-  TrampolinePtr mallocStub() const { return trampolineCode(mallocStubOffset_); }
 
   TrampolinePtr freeStub() const { return trampolineCode(freeStubOffset_); }
 
@@ -377,7 +478,7 @@ struct CacheIRStubKey : public DefaultHasher<CacheIRStubKey> {
 
 template <typename Key>
 struct IcStubCodeMapGCPolicy {
-  static bool needsSweep(Key*, ReadBarrieredJitCode* value) {
+  static bool needsSweep(Key*, WeakHeapPtrJitCode* value) {
     return IsAboutToBeFinalized(value);
   }
 };
@@ -395,7 +496,7 @@ class JitZone {
 
   // Map CacheIRStubKey to shared JitCode objects.
   using BaselineCacheIRStubCodeMap =
-      GCHashMap<CacheIRStubKey, ReadBarrieredJitCode, CacheIRStubKey,
+      GCHashMap<CacheIRStubKey, WeakHeapPtrJitCode, CacheIRStubKey,
                 SystemAllocPolicy, IcStubCodeMapGCPolicy<CacheIRStubKey>>;
   BaselineCacheIRStubCodeMap baselineCacheIRStubCodes_;
 
@@ -441,41 +542,19 @@ class JitZone {
   void purgeIonCacheIRStubInfo() { ionCacheIRStubInfoSet_.clearAndCompact(); }
 };
 
-enum class BailoutReturnStub {
-  GetProp,
-  GetPropSuper,
-  SetProp,
-  Call,
-  New,
-  Count
-};
-
 class JitRealm {
   friend class JitActivation;
 
   // Map ICStub keys to ICStub shared code objects.
   using ICStubCodeMap =
-      GCHashMap<uint32_t, ReadBarrieredJitCode, DefaultHasher<uint32_t>,
+      GCHashMap<uint32_t, WeakHeapPtrJitCode, DefaultHasher<uint32_t>,
                 ZoneAllocPolicy, IcStubCodeMapGCPolicy<uint32_t>>;
   ICStubCodeMap* stubCodes_;
 
-  // Keep track of offset into various baseline stubs' code at return
-  // point from called script.
-  struct BailoutReturnStubInfo {
-    void* addr;
-    uint32_t key;
-
-    BailoutReturnStubInfo() : addr(nullptr), key(0) {}
-    BailoutReturnStubInfo(void* addr_, uint32_t key_)
-        : addr(addr_), key(key_) {}
-  };
-  mozilla::EnumeratedArray<BailoutReturnStub, BailoutReturnStub::Count,
-                           BailoutReturnStubInfo>
-      bailoutReturnStubInfo_;
-
-  // The JitRealm stores stubs to concatenate strings inline and perform
-  // RegExp calls inline.  These bake in zone and realm specific pointers
-  // and can't be stored in JitRuntime.
+  // The JitRealm stores stubs to concatenate strings inline and perform RegExp
+  // calls inline. These bake in zone and realm specific pointers and can't be
+  // stored in JitRuntime. They also are dependent on the value of
+  // 'stringsCanBeInNursery' and must be flushed when its value changes.
   //
   // These are weak pointers, but they can by accessed during off-thread Ion
   // compilation and therefore can't use the usual read barrier. Instead, we
@@ -490,8 +569,10 @@ class JitRealm {
     Count
   };
 
-  mozilla::EnumeratedArray<StubIndex, StubIndex::Count, ReadBarrieredJitCode>
+  mozilla::EnumeratedArray<StubIndex, StubIndex::Count, WeakHeapPtrJitCode>
       stubs_;
+
+  bool stringsCanBeInNursery;
 
   JitCode* generateStringConcatStub(JSContext* cx);
   JitCode* generateRegExpMatcherStub(JSContext* cx);
@@ -522,19 +603,11 @@ class JitRealm {
     }
     return true;
   }
-  void initBailoutReturnAddr(void* addr, uint32_t key, BailoutReturnStub kind) {
-    MOZ_ASSERT(bailoutReturnStubInfo_[kind].addr == nullptr);
-    bailoutReturnStubInfo_[kind] = BailoutReturnStubInfo{addr, key};
-  }
-  void* bailoutReturnAddr(BailoutReturnStub kind) {
-    MOZ_ASSERT(bailoutReturnStubInfo_[kind].addr);
-    return bailoutReturnStubInfo_[kind].addr;
-  }
 
   JitRealm();
   ~JitRealm();
 
-  MOZ_MUST_USE bool initialize(JSContext* cx);
+  MOZ_MUST_USE bool initialize(JSContext* cx, bool zoneHasNurseryStrings);
 
   // Initialize code stubs only used by Ion, not Baseline.
   MOZ_MUST_USE bool ensureIonStubsExist(JSContext* cx) {
@@ -548,9 +621,23 @@ class JitRealm {
   void sweep(JS::Realm* realm);
 
   void discardStubs() {
-    for (ReadBarrieredJitCode& stubRef : stubs_) {
+    for (WeakHeapPtrJitCode& stubRef : stubs_) {
       stubRef = nullptr;
     }
+  }
+
+  bool hasStubs() const {
+    for (const WeakHeapPtrJitCode& stubRef : stubs_) {
+      if (stubRef) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void setStringsCanBeInNursery(bool allow) {
+    MOZ_ASSERT(!hasStubs());
+    stringsCanBeInNursery = allow;
   }
 
   JitCode* stringConcatStubNoBarrier(uint32_t* requiredBarriersOut) const {
@@ -602,8 +689,6 @@ class JitRealm {
   void performStubReadBarriers(uint32_t stubsToBarrier) const;
 
   size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
-
-  bool stringsCanBeInNursery;
 };
 
 // Called from Zone::discardJitCode().

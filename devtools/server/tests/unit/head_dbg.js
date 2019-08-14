@@ -18,8 +18,12 @@ _appInfo.updateAppInfo({
   crashReporter: true,
 });
 
-const { require, loader } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
-const { worker } = ChromeUtils.import("resource://devtools/shared/worker/loader.js", {});
+const { require, loader } = ChromeUtils.import(
+  "resource://devtools/shared/Loader.jsm"
+);
+const { worker } = ChromeUtils.import(
+  "resource://devtools/shared/worker/loader.js"
+);
 const defer = require("devtools/shared/defer");
 const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 
@@ -31,17 +35,25 @@ Services.prefs.setBoolPref("devtools.debugger.log", true);
 Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const { ActorRegistry } = require("devtools/server/actors/utils/actor-registry");
+const {
+  ActorRegistry,
+} = require("devtools/server/actors/utils/actor-registry");
 const { DebuggerServer } = require("devtools/server/main");
-const { DebuggerServer: WorkerDebuggerServer } = worker.require("devtools/server/main");
+const { DebuggerServer: WorkerDebuggerServer } = worker.require(
+  "devtools/server/main"
+);
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 const ObjectClient = require("devtools/shared/client/object-client");
-const {TargetFactory} = require("devtools/client/framework/target");
+const { LongStringFront } = require("devtools/shared/fronts/string");
+const { TargetFactory } = require("devtools/client/framework/target");
 
-const { addDebuggerToGlobal } = ChromeUtils.import("resource://gre/modules/jsdebugger.jsm", {});
+const { addDebuggerToGlobal } = ChromeUtils.import(
+  "resource://gre/modules/jsdebugger.jsm"
+);
 
-const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"]
-                        .createInstance(Ci.nsIPrincipal);
+const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].createInstance(
+  Ci.nsIPrincipal
+);
 
 var { loadSubScript, loadSubScriptWithOptions } = Services.scriptloader;
 
@@ -60,40 +72,14 @@ function startupAddonsManager() {
   internalManager.observe(null, "addons-startup", null);
 }
 
-/**
- * Create a MemoryFront for a fake test tab.
- *
- * When the test ends, the front should be detached and we should call
- * `finishClient(client)`.
- */
-async function createTabMemoryFront() {
-  const client = await startTestDebuggerServer("test_MemoryActor");
+async function createTargetForFakeTab(title) {
+  const client = await startTestDebuggerServer(title);
 
-  // MemoryFront requires the HeadSnapshotActor actor to be available
-  // as a global actor. This isn't registered by startTestDebuggerServer which
-  // only register the target actors and not the browser ones.
-  DebuggerServer.registerActors({ browser: true });
-
-  const { tabs } = await listTabs(client);
-  const tab = findTab(tabs, "test_MemoryActor");
-  const options = {
-    form: tab,
-    client,
-    chrome: false,
-  };
-  const target = await TargetFactory.forRemoteTab(options);
-
-  const memoryFront = await target.getFront("memory");
-  await memoryFront.attach();
-
-  return { client, memoryFront };
+  const tabs = await listTabs(client);
+  return findTab(tabs, title);
 }
 
-/**
- * Same as createTabMemoryFront but attaches the MemoryFront to the MemoryActor
- * scoped to the full runtime rather than to a tab.
- */
-async function createFullRuntimeMemoryFront() {
+async function createTargetForMainProcess() {
   DebuggerServer.init();
   DebuggerServer.registerAllActors();
   DebuggerServer.allowChromeProcess = true;
@@ -101,23 +87,111 @@ async function createFullRuntimeMemoryFront() {
   const client = new DebuggerClient(DebuggerServer.connectPipe());
   await client.connect();
 
-  const front = await client.mainRoot.getMainProcess();
-  const options = {
-    activeTab: front,
-    client,
-    chrome: true,
-  };
-  const target = await TargetFactory.forRemoteTab(options);
+  return client.mainRoot.getMainProcess();
+}
+
+/**
+ * Create a MemoryFront for a fake test tab.
+ */
+async function createTabMemoryFront() {
+  const target = await createTargetForFakeTab("test_memory");
+
+  // MemoryFront requires the HeadSnapshotActor actor to be available
+  // as a global actor. This isn't registered by startTestDebuggerServer which
+  // only register the target actors and not the browser ones.
+  DebuggerServer.registerActors({ browser: true });
 
   const memoryFront = await target.getFront("memory");
   await memoryFront.attach();
 
-  return { client, memoryFront };
+  registerCleanupFunction(async () => {
+    await memoryFront.detach();
+
+    // On XPCShell, the target isn't for a local tab and so target.destroy
+    // won't close the client. So do it so here. It will automatically destroy the target.
+    await target.client.close();
+  });
+
+  return { target, memoryFront };
+}
+
+/**
+ * Create a PromisesFront for a fake test tab.
+ */
+async function createTabPromisesFront() {
+  const title = "test_promises";
+  const target = await createTargetForFakeTab(title);
+
+  // Retrieve the debuggee create by createTargetForFakeTab
+  const debuggee = DebuggerServer.getTestGlobal(title);
+
+  const promisesFront = await target.getFront("promises");
+
+  registerCleanupFunction(async () => {
+    // On XPCShell, the target isn't for a local tab and so target.destroy
+    // won't close the client. So do it so here. It will automatically destroy the target.
+    await target.client.close();
+  });
+
+  return { debuggee, client: target.client, promisesFront };
+}
+
+/**
+ * Create a PromisesFront for the main process target actor.
+ */
+async function createMainProcessPromisesFront() {
+  const target = await createTargetForMainProcess();
+
+  const promisesFront = await target.getFront("promises");
+
+  registerCleanupFunction(async () => {
+    // For XPCShell, the main process target actor is ContentProcessTargetActor
+    // which doesn't expose any `detach` method. So that the target actor isn't
+    // destroyed when calling target.destroy.
+    // Close the client to cleanup everything.
+    await target.client.close();
+  });
+
+  return { client: target.client, promisesFront };
+}
+
+/**
+ * Same as createTabMemoryFront but attaches the MemoryFront to the MemoryActor
+ * scoped to the full runtime rather than to a tab.
+ */
+async function createMainProcessMemoryFront() {
+  const target = await createTargetForMainProcess();
+
+  const memoryFront = await target.getFront("memory");
+  await memoryFront.attach();
+
+  registerCleanupFunction(async () => {
+    await memoryFront.detach();
+    // For XPCShell, the main process target actor is ContentProcessTargetActor
+    // which doesn't expose any `detach` method. So that the target actor isn't
+    // destroyed when calling target.destroy.
+    // Close the client to cleanup everything.
+    await target.client.close();
+  });
+
+  return { client: target.client, memoryFront };
+}
+
+function createLongStringFront(conn, form) {
+  // CAUTION -- do not replicate in the codebase. Instead, use marshalling
+  // This code is simulating how the LongStringFront would be created by protocol.js
+  // We should not use it like this in the codebase, this is done only for testing
+  // purposes until we can return a proper LongStringFront from the server.
+  const front = new LongStringFront(conn, form);
+  front.actorID = form.actor;
+  front.manage(front);
+  return front;
 }
 
 function createTestGlobal(name) {
-  const sandbox = Cu.Sandbox(Cc["@mozilla.org/systemprincipal;1"]
-                           .createInstance(Ci.nsIPrincipal));
+  const sandbox = Cu.Sandbox(
+    Cc["@mozilla.org/systemprincipal;1"].createInstance(Ci.nsIPrincipal)
+  );
   sandbox.__name = name;
   return sandbox;
 }
@@ -134,7 +208,7 @@ function close(client) {
 
 function listTabs(client) {
   dump("Listing tabs.\n");
-  return client.listTabs();
+  return client.mainRoot.listTabs();
 }
 
 function findTab(tabs, title) {
@@ -145,11 +219,6 @@ function findTab(tabs, title) {
     }
   }
   return null;
-}
-
-function attachTarget(client, tab) {
-  dump("Attaching to tab with title '" + tab.title + "'.\n");
-  return client.attachTarget(tab);
 }
 
 function waitForNewSource(threadClient, url) {
@@ -199,9 +268,9 @@ function waitForProperty(dbg, property) {
   });
 }
 
-function setBreakpoint(sourceClient, location) {
+function setBreakpoint(threadClient, location) {
   dump("Setting breakpoint.\n");
-  return sourceClient.setBreakpoint(location);
+  return threadClient.setBreakpoint(location, {});
 }
 
 function getPrototypeAndProperties(objClient) {
@@ -220,7 +289,7 @@ function testExceptionHook(ex) {
   try {
     do_report_unexpected_exception(ex);
   } catch (e) {
-    return {throw: e};
+    return { throw: e };
   }
   return undefined;
 }
@@ -256,9 +325,15 @@ var listener = {
         // If we've been given an nsIScriptError, then we can print out
         // something nicely formatted, for tools like Emacs to pick up.
         message.QueryInterface(Ci.nsIScriptError);
-        dumpn(message.sourceName + ":" + message.lineNumber + ": " +
-              scriptErrorFlagsToKind(message.flags) + ": " +
-              message.errorMessage);
+        dumpn(
+          message.sourceName +
+            ":" +
+            message.lineNumber +
+            ": " +
+            scriptErrorFlagsToKind(message.flags) +
+            ": " +
+            message.errorMessage
+        );
         string = message.errorMessage;
       } catch (e1) {
         // Be a little paranoid with message, as the whole goal here is to lose
@@ -271,17 +346,19 @@ var listener = {
       }
 
       // Make sure we exit all nested event loops so that the test can finish.
-      while (DebuggerServer
-             && DebuggerServer.xpcInspector
-             && DebuggerServer.xpcInspector.eventLoopNestLevel > 0) {
+      while (
+        DebuggerServer &&
+        DebuggerServer.xpcInspector &&
+        DebuggerServer.xpcInspector.eventLoopNestLevel > 0
+      ) {
         DebuggerServer.xpcInspector.exitNestedEventLoop();
       }
 
       // In the world before bug 997440, exceptions were getting lost because of
-      // the arbitrary JSContext being used in nsXPCWrappedJSClass::CallMethod.
+      // the arbitrary JSContext being used in nsXPCWrappedJS::CallMethod.
       // In the new world, the wanderers have returned. However, because of the,
       // currently very-broken, exception reporting machinery in
-      // XPCWrappedJSClass these get reported as errors to the console, even if
+      // nsXPCWrappedJS these get reported as errors to the console, even if
       // there's actually JS on the stack above that will catch them.  If we
       // throw an error here because of them our tests start failing.  So, we'll
       // just dump the message to the logs instead, to make sure the information
@@ -297,8 +374,9 @@ var listener = {
 Services.console.registerListener(listener);
 
 function testGlobal(name) {
-  const sandbox = Cu.Sandbox(Cc["@mozilla.org/systemprincipal;1"]
-                           .createInstance(Ci.nsIPrincipal));
+  const sandbox = Cu.Sandbox(
+    Cc["@mozilla.org/systemprincipal;1"].createInstance(Ci.nsIPrincipal)
+  );
   sandbox.__name = name;
   return sandbox;
 }
@@ -311,57 +389,52 @@ function addTestGlobal(name, server = DebuggerServer) {
 
 // List the DebuggerClient |client|'s tabs, look for one whose title is
 // |title|, and apply |callback| to the packet's entry for that tab.
-function getTestTab(client, title, callback) {
-  client.listTabs().then(function(response) {
-    for (const tab of response.tabs) {
-      if (tab.title === title) {
-        callback(tab);
-        return;
-      }
+async function getTestTab(client, title) {
+  const tabs = await client.mainRoot.listTabs();
+  for (const tab of tabs) {
+    if (tab.title === title) {
+      return tab;
     }
-    callback(null);
-  });
+  }
+  return null;
 }
 
-// Attach to |client|'s tab whose title is |title|; pass |callback| the
-// response packet and a TargetFront instance referring to that tab.
-function attachTestTab(client, title, callback) {
-  getTestTab(client, title, function(tab) {
-    client.attachTarget(tab).then(([response, targetFront]) => {
-      callback(response, targetFront);
-    });
-  });
+// Attach to |client|'s tab whose title is |title|; and return the targetFront instance
+// referring to that tab.
+async function attachTestTab(client, title) {
+  const targetFront = await getTestTab(client, title);
+  await targetFront.attach();
+  return targetFront;
 }
 
 // Attach to |client|'s tab whose title is |title|, and then attach to
 // that tab's thread. Pass |callback| the thread attach response packet, a
 // TargetFront referring to the tab, and a ThreadClient referring to the
 // thread.
-function attachTestThread(client, title, callback) {
-  attachTestTab(client, title, function(tabResponse, targetFront) {
-    function onAttach([response, threadClient]) {
-      callback(response, targetFront, threadClient, tabResponse);
-    }
-    targetFront.attachThread({
-      useSourceMaps: true,
-      autoBlackBox: true,
-    }).then(onAttach);
+async function attachTestThread(client, title, callback = () => {}) {
+  const targetFront = await attachTestTab(client, title);
+  const threadClient = await targetFront.getFront("context");
+  const onPaused = threadClient.once("paused");
+  await targetFront.attachThread({
+    autoBlackBox: true,
   });
+  const response = await onPaused;
+  Assert.equal(threadClient.state, "paused", "Thread client is paused");
+  Assert.ok("why" in response);
+  Assert.equal(response.why.type, "attached");
+  callback(response, targetFront, threadClient);
+  return { targetFront, threadClient };
 }
 
 // Attach to |client|'s tab whose title is |title|, attach to the tab's
 // thread, and then resume it. Pass |callback| the thread's response to
 // the 'resume' packet, a TargetFront for the tab, and a ThreadClient for the
 // thread.
-function attachTestTabAndResume(client, title, callback = () => {}) {
-  return new Promise((resolve) => {
-    attachTestThread(client, title, function(response, targetFront, threadClient) {
-      threadClient.resume(function(response) {
-        callback(response, targetFront, threadClient);
-        resolve([response, targetFront, threadClient]);
-      });
-    });
-  });
+async function attachTestTabAndResume(client, title, callback = () => {}) {
+  const { targetFront, threadClient } = await attachTestThread(client, title);
+  const response = await threadClient.resume();
+  callback(response, targetFront, threadClient);
+  return { targetFront, threadClient };
 }
 
 /**
@@ -403,11 +476,6 @@ async function finishClient(client) {
   do_test_finished();
 }
 
-function getParentProcessActors(client, server = DebuggerServer) {
-  server.allowChromeProcess = true;
-  return client.mainRoot.getMainProcess().then(response => response.targetForm);
-}
-
 /**
  * Takes a relative file path and returns the absolute file url for it.
  */
@@ -420,12 +488,15 @@ function getFileUrl(name, allowMissing = false) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(name, allowMissing = false, usePlatformPathSeparator = false) {
+function getFilePath(
+  name,
+  allowMissing = false,
+  usePlatformPathSeparator = false
+) {
   const file = do_get_file(name, allowMissing);
   let path = Services.io.newFileURI(file).spec;
   let filePrePath = "file://";
-  if ("nsILocalFileWin" in Ci &&
-      file instanceof Ci.nsILocalFileWin) {
+  if ("nsILocalFileWin" in Ci && file instanceof Ci.nsILocalFileWin) {
     filePrePath += "/";
   }
 
@@ -443,8 +514,9 @@ function getFilePath(name, allowMissing = false, usePlatformPathSeparator = fals
  */
 function readFile(fileName) {
   const f = do_get_file(fileName);
-  const s = Cc["@mozilla.org/network/file-input-stream;1"]
-    .createInstance(Ci.nsIFileInputStream);
+  const s = Cc["@mozilla.org/network/file-input-stream;1"].createInstance(
+    Ci.nsIFileInputStream
+  );
   s.init(f, -1, -1, false);
   try {
     return NetUtil.readInputStreamToString(s, s.available());
@@ -455,8 +527,9 @@ function readFile(fileName) {
 
 function writeFile(fileName, content) {
   const file = do_get_file(fileName, true);
-  const stream = Cc["@mozilla.org/network/file-output-stream;1"]
-    .createInstance(Ci.nsIFileOutputStream);
+  const stream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(
+    Ci.nsIFileOutputStream
+  );
   stream.init(file, -1, -1, 0);
   try {
     do {
@@ -485,12 +558,14 @@ function TracingTransport(childTransport) {
 TracingTransport.prototype = {
   // Remove actor names
   normalize: function(packet) {
-    return JSON.parse(JSON.stringify(packet, (key, value) => {
-      if (key === "to" || key === "from" || key === "actor") {
-        return "<actorid>";
-      }
-      return value;
-    }));
+    return JSON.parse(
+      JSON.stringify(packet, (key, value) => {
+        if (key === "to" || key === "from" || key === "actor") {
+          return "<actorid>";
+        }
+        return value;
+      })
+    );
   },
   send: function(packet) {
     this.packets.push({
@@ -541,7 +616,7 @@ TracingTransport.prototype = {
   },
 };
 
-function StubTransport() { }
+function StubTransport() {}
 StubTransport.prototype.ready = function() {};
 StubTransport.prototype.send = function() {};
 StubTransport.prototype.close = function() {};
@@ -551,8 +626,9 @@ StubTransport.prototype.close = function() {};
 // destructuring objects with methods that take callbacks.
 const Async = target => new Proxy(target, Async);
 Async.get = (target, name) =>
-  typeof (target[name]) === "function" ? asyncall.bind(null, target[name], target) :
-  target[name];
+  typeof target[name] === "function"
+    ? asyncall.bind(null, target[name], target)
+    : target[name];
 
 // Calls async function that takes callback and errorback and returns
 // returns promise representing result.
@@ -569,25 +645,25 @@ const assert = Assert.ok.bind(Assert);
 /**
  * Create a promise that is resolved on the next occurence of the given event.
  *
- * @param DebuggerClient client
+ * @param ThreadClient threadClient
  * @param String event
  * @param Function predicate
  * @returns Promise
  */
-function waitForEvent(client, type, predicate) {
+function waitForEvent(threadClient, type, predicate) {
   if (!predicate) {
-    return client.addOneTimeListener(type);
+    return threadClient.once(type);
   }
 
   return new Promise(function(resolve) {
-    function listener(type, packet) {
+    function listener(packet) {
       if (!predicate(packet)) {
         return;
       }
-      client.removeListener(listener);
+      threadClient.off(type, listener);
       resolve(packet);
     }
-    client.addListener(type, listener);
+    threadClient.on(type, listener);
   });
 }
 
@@ -604,23 +680,17 @@ function waitForEvent(client, type, predicate) {
  * and finally yield the promise.
  *
  * @param Function action
- * @param DebuggerClient client
+ * @param ThreadClient threadClient
  * @returns Promise
  */
-function executeOnNextTickAndWaitForPause(action, client) {
-  const paused = waitForPause(client);
+function executeOnNextTickAndWaitForPause(action, threadClient) {
+  const paused = waitForPause(threadClient);
   executeSoon(action);
   return paused;
 }
 
 function evalCallback(debuggeeGlobal, func) {
-  Cu.evalInSandbox(
-    "(" + func + ")()",
-    debuggeeGlobal,
-    "1.8",
-    "test.js",
-    1
-  );
+  Cu.evalInSandbox("(" + func + ")()", debuggeeGlobal, "1.8", "test.js", 1);
 }
 
 /**
@@ -642,8 +712,8 @@ function interrupt(threadClient) {
  * @param ThreadClient threadClient
  * @returns Promise
  */
-function resumeAndWaitForPause(client, threadClient) {
-  const paused = waitForPause(client);
+function resumeAndWaitForPause(threadClient) {
+  const paused = waitForPause(threadClient);
   return resume(threadClient).then(() => paused);
 }
 
@@ -651,29 +721,25 @@ function resumeAndWaitForPause(client, threadClient) {
  * Resume JS execution for a single step and wait for the pause after the step
  * has been taken.
  *
- * @param DebuggerClient client
  * @param ThreadClient threadClient
  * @returns Promise
  */
-function stepIn(client, threadClient) {
+function stepIn(threadClient) {
   dumpn("Stepping in.");
-  const paused = waitForPause(client);
-  return threadClient.stepIn()
-    .then(() => paused);
+  const paused = waitForPause(threadClient);
+  return threadClient.stepIn().then(() => paused);
 }
 
 /**
  * Resume JS execution for a step over and wait for the pause after the step
  * has been taken.
  *
- * @param DebuggerClient client
  * @param ThreadClient threadClient
  * @returns Promise
  */
-function stepOver(client, threadClient) {
+function stepOver(threadClient) {
   dumpn("Stepping over.");
-  return threadClient.stepOver()
-    .then(() => waitForPause(client));
+  return threadClient.stepOver().then(() => waitForPause(threadClient));
 }
 
 /**
@@ -684,10 +750,9 @@ function stepOver(client, threadClient) {
  * @param ThreadClient threadClient
  * @returns Promise
  */
-function stepOut(client, threadClient) {
+function stepOut(threadClient) {
   dumpn("Stepping out.");
-  return threadClient.stepOut()
-    .then(() => waitForPause(client));
+  return threadClient.stepOut().then(() => waitForPause(threadClient));
 }
 
 /**
@@ -707,35 +772,38 @@ function getFrames(threadClient, first, count) {
 /**
  * Black box the specified source.
  *
- * @param SourceClient sourceClient
+ * @param SourceFront sourceFront
  * @returns Promise
  */
-function blackBox(sourceClient) {
-  dumpn("Black boxing source: " + sourceClient.actor);
-  return sourceClient.blackBox();
+async function blackBox(sourceFront, range = null) {
+  dumpn("Black boxing source: " + sourceFront.actor);
+  const pausedInSource = await sourceFront.blackBox(range);
+  ok(true, "blackBox didn't throw");
+  return pausedInSource;
 }
 
 /**
  * Stop black boxing the specified source.
  *
- * @param SourceClient sourceClient
+ * @param SourceFront sourceFront
  * @returns Promise
  */
-function unBlackBox(sourceClient) {
-  dumpn("Un-black boxing source: " + sourceClient.actor);
-  return sourceClient.unblackBox();
+async function unBlackBox(sourceFront, range = null) {
+  dumpn("Un-black boxing source: " + sourceFront.actor);
+  await sourceFront.unblackBox(range);
+  ok(true, "unblackBox didn't throw");
 }
 
 /**
- * Perform a "source" RDP request with the given SourceClient to get the source
+ * Perform a "source" RDP request with the given SourceFront to get the source
  * content and content type.
  *
- * @param SourceClient sourceClient
+ * @param SourceFront sourceFront
  * @returns Promise
  */
-function getSourceContent(sourceClient) {
-  dumpn("Getting source content for " + sourceClient.actor);
-  return sourceClient.source();
+function getSourceContent(sourceFront) {
+  dumpn("Getting source content for " + sourceFront.actor);
+  return sourceFront.source();
 }
 
 /**
@@ -743,21 +811,30 @@ function getSourceContent(sourceClient) {
  *
  * @param ThreadClient threadClient
  * @param string url
- * @returns Promise<SourceClient>
+ * @returns Promise<SourceFront>
  */
-function getSource(threadClient, url) {
-  const deferred = defer();
-  threadClient.getSources((res) => {
-    const source = res.sources.filter(function(s) {
-      return s.url === url;
-    });
-    if (source.length) {
-      deferred.resolve(threadClient.source(source[0]));
-    } else {
-      deferred.reject(new Error("source not found"));
-    }
-  });
-  return deferred.promise;
+async function getSource(threadClient, url) {
+  const source = await getSourceForm(threadClient, url);
+  if (source) {
+    return threadClient.source(source);
+  }
+
+  throw new Error("source not found");
+}
+
+async function getSourceById(threadClient, id) {
+  const form = await getSourceFormById(threadClient, id);
+  return threadClient.source(form);
+}
+
+async function getSourceForm(threadClient, url) {
+  const { sources } = await threadClient.getSources();
+  return sources.find(s => s.url === url);
+}
+
+async function getSourceFormById(threadClient, id) {
+  const { sources } = await threadClient.getSources();
+  return sources.find(source => source.actor == id);
 }
 
 /**
@@ -814,9 +891,9 @@ async function setupTestFromUrl(url) {
   const debuggerClient = new DebuggerClient(DebuggerServer.connectPipe());
   await connect(debuggerClient);
 
-  const { tabs } = await listTabs(debuggerClient);
-  const tab = findTab(tabs, "test");
-  const [, targetFront] = await attachTarget(debuggerClient, tab);
+  const tabs = await listTabs(debuggerClient);
+  const targetFront = findTab(tabs, "test");
+  await targetFront.attach();
 
   const [, threadClient] = await attachThread(targetFront);
   await resume(threadClient);
@@ -826,8 +903,8 @@ async function setupTestFromUrl(url) {
   loadSubScript(sourceUrl, global);
   const { source } = await promise;
 
-  const sourceClient = threadClient.source(source);
-  return { global, debuggerClient, threadClient, sourceClient };
+  const sourceFront = threadClient.source(source);
+  return { global, debuggerClient, threadClient, sourceFront };
 }
 
 /**
@@ -863,8 +940,9 @@ function threadClientTest(test, options = {}) {
     initTestDebuggerServer(server);
 
     // Create a custom debuggee and register it to the server.
-    // We are using a custom Sandbox as debuggee.
-    const debuggee = Cu.Sandbox(principal);
+    // We are using a custom Sandbox as debuggee. Create a new zone because
+    // debugger and debuggee must be in different compartments.
+    const debuggee = Cu.Sandbox(principal, { freshZone: true });
     const scriptName = "debuggee.js";
     debuggee.__name = scriptName;
     server.addTestGlobal(debuggee);
@@ -874,11 +952,13 @@ function threadClientTest(test, options = {}) {
 
     // Attach to the fake tab target and retrieve the ThreadClient instance.
     // Automatically resume as the thread is paused by default after attach.
-    const [, , threadClient] =
-      await attachTestTabAndResume(client, scriptName);
+    const { targetFront, threadClient } = await attachTestTabAndResume(
+      client,
+      scriptName
+    );
 
     // Run the test function
-    await test({ threadClient, debuggee, client });
+    await test({ threadClient, debuggee, client, server, targetFront });
 
     // Cleanup the client after the test ran
     await client.close();

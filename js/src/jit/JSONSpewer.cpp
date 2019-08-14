@@ -6,26 +6,28 @@
 
 #ifdef JS_JITSPEW
 
-#include "jit/JSONSpewer.h"
+#  include "jit/JSONSpewer.h"
 
-#include <stdarg.h>
+#  include <stdarg.h>
 
-#include "jit/BacktrackingAllocator.h"
-#include "jit/LIR.h"
-#include "jit/MIR.h"
-#include "jit/MIRGraph.h"
-#include "jit/RangeAnalysis.h"
+#  include "jit/BacktrackingAllocator.h"
+#  include "jit/LIR.h"
+#  include "jit/MIR.h"
+#  include "jit/MIRGraph.h"
+#  include "jit/RangeAnalysis.h"
 
 using namespace js;
 using namespace js::jit;
 
 void JSONSpewer::beginFunction(JSScript* script) {
   beginObject();
-  if (script) {
-    formatProperty("name", "%s:%u", script->filename(), script->lineno());
-  } else {
-    property("name", "wasm compilation");
-  }
+  formatProperty("name", "%s:%u", script->filename(), script->lineno());
+  beginListProperty("passes");
+}
+
+void JSONSpewer::beginWasmFunction(unsigned funcIndex) {
+  beginObject();
+  formatProperty("name", "wasm-func%u", funcIndex);
   beginListProperty("passes");
 }
 
@@ -82,12 +84,12 @@ void JSONSpewer::spewMDef(MDefinition* def) {
   out_.printf("\"");
 
   beginListProperty("attributes");
-#define OUTPUT_ATTRIBUTE(X)      \
-  do {                           \
-    if (def->is##X()) value(#X); \
-  } while (0);
+#  define OUTPUT_ATTRIBUTE(X)      \
+    do {                           \
+      if (def->is##X()) value(#X); \
+    } while (0);
   MIR_FLAG_LIST(OUTPUT_ATTRIBUTE);
-#undef OUTPUT_ATTRIBUTE
+#  undef OUTPUT_ATTRIBUTE
   endList();
 
   beginListProperty("inputs");

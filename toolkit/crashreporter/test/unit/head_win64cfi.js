@@ -50,7 +50,7 @@ function findNearestTestCrasherSymbol(addr) {
 // Populate known symbols for testcrasher.dll.
 // Use the same prop names as from CrashTestUtils to avoid the need for mapping.
 function initTestCrasherSymbols() {
-  gTestCrasherSyms = { };
+  gTestCrasherSyms = {};
   for (let k in CrashTestUtils) {
     // Not all keys here are valid symbol names. getWin64CFITestFnAddrOffset
     // will return 0 in those cases, no need to filter here.
@@ -70,9 +70,11 @@ function stackFrameToString(frameIndex, frame) {
   let moduleOffset = "unknown_offset";
   let filename = "unknown_module";
 
-  if (typeof frame.module_index !== "undefined" && (frame.module_index >= 0)
-    && (frame.module_index < gModules.length)) {
-
+  if (
+    typeof frame.module_index !== "undefined" &&
+    frame.module_index >= 0 &&
+    frame.module_index < gModules.length
+  ) {
     let base = gModules[frame.module_index].base_addr;
     moduleOffset = getModuleOffset(base, ip);
     filename = gModules[frame.module_index].filename;
@@ -85,11 +87,19 @@ function stackFrameToString(frameIndex, frame) {
     }
   }
 
-  let ret = "frames[" + frameIndex + "] ip=" + ip +
-    " " + symbol +
-    ", module:" + filename +
-    ", trust:" + frame.trust +
-    ", moduleOffset:" + moduleOffset.toString(16);
+  let ret =
+    "frames[" +
+    frameIndex +
+    "] ip=" +
+    ip +
+    " " +
+    symbol +
+    ", module:" +
+    filename +
+    ", trust:" +
+    frame.trust +
+    ", moduleOffset:" +
+    moduleOffset.toString(16);
   return ret;
 }
 
@@ -113,7 +123,13 @@ function assertStack(stack, expected) {
     let expectedFrame = expected[i];
     let dumpThisFrame = function() {
       info("  Actual frame: " + stackFrameToString(i, frame));
-      info("Expected { symbol: " + expectedFrame.symbol + ", trust: " + expectedFrame.trust + "}");
+      info(
+        "Expected { symbol: " +
+          expectedFrame.symbol +
+          ", trust: " +
+          expectedFrame.trust +
+          "}"
+      );
     };
 
     if (expectedFrame.trust) {
@@ -175,7 +191,6 @@ function assertStack(stack, expected) {
 // minidumpAnalyzerArgs: An array of additional arguments to pass to
 //   minidump-analyzer.exe.
 function do_x64CFITest(how, expectedStack, minidumpAnalyzerArgs) {
-
   // Setup is run in the subprocess so we cannot use any closures.
   let setupFn = "crashType = CrashTestUtils." + how + ";";
 

@@ -14,18 +14,18 @@
 
 struct JSContext;
 class JSObject;
-class nsIDocument;
 class ComputedStyle;
 struct RawServoDeclarationBlock;
 
 namespace mozilla {
 struct AnimationProperty;
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 class ErrorResult;
 struct Keyframe;
 struct PropertyStyleAnimationValuePair;
 
 namespace dom {
+class Document;
 class Element;
 }  // namespace dom
 }  // namespace mozilla
@@ -56,7 +56,7 @@ class KeyframeUtils {
    *   returned.
    */
   static nsTArray<Keyframe> GetKeyframesFromObject(
-      JSContext* aCx, nsIDocument* aDocument, JS::Handle<JSObject*> aFrames,
+      JSContext* aCx, dom::Document* aDocument, JS::Handle<JSObject*> aFrames,
       ErrorResult& aRv);
 
   /**

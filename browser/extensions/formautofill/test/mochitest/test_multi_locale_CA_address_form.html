@@ -3,9 +3,8 @@
 <head>
   <meta charset="utf-8">
   <title>Test basic autofill</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/EventUtils.js"></script>
   <script type="text/javascript" src="formautofill_common.js"></script>
   <script type="text/javascript" src="satchel_common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
@@ -52,6 +51,12 @@ function checkElementFilled(element, expectedvalue) {
         if (element.tagName == "INPUT" && element.type == "text") {
           ok(event instanceof InputEvent,
              `"input" event should be dispatched with InputEvent interface on ${element.name}`);
+          is(event.inputType, "insertReplacementText",
+             "inputType value should be \"insertReplacementText\"");
+          is(event.data, element.value,
+             "data value should be same as value of the input element");
+          is(event.dataTransfer, null,
+             "dataTransfer value should be null");
         } else {
           ok(event instanceof Event && !(event instanceof UIEvent),
              `"input" event should be dispatched with Event interface on ${element.name}`);
@@ -75,7 +80,7 @@ function checkElementFilled(element, expectedvalue) {
 
 function checkAutoCompleteInputFilled(element, expectedvalue) {
   return new Promise(resolve => {
-    element.addEventListener("DOMAutoComplete", function onChange() {
+    element.addEventListener("input", function onInput() {
       is(element.value, expectedvalue, "Checking " + element.name + " field");
       resolve();
     }, {once: true});
@@ -120,7 +125,7 @@ add_task(async function setup() {
 
 // Autofill the address with address level 1 code.
 add_task(async function autofill_with_level1_code() {
-  await setInput("#organization-en", "Mozilla Toronto");
+  await setInput("#organization-en", "Mozilla Toront");
   synthesizeKey("KEY_ArrowDown");
   await expectPopup();
 
@@ -129,7 +134,7 @@ add_task(async function autofill_with_level1_code() {
   let result = Object.assign({}, MOCK_STORAGE[1], {"address-level1": "Ontario"});
   await checkFormFilled("#form-en", result);
 
-  await setInput("#organization-fr", "Mozilla Vancouver");
+  await setInput("#organization-fr", "Mozilla Vancouve");
   synthesizeKey("KEY_ArrowDown");
   await expectPopup();
 
@@ -143,7 +148,7 @@ add_task(async function autofill_with_level1_code() {
 
 // Autofill the address with address level 1 full name.
 add_task(async function autofill_with_level1_full_name() {
-  await setInput("#organization-en", "ExpoCité");
+  await setInput("#organization-en", "ExpoCit");
   synthesizeKey("KEY_ArrowDown");
   await expectPopup();
 
@@ -152,7 +157,7 @@ add_task(async function autofill_with_level1_full_name() {
   let result = Object.assign({}, MOCK_STORAGE[3], {"address-level1": "Quebec"});
   await checkFormFilled("#form-en", result);
 
-  await setInput("#organization-fr", "Prince of Wales Northern Heritage");
+  await setInput("#organization-fr", "Prince of Wales");
   synthesizeKey("KEY_ArrowDown");
   await expectPopup();
 

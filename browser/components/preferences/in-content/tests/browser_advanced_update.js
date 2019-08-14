@@ -5,9 +5,9 @@
 
 const Cm = Components.manager;
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
-const uuidGenerator = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
+const uuidGenerator = Cc["@mozilla.org/uuid-generator;1"].getService(
+  Ci.nsIUUIDGenerator
+);
 
 const mockUpdateManager = {
   contractId: "@mozilla.org/updates/update-manager;1",
@@ -15,8 +15,6 @@ const mockUpdateManager = {
   _mockClassId: uuidGenerator.generateUUID(),
 
   _originalClassId: "",
-
-  _originalFactory: null,
 
   QueryInterface: ChromeUtils.generateQI([Ci.nsIUpdateManager]),
 
@@ -31,16 +29,19 @@ const mockUpdateManager = {
     let registrar = Cm.QueryInterface(Ci.nsIComponentRegistrar);
     if (!registrar.isCIDRegistered(this._mockClassId)) {
       this._originalClassId = registrar.contractIDToCID(this.contractId);
-      this._originalFactory = Cm.getClassObject(Cc[this.contractId], Ci.nsIFactory);
-      registrar.unregisterFactory(this._originalClassId, this._originalFactory);
-      registrar.registerFactory(this._mockClassId, "Unregister after testing", this.contractId, this);
+      registrar.registerFactory(
+        this._mockClassId,
+        "Unregister after testing",
+        this.contractId,
+        this
+      );
     }
   },
 
   unregister() {
     let registrar = Cm.QueryInterface(Ci.nsIComponentRegistrar);
     registrar.unregisterFactory(this._mockClassId, this);
-    registrar.registerFactory(this._originalClassId, "", this.contractId, this._originalFactory);
+    registrar.registerFactory(this._originalClassId, "", this.contractId, null);
   },
 
   get updateCount() {
@@ -82,8 +83,14 @@ function resetPreferences() {
 
 function formatInstallDate(sec) {
   var date = new Date(sec);
-  const dtOptions = { year: "numeric", month: "long", day: "numeric",
-                      hour: "numeric", minute: "numeric", second: "numeric" };
+  const dtOptions = {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+  };
   return date.toLocaleString(undefined, dtOptions);
 }
 
@@ -96,7 +103,10 @@ add_task(async function() {
 
   let doc = gBrowser.selectedBrowser.contentDocument;
   let enableSearchUpdate = doc.getElementById("enableSearchUpdate");
-  is_element_visible(enableSearchUpdate, "Check search update preference is visible");
+  is_element_visible(
+    enableSearchUpdate,
+    "Check search update preference is visible"
+  );
 
   // Ensure that the update pref dialog reflects the actual pref value.
   ok(!enableSearchUpdate.checked, "Ensure search updates are disabled");
@@ -122,7 +132,9 @@ add_task(async function() {
 
   // Test the dialog window opens
   is(dialogOverlay.style.visibility, "", "The dialog should be invisible");
-  let promiseSubDialogLoaded = promiseLoadSubDialog("chrome://mozapps/content/update/history.xul");
+  let promiseSubDialogLoaded = promiseLoadSubDialog(
+    "chrome://mozapps/content/update/history.xul"
+  );
   showBtn.doCommand();
   await promiseSubDialogLoaded;
   is(dialogOverlay.style.visibility, "visible", "The dialog should be visible");
@@ -132,7 +144,11 @@ add_task(async function() {
   let updates = frameDoc.querySelectorAll("richlistitem.update");
 
   // Test the update history numbers are correct
-  is(updates.length, mockUpdateManager.updateCount, "The update count is incorrect.");
+  is(
+    updates.length,
+    mockUpdateManager.updateCount,
+    "The update count is incorrect."
+  );
 
   // Test the updates are displayed correctly
   let update = null;
@@ -140,14 +156,45 @@ add_task(async function() {
   for (let i = 0; i < updates.length; ++i) {
     update = updates[i];
     updateData = mockUpdateManager.getUpdateAt(i);
-    const l10nAttrs = frameDoc.l10n.getAttributes(update);
-    Assert.deepEqual(l10nAttrs, {
-      id: "update-full-name",
-      args: { name: updateData.name, buildID: updateData.buildID },
-    }, "Wrong update name");
-    is(update.installDate, formatInstallDate(updateData.installDate), "Wrong update installDate");
-    is(update.detailsURL, updateData.detailsURL, "Wrong update detailsURL");
-    is(update.status, updateData.statusText, "Wrong update status");
+
+    let testcases = [
+      {
+        selector: ".update-name",
+        id: "update-full-build-name",
+        args: { name: updateData.name, buildID: updateData.buildID },
+      },
+      {
+        selector: ".update-installedOn-label",
+        id: "update-installed-on",
+        args: { date: formatInstallDate(updateData.installDate) },
+      },
+      {
+        selector: ".update-status-label",
+        id: "update-status",
+        args: { status: updateData.statusText },
+      },
+    ];
+
+    for (let { selector, id, args } of testcases) {
+      const element = update.querySelector(selector);
+      const l10nAttrs = frameDoc.l10n.getAttributes(element);
+      Assert.deepEqual(
+        l10nAttrs,
+        {
+          id,
+          args,
+        },
+        "Wrong " + id
+      );
+    }
+
+    if (update.detailsURL) {
+      is(
+        update.detailsURL,
+        update.querySelector(".text-link").href,
+        "Wrong detailsURL"
+      );
+    }
   }
 
   // Test the dialog window closes

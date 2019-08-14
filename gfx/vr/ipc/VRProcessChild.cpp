@@ -8,39 +8,77 @@
 
 #include "mozilla/BackgroundHangMonitor.h"
 #include "mozilla/ipc/IOThreadChild.h"
+#include "ProcessUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
 using mozilla::ipc::IOThreadChild;
 
+StaticRefPtr<VRParent> sVRParent;
+
 VRProcessChild::VRProcessChild(ProcessId aParentPid)
-    : ProcessChild(aParentPid)
-#if defined(aParentPid)
-      ,
-      mVR(nullptr)
-#endif
-{
+    : ProcessChild(aParentPid) {}
+
+VRProcessChild::~VRProcessChild() { sVRParent = nullptr; }
+
+/*static*/
+VRParent* VRProcessChild::GetVRParent() {
+  MOZ_ASSERT(sVRParent);
+  return sVRParent;
 }
 
-VRProcessChild::~VRProcessChild() {}
-
 bool VRProcessChild::Init(int aArgc, char* aArgv[]) {
-  BackgroundHangMonitor::Startup();
-
   char* parentBuildID = nullptr;
+  char* prefsHandle = nullptr;
+  char* prefMapHandle = nullptr;
+  char* prefsLen = nullptr;
+  char* prefMapSize = nullptr;
   for (int i = 1; i < aArgc; i++) {
     if (!aArgv[i]) {
       continue;
     }
     if (strcmp(aArgv[i], "-parentBuildID") == 0) {
       parentBuildID = aArgv[i + 1];
+
+#ifdef XP_WIN
+    } else if (strcmp(aArgv[i], "-prefsHandle") == 0) {
+      if (++i == aArgc) {
+        return false;
+      }
+      prefsHandle = aArgv[i];
+    } else if (strcmp(aArgv[i], "-prefMapHandle") == 0) {
+      if (++i == aArgc) {
+        return false;
+      }
+      prefMapHandle = aArgv[i];
+#endif
+    } else if (strcmp(aArgv[i], "-prefsLen") == 0) {
+      if (++i == aArgc) {
+        return false;
+      }
+      prefsLen = aArgv[i];
+    } else if (strcmp(aArgv[i], "-prefMapSize") == 0) {
+      if (++i == aArgc) {
+        return false;
+      }
+      prefMapSize = aArgv[i];
     }
   }
 
-  mVR.Init(ParentPid(), parentBuildID, IOThreadChild::message_loop(),
-           IOThreadChild::channel());
+  SharedPreferenceDeserializer deserializer;
+  if (!deserializer.DeserializeFromSharedMemory(prefsHandle, prefMapHandle,
+                                                prefsLen, prefMapSize)) {
+    return false;
+  }
+
+  sVRParent = new VRParent();
+  sVRParent->Init(ParentPid(), parentBuildID, IOThreadChild::message_loop(),
+                  IOThreadChild::channel());
 
   return true;
 }
 
-void VRProcessChild::CleanUp() { NS_ShutdownXPCOM(nullptr); }
+void VRProcessChild::CleanUp() {
+  sVRParent = nullptr;
+  NS_ShutdownXPCOM(nullptr);
+}

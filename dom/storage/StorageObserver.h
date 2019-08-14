@@ -18,8 +18,10 @@ namespace dom {
 
 class StorageObserver;
 
-// Implementers are StorageManager and StorageDBParent to forward to
-// child processes.
+// Main-thread interface implemented by legacy LocalStorageManager and current
+// SessionStorageManager for direct consumption. Also implemented by legacy
+// StorageDBParent and current SessionStorageObserverParent for propagation to
+// content processes.
 class StorageObserverSink {
  public:
   virtual ~StorageObserverSink() {}
@@ -53,7 +55,7 @@ class StorageObserver : public nsIObserver, public nsSupportsWeakReference {
  private:
   virtual ~StorageObserver() {}
 
-  nsresult ClearMatchingOrigin(const char16_t* aData, nsACString& aOriginScope);
+  nsresult GetOriginScope(const char16_t* aData, nsACString& aOriginScope);
 
   static void TestingPrefChanged(const char* aPrefName, void* aClosure);
 

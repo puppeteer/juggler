@@ -10,12 +10,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 
-import android.graphics.SurfaceTexture;
 import android.os.IBinder;
-import android.os.Process;
 import android.os.RemoteException;
 import android.util.Log;
-import android.view.Surface;
 
 import org.mozilla.gecko.annotation.WrapForJNI;
 import org.mozilla.gecko.GeckoAppShell;
@@ -42,15 +39,20 @@ import org.mozilla.gecko.GeckoAppShell;
     }
 
     @WrapForJNI
-    public static GeckoSurface acquireSurface(int width, int height, boolean singleBufferMode) {
+    public static GeckoSurface acquireSurface(final int width, final int height,
+                                              final boolean singleBufferMode) {
         try {
             ensureConnection();
 
             if (singleBufferMode && !GeckoSurfaceTexture.isSingleBufferSupported()) {
                 return null;
             }
-
-            return sConnection.getAllocator().acquireSurface(width, height, singleBufferMode);
+            ISurfaceAllocator allocator = sConnection.getAllocator();
+            GeckoSurface surface = allocator.acquireSurface(width, height, singleBufferMode);
+            if (surface != null && !surface.inProcess()) {
+                allocator.configureSync(surface.initSyncSurface(width, height));
+            }
+            return surface;
         } catch (Exception e) {
             Log.w(LOGTAG, "Failed to acquire GeckoSurface", e);
             return null;
@@ -58,7 +60,7 @@ import org.mozilla.gecko.GeckoAppShell;
     }
 
     @WrapForJNI
-    public static void disposeSurface(GeckoSurface surface) {
+    public static void disposeSurface(final GeckoSurface surface) {
         try {
             ensureConnection();
         } catch (Exception e) {
@@ -81,6 +83,22 @@ import org.mozilla.gecko.GeckoAppShell;
         }
     }
 
+    public static void sync(final int upstream) {
+        try {
+            ensureConnection();
+        } catch (Exception e) {
+            Log.w(LOGTAG, "Failed to sync texture, no connection");
+            return;
+        }
+
+        // Release the SurfaceTexture on the other side
+        try {
+            sConnection.getAllocator().sync(upstream);
+        } catch (RemoteException e) {
+            Log.w(LOGTAG, "Failed to sync texture", e);
+        }
+    }
+
     private static final class SurfaceAllocatorConnection implements ServiceConnection {
         private ISurfaceAllocator mAllocator;
 
@@ -95,13 +113,14 @@ import org.mozilla.gecko.GeckoAppShell;
         }
 
         @Override
-        public synchronized void onServiceConnected(ComponentName name, IBinder service) {
+        public synchronized void onServiceConnected(final ComponentName name,
+                                                    final IBinder service) {
             mAllocator = ISurfaceAllocator.Stub.asInterface(service);
             this.notifyAll();
         }
 
         @Override
-        public synchronized void onServiceDisconnected(ComponentName name) {
+        public synchronized void onServiceDisconnected(final ComponentName name) {
             mAllocator = null;
         }
     }

@@ -12,14 +12,15 @@
         data-l10n-id="blocklist-window"
         data-l10n-attrs="title, style"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
         onload="gBlocklistManager.onLoad();"
         onunload="gBlocklistManager.uninit();"
         persist="screenX screenY width height"
         onkeypress="gBlocklistManager.onWindowKeyPress(event);">
 
   <linkset>
-    <link rel="localization" href="branding/brand.ftl"/>
-    <link rel="localization" href="browser/preferences/blocklists.ftl"/>
+    <html:link rel="localization" href="branding/brand.ftl"/>
+    <html:link rel="localization" href="browser/preferences/blocklists.ftl"/>
   </linkset>
 
   <script src="chrome://browser/content/preferences/blocklists.js"/>
@@ -29,7 +30,9 @@
   </keyset>
 
   <vbox class="contentPane">
-    <description id="blocklistsText" data-l10n-id="blocklist-desc" control="url"/>
+    <description id="blocklistsText" data-l10n-id="blocklist-description" control="url">
+      <html:a target="_blank" class="text-link" data-l10n-name="disconnect-link" href="https://disconnect.me/"/>
+    </description>
     <separator class="thin"/>
     <tree id="blocklistsTree" flex="1" style="height: 18em;"
           hidecolumnpicker="true"
@@ -45,7 +48,7 @@
   </vbox>
 
   <hbox class="actionButtons" align="right" flex="1">
-    <button oncommand="close();" icon="close"
+    <button oncommand="window.close();" icon="close"
             data-l10n-id="blocklist-button-cancel"/>
     <button id="btnApplyChanges" oncommand="gBlocklistManager.onApplyChanges();" icon="save"
             data-l10n-id="blocklist-button-ok"/>

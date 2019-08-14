@@ -58,13 +58,16 @@ endif
 
 .PHONY: FORCE
 
-# Extra define to trigger some workarounds. We should strive to limit the
-# use of those. As of writing the only one is in browser/locales/jar.mn.
-ACDEFINES += -DBUILD_FASTER
-
 # Files under the faster/ sub-directory, however, are not meant to use the
 # fallback
 $(TOPOBJDIR)/faster/%: ;
+
+ifeq ($(MOZ_BUILD_APP),mobile/android)
+# The generic rule doesn't handle relative directories, which are used
+# extensively in mobile/android/base.
+$(TOPOBJDIR)/mobile/android/base/% : $(TOPOBJDIR)/buildid.h FORCE
+	$(MAKE) -C $(TOPOBJDIR)/mobile/android/base $*
+endif
 
 # Generic rule to fall back to the recursive make backend.
 # This needs to stay after other $(TOPOBJDIR)/* rules because GNU Make

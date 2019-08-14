@@ -6,8 +6,8 @@
 #include "RDDParent.h"
 
 #if defined(XP_WIN)
-#include <process.h>
-#include <dwrite.h>
+#  include <process.h>
+#  include <dwrite.h>
 #endif
 
 #include "mozilla/Assertions.h"
@@ -18,15 +18,21 @@
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/ipc/CrashReporterClient.h"
 #include "mozilla/ipc/ProcessChild.h"
+#include "mozilla/gfx/gfxVars.h"
+
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
+#  include "mozilla/Sandbox.h"
+#endif
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ChildProfilerController.h"
+#  include "ChildProfilerController.h"
 #endif
 
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
-#include "mozilla/Sandbox.h"
-#include "nsMacUtilsImpl.h"
-#include <Carbon/Carbon.h>  // for CGSSetDenyWindowServerConnections
+#  include "mozilla/Sandbox.h"
+#  include "nsMacUtilsImpl.h"
+#  include <Carbon/Carbon.h>  // for CGSSetDenyWindowServerConnections
+#  include "RDDProcessHost.h"
 #endif
 
 #include "nsDebugImpl.h"
@@ -36,6 +42,7 @@
 namespace mozilla {
 
 using namespace ipc;
+using namespace gfx;
 
 static RDDParent* sRDDParent;
 
@@ -43,7 +50,8 @@ RDDParent::RDDParent() : mLaunchTime(TimeStamp::Now()) { sRDDParent = this; }
 
 RDDParent::~RDDParent() { sRDDParent = nullptr; }
 
-/* static */ RDDParent* RDDParent::GetSingleton() { return sRDDParent; }
+/* static */
+RDDParent* RDDParent::GetSingleton() { return sRDDParent; }
 
 bool RDDParent::Init(base::ProcessId aParentPid, const char* aParentBuildID,
                      MessageLoop* aIOLoop, IPC::Channel* aChannel) {
@@ -77,6 +85,8 @@ bool RDDParent::Init(base::ProcessId aParentPid, const char* aParentBuildID,
     return false;
   }
 
+  gfxVars::Initialize();
+
   mozilla::ipc::SetThisProcessName("RDD Process");
   return true;
 }
@@ -88,32 +98,17 @@ void CGSShutdownServerConnections();
 };
 
 static void StartRDDMacSandbox() {
-  // Close all current connections to the WindowServer. This ensures that the
-  // Activity Monitor will not label the content process as "Not responding"
-  // because it's not running a native event loop. See bug 1384336.
-  CGSShutdownServerConnections();
-
   // Actual security benefits are only acheived when we additionally deny
   // future connections.
   CGError result = CGSSetDenyWindowServerConnections(true);
   MOZ_DIAGNOSTIC_ASSERT(result == kCGErrorSuccess);
-#if !MOZ_DIAGNOSTIC_ASSERT_ENABLED
+#  if !MOZ_DIAGNOSTIC_ASSERT_ENABLED
   Unused << result;
-#endif
-
-  nsAutoCString appPath;
-  nsMacUtilsImpl::GetAppPath(appPath);
+#  endif
 
   MacSandboxInfo info;
-  info.type = MacSandboxType_Plugin;
-  info.shouldLog = Preferences::GetBool("security.sandbox.logging.enabled") ||
-                   PR_GetEnv("MOZ_SANDBOX_LOGGING");
-  info.appPath.assign(appPath.get());
-  // Per Haik, set appBinaryPath and pluginBinaryPath to '/dev/null' to
-  // make sure OSX sandbox policy isn't confused by empty strings for
-  // the paths.
-  info.appBinaryPath.assign("/dev/null");
-  info.pluginInfo.pluginBinaryPath.assign("/dev/null");
+  RDDProcessHost::StaticFillMacSandboxInfo(info);
+
   std::string err;
   bool rv = mozilla::StartMacSandbox(info, err);
   if (!rv) {
@@ -123,13 +118,43 @@ static void StartRDDMacSandbox() {
 }
 #endif
 
-mozilla::ipc::IPCResult RDDParent::RecvInit() {
+mozilla::ipc::IPCResult RDDParent::RecvInit(
+    nsTArray<GfxVarUpdate>&& vars, const Maybe<FileDescriptor>& aBrokerFd,
+    bool aStartMacSandbox) {
   Unused << SendInitComplete();
 
-#if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
-  StartRDDMacSandbox();
-#endif
+  for (const auto& var : vars) {
+    gfxVars::ApplyUpdate(var);
+  }
 
+#if defined(MOZ_SANDBOX)
+#  if defined(XP_MACOSX)
+  // Close all current connections to the WindowServer. This ensures that the
+  // Activity Monitor will not label the content process as "Not responding"
+  // because it's not running a native event loop. See bug 1384336.
+  CGSShutdownServerConnections();
+
+  if (aStartMacSandbox) {
+    StartRDDMacSandbox();
+  } else {
+#    ifdef DEBUG
+    AssertMacSandboxEnabled();
+#    endif
+  }
+#  elif defined(XP_LINUX)
+  int fd = -1;
+  if (aBrokerFd.isSome()) {
+    fd = aBrokerFd.value().ClonePlatformHandle().release();
+  }
+  SetRemoteDataDecoderSandbox(fd);
+#  endif  // XP_MACOSX/XP_LINUX
+#endif    // MOZ_SANDBOX
+
+  return IPC_OK();
+}
+
+IPCResult RDDParent::RecvUpdateVar(const GfxVarUpdate& aUpdate) {
+  gfxVars::ApplyUpdate(aUpdate);
   return IPC_OK();
 }
 
@@ -149,13 +174,33 @@ mozilla::ipc::IPCResult RDDParent::RecvNewContentRemoteDecoderManager(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult RDDParent::RecvCreateVideoBridgeToParentProcess(
+    Endpoint<PVideoBridgeChild>&& aEndpoint) {
+  if (!RemoteDecoderManagerParent::CreateVideoBridgeToParentProcess(
+          std::move(aEndpoint))) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult RDDParent::RecvRequestMemoryReport(
     const uint32_t& aGeneration, const bool& aAnonymize,
-    const bool& aMinimizeMemoryUsage, const MaybeFileDesc& aDMDFile) {
+    const bool& aMinimizeMemoryUsage, const Maybe<FileDescriptor>& aDMDFile) {
   nsPrintfCString processName("RDD (pid %u)", (unsigned)getpid());
 
   mozilla::dom::MemoryReportRequestClient::Start(
-      aGeneration, aAnonymize, aMinimizeMemoryUsage, aDMDFile, processName);
+      aGeneration, aAnonymize, aMinimizeMemoryUsage, aDMDFile, processName,
+      [&](const MemoryReport& aReport) {
+        Unused << GetSingleton()->SendAddMemoryReport(aReport);
+      },
+      [&](const uint32_t& aGeneration) {
+        return GetSingleton()->SendFinishMemoryReport(aGeneration);
+      });
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult RDDParent::RecvPreferenceUpdate(const Pref& aPref) {
+  Preferences::SetPreference(aPref);
   return IPC_OK();
 }
 
@@ -178,6 +223,9 @@ void RDDParent::ActorDestroy(ActorDestroyReason aWhy) {
   }
 #endif
 
+  RemoteDecoderManagerParent::ShutdownVideoBridge();
+
+  gfxVars::Shutdown();
   CrashReporterClient::DestroySingleton();
   XRE_ShutdownChildProcess();
 }

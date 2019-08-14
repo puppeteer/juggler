@@ -5,6 +5,7 @@
 "use strict";
 
 const { Ci, Cu } = require("chrome");
+const ChromeUtils = require("ChromeUtils");
 const Services = require("Services");
 const { BrowserElementWebNavigation } = require("./web-navigation");
 const { getStack } = require("devtools/shared/platform/stack");
@@ -19,7 +20,7 @@ function debug(msg) {
 }
 
 /**
- * Properties swapped between browsers by browser.xml's `swapDocShells`.
+ * Properties swapped between browsers by browser.js's `swapDocShells`.
  */
 const SWAPPED_BROWSER_STATE = [
   "_remoteFinder",
@@ -30,8 +31,6 @@ const SWAPPED_BROWSER_STATE = [
   "_characterSet",
   "_contentPrincipal",
   "_imageDocument",
-  "_fullZoom",
-  "_textZoom",
   "_isSyntheticDocument",
   "_innerWindowID",
 ];
@@ -64,8 +63,8 @@ const PROPERTIES_FROM_BROWSER_WINDOW = [
  *
  * The inner <iframe mozbrowser> element is _just_ the page content.  It is not
  * enough to to replace <xul:browser> on its own.  <xul:browser> comes along
- * with lots of associated functionality via XBL binding defined for such
- * elements in browser.xml, and the Firefox UI depends on these various things
+ * with lots of associated functionality via a Custom Element defined for such
+ * elements in browser.js, and the Firefox UI depends on these various things
  * to make the UI function.
  *
  * By mapping various methods, properties, and messages from the outer browser
@@ -91,6 +90,38 @@ function tunnelToInnerBrowser(outer, inner) {
   let gBrowser = browserWindow.gBrowser;
   let mmTunnel;
 
+  // Mirror the state updates from the outer <xul:browser> to the inner
+  // <iframe mozbrowser>.
+  const mirroringProgressListener = {
+    onStateChange: (webProgress, request, stateFlags, status) => {
+      if (webProgress && webProgress.isTopLevel) {
+        inner._characterSet = outer._characterSet;
+        inner._documentURI = outer._documentURI;
+        inner._documentContentType = outer._documentContentType;
+      }
+    },
+
+    onLocationChange: (webProgress, request, location, flags) => {
+      if (webProgress && webProgress.isTopLevel) {
+        inner._securityUI = outer._securityUI;
+        inner._documentURI = outer._documentURI;
+        inner._documentContentType = outer._documentContentType;
+        inner._contentTitle = outer._contentTitle;
+        inner._characterSet = outer._characterSet;
+        inner._contentPrincipal = outer._contentPrincipal;
+        inner._imageDocument = outer._imageDocument;
+        inner._isSyntheticDocument = outer._isSyntheticDocument;
+        inner._innerWindowID = outer._innerWindowID;
+        inner._remoteWebNavigationImpl._currentURI = outer._remoteWebNavigationImpl._currentURI;
+      }
+    },
+
+    QueryInterface: ChromeUtils.generateQI([
+      Ci.nsISupportsWeakReference,
+      Ci.nsIWebProgressListener,
+    ]),
+  };
+
   return {
 
     async start() {
@@ -103,9 +134,9 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Various browser methods access the `frameLoader` property, including:
       //   * `saveBrowser` from contentAreaUtils.js
-      //   * `docShellIsActive` from browser.xml
-      //   * `hasContentOpener` from browser.xml
-      //   * `preserveLayers` from browser.xml
+      //   * `docShellIsActive` from browser.js
+      //   * `hasContentOpener` from browser.js
+      //   * `preserveLayers` from browser.js
       //   * `receiveMessage` from SessionStore.jsm
       // In general, these methods are interested in the `frameLoader` for the content,
       // so we redirect them to the inner browser's `frameLoader`.
@@ -153,12 +184,12 @@ function tunnelToInnerBrowser(outer, inner) {
       // which we can use to route messages of interest to the inner browser instead.
       // Note: The _actual_ messageManager accessible from
       // `browser.frameLoader.messageManager` is not overridable and is left unchanged.
-      // Only the XBL getter `browser.messageManager` is overridden.  Browser UI code
-      // always uses this getter instead of `browser.frameLoader.messageManager` directly,
+      // Only the Custom Element getter `browser.messageManager` is overridden. This
+      // getter is always used instead of `browser.frameLoader.messageManager` directly,
       // so this has the effect of overriding the message manager for browser UI code.
       mmTunnel = new MessageManagerTunnel(outer, inner);
 
-      // Clear out any cached state that references the XBL binding's non-remote state,
+      // Clear out any cached state that references the Custom Element's non-remote state,
       // such as form fill controllers.  Otherwise they will remain in place and leak the
       // outer docshell.
       outer.destroy();
@@ -175,8 +206,15 @@ function tunnelToInnerBrowser(outer, inner) {
       // different browser properties.
       // The content within is not reloaded.
       outer.setAttribute("remote", "true");
-      outer.setAttribute("remoteType", inner.remoteType);
       outer.construct();
+
+      Object.defineProperty(outer, "remoteType", {
+        get() {
+          return inner.remoteType;
+        },
+        configurable: true,
+        enumerable: true,
+      });
 
       // Verify that we indeed have the correct binding.
       if (!outer.isRemoteBrowser) {
@@ -193,15 +231,20 @@ function tunnelToInnerBrowser(outer, inner) {
       outer._remoteWebNavigation = webNavigation;
       outer._remoteWebNavigationImpl = webNavigation;
 
-      // Now that we've flipped to the remote browser XBL binding, add `progressListener`
+      // Now that we've flipped to the remote browser mode, add `progressListener`
       // onto the remote version of `webProgress`.  Normally tabbrowser.xml does this step
-      // when it creates a new browser, etc.  Since we manually changed the XBL binding
+      // when it creates a new browser, etc.  Since we manually changed the mode
       // above, it caused a fresh webProgress object to be created which does not have any
       // listeners added.  So, we get the listener that gBrowser is using for the tab and
       // reattach it here.
       const tab = gBrowser.getTabForBrowser(outer);
       const filteredProgressListener = gBrowser._tabFilters.get(tab);
-      outer.webProgress.addProgressListener(filteredProgressListener);
+      outer.webProgress.addProgressListener(filteredProgressListener,
+                                            Ci.nsIWebProgress.NOTIFY_ALL);
+      outer.webProgress.addProgressListener(
+        mirroringProgressListener,
+        Ci.nsIWebProgress.NOTIFY_STATE_ALL | Ci.nsIWebProgress.NOTIFY_LOCATION
+      );
 
       // Add the inner browser to tabbrowser's WeakMap from browser to tab.  This assists
       // with tabbrowser's processing of some events such as MozLayerTreeReady which
@@ -230,13 +273,21 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Add mozbrowser event handlers
       inner.addEventListener("mozbrowseropenwindow", this);
+      inner.addEventListener("mozbrowsershowmodalprompt", this);
     },
 
     handleEvent(event) {
-      if (event.type != "mozbrowseropenwindow") {
-        return;
+      switch (event.type) {
+        case "mozbrowseropenwindow":
+          this.handleOpenWindowEvent(event);
+          break;
+        case "mozbrowsershowmodalprompt":
+          this.handleModalPromptEvent(event);
+          break;
       }
+    },
 
+    handleOpenWindowEvent(event) {
       // Minimal support for <a target/> and window.open() which just ensures we at
       // least open them somewhere (in a new tab).  The following things are ignored:
       //   * Specific target names (everything treated as _blank)
@@ -247,14 +298,40 @@ function tunnelToInnerBrowser(outer, inner) {
       const { detail } = event;
       event.preventDefault();
       const uri = Services.io.newURI(detail.url);
+      let flags = Ci.nsIBrowserDOMWindow.OPEN_NEWTAB;
+      if (detail.forceNoReferrer) {
+        flags |= Ci.nsIBrowserDOMWindow.OPEN_NO_REFERRER;
+      }
       // This API is used mainly because it's near the path used for <a target/> with
       // regular browser tabs (which calls `openURIInFrame`).  The more elaborate APIs
       // that support openers, window features, etc. didn't seem callable from JS and / or
       // this event doesn't give enough info to use them.
       browserWindow.browserDOMWindow
-        .openURI(uri, null, Ci.nsIBrowserDOMWindow.OPEN_NEWTAB,
-                 Ci.nsIBrowserDOMWindow.OPEN_NEW,
+        .openURI(uri, null, flags, Ci.nsIBrowserDOMWindow.OPEN_NEW,
                  outer.contentPrincipal);
+    },
+
+    handleModalPromptEvent({ detail }) {
+      // Relay window.alert(), window.prompt() and window.confirm() dialogs through the
+      // outer window and make sure the return value is passed back to the inner window.
+      // When this event handler is called, the inner iframe is spinning in a nested event
+      // loop waiting to be unblocked.
+      // If we were calling preventDefault() here, then we would have to call
+      // detail.unblock() to unblock the inner iframe.
+      // But since we aren't the inner iframe will be unblocked automatically as soon as
+      // the mozbrowsershowmodalprompt event is done dispatching (i.e. as soon as this
+      // handler completes).
+      // See _handleShowModelPrompt in /dom/browser-element/BrowserElementParent.js
+
+      if (!["alert", "prompt", "confirm"].includes(detail.promptType)) {
+        return;
+      }
+
+      const promptFunction = outer.contentWindow[detail.promptType];
+      // Passing the initial value is useful for window.prompt() and doesn't hurt
+      // window.alert() and window.confirm(). See the Window webidl:
+      // https://searchfox.org/mozilla-central/source/dom/webidl/Window.webidl#77-80
+      detail.returnValue = promptFunction(detail.message, detail.initialValue);
     },
 
     stop() {
@@ -273,13 +350,18 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Remove the progress listener we added manually.
       outer.webProgress.removeProgressListener(filteredProgressListener);
+      outer.webProgress.removeProgressListener(mirroringProgressListener);
 
-      // Reset the XBL binding back to the original state.
+      // Reset the Custom Element back to the original state.
       outer.destroy();
 
       // Reset @remote since this is now back to a regular, non-remote browser
       outer.setAttribute("remote", "false");
       outer.removeAttribute("remoteType");
+
+      // Stop forwarding remoteType to the inner browser
+      delete outer.remoteType;
+
       outer.construct();
 
       // Delete browser window properties exposed on content's owner global
@@ -289,6 +371,7 @@ function tunnelToInnerBrowser(outer, inner) {
 
       // Remove mozbrowser event handlers
       inner.removeEventListener("mozbrowseropenwindow", this);
+      inner.removeEventListener("mozbrowsershowmodalprompt", this);
 
       mmTunnel.destroy();
       mmTunnel = null;
@@ -356,7 +439,7 @@ MessageManagerTunnel.prototype = {
   ],
 
   OUTER_TO_INNER_MESSAGES: [
-    // Messages sent from remote-browser.xml
+    // Messages sent from browser.js
     "Browser:PurgeSessionHistory",
     "InPermitUnload",
     "PermitUnload",
@@ -373,6 +456,8 @@ MessageManagerTunnel.prototype = {
     "SessionStore:flush",
     "SessionStore:restoreHistory",
     "SessionStore:restoreTabContent",
+    // Messages sent from viewZoomOverlay.js.
+    "FullZoom",
   ],
 
   INNER_TO_OUTER_MESSAGES: [
@@ -384,13 +469,8 @@ MessageManagerTunnel.prototype = {
     "Link:AddSearch",
     "PageStyle:StyleSheets",
     // Messages sent to RemoteWebProgress.jsm
-    "Content:LoadURIResult",
-    "Content:LocationChange",
-    "Content:ProgressChange",
     "Content:SecurityChange",
-    "Content:StateChange",
-    "Content:StatusChange",
-    // Messages sent to remote-browser.xml
+    // Messages sent to browser.js
     "DOMTitleChanged",
     "ImageDocumentLoaded",
     "Forms:ShowDropDown",
@@ -408,7 +488,7 @@ MessageManagerTunnel.prototype = {
   ],
 
   OUTER_TO_INNER_MESSAGE_PREFIXES: [
-    // Messages sent from browser.xml
+    // Messages sent from browser.js
     "Autoscroll:",
     // Messages sent from nsContextMenu.js
     "ContextMenu:",
@@ -426,13 +506,12 @@ MessageManagerTunnel.prototype = {
     "PageInfo:",
     // Messages sent from printUtils.js
     "Printing:",
-    "PageMetadata:",
     // Messages sent from viewSourceUtils.js
     "ViewSource:",
   ],
 
   INNER_TO_OUTER_MESSAGE_PREFIXES: [
-    // Messages sent to browser.xml
+    // Messages sent to browser.js
     "Autoscroll:",
     // Messages sent to nsContextMenu.js
     "ContextMenu:",
@@ -448,7 +527,6 @@ MessageManagerTunnel.prototype = {
     "PageInfo:",
     // Messages sent to printUtils.js
     "Printing:",
-    "PageMetadata:",
     // Messages sent to viewSourceUtils.js
     "ViewSource:",
   ],
@@ -568,6 +646,10 @@ MessageManagerTunnel.prototype = {
    */
   get processMessageManager() {
     return this.innerParentMM.processMessageManager;
+  },
+
+  get remoteType() {
+    return this.innerParentMM.remoteType;
   },
 
   loadFrameScript(url, ...args) {

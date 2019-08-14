@@ -1,13 +1,13 @@
 //! Expanding instructions as runtime library calls.
 
-use ir;
-use ir::{get_libcall_funcref, InstBuilder};
-use isa::TargetIsa;
-use legalizer::boundary::legalize_libcall_signature;
+use crate::ir;
+use crate::ir::{get_libcall_funcref, InstBuilder};
+use crate::isa::TargetIsa;
+use crate::legalizer::boundary::legalize_libcall_signature;
 use std::vec::Vec;
 
 /// Try to expand `inst` as a library call, returning true is successful.
-pub fn expand_as_libcall(inst: ir::Inst, func: &mut ir::Function, isa: &TargetIsa) -> bool {
+pub fn expand_as_libcall(inst: ir::Inst, func: &mut ir::Function, isa: &dyn TargetIsa) -> bool {
     // Does the opcode/ctrl_type combo even have a well-known runtime library name.
     let libcall = match ir::LibCall::for_inst(func.dfg[inst].opcode(), func.dfg.ctrl_typevar(inst))
     {

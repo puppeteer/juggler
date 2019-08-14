@@ -51,12 +51,6 @@ class ClearSiteData::PendingCleanupHolder final : public nsIClearDataCallback {
     return NS_OK;
   }
 
-  // This method must be called after any Start() call.
-  void BrowsingContextsReloadNeeded(const nsACString& aOrigin) {
-    mContextsReloadOrigin = aOrigin;
-    MaybeBrowsingContextsReload();
-  }
-
   // nsIClearDataCallback interface
 
   NS_IMETHOD
@@ -67,7 +61,6 @@ class ClearSiteData::PendingCleanupHolder final : public nsIClearDataCallback {
     mChannel->Resume();
     mChannel = nullptr;
 
-    MaybeBrowsingContextsReload();
     return NS_OK;
   }
 
@@ -78,25 +71,8 @@ class ClearSiteData::PendingCleanupHolder final : public nsIClearDataCallback {
     }
   }
 
-  void MaybeBrowsingContextsReload() {
-    if (mPendingOp || mContextsReloadOrigin.IsEmpty()) {
-      return;
-    }
-
-    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-    if (NS_WARN_IF(!obs)) {
-      return;
-    }
-
-    NS_ConvertUTF8toUTF16 origin(mContextsReloadOrigin);
-    nsresult rv = obs->NotifyObservers(nullptr, "clear-site-data-reload-needed",
-                                       origin.get());
-    Unused << NS_WARN_IF(NS_FAILED(rv));
-  }
-
   nsCOMPtr<nsIHttpChannel> mChannel;
   bool mPendingOp;
-  nsCString mContextsReloadOrigin;
 };
 
 NS_INTERFACE_MAP_BEGIN(ClearSiteData::PendingCleanupHolder)
@@ -107,7 +83,8 @@ NS_INTERFACE_MAP_END
 NS_IMPL_ADDREF(ClearSiteData::PendingCleanupHolder)
 NS_IMPL_RELEASE(ClearSiteData::PendingCleanupHolder)
 
-/* static */ void ClearSiteData::Initialize() {
+/* static */
+void ClearSiteData::Initialize() {
   MOZ_ASSERT(!gClearSiteData);
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -127,7 +104,8 @@ NS_IMPL_RELEASE(ClearSiteData::PendingCleanupHolder)
   gClearSiteData = service;
 }
 
-/* static */ void ClearSiteData::Shutdown() {
+/* static */
+void ClearSiteData::Shutdown() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!gClearSiteData) {
@@ -159,11 +137,6 @@ ClearSiteData::Observe(nsISupports* aSubject, const char* aTopic,
 
   MOZ_ASSERT(!strcmp(aTopic, NS_HTTP_ON_EXAMINE_RESPONSE_TOPIC));
 
-  // Pref disabled.
-  if (!StaticPrefs::dom_clearSiteData_enabled()) {
-    return NS_OK;
-  }
-
   nsCOMPtr<nsIHttpChannel> channel = do_QueryInterface(aSubject);
   if (NS_WARN_IF(!channel)) {
     return NS_OK;
@@ -174,6 +147,8 @@ ClearSiteData::Observe(nsISupports* aSubject, const char* aTopic,
 }
 
 void ClearSiteData::ClearDataFromChannel(nsIHttpChannel* aChannel) {
+  MOZ_ASSERT(aChannel);
+
   nsresult rv;
   nsCOMPtr<nsIURI> uri;
 
@@ -244,11 +219,6 @@ void ClearSiteData::ClearDataFromChannel(nsIHttpChannel* aChannel) {
       return;
     }
   }
-
-  if (flags & eExecutionContexts) {
-    LogOpToConsole(aChannel, uri, eExecutionContexts);
-    BrowsingContextsReload(holder, principal);
-  }
 }
 
 uint32_t ClearSiteData::ParseHeader(nsIHttpChannel* aChannel,
@@ -284,13 +254,8 @@ uint32_t ClearSiteData::ParseHeader(nsIHttpChannel* aChannel,
       continue;
     }
 
-    if (value.EqualsLiteral("\"executionContexts\"")) {
-      flags |= eExecutionContexts;
-      continue;
-    }
-
     if (value.EqualsLiteral("\"*\"")) {
-      flags = eCache | eCookies | eStorage | eExecutionContexts;
+      flags = eCache | eCookies | eStorage;
       break;
     }
 
@@ -371,24 +336,9 @@ void ClearSiteData::TypeToString(Type aType, nsAString& aStr) const {
       aStr.AssignLiteral("storage");
       break;
 
-    case eExecutionContexts:
-      aStr.AssignLiteral("executionContexts");
-      break;
-
     default:
       MOZ_CRASH("Unknown type.");
   }
-}
-
-void ClearSiteData::BrowsingContextsReload(PendingCleanupHolder* aHolder,
-                                           nsIPrincipal* aPrincipal) const {
-  nsAutoCString origin;
-  nsresult rv = aPrincipal->GetOrigin(origin);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
-  }
-
-  aHolder->BrowsingContextsReloadNeeded(origin);
 }
 
 NS_INTERFACE_MAP_BEGIN(ClearSiteData)

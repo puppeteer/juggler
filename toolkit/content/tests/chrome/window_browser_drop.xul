@@ -4,21 +4,19 @@
 <window title="Browser Drop Tests"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"/>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"/>
+  <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"/>
 
 <script>
 <![CDATA[
 
-ChromeUtils.import("resource://testing-common/ContentTask.jsm");
+const {ContentTask} = ChromeUtils.import("resource://testing-common/ContentTask.jsm");
 
 function dropOnRemoteBrowserAsync(browser, data, shouldExpectStateChange) {
   ContentTask.setTestScope(window); // Need this so is/isnot/ok are available inside the contenttask
   return ContentTask.spawn(browser, {data, shouldExpectStateChange}, async function({data, shouldExpectStateChange}) {
     ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-    ChromeUtils.import("resource://gre/modules/Services.jsm");
+    const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
     if (!content.document.documentElement) {
       // Wait until the testing document gets loaded.
@@ -198,7 +196,7 @@ async function dropLinksOnBrowser(browser, type) {
   await expectLink(browser,
                     [],
                     [ [ { type: "text/x-moz-url",
-                          data: "chrome://browser/content/browser.xul" } ] ],
+                          data: "chrome://browser/content/browser.xhtml" } ] ],
                     "text/x-moz-url chrome url drop on browser " + type);
 
   if (browser.type == "content") {

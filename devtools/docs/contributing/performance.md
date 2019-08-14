@@ -92,10 +92,10 @@ window.performance.mark("my-function-start");
 window.performance.measure("my-function", "my-function-start");
 ```
 
-This marker will appear in the `Marker Chart` section in perf-html, in the `UserTiming` lines:
+This marker will appear in the `Marker Chart` section in [profiler.firefox.com](https://profiler.firefox.com), in the `UserTiming` lines:
   ![custom markers](performance/profiler-custom-markers.png)
 
-You can double click on it to make perf-html display the record during this precise moment in time,
+You can double click on it to make [profiler.firefox.com](https://profiler.firefox.com) display the record during this precise moment in time,
 and the call tree will only display what was executed during this measurement.
 
 ### Prototype quickly
@@ -136,7 +136,7 @@ This might happen if the test no longer waits for all the operations to finish e
 
 To push your current patch to try, execute:
 ```
-./mach try -b o -p linux64 -u none -t damp-e10s --rebuild-talos 5 --artifact
+./mach try -b o -p linux64 -u none -t damp --rebuild-talos 5 --artifact
 ```
 It will print in your Terminal a link to perfherder like this one:
 [https://treeherder.mozilla.org/perf.html#/comparechooser?newProject=try&newRevision=9bef6cb13c43bbce21d40ffaea595e082a4c28db](https://treeherder.mozilla.org/perf.html#/comparechooser?newProject=try&newRevision=9bef6cb13c43bbce21d40ffaea595e082a4c28db)

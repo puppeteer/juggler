@@ -16,6 +16,10 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/extensions/WebExtensionPolicy.h"
 
+namespace Json {
+class Value;
+}
+
 namespace mozilla {
 
 class ContentPrincipal final : public BasePrincipal {
@@ -38,6 +42,8 @@ class ContentPrincipal final : public BasePrincipal {
   // Init() must be called before the principal is in a usable state.
   nsresult Init(nsIURI* aCodebase, const OriginAttributes& aOriginAttributes,
                 const nsACString& aOriginNoSuffix);
+  nsresult Init(ContentPrincipal* aOther,
+                const OriginAttributes& aOriginAttributes);
 
   virtual nsresult GetScriptLocation(nsACString& aStr) override;
 
@@ -50,6 +56,20 @@ class ContentPrincipal final : public BasePrincipal {
 
   nsCOMPtr<nsIURI> mDomain;
   nsCOMPtr<nsIURI> mCodebase;
+
+  virtual nsresult PopulateJSONObject(Json::Value& aObject) override;
+  // Serializable keys are the valid enum fields the serialization supports
+  enum SerializableKeys { eCodebase = 0, eDomain, eSuffix, eMax = eSuffix };
+  // KeyVal is a lightweight storage that passes
+  // SerializableKeys and values after JSON parsing in the BasePrincipal to
+  // FromProperties
+  struct KeyVal {
+    bool valueWasSerialized;
+    nsCString value;
+    SerializableKeys key;
+  };
+  static already_AddRefed<BasePrincipal> FromProperties(
+      nsTArray<ContentPrincipal::KeyVal>& aFields);
 
  protected:
   virtual ~ContentPrincipal();

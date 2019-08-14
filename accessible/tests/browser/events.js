@@ -9,16 +9,18 @@
 /* import-globals-from shared-head.js */
 /* import-globals-from ../mochitest/common.js */
 
-/* exported EVENT_REORDER, EVENT_SCROLLING, EVENT_SCROLLING_END, EVENT_SHOW,
-            EVENT_TEXT_INSERTED, EVENT_TEXT_REMOVED,
-            EVENT_DOCUMENT_LOAD_COMPLETE, EVENT_HIDE, EVENT_TEXT_CARET_MOVED,
-            EVENT_DESCRIPTION_CHANGE, EVENT_NAME_CHANGE, EVENT_STATE_CHANGE,
-            EVENT_VALUE_CHANGE, EVENT_TEXT_VALUE_CHANGE, EVENT_FOCUS,
-            EVENT_DOCUMENT_RELOAD, EVENT_VIRTUALCURSOR_CHANGED,
+/* exported EVENT_ANNOUNCEMENT, EVENT_REORDER, EVENT_SCROLLING,
+            EVENT_SCROLLING_END, EVENT_SHOW, EVENT_TEXT_INSERTED,
+            EVENT_TEXT_REMOVED, EVENT_DOCUMENT_LOAD_COMPLETE, EVENT_HIDE,
+            EVENT_TEXT_CARET_MOVED, EVENT_DESCRIPTION_CHANGE, EVENT_NAME_CHANGE,
+            EVENT_STATE_CHANGE, EVENT_VALUE_CHANGE, EVENT_TEXT_VALUE_CHANGE,
+            EVENT_FOCUS, EVENT_DOCUMENT_RELOAD, EVENT_VIRTUALCURSOR_CHANGED,
             UnexpectedEvents, contentSpawnMutation, waitForEvent, waitForEvents,
             waitForOrderedEvents */
 
-const EVENT_DOCUMENT_LOAD_COMPLETE = nsIAccessibleEvent.EVENT_DOCUMENT_LOAD_COMPLETE;
+const EVENT_ANNOUNCEMENT = nsIAccessibleEvent.EVENT_ANNOUNCEMENT;
+const EVENT_DOCUMENT_LOAD_COMPLETE =
+  nsIAccessibleEvent.EVENT_DOCUMENT_LOAD_COMPLETE;
 const EVENT_HIDE = nsIAccessibleEvent.EVENT_HIDE;
 const EVENT_REORDER = nsIAccessibleEvent.EVENT_REORDER;
 const EVENT_SCROLLING = nsIAccessibleEvent.EVENT_SCROLLING;
@@ -34,7 +36,8 @@ const EVENT_VALUE_CHANGE = nsIAccessibleEvent.EVENT_VALUE_CHANGE;
 const EVENT_TEXT_VALUE_CHANGE = nsIAccessibleEvent.EVENT_TEXT_VALUE_CHANGE;
 const EVENT_FOCUS = nsIAccessibleEvent.EVENT_FOCUS;
 const EVENT_DOCUMENT_RELOAD = nsIAccessibleEvent.EVENT_DOCUMENT_RELOAD;
-const EVENT_VIRTUALCURSOR_CHANGED = nsIAccessibleEvent.EVENT_VIRTUALCURSOR_CHANGED;
+const EVENT_VIRTUALCURSOR_CHANGED =
+  nsIAccessibleEvent.EVENT_VIRTUALCURSOR_CHANGED;
 
 /**
  * Describe an event in string format.
@@ -45,12 +48,16 @@ function eventToString(event) {
   let info = `Event type: ${type}`;
 
   if (event instanceof nsIAccessibleStateChangeEvent) {
-    let stateStr = statesToString(event.isExtraState ? 0 : event.state,
-                                  event.isExtraState ? event.state : 0);
+    let stateStr = statesToString(
+      event.isExtraState ? 0 : event.state,
+      event.isExtraState ? event.state : 0
+    );
     info += `, state: ${stateStr}, is enabled: ${event.isEnabled}`;
   } else if (event instanceof nsIAccessibleTextChangeEvent) {
     let tcType = event.isInserted ? "inserted" : "removed";
-    info += `, start: ${event.start}, length: ${event.length}, ${tcType} text: ${event.modifiedText}`;
+    info += `, start: ${event.start}, length: ${
+      event.length
+    }, ${tcType} text: ${event.modifiedText}`;
   }
 
   info += `. Target: ${prettyName(event.accessible)}`;
@@ -120,7 +127,7 @@ function waitForEvent(eventType, matchCriteria) {
           Services.obs.removeObserver(this, "accessible-event");
           resolve(event);
         }
-      }
+      },
     };
     Services.obs.addObserver(eventObserver, "accessible-event");
   });
@@ -141,8 +148,10 @@ class UnexpectedEvents {
 
     let event = subject.QueryInterface(nsIAccessibleEvent);
 
-    let unexpectedEvent = this.unexpected.find(([etype, criteria]) =>
-      etype === event.eventType && matchEvent(event, criteria));
+    let unexpectedEvent = this.unexpected.find(
+      ([etype, criteria]) =>
+        etype === event.eventType && matchEvent(event, criteria)
+    );
 
     if (unexpectedEvent) {
       ok(false, `Got unexpected event: ${eventToString(event)}`);
@@ -170,16 +179,17 @@ function waitForEvents(events, ordered = false) {
 
   let unexpectedListener = new UnexpectedEvents(unexpected);
 
-  return Promise.all(expected.map((evt, idx) => {
-    let promise = evt instanceof Array ? waitForEvent(...evt) : evt;
-    return promise.then(result => {
-      if (ordered) {
-        is(idx, currentIdx++,
-          `Unexpected event order: ${result}`);
-      }
-      return result;
-    });
-  })).then(results => {
+  return Promise.all(
+    expected.map((evt, idx) => {
+      let promise = evt instanceof Array ? waitForEvent(...evt) : evt;
+      return promise.then(result => {
+        if (ordered) {
+          is(idx, currentIdx++, `Unexpected event order: ${result}`);
+        }
+        return result;
+      });
+    })
+  ).then(results => {
     unexpectedListener.stop();
     return results;
   });

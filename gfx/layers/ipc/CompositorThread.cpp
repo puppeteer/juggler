@@ -7,6 +7,7 @@
 #include "MainThreadUtils.h"
 #include "nsThreadUtils.h"
 #include "CompositorBridgeParent.h"
+#include "mozilla/layers/CanvasParent.h"
 #include "mozilla/layers/CompositorManagerParent.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/media/MediaSystemResourceService.h"
@@ -23,17 +24,14 @@ namespace layers {
 static StaticRefPtr<CompositorThreadHolder> sCompositorThreadHolder;
 static bool sFinishedCompositorShutDown = false;
 
-CompositorThreadHolder* GetCompositorThreadHolder() {
-  return sCompositorThreadHolder;
-}
-
 base::Thread* CompositorThread() {
   return sCompositorThreadHolder
              ? sCompositorThreadHolder->GetCompositorThread()
              : nullptr;
 }
 
-/* static */ MessageLoop* CompositorThreadHolder::Loop() {
+/* static */
+MessageLoop* CompositorThreadHolder::Loop() {
   return CompositorThread() ? CompositorThread()->message_loop() : nullptr;
 }
 
@@ -53,7 +51,8 @@ CompositorThreadHolder::~CompositorThreadHolder() {
   }
 }
 
-/* static */ void CompositorThreadHolder::DestroyCompositorThread(
+/* static */
+void CompositorThreadHolder::DestroyCompositorThread(
     base::Thread* aCompositorThread) {
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -129,6 +128,7 @@ void CompositorThreadHolder::Shutdown() {
   gfx::ReleaseVRManagerParentSingleton();
   MediaSystemResourceService::Shutdown();
   CompositorManagerParent::Shutdown();
+  CanvasParent::Shutdown();
 
   sCompositorThreadHolder = nullptr;
 
@@ -139,7 +139,8 @@ void CompositorThreadHolder::Shutdown() {
   CompositorBridgeParent::FinishShutdown();
 }
 
-/* static */ bool CompositorThreadHolder::IsInCompositorThread() {
+/* static */
+bool CompositorThreadHolder::IsInCompositorThread() {
   return CompositorThread() &&
          CompositorThread()->thread_id() == PlatformThread::CurrentId();
 }

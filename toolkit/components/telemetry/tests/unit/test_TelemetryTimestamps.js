@@ -1,15 +1,16 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 ChromeUtils.import("resource://gre/modules/TelemetryController.jsm", this);
 ChromeUtils.import("resource://gre/modules/TelemetrySession.jsm", this);
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 // The @mozilla/xre/app-info;1 XPCOM object provided by the xpcshell test harness doesn't
 // implement the nsIXULAppInfo interface, which is needed by Services.jsm and
 // TelemetrySession.jsm. updateAppInfo() creates and registers a minimal mock app-info.
-ChromeUtils.import("resource://testing-common/AppInfo.jsm");
+const { updateAppInfo } = ChromeUtils.import(
+  "resource://testing-common/AppInfo.jsm"
+);
 updateAppInfo();
 
 var gGlobalScope = this;
@@ -22,6 +23,7 @@ add_task(async function test_setup() {
   // Telemetry needs the AddonManager.
   loadAddonManager();
   finishAddonManagerStartup();
+  fakeIntlReady();
   // Make profile available for |TelemetryController.testShutdown()|.
   do_get_profile();
 
@@ -29,7 +31,8 @@ add_task(async function test_setup() {
   await setEmptyPrefWatchlist();
 
   await new Promise(resolve =>
-    Services.telemetry.asyncFetchTelemetryData(resolve));
+    Services.telemetry.asyncFetchTelemetryData(resolve)
+  );
 });
 
 add_task(async function actualTest() {

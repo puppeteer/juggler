@@ -1,23 +1,31 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
-/* import-globals-from ../performance-controller.js */
-/* import-globals-from ../performance-view.js */
-/* globals WaterfallView, JsCallTreeView, JsFlameGraphView, MemoryCallTreeView,
-           MemoryFlameGraphView */
+/* globals $, $$, PerformanceController */
+
 "use strict";
+
+const EVENTS = require("../events");
+
+const { WaterfallView } = require("./details-waterfall");
+const { JsCallTreeView } = require("./details-js-call-tree");
+const { JsFlameGraphView } = require("./details-js-flamegraph");
+const { MemoryCallTreeView } = require("./details-memory-call-tree");
+const { MemoryFlameGraphView } = require("./details-memory-flamegraph");
+
+const EventEmitter = require("devtools/shared/event-emitter");
 
 /**
  * Details view containing call trees, flamegraphs and markers waterfall.
  * Manages subviews and toggles visibility between them.
  */
-var DetailsView = {
+const DetailsView = {
   /**
    * Name to (node id, view object, actor requirements, pref killswitch)
    * mapping of subviews.
    */
   components: {
-    "waterfall": {
+    waterfall: {
       id: "waterfall-view",
       view: WaterfallView,
       features: ["withMarkers"],
@@ -51,7 +59,9 @@ var DetailsView = {
     this.toolbar = $("#performance-toolbar-controls-detail-views");
 
     this._onViewToggle = this._onViewToggle.bind(this);
-    this._onRecordingStoppedOrSelected = this._onRecordingStoppedOrSelected.bind(this);
+    this._onRecordingStoppedOrSelected = this._onRecordingStoppedOrSelected.bind(
+      this
+    );
     this.setAvailableViews = this.setAvailableViews.bind(this);
 
     for (const button of $$("toolbarbutton[data-view]", this.toolbar)) {
@@ -60,10 +70,14 @@ var DetailsView = {
 
     await this.setAvailableViews();
 
-    PerformanceController.on(EVENTS.RECORDING_STATE_CHANGE,
-                             this._onRecordingStoppedOrSelected);
-    PerformanceController.on(EVENTS.RECORDING_SELECTED,
-                             this._onRecordingStoppedOrSelected);
+    PerformanceController.on(
+      EVENTS.RECORDING_STATE_CHANGE,
+      this._onRecordingStoppedOrSelected
+    );
+    PerformanceController.on(
+      EVENTS.RECORDING_SELECTED,
+      this._onRecordingStoppedOrSelected
+    );
     PerformanceController.on(EVENTS.PREF_CHANGED, this.setAvailableViews);
   },
 
@@ -79,10 +93,14 @@ var DetailsView = {
       component.initialized && (await component.view.destroy());
     }
 
-    PerformanceController.off(EVENTS.RECORDING_STATE_CHANGE,
-                              this._onRecordingStoppedOrSelected);
-    PerformanceController.off(EVENTS.RECORDING_SELECTED,
-                              this._onRecordingStoppedOrSelected);
+    PerformanceController.off(
+      EVENTS.RECORDING_STATE_CHANGE,
+      this._onRecordingStoppedOrSelected
+    );
+    PerformanceController.off(
+      EVENTS.RECORDING_SELECTED,
+      this._onRecordingStoppedOrSelected
+    );
     PerformanceController.off(EVENTS.PREF_CHANGED, this.setAvailableViews);
   },
 
@@ -117,8 +135,10 @@ var DetailsView = {
     //
     // 2. If we have a finished recording and no panel was selected yet,
     // use a default now that we have the recording configurations
-    if ((this._initialized && isCompleted && invalidCurrentView) ||
-        (!this._initialized && isCompleted && recording)) {
+    if (
+      (this._initialized && isCompleted && invalidCurrentView) ||
+      (!this._initialized && isCompleted && recording)
+    ) {
       await this.selectDefaultView();
     }
   },
@@ -138,9 +158,10 @@ var DetailsView = {
       return false;
     }
 
-    const prefSupported = (prefs && prefs.length) ?
-                        prefs.every(p => PerformanceController.getPref(p)) :
-                        true;
+    const prefSupported =
+      prefs && prefs.length
+        ? prefs.every(p => PerformanceController.getPref(p))
+        : true;
     return PerformanceController.isFeatureSupported(features) && prefSupported;
   },
 
@@ -261,3 +282,5 @@ var DetailsView = {
  * Convenient way of emitting events from the view.
  */
 EventEmitter.decorate(DetailsView);
+
+exports.DetailsView = DetailsView;

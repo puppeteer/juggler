@@ -3,9 +3,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::collections::HashMap;
-use webrender::api::{BuiltDisplayList, ColorF, Epoch};
-use webrender::api::{LayoutSize, PipelineId};
-use webrender::api::{PropertyBinding, PropertyBindingId, LayoutTransform, DynamicProperties};
+use webrender::api::{BuiltDisplayList, ColorF, Epoch, PipelineId};
+use webrender::api::{PropertyBinding, PropertyBindingId, DynamicProperties};
+use webrender::api::units::{LayoutSize, LayoutTransform};
 
 /// Stores a map of the animated property bindings for the current display list. These
 /// can be used to animate the transform and/or opacity of a display list without
@@ -36,14 +36,9 @@ impl SceneProperties {
     /// Get the current value for a transform property.
     pub fn resolve_layout_transform(
         &self,
-        property: &Option<PropertyBinding<LayoutTransform>>,
+        property: &PropertyBinding<LayoutTransform>,
     ) -> LayoutTransform {
-        let property = match *property {
-            Some(property) => property,
-            None => return LayoutTransform::identity(),
-        };
-
-        match property {
+        match *property {
             PropertyBinding::Value(matrix) => matrix,
             PropertyBinding::Binding(ref key, v) => self.transform_properties
                 .get(&key.id)

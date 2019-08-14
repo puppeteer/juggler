@@ -12,6 +12,7 @@
 #include "mozilla/ipc/BackgroundParent.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundParent.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/Unused.h"
 #include "nsThreadUtils.h"
 
@@ -68,9 +69,11 @@ void LocalStorageCacheChild::ActorDestroy(ActorDestroyReason aWhy) {
 }
 
 mozilla::ipc::IPCResult LocalStorageCacheChild::RecvObserve(
-    const PrincipalInfo& aPrincipalInfo, const uint32_t& aPrivateBrowsingId,
-    const nsString& aDocumentURI, const nsString& aKey,
-    const nsString& aOldValue, const nsString& aNewValue) {
+    const PrincipalInfo& aPrincipalInfo,
+    const PrincipalInfo& aCachePrincipalInfo,
+    const uint32_t& aPrivateBrowsingId, const nsString& aDocumentURI,
+    const nsString& aKey, const nsString& aOldValue,
+    const nsString& aNewValue) {
   AssertIsOnOwningThread();
 
   nsresult rv;
@@ -80,11 +83,19 @@ mozilla::ipc::IPCResult LocalStorageCacheChild::RecvObserve(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  Storage::NotifyChange(/* aStorage */ nullptr, principal, aKey, aOldValue,
-                        aNewValue,
-                        /* aStorageType */ u"localStorage", aDocumentURI,
-                        /* aIsPrivate */ !!aPrivateBrowsingId,
-                        /* aImmediateDispatch */ true);
+  nsCOMPtr<nsIPrincipal> cachePrincipal =
+      PrincipalInfoToPrincipal(aCachePrincipalInfo, &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
+  if (StorageUtils::PrincipalsEqual(principal, cachePrincipal)) {
+    Storage::NotifyChange(/* aStorage */ nullptr, principal, aKey, aOldValue,
+                          aNewValue,
+                          /* aStorageType */ u"localStorage", aDocumentURI,
+                          /* aIsPrivate */ !!aPrivateBrowsingId,
+                          /* aImmediateDispatch */ true);
+  }
 
   return IPC_OK();
 }
@@ -401,9 +412,59 @@ StorageDBChild::ShutdownObserver::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
+SessionStorageObserverChild::SessionStorageObserverChild(
+    SessionStorageObserver* aObserver)
+    : mObserver(aObserver) {
+  AssertIsOnOwningThread();
+  MOZ_ASSERT(NextGenLocalStorageEnabled());
+  MOZ_ASSERT(aObserver);
+  aObserver->AssertIsOnOwningThread();
+
+  MOZ_COUNT_CTOR(SessionStorageObserverChild);
+}
+
+SessionStorageObserverChild::~SessionStorageObserverChild() {
+  AssertIsOnOwningThread();
+
+  MOZ_COUNT_DTOR(SessionStorageObserverChild);
+}
+
+void SessionStorageObserverChild::SendDeleteMeInternal() {
+  AssertIsOnOwningThread();
+
+  if (mObserver) {
+    mObserver->ClearActor();
+    mObserver = nullptr;
+
+    // Don't check result here since IPC may no longer be available due to
+    // SessionStorageManager (which holds a strong reference to
+    // SessionStorageObserver) being destroyed very late in the game.
+    PSessionStorageObserverChild::SendDeleteMe();
+  }
+}
+
+void SessionStorageObserverChild::ActorDestroy(ActorDestroyReason aWhy) {
+  AssertIsOnOwningThread();
+
+  if (mObserver) {
+    mObserver->ClearActor();
+    mObserver = nullptr;
+  }
+}
+
+mozilla::ipc::IPCResult SessionStorageObserverChild::RecvObserve(
+    const nsCString& aTopic, const nsString& aOriginAttributesPattern,
+    const nsCString& aOriginScope) {
+  AssertIsOnOwningThread();
+
+  StorageObserver::Self()->Notify(aTopic.get(), aOriginAttributesPattern,
+                                  aOriginScope);
+  return IPC_OK();
+}
+
 LocalStorageCacheParent::LocalStorageCacheParent(
-    const PrincipalInfo& aPrincipalInfo, const nsACString& aOriginKey,
-    uint32_t aPrivateBrowsingId)
+    const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
+    const nsACString& aOriginKey, uint32_t aPrivateBrowsingId)
     : mPrincipalInfo(aPrincipalInfo),
       mOriginKey(aOriginKey),
       mPrivateBrowsingId(aPrivateBrowsingId),
@@ -461,9 +522,14 @@ mozilla::ipc::IPCResult LocalStorageCacheParent::RecvNotify(
 
   for (LocalStorageCacheParent* localStorageCacheParent : *array) {
     if (localStorageCacheParent != this) {
+      // When bug 1443925 is fixed, we can compare mPrincipalInfo against
+      // localStorageCacheParent->PrincipalInfo() here on the background thread
+      // instead of posting it to the main thread.  The advantage of doing so is
+      // that it would save an IPC message in the case where the principals do
+      // not match.
       Unused << localStorageCacheParent->SendObserve(
-          mPrincipalInfo, mPrivateBrowsingId, aDocumentURI, aKey, aOldValue,
-          aNewValue);
+          mPrincipalInfo, localStorageCacheParent->PrincipalInfo(),
+          mPrivateBrowsingId, aKey, aDocumentURI, aOldValue, aNewValue);
     }
   }
 
@@ -1107,6 +1173,56 @@ nsresult StorageDBParent::ObserverSink::Observe(
   return NS_OK;
 }
 
+SessionStorageObserverParent::SessionStorageObserverParent()
+    : mActorDestroyed(false) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  StorageObserver* observer = StorageObserver::Self();
+  if (observer) {
+    observer->AddSink(this);
+  }
+}
+
+SessionStorageObserverParent::~SessionStorageObserverParent() {
+  MOZ_ASSERT(mActorDestroyed);
+
+  StorageObserver* observer = StorageObserver::Self();
+  if (observer) {
+    observer->RemoveSink(this);
+  }
+}
+
+void SessionStorageObserverParent::ActorDestroy(ActorDestroyReason aWhy) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mActorDestroyed);
+
+  mActorDestroyed = true;
+}
+
+mozilla::ipc::IPCResult SessionStorageObserverParent::RecvDeleteMe() {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mActorDestroyed);
+
+  IProtocol* mgr = Manager();
+  if (!PSessionStorageObserverParent::Send__delete__(this)) {
+    return IPC_FAIL_NO_REASON(mgr);
+  }
+  return IPC_OK();
+}
+
+nsresult SessionStorageObserverParent::Observe(
+    const char* aTopic, const nsAString& aOriginAttributesPattern,
+    const nsACString& aOriginScope) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!mActorDestroyed) {
+    mozilla::Unused << SendObserve(nsCString(aTopic),
+                                   nsString(aOriginAttributesPattern),
+                                   nsCString(aOriginScope));
+  }
+  return NS_OK;
+}
+
 /*******************************************************************************
  * Exported functions
  ******************************************************************************/
@@ -1186,6 +1302,36 @@ bool DeallocPBackgroundStorageParent(PBackgroundStorageParent* aActor) {
 
   StorageDBParent* actor = static_cast<StorageDBParent*>(aActor);
   actor->ReleaseIPDLReference();
+  return true;
+}
+
+PSessionStorageObserverParent* AllocPSessionStorageObserverParent() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  RefPtr<SessionStorageObserverParent> actor =
+      new SessionStorageObserverParent();
+
+  // Transfer ownership to IPDL.
+  return actor.forget().take();
+}
+
+bool RecvPSessionStorageObserverConstructor(
+    PSessionStorageObserverParent* aActor) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  return true;
+}
+
+bool DeallocPSessionStorageObserverParent(
+    PSessionStorageObserverParent* aActor) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  // Transfer ownership back from IPDL.
+  RefPtr<SessionStorageObserverParent> actor =
+      dont_AddRef(static_cast<SessionStorageObserverParent*>(aActor));
+
   return true;
 }
 

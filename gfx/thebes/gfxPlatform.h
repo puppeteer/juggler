@@ -44,9 +44,6 @@ class gfxTextPerfMetrics;
 typedef struct FT_LibraryRec_* FT_Library;
 
 namespace mozilla {
-namespace gl {
-class SkiaGLGlue;
-}  // namespace gl
 namespace layers {
 class FrameStats;
 }
@@ -117,6 +114,8 @@ inline const char* GetBackendName(mozilla::gfx::BackendType aBackend) {
       return "direct2d 1.1";
     case mozilla::gfx::BackendType::WEBRENDER_TEXT:
       return "webrender text";
+    case mozilla::gfx::BackendType::CAPTURE:
+      return "capture";
     case mozilla::gfx::BackendType::NONE:
       return "none";
     case mozilla::gfx::BackendType::BACKEND_LAST:
@@ -204,6 +203,8 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   static bool IsHeadless();
 
+  static bool UseWebRender();
+
   /**
    * Create an offscreen surface of the given dimensions
    * and image format.
@@ -274,21 +275,13 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
     return BackendTypeBit(aType) & mContentBackendBitmask;
   }
 
-  /// This function also lets us know if the current preferences/platform
-  /// combination allows for both accelerated and not accelerated canvas
-  /// implementations.  If it does, and other relevant preferences are
-  /// asking for it, we will examine the commands in the first few seconds
-  /// of the canvas usage, and potentially change to accelerated or
-  /// non-accelerated canvas.
-  virtual bool AllowOpenGLCanvas();
-  virtual void InitializeSkiaCacheLimits();
-
   static bool AsyncPanZoomEnabled();
 
   virtual void GetAzureBackendInfo(mozilla::widget::InfoObject& aObj);
   void GetApzSupportInfo(mozilla::widget::InfoObject& aObj);
   void GetTilesSupportInfo(mozilla::widget::InfoObject& aObj);
   void GetFrameStats(mozilla::widget::InfoObject& aObj);
+  void GetCMSSupportInfo(mozilla::widget::InfoObject& aObj);
 
   // Get the default content backend that will be used with the default
   // compositor. If the compositor is known when calling this function,
@@ -313,12 +306,10 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   mozilla::gfx::BackendType GetFallbackCanvasBackend() {
     return mFallbackCanvasBackend;
   }
+
   /*
    * Font bits
    */
-
-  virtual void SetupClusterBoundaries(gfxTextRun* aTextRun,
-                                      const char16_t* aString);
 
   /**
    * Fill aListOfFonts with the results of querying the list of font names
@@ -553,6 +544,11 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    */
   static qcms_transform* GetCMSRGBATransform();
 
+  /**
+   * Return sRGBA -> output device transform.
+   */
+  static qcms_transform* GetCMSBGRATransform();
+
   virtual void FontsPrefsChanged(const char* aPref);
 
   int32_t GetBidiNumeralOption();
@@ -613,13 +609,9 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    */
   mozilla::layers::DiagnosticTypes GetLayerDiagnosticTypes();
 
-  mozilla::gl::SkiaGLGlue* GetSkiaGLGlue();
-  void PurgeSkiaGPUCache();
   static void PurgeSkiaFontCache();
 
   static bool UsesOffMainThreadCompositing();
-
-  bool HasEnoughTotalSystemMemoryForSkiaGL();
 
   /**
    * Get the hardware vsync source for each platform.
@@ -640,19 +632,24 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   static bool IsInLayoutAsapMode();
 
   /**
-   * Returns the software vsync rate to use.
-   */
-  static int GetSoftwareVsyncRate();
-
-  /**
    * Returns whether or not a custom vsync rate is set.
    */
   static bool ForceSoftwareVsync();
 
   /**
+   * Returns the software vsync rate to use.
+   */
+  static int GetSoftwareVsyncRate();
+
+  /**
    * Returns the default frame rate for the refresh driver / software vsync.
    */
   static int GetDefaultFrameRate();
+
+  /**
+   * Update the frame rate (called e.g. after pref changes).
+   */
+  static void ReInitFrameRate();
 
   /**
    * Used to test which input types are handled via APZ.
@@ -678,8 +675,8 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
       mozilla::gfx::SurfaceFormat aFormat);
 
   /**
-   * Wrapper around gfxPrefs::PerfWarnings().
-   * Extracted into a function to avoid including gfxPrefs.h from this file.
+   * Wrapper around StaticPrefs::gfx_perf_warnings_enabled().
+   * Extracted into a function to avoid including StaticPrefs.h from this file.
    */
   static bool PerfWarnings();
 
@@ -738,11 +735,16 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   virtual void OnMemoryPressure(
       mozilla::layers::MemoryPressureReason aWhy) override;
 
+  virtual void EnsureDevicesInitialized(){};
+  virtual bool DevicesInitialized() { return true; };
+
+  static uint32_t TargetFrameRate();
+
  protected:
   gfxPlatform();
   virtual ~gfxPlatform();
 
-  virtual bool HasBattery() { return true; }
+  virtual bool HasBattery() { return false; }
 
   virtual void InitAcceleration();
   virtual void InitWebRenderConfig();
@@ -882,6 +884,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   void InitCompositorAccelerationPrefs();
   void InitGPUProcessPrefs();
+  virtual void InitPlatformGPUProcessPrefs() {}
   void InitOMTPConfig();
 
   static bool IsDXInterop2Blocked();
@@ -909,11 +912,11 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   mozilla::widget::GfxInfoCollector<gfxPlatform> mApzSupportCollector;
   mozilla::widget::GfxInfoCollector<gfxPlatform> mTilesInfoCollector;
   mozilla::widget::GfxInfoCollector<gfxPlatform> mFrameStatsCollector;
+  mozilla::widget::GfxInfoCollector<gfxPlatform> mCMSInfoCollector;
 
   nsTArray<mozilla::layers::FrameStats> mFrameStats;
 
   RefPtr<mozilla::gfx::DrawEventRecorder> mRecorder;
-  RefPtr<mozilla::gl::SkiaGLGlue> mSkiaGlue;
 
   // Backend that we are compositing with. NONE, if no compositor has been
   // created yet.

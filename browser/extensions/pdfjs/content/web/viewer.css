@@ -56,8 +56,6 @@
   background-color: rgb(0, 100, 0);
 }
 
-.textLayer ::-moz-selection { background: rgb(0,0,255); }
-
 .textLayer ::selection { background: rgb(0,0,255); }
 
 .textLayer .endOfContent {
@@ -224,36 +222,46 @@
   z-index: 200;
   max-width: 20em;
   background-color: #FFFF99;
-  box-shadow: 0px 2px 5px #333;
+  box-shadow: 0px 2px 5px #888;
   border-radius: 2px;
-  padding: 0.6em;
+  padding: 6px;
   margin-left: 5px;
   cursor: pointer;
   font: message-box;
+  font-size: 9px;
   word-wrap: break-word;
 }
 
+.annotationLayer .popup > * {
+  font-size: 9px;
+}
+
 .annotationLayer .popup h1 {
-  font-size: 1em;
-  border-bottom: 1px solid #000000;
-  margin: 0;
-  padding-bottom: 0.2em;
+  display: inline-block;
+}
+
+.annotationLayer .popup span {
+  display: inline-block;
+  margin-left: 5px;
 }
 
 .annotationLayer .popup p {
-  margin: 0;
-  padding-top: 0.2em;
+  border-top: 1px solid #333;
+  margin-top: 2px;
+  padding-top: 2px;
 }
 
 .annotationLayer .highlightAnnotation,
 .annotationLayer .underlineAnnotation,
 .annotationLayer .squigglyAnnotation,
 .annotationLayer .strikeoutAnnotation,
+.annotationLayer .freeTextAnnotation,
 .annotationLayer .lineAnnotation svg line,
 .annotationLayer .squareAnnotation svg rect,
 .annotationLayer .circleAnnotation svg ellipse,
 .annotationLayer .polylineAnnotation svg polyline,
 .annotationLayer .polygonAnnotation svg polygon,
+.annotationLayer .caretAnnotation,
 .annotationLayer .inkAnnotation svg polyline,
 .annotationLayer .stampAnnotation,
 .annotationLayer .fileAttachmentAnnotation {
@@ -366,11 +374,6 @@
   margin-right: auto;
 }
 
-.pdfPresentationMode:-moz-full-screen .pdfViewer .page {
-  margin-bottom: 100%;
-  border: 0;
-}
-
 .pdfPresentationMode:fullscreen .pdfViewer .page {
   margin-bottom: 100%;
   border: 0;
@@ -414,18 +417,6 @@ select {
   display: none !important;
 }
 
-#viewerContainer.pdfPresentationMode:-moz-full-screen {
-  top: 0px;
-  border-top: 2px solid transparent;
-  background-color: #000;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  cursor: none;
-  -moz-user-select: none;
-       user-select: none;
-}
-
 #viewerContainer.pdfPresentationMode:fullscreen {
   top: 0px;
   border-top: 2px solid transparent;
@@ -438,16 +429,8 @@ select {
        user-select: none;
 }
 
-.pdfPresentationMode:-moz-full-screen a:not(.internalLink) {
-  display: none;
-}
-
 .pdfPresentationMode:fullscreen a:not(.internalLink) {
   display: none;
-}
-
-.pdfPresentationMode:-moz-full-screen .textLayer > span {
-  cursor: none;
 }
 
 .pdfPresentationMode:fullscreen .textLayer > span {
@@ -1467,6 +1450,11 @@ html[dir='rtl'] .verticalToolbarSeparator {
   overflow: auto;
 }
 
+#thumbnailView > a:active,
+#thumbnailView > a:focus {
+  outline: 0;
+}
+
 .thumbnail {
   margin: 0 10px 5px 10px;
 }
@@ -1672,7 +1660,6 @@ html[dir='rtl'] .outlineItemToggler::before {
 /* TODO: file FF bug to support ::-moz-selection:window-inactive
    so we can override the opaque grey background when the window is inactive;
    see https://bugzilla.mozilla.org/show_bug.cgi?id=706209 */
-::-moz-selection { background: rgba(0,0,255,0.3); }
 ::selection { background: rgba(0,0,255,0.3); }
 
 #errorWrapper {
@@ -1930,7 +1917,7 @@ html[dir='rtl'] #documentPropertiesOverlay .row > * {
   display: none;
 }
 
-@media screen and (min-resolution: 2dppx) {
+@media screen and (min-resolution: 1.1dppx) {
   /* Rules for Retina screens */
   .toolbarButton::before {
     transform: scale(0.5);

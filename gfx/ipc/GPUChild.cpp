@@ -5,17 +5,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "GPUChild.h"
 #include "gfxConfig.h"
-#include "gfxPrefs.h"
 #include "GPUProcessHost.h"
 #include "GPUProcessManager.h"
 #include "VRProcessManager.h"
+#include "mozilla/StaticPrefs.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TelemetryIPC.h"
 #include "mozilla/dom/CheckerboardReportService.h"
 #include "mozilla/dom/MemoryReportRequest.h"
 #include "mozilla/gfx/gfxVars.h"
 #if defined(XP_WIN)
-#include "mozilla/gfx/DeviceManagerDx.h"
+#  include "mozilla/gfx/DeviceManagerDx.h"
 #endif
 #include "mozilla/ipc/CrashReporterHost.h"
 #include "mozilla/layers/APZInputBridgeChild.h"
@@ -25,7 +25,7 @@
 #include "nsIObserverService.h"
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerParent.h"
+#  include "ProfilerParent.h"
 #endif
 
 namespace mozilla {
@@ -40,22 +40,6 @@ GPUChild::GPUChild(GPUProcessHost* aHost) : mHost(aHost), mGPUReady(false) {
 GPUChild::~GPUChild() { MOZ_COUNT_DTOR(GPUChild); }
 
 void GPUChild::Init() {
-  // Build a list of prefs the GPU process will need. Note that because we
-  // limit the GPU process to prefs contained in gfxPrefs, we can simplify
-  // the message in two ways: one, we only need to send its index in gfxPrefs
-  // rather than its name, and two, we only need to send prefs that don't
-  // have their default value.
-  nsTArray<GfxPrefSetting> prefs;
-  for (auto pref : gfxPrefs::all()) {
-    if (pref->HasDefaultValue()) {
-      continue;
-    }
-
-    GfxPrefValue value;
-    pref->GetCachedValue(&value);
-    prefs.AppendElement(GfxPrefSetting(pref->Index(), value));
-  }
-
   nsTArray<GfxVarUpdate> updates = gfxVars::FetchNonDefaultVars();
 
   DevicePrefs devicePrefs;
@@ -73,7 +57,7 @@ void GPUChild::Init() {
         mappings.AppendElement(LayerTreeIdMapping(aLayersId, aProcessId));
       });
 
-  SendInit(prefs, updates, devicePrefs, mappings);
+  SendInit(updates, devicePrefs, mappings);
 
   gfxVars::AddReceiver(this);
 
@@ -158,7 +142,7 @@ mozilla::ipc::IPCResult GPUChild::RecvInitCrashReporter(
 mozilla::ipc::IPCResult GPUChild::RecvCreateVRProcess() {
   // Make sure create VR process at the main process
   MOZ_ASSERT(XRE_IsParentProcess());
-  if (gfxPrefs::VRProcessEnabled()) {
+  if (StaticPrefs::dom_vr_process_enabled()) {
     VRProcessManager::Initialize();
     VRProcessManager* vr = VRProcessManager::Get();
     MOZ_ASSERT(vr, "VRProcessManager must be initialized first.");
@@ -166,6 +150,16 @@ mozilla::ipc::IPCResult GPUChild::RecvCreateVRProcess() {
     if (vr) {
       vr->LaunchVRProcess();
     }
+  }
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult GPUChild::RecvShutdownVRProcess() {
+  // Make sure stopping VR process at the main process
+  MOZ_ASSERT(XRE_IsParentProcess());
+  if (StaticPrefs::dom_vr_process_enabled()) {
+    VRProcessManager::Shutdown();
   }
 
   return IPC_OK();
@@ -230,7 +224,7 @@ mozilla::ipc::IPCResult GPUChild::RecvNotifyDeviceReset(
 bool GPUChild::SendRequestMemoryReport(const uint32_t& aGeneration,
                                        const bool& aAnonymize,
                                        const bool& aMinimizeMemoryUsage,
-                                       const MaybeFileDesc& aDMDFile) {
+                                       const Maybe<FileDescriptor>& aDMDFile) {
   mMemoryReportRequest = MakeUnique<MemoryReportRequestHost>(aGeneration);
   Unused << PGPUChild::SendRequestMemoryReport(aGeneration, aAnonymize,
                                                aMinimizeMemoryUsage, aDMDFile);
@@ -316,7 +310,8 @@ class DeferredDeleteGPUChild : public Runnable {
   UniquePtr<GPUChild> mChild;
 };
 
-/* static */ void GPUChild::Destroy(UniquePtr<GPUChild>&& aChild) {
+/* static */
+void GPUChild::Destroy(UniquePtr<GPUChild>&& aChild) {
   NS_DispatchToMainThread(new DeferredDeleteGPUChild(std::move(aChild)));
 }
 

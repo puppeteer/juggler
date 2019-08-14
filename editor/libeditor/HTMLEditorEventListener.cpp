@@ -180,12 +180,12 @@ nsresult HTMLEditorEventListener::ListenToWindowResizeEvent(bool aListen) {
     return aListen ? NS_ERROR_FAILURE : NS_OK;
   }
 
-  nsIDocument* document = mEditorBase->AsHTMLEditor()->GetDocument();
+  Document* document = mEditorBase->AsHTMLEditor()->GetDocument();
   if (NS_WARN_IF(!document)) {
     return NS_ERROR_FAILURE;
   }
 
-  // nsIDocument::GetWindow() may return nullptr when HTMLEditor is destroyed
+  // Document::GetWindow() may return nullptr when HTMLEditor is destroyed
   // while the document is being unloaded.  If we cannot retrieve window as
   // expected, let's ignore it.
   nsPIDOMWindowOuter* window = document->GetWindow();
@@ -228,7 +228,7 @@ nsresult HTMLEditorEventListener::MouseUp(MouseEvent* aMouseEvent) {
 
   // FYI: We need to notify HTML editor of mouseup even if it's consumed
   //      because HTML editor always needs to release grabbing resizer.
-  HTMLEditor* htmlEditor = mEditorBase->AsHTMLEditor();
+  RefPtr<HTMLEditor> htmlEditor = mEditorBase->AsHTMLEditor();
   MOZ_ASSERT(htmlEditor);
 
   RefPtr<EventTarget> target = aMouseEvent->GetTarget();
@@ -258,7 +258,7 @@ nsresult HTMLEditorEventListener::MouseDown(MouseEvent* aMouseEvent) {
   WidgetMouseEvent* mousedownEvent =
       aMouseEvent->WidgetEventPtr()->AsMouseEvent();
 
-  HTMLEditor* htmlEditor = mEditorBase->AsHTMLEditor();
+  RefPtr<HTMLEditor> htmlEditor = mEditorBase->AsHTMLEditor();
   MOZ_ASSERT(htmlEditor);
 
   // Contenteditable should disregard mousedowns outside it.

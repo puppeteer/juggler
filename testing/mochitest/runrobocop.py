@@ -22,7 +22,7 @@ from mochitest_options import MochitestArgumentParser
 
 from manifestparser import TestManifest
 from manifestparser.filters import chunk_by_slice
-from mozdevice import ADBAndroid, ADBTimeoutError
+from mozdevice import ADBDevice, ADBTimeoutError
 from mozprofile.cli import parse_key_value, parse_preferences
 import mozfile
 import mozinfo
@@ -48,10 +48,10 @@ class RobocopTestRunner(MochitestDesktop):
         verbose = False
         if options.log_tbpl_level == 'debug' or options.log_mach_level == 'debug':
             verbose = True
-        self.device = ADBAndroid(adb=options.adbPath or 'adb',
-                                 device=options.deviceSerial,
-                                 test_root=options.remoteTestRoot,
-                                 verbose=verbose)
+        self.device = ADBDevice(adb=options.adbPath or 'adb',
+                                device=options.deviceSerial,
+                                test_root=options.remoteTestRoot,
+                                verbose=verbose)
 
         # Check that Firefox is installed
         expected = options.app.split('/')[-1]
@@ -96,8 +96,6 @@ class RobocopTestRunner(MochitestDesktop):
         # trying to start new ones.
         self.killNamedProc('ssltunnel')
         self.killNamedProc('xpcshell')
-        self.auto.deleteANRs()
-        self.auto.deleteTombstones()
         procName = self.options.app.split('/')[-1]
         self.device.stop_application(procName)
         if self.device.process_exist(procName):
@@ -123,11 +121,10 @@ class RobocopTestRunner(MochitestDesktop):
             self.printDeviceInfo()
         self.setupLocalPaths()
         self.buildProfile()
-        # ignoreSSLTunnelExts is a workaround for bug 1109310
         self.startServers(
             self.options,
             debuggerInfo=None,
-            ignoreSSLTunnelExts=True)
+            public=True)
         self.log.debug("Servers started")
 
     def cleanup(self):
@@ -233,7 +230,6 @@ class RobocopTestRunner(MochitestDesktop):
         self.options.extraPrefs.append('browser.search.suggest.prompted=true')
         self.options.extraPrefs.append('layout.css.devPixelsPerPx=1.0')
         self.options.extraPrefs.append('browser.chrome.dynamictoolbar=false')
-        self.options.extraPrefs.append('browser.snippets.enabled=false')
         self.options.extraPrefs.append('extensions.autoupdate.enabled=false')
 
         # Override the telemetry init delay for integration testing.

@@ -4,22 +4,22 @@
 function serviceWorkerTestExec(testFile) {
   return new Promise(function(resolve, reject) {
     function setupSW(registration) {
-      var worker = registration.installing ||
-                   registration.waiting ||
-                   registration.active;
+      var worker =
+        registration.installing || registration.waiting || registration.active;
       var iframe;
 
-      window.addEventListener("message",function onMessage(event) {
+      window.addEventListener("message", function onMessage(event) {
         if (event.data.context != "ServiceWorker") {
           return;
         }
-        if (event.data.type == 'finish') {
+        if (event.data.type == "finish") {
           window.removeEventListener("message", onMessage);
           iframe.remove();
-          registration.unregister()
+          registration
+            .unregister()
             .then(resolve)
             .catch(reject);
-        } else if (event.data.type == 'status') {
+        } else if (event.data.type == "status") {
           ok(event.data.status, event.data.context + ": " + event.data.msg);
         }
       });
@@ -34,7 +34,8 @@ function serviceWorkerTestExec(testFile) {
       document.body.appendChild(iframe);
     }
 
-    navigator.serviceWorker.register("worker_wrapper.js", {scope: "."})
+    navigator.serviceWorker
+      .register("worker_wrapper.js", { scope: "." })
       .then(setupSW);
   });
 }

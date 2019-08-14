@@ -6,6 +6,7 @@
 
 #include "GeometryUtils.h"
 
+#include "mozilla/PresShell.h"
 #include "mozilla/dom/CharacterData.h"
 #include "mozilla/dom/DOMPointBinding.h"
 #include "mozilla/dom/GeometryUtilsBinding.h"
@@ -31,10 +32,10 @@ enum GeometryNodeType {
 };
 
 static nsIFrame* GetFrameForNode(nsINode* aNode, GeometryNodeType aType) {
-  nsIDocument* doc = aNode->OwnerDoc();
+  Document* doc = aNode->OwnerDoc();
   if (aType == GEOMETRY_NODE_TEXT) {
-    if (nsIPresShell* shell = doc->GetShell()) {
-      shell->FrameConstructor()->EnsureFrameForTextNodeIsCreatedAfterFlush(
+    if (PresShell* presShell = doc->GetPresShell()) {
+      presShell->FrameConstructor()->EnsureFrameForTextNodeIsCreatedAfterFlush(
           static_cast<CharacterData*>(aNode));
     }
   }
@@ -45,7 +46,7 @@ static nsIFrame* GetFrameForNode(nsINode* aNode, GeometryNodeType aType) {
     case GEOMETRY_NODE_ELEMENT:
       return aNode->AsContent()->GetPrimaryFrame();
     case GEOMETRY_NODE_DOCUMENT: {
-      nsIPresShell* presShell = doc->GetShell();
+      PresShell* presShell = doc->GetPresShell();
       return presShell ? presShell->GetRootFrame() : nullptr;
     }
     default:
@@ -157,12 +158,12 @@ static nsRect GetBoxRectForFrame(nsIFrame** aFrame, CSSBoxType aType) {
 
 class AccumulateQuadCallback : public nsLayoutUtils::BoxCallback {
  public:
-  AccumulateQuadCallback(nsISupports* aParentObject,
+  AccumulateQuadCallback(Document* aParentObject,
                          nsTArray<RefPtr<DOMQuad> >& aResult,
                          nsIFrame* aRelativeToFrame,
                          const nsPoint& aRelativeToBoxTopLeft,
                          CSSBoxType aBoxType)
-      : mParentObject(aParentObject),
+      : mParentObject(ToSupports(aParentObject)),
         mResult(aResult),
         mRelativeToFrame(aRelativeToFrame),
         mRelativeToBoxTopLeft(aRelativeToBoxTopLeft),
@@ -250,7 +251,7 @@ void GetBoxQuads(nsINode* aNode, const dom::BoxQuadOptions& aOptions,
     return;
   }
   AutoWeakFrame weakFrame(frame);
-  nsIDocument* ownerDoc = aNode->OwnerDoc();
+  Document* ownerDoc = aNode->OwnerDoc();
   nsIFrame* relativeToFrame =
       GetFirstNonAnonymousFrameForGeometryNode(aOptions.mRelativeTo, ownerDoc);
   // The first frame might be destroyed now if the above call lead to an

@@ -10,24 +10,26 @@
  */
 
 #include "nsContentSink.h"
-#include "nsIDocument.h"
+#include "mozilla/Components.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/SRILogHelper.h"
 #include "nsStyleLinkElement.h"
 #include "nsIDocShell.h"
 #include "nsILoadContext.h"
-#include "nsCPrefetchService.h"
+#include "nsIPrefetchService.h"
 #include "nsIURI.h"
 #include "nsNetUtil.h"
 #include "nsIMIMEHeaderParam.h"
 #include "nsIProtocolHandler.h"
 #include "nsIHttpChannel.h"
 #include "nsIContent.h"
-#include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsViewManager.h"
 #include "nsAtom.h"
 #include "nsGkAtoms.h"
+#include "nsGlobalWindowInner.h"
 #include "nsNetCID.h"
 #include "nsIOfflineCacheUpdate.h"
 #include "nsIApplicationCache.h"
@@ -97,7 +99,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 nsContentSink::nsContentSink()
     : mBackoffCount(0),
       mLastNotificationTime(0),
-      mBeganUpdate(0),
       mLayoutStarted(0),
       mDynamicLowerValue(0),
       mParsing(0),
@@ -182,7 +183,7 @@ void nsContentSink::InitializeStatics() {
                               0);
 }
 
-nsresult nsContentSink::Init(nsIDocument* aDoc, nsIURI* aURI,
+nsresult nsContentSink::Init(Document* aDoc, nsIURI* aURI,
                              nsISupports* aContainer, nsIChannel* aChannel) {
   MOZ_ASSERT(aDoc, "null ptr");
   MOZ_ASSERT(aURI, "null ptr");
@@ -296,7 +297,8 @@ nsresult nsContentSink::ProcessHeaderData(nsAtom* aHeader,
 
   mDocument->SetHeaderData(aHeader, aValue);
 
-  if (aHeader == nsGkAtoms::setcookie) {
+  if (aHeader == nsGkAtoms::setcookie &&
+      StaticPrefs::dom_metaElement_setCookie_allowed()) {
     // Note: Necko already handles cookies set via the channel.  We can't just
     // call SetCookie on the channel because we want to do some security checks
     // here.
@@ -322,8 +324,8 @@ nsresult nsContentSink::ProcessHeaderData(nsAtom* aHeader,
       mParser->GetChannel(getter_AddRefs(channel));
     }
 
-    rv = cookieServ->SetCookieString(
-        codebaseURI, nullptr, NS_ConvertUTF16toUTF8(aValue).get(), channel);
+    rv = cookieServ->SetCookieString(codebaseURI, nullptr,
+                                     NS_ConvertUTF16toUTF8(aValue), channel);
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -757,6 +759,7 @@ nsresult nsContentSink::ProcessStyleLinkFromHeader(
       aMedia,
       aAlternate ? Loader::HasAlternateRel::Yes : Loader::HasAlternateRel::No,
       Loader::IsInline::No,
+      Loader::IsExplicitlyEnabled::No,
   };
 
   auto loadResultOrErr =
@@ -794,7 +797,8 @@ nsresult nsContentSink::ProcessMETATag(nsIContent* aContent) {
 
     // Don't allow setting cookies in <meta http-equiv> in cookie averse
     // documents.
-    if (nsGkAtoms::setcookie->Equals(header) && mDocument->IsCookieAverse()) {
+    if (nsGkAtoms::setcookie->Equals(header) && mDocument->IsCookieAverse() &&
+        StaticPrefs::dom_metaElement_setCookie_allowed()) {
       return NS_OK;
     }
 
@@ -825,8 +829,7 @@ void nsContentSink::PrefetchPreloadHref(const nsAString& aHref,
                                         const nsAString& aAs,
                                         const nsAString& aType,
                                         const nsAString& aMedia) {
-  nsCOMPtr<nsIPrefetchService> prefetchService(
-      do_GetService(NS_PREFETCHSERVICE_CONTRACTID));
+  nsCOMPtr<nsIPrefetchService> prefetchService(components::Prefetch::Service());
   if (prefetchService) {
     // construct URI using document charset
     auto encoding = mDocument->GetDocumentCharacterSet();
@@ -911,11 +914,6 @@ nsresult nsContentSink::SelectDocAppCache(
 
   *aAction = CACHE_SELECTION_NONE;
 
-  nsCOMPtr<nsIApplicationCacheContainer> applicationCacheDocument =
-      do_QueryInterface(mDocument);
-  NS_ASSERTION(applicationCacheDocument,
-               "mDocument must implement nsIApplicationCacheContainer.");
-
   if (aLoadApplicationCache) {
     nsCOMPtr<nsIURI> groupURI;
     rv = aLoadApplicationCache->GetManifestURI(getter_AddRefs(groupURI));
@@ -944,7 +942,7 @@ nsresult nsContentSink::SelectDocAppCache(
                   clientID.get(), docURISpec.get()));
 #endif
 
-      rv = applicationCacheDocument->SetApplicationCache(aLoadApplicationCache);
+      rv = mDocument->SetApplicationCache(aLoadApplicationCache);
       NS_ENSURE_SUCCESS(rv, rv);
 
       // Document will be added as implicit entry to the cache as part of
@@ -981,11 +979,6 @@ nsresult nsContentSink::SelectDocAppCacheNoManifest(
   if (aLoadApplicationCache) {
     // The document was loaded from an application cache, use that
     // application cache as the document's application cache.
-    nsCOMPtr<nsIApplicationCacheContainer> applicationCacheDocument =
-        do_QueryInterface(mDocument);
-    NS_ASSERTION(applicationCacheDocument,
-                 "mDocument must implement nsIApplicationCacheContainer.");
-
 #ifdef DEBUG
     nsAutoCString docURISpec, clientID;
     mDocumentURI->GetAsciiSpec(docURISpec);
@@ -996,7 +989,7 @@ nsresult nsContentSink::SelectDocAppCacheNoManifest(
                 clientID.get(), docURISpec.get()));
 #endif
 
-    rv = applicationCacheDocument->SetApplicationCache(aLoadApplicationCache);
+    rv = mDocument->SetApplicationCache(aLoadApplicationCache);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // Return the uri and invoke the update process for the selected
@@ -1136,7 +1129,7 @@ void nsContentSink::ProcessOfflineManifest(const nsAString& aManifestSpec) {
       break;
     case CACHE_SELECTION_UPDATE: {
       nsCOMPtr<nsIOfflineCacheUpdateService> updateService =
-          do_GetService(NS_OFFLINECACHEUPDATESERVICE_CONTRACTID);
+          components::OfflineCacheUpdate::Service();
 
       if (updateService) {
         updateService->ScheduleOnDocumentStop(
@@ -1167,7 +1160,10 @@ void nsContentSink::ProcessOfflineManifest(const nsAString& aManifestSpec) {
   }
 }
 
-void nsContentSink::ScrollToRef() { mDocument->ScrollToRef(); }
+void nsContentSink::ScrollToRef() {
+  RefPtr<Document> document = mDocument;
+  document->ScrollToRef();
+}
 
 void nsContentSink::StartLayout(bool aIgnorePendingSheets) {
   AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING("nsContentSink::StartLayout", LAYOUT,
@@ -1180,8 +1176,9 @@ void nsContentSink::StartLayout(bool aIgnorePendingSheets) {
 
   mDeferredLayoutStart = true;
 
-  if (!aIgnorePendingSheets && WaitForPendingSheets()) {
-    // Bail out; we'll start layout when the sheets load
+  if (!aIgnorePendingSheets &&
+      (WaitForPendingSheets() || mDocument->HasPendingInitialTranslation())) {
+    // Bail out; we'll start layout when the sheets and l10n load
     return;
   }
 
@@ -1199,14 +1196,14 @@ void nsContentSink::StartLayout(bool aIgnorePendingSheets) {
   mLastNotificationTime = PR_Now();
 
   mDocument->SetMayStartLayout(true);
-  nsCOMPtr<nsIPresShell> shell = mDocument->GetShell();
+  RefPtr<PresShell> presShell = mDocument->GetPresShell();
   // Make sure we don't call Initialize() for a shell that has
   // already called it. This can happen when the layout frame for
   // an iframe is constructed *between* the Embed() call for the
   // docshell in the iframe, and the content sink's call to OpenBody().
   // (Bug 153815)
-  if (shell && !shell->DidInitialize()) {
-    nsresult rv = shell->Initialize();
+  if (presShell && !presShell->DidInitialize()) {
+    nsresult rv = presShell->Initialize();
     if (NS_FAILED(rv)) {
       return;
     }
@@ -1219,17 +1216,13 @@ void nsContentSink::StartLayout(bool aIgnorePendingSheets) {
 }
 
 void nsContentSink::NotifyAppend(nsIContent* aContainer, uint32_t aStartIndex) {
-  if (aContainer->GetUncomposedDoc() != mDocument) {
-    // aContainer is not actually in our document anymore.... Just bail out of
-    // here; notifying on our document for this append would be wrong.
-    return;
-  }
-
   mInNotification++;
 
   {
     // Scope so we call EndUpdate before we decrease mInNotification
-    MOZ_AUTO_DOC_UPDATE(mDocument, !mBeganUpdate);
+    //
+    // Note that aContainer->OwnerDoc() may not be mDocument.
+    MOZ_AUTO_DOC_UPDATE(aContainer->OwnerDoc(), true);
     nsNodeUtils::ContentAppended(
         aContainer, aContainer->GetChildAt_Deprecated(aStartIndex));
     mLastNotificationTime = PR_Now();
@@ -1358,8 +1351,8 @@ nsresult nsContentSink::DidProcessATokenImpl() {
   }
 
   // Get the current user event time
-  nsIPresShell* shell = mDocument->GetShell();
-  if (!shell) {
+  PresShell* presShell = mDocument->GetPresShell();
+  if (!presShell) {
     // If there's no pres shell in the document, return early since
     // we're not laying anything out here.
     return NS_OK;
@@ -1371,7 +1364,7 @@ nsresult nsContentSink::DidProcessATokenImpl() {
   // Check if there's a pending event
   if (sPendingEventMode != 0 && !mHasPendingEvent &&
       (mDeflectedCount % sEventProbeRate) == 0) {
-    nsViewManager* vm = shell->GetViewManager();
+    nsViewManager* vm = presShell->GetViewManager();
     NS_ENSURE_TRUE(vm, NS_ERROR_FAILURE);
     nsCOMPtr<nsIWidget> widget;
     vm->GetRootWidget(getter_AddRefs(widget));
@@ -1409,7 +1402,7 @@ void nsContentSink::FavorPerformanceHint(bool perfOverStarvation,
     appShell->FavorPerformanceHint(perfOverStarvation, starvationDelay);
 }
 
-void nsContentSink::BeginUpdate(nsIDocument* aDocument) {
+void nsContentSink::BeginUpdate(Document* aDocument) {
   // Remember nested updates from updates that we started.
   if (mInNotification > 0 && mUpdatesInNotification < 2) {
     ++mUpdatesInNotification;
@@ -1426,7 +1419,7 @@ void nsContentSink::BeginUpdate(nsIDocument* aDocument) {
   }
 }
 
-void nsContentSink::EndUpdate(nsIDocument* aDocument) {
+void nsContentSink::EndUpdate(Document* aDocument) {
   // If we're in a script and we didn't do the notification,
   // something else in the script processing caused the
   // notification to occur. Update our notion of how much
@@ -1440,9 +1433,9 @@ void nsContentSink::EndUpdate(nsIDocument* aDocument) {
 void nsContentSink::DidBuildModelImpl(bool aTerminated) {
   if (mDocument) {
     MOZ_ASSERT(aTerminated || mDocument->GetReadyStateEnum() ==
-                                  nsIDocument::READYSTATE_LOADING,
+                                  Document::READYSTATE_LOADING,
                "Bad readyState");
-    mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_INTERACTIVE);
+    mDocument->SetReadyStateInternal(Document::READYSTATE_INTERACTIVE);
   }
 
   if (mScriptLoader) {
@@ -1505,15 +1498,15 @@ nsresult nsContentSink::WillParseImpl(void) {
     return NS_OK;
   }
 
-  nsIPresShell* shell = mDocument->GetShell();
-  if (!shell) {
+  PresShell* presShell = mDocument->GetPresShell();
+  if (!presShell) {
     return NS_OK;
   }
 
   uint32_t currentTime = PR_IntervalToMicroseconds(PR_IntervalNow());
 
   if (sEnablePerfMode == 0) {
-    nsViewManager* vm = shell->GetViewManager();
+    nsViewManager* vm = presShell->GetViewManager();
     NS_ENSURE_TRUE(vm, NS_ERROR_FAILURE);
     uint32_t lastEventTime;
     vm->GetLastUserEventTime(lastEventTime);
@@ -1557,19 +1550,29 @@ void nsContentSink::WillBuildModelImpl() {
 }
 
 /* static */
-void nsContentSink::NotifyDocElementCreated(nsIDocument* aDoc) {
+void nsContentSink::NotifyDocElementCreated(Document* aDoc) {
   MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
 
   nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
-  if (observerService) {
-    observerService->NotifyObservers(aDoc, "document-element-inserted",
+  MOZ_ASSERT(observerService);
+
+  auto* win = nsGlobalWindowInner::Cast(aDoc->GetInnerWindow());
+  bool fireInitialInsertion = !win || !win->DidFireDocElemInserted();
+  if (win) {
+    win->SetDidFireDocElemInserted();
+  }
+  if (fireInitialInsertion) {
+    observerService->NotifyObservers(ToSupports(aDoc),
+                                     "initial-document-element-inserted",
                                      EmptyString().get());
   }
+  observerService->NotifyObservers(
+      ToSupports(aDoc), "document-element-inserted", EmptyString().get());
 
   nsContentUtils::DispatchChromeEvent(
-      aDoc, aDoc, NS_LITERAL_STRING("DOMDocElementInserted"), CanBubble::eYes,
-      Cancelable::eNo);
+      aDoc, ToSupports(aDoc), NS_LITERAL_STRING("DOMDocElementInserted"),
+      CanBubble::eYes, Cancelable::eNo);
 }
 
 NS_IMETHODIMP

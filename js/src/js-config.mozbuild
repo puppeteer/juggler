@@ -4,14 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# Nightly-only features
-if CONFIG['NIGHTLY_BUILD']:
-    DEFINES['ENABLE_BINARYDATA'] = True
-    DEFINES['ENABLE_WASM_BULKMEM_OPS'] = True
-    DEFINES['ENABLE_WASM_GC'] = True
-    DEFINES['ENABLE_WASM_GENERALIZED_TABLES'] = True
-    DEFINES['WASM_PRIVATE_REFTYPES'] = True
-
 # Some huge-mapping optimization instead of bounds checks on supported
 # platforms.
 if CONFIG['JS_CODEGEN_X64'] or CONFIG['JS_CODEGEN_ARM64']:

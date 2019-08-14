@@ -80,6 +80,7 @@ struct NrIceCandidate {
 
   NrIceAddr cand_addr;
   NrIceAddr local_addr;
+  std::string mdns_addr;
   Type type;
   TcpType tcp_type;
   std::string codeword;
@@ -152,7 +153,9 @@ class NrIceMediaStream {
   nsresult GetDefaultCandidate(int component, NrIceCandidate* candidate) const;
 
   // Parse trickle ICE candidate
-  nsresult ParseTrickleCandidate(const std::string& candidate);
+  nsresult ParseTrickleCandidate(const std::string& candidate,
+                                 const std::string& ufrag,
+                                 const std::string& mdns_addr);
 
   // Disable a component
   nsresult DisableComponent(int component);
@@ -190,7 +193,7 @@ class NrIceMediaStream {
   // the candidate belongs to.
   const std::string& GetId() const { return id_; }
 
-  sigslot::signal2<NrIceMediaStream*, const std::string&>
+  sigslot::signal3<NrIceMediaStream*, const std::string&, const std::string&>
       SignalCandidate;  // A new ICE candidate:
 
   sigslot::signal1<NrIceMediaStream*> SignalReady;   // Candidate pair ready.
@@ -207,6 +210,7 @@ class NrIceMediaStream {
 
   void CloseStream(nr_ice_media_stream** stream);
   void DeferredCloseOldStream(const nr_ice_media_stream* old);
+  nr_ice_media_stream* GetStreamForRemoteUfrag(const std::string& ufrag);
 
   State state_;
   nr_ice_ctx* ctx_;

@@ -3,18 +3,19 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 /* globals Components, Task, PromiseMessage */
 "use strict";
-const {
-  utils: Cu
-} = Components;
-ChromeUtils.import("resource://gre/modules/PromiseMessage.jsm");
 
-var ManifestFinder = {// jshint ignore:line
+const { PromiseMessage } = ChromeUtils.import(
+  "resource://gre/modules/PromiseMessage.jsm"
+);
+
+var ManifestFinder = {
+  // jshint ignore:line
   /**
-  * Check from content process if DOM Window has a conforming
-  * manifest link relationship.
-  * @param aContent DOM Window to check.
-  * @return {Promise<Boolean>}
-  */
+   * Check from content process if DOM Window has a conforming
+   * manifest link relationship.
+   * @param aContent DOM Window to check.
+   * @return {Promise<Boolean>}
+   */
   contentHasManifestLink(aContent) {
     if (!aContent || isXULBrowser(aContent)) {
       throw new TypeError("Invalid input.");
@@ -23,20 +24,20 @@ var ManifestFinder = {// jshint ignore:line
   },
 
   /**
-  * Check from a XUL browser (parent process) if it's content document has a
-  * manifest link relationship.
-  * @param aBrowser The XUL browser to check.
-  * @return {Promise}
-  */
+   * Check from a XUL browser (parent process) if it's content document has a
+   * manifest link relationship.
+   * @param aBrowser The XUL browser to check.
+   * @return {Promise}
+   */
   async browserHasManifestLink(aBrowser) {
-      if (!isXULBrowser(aBrowser)) {
-        throw new TypeError("Invalid input.");
-      }
-      const msgKey = "DOM:WebManifest:hasManifestLink";
-      const mm = aBrowser.messageManager;
-      const reply = await PromiseMessage.send(mm, msgKey);
-      return reply.data.result;
+    if (!isXULBrowser(aBrowser)) {
+      throw new TypeError("Invalid input.");
     }
+    const msgKey = "DOM:WebManifest:hasManifestLink";
+    const mm = aBrowser.messageManager;
+    const reply = await PromiseMessage.send(mm, msgKey);
+    return reply.data.result;
+  },
 };
 
 function isXULBrowser(aBrowser) {
@@ -44,7 +45,7 @@ function isXULBrowser(aBrowser) {
     return false;
   }
   const XUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-  return (aBrowser.namespaceURI === XUL && aBrowser.localName === "browser");
+  return aBrowser.namespaceURI === XUL && aBrowser.localName === "browser";
 }
 
 function checkForManifest(aWindow) {
@@ -60,6 +61,7 @@ function checkForManifest(aWindow) {
   return true;
 }
 
-var EXPORTED_SYMBOLS = [// jshint ignore:line
-  "ManifestFinder"
+var EXPORTED_SYMBOLS = [
+  // jshint ignore:line
+  "ManifestFinder",
 ];

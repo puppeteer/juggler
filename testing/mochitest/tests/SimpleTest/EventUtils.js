@@ -154,7 +154,8 @@ function computeButton(aEvent) {
 }
 
 function sendMouseEvent(aEvent, aTarget, aWindow) {
-  if (!['click', 'contextmenu', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout'].includes(aEvent.type)) {
+  if (!['click', 'contextmenu', 'dblclick', 'mousedown', 'mouseup', 'mouseover',
+        'mouseout'].includes(aEvent.type)) {
     throw new Error("sendMouseEvent doesn't know about event type '" + aEvent.type + "'");
   }
 
@@ -260,7 +261,7 @@ function sendDragEvent(aEvent, aTarget, aWindow = window) {
   }
 
   var utils = _getDOMWindowUtils(aWindow);
-  return utils.dispatchDOMEventViaPresShell(aTarget, event, true);
+  return utils.dispatchDOMEventViaPresShell(aTarget, event);
 }
 
 /**
@@ -491,11 +492,11 @@ function synthesizeTouchAtPoint(left, top, aEvent, aWindow = window)
     var modifiers = _parseModifiers(aEvent, aWindow);
 
     if (("type" in aEvent) && aEvent.type) {
-      defaultPrevented = utils.sendTouchEvent(aEvent.type, [id], [left], [top], [rx], [ry], [angle], [force], 1, modifiers);
+      defaultPrevented = utils.sendTouchEvent(aEvent.type, [id], [left], [top], [rx], [ry], [angle], [force], modifiers);
     }
     else {
-      utils.sendTouchEvent("touchstart", [id], [left], [top], [rx], [ry], [angle], [force], 1, modifiers);
-      utils.sendTouchEvent("touchend", [id], [left], [top], [rx], [ry], [angle], [force], 1, modifiers);
+      utils.sendTouchEvent("touchstart", [id], [left], [top], [rx], [ry], [angle], [force], modifiers);
+      utils.sendTouchEvent("touchend", [id], [left], [top], [rx], [ry], [angle], [force], modifiers);
     }
   }
   return defaultPrevented;
@@ -2336,6 +2337,7 @@ function synthesizeDropAfterDragOver(aResult, aDataTransfer, aDestElement, aDest
                                   aDataTransfer, aDragEvent);
     sendDragEvent(event, aDestElement, aDestWindow);
   }
+  synthesizeMouse(aDestElement, 2, 2, { type: "mouseup" }, aDestWindow);
 
   return effect;
 }
@@ -2501,3 +2503,42 @@ var PluginUtils =
     return false;
   }
 };
+
+class EventCounter {
+  constructor(aTarget, aType, aOptions = {}) {
+    this.target = aTarget;
+    this.type = aType;
+    this.options = aOptions;
+
+    this.eventCount = 0;
+    // Bug 1512817:
+    // SpecialPowers is picky and needs to be passed an explicit reference to
+    // the function to be called. To avoid having to bind "this", we therefore
+    // define the method this way, via a property.
+    this.handleEvent = (aEvent) => {
+        this.eventCount++;
+    };
+
+    if (aOptions.mozSystemGroup) {
+      SpecialPowers.addSystemEventListener(aTarget, aType,
+                                           this.handleEvent,
+                                           aOptions.capture);
+    } else {
+      aTarget.addEventListener(aType, this, aOptions);
+    }
+  }
+
+  unregister() {
+    if (this.options.mozSystemGroup) {
+      SpecialPowers.removeSystemEventListener(this.target, this.type,
+                                              this.handleEvent,
+                                              this.options.capture);
+    } else {
+      this.target.removeEventListener(this.type, this, this.options);
+    }
+  }
+
+  get count() {
+    return this.eventCount;
+  }
+}

@@ -20,10 +20,7 @@
 #include "mozilla/dom/Element.h"
 #include "nsCycleCollectionParticipant.h"
 
-#include "nsISMILAttr.h"
 #include "mozilla/dom/ShadowRoot.h"
-
-class nsIDocument;
 
 namespace mozilla {
 namespace dom {
@@ -110,20 +107,19 @@ class CharacterData : public nsIContent {
   }
 
   // Implementation for nsIContent
-  nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
-                      nsIContent* aBindingParent) override;
+  nsresult BindToTree(BindContext&, nsINode& aParent) override;
 
-  void UnbindFromTree(bool aDeep = true, bool aNullParent = true) override;
+  void UnbindFromTree(bool aNullParent = true) override;
 
   already_AddRefed<nsINodeList> GetChildren(uint32_t aFilter) final {
     return nullptr;
   }
 
   const nsTextFragment* GetText() override { return &mText; }
+  uint32_t TextLength() const final { return TextDataLength(); }
 
   const nsTextFragment& TextFragment() const { return mText; }
-
-  uint32_t TextLength() const final { return TextDataLength(); }
+  uint32_t TextDataLength() const { return mText.GetLength(); }
 
   /**
    * Set the text to the given value. If aNotify is true then
@@ -200,8 +196,6 @@ class CharacterData : public nsIContent {
   void ReplaceData(uint32_t aOffset, uint32_t aCount, const nsAString& aData,
                    ErrorResult& rv);
 
-  uint32_t TextDataLength() const { return mText.GetLength(); }
-
   //----------------------------------------
 
 #ifdef DEBUG
@@ -210,6 +204,14 @@ class CharacterData : public nsIContent {
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_INHERITED(
       CharacterData, nsIContent)
+
+  /**
+   * Compare two CharacterData nodes for text equality.
+   */
+  MOZ_MUST_USE
+  bool TextEquals(const CharacterData* aOther) const {
+    return mText.TextEquals(aOther->mText);
+  }
 
  protected:
   virtual ~CharacterData();

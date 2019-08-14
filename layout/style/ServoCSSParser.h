@@ -18,25 +18,23 @@
 #include "nsDOMCSSDeclaration.h"
 #include "nsStringFwd.h"
 
-class nsCSSValue;
-class nsIDocument;
 struct nsCSSRect;
 struct nsTimingFunction;
 struct RawServoDeclarationBlock;
-
-using RawGeckoGfxMatrix4x4 = mozilla::gfx::Float[16];
-
-namespace mozilla {
-namespace css {
-class Loader;
-}  // namespace css
-}  // namespace mozilla
 
 namespace mozilla {
 
 class ServoStyleSet;
 class SharedFontList;
 struct URLExtraData;
+
+namespace css {
+class Loader;
+}
+
+namespace dom {
+class Document;
+}
 
 class ServoCSSParser {
  public:
@@ -109,7 +107,7 @@ class ServoCSSParser {
    */
   static bool ParseTransformIntoMatrix(const nsAString& aValue,
                                        bool& aContains3DTransform,
-                                       RawGeckoGfxMatrix4x4& aResult);
+                                       gfx::Matrix4x4& aResult);
 
   /**
    * Parse a font shorthand for FontFaceSet matching, so we only care about
@@ -129,20 +127,14 @@ class ServoCSSParser {
       float& aStretch, float& aWeight);
 
   /**
-   * Get a URLExtraData from |nsIDocument|.
-   *
-   * @param aDocument The current document.
-   * @return The URLExtraData object.
+   * Get a URLExtraData from a document.
    */
-  static already_AddRefed<URLExtraData> GetURLExtraData(nsIDocument* aDocument);
+  static already_AddRefed<URLExtraData> GetURLExtraData(dom::Document*);
 
   /**
-   * Get a ParsingEnvironment from |nsIDocument|.
-   *
-   * @param aDocument The current document.
-   * @return The ParsingEnvironment object.
+   * Get a ParsingEnvironment from a document.
    */
-  static ParsingEnvironment GetParsingEnvironment(nsIDocument* aDocument);
+  static ParsingEnvironment GetParsingEnvironment(dom::Document*);
 };
 
 }  // namespace mozilla

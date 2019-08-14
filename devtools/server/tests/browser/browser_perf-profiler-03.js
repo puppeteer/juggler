@@ -10,7 +10,12 @@
 
 "use strict";
 
-const { pmmIsProfilerActive, pmmStartProfiler, pmmLoadFrameScripts, pmmClearFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
+const {
+  pmmIsProfilerActive,
+  pmmStartProfiler,
+  pmmLoadFrameScripts,
+  pmmClearFrameScripts,
+} = require("devtools/client/performance/test/helpers/profiler-mm-utils");
 
 add_task(async function() {
   // Ensure the profiler is already running when the test starts.
@@ -20,12 +25,13 @@ add_task(async function() {
   const features = ["js"];
   await pmmStartProfiler({ entries, interval, features });
 
-  ok((await pmmIsProfilerActive()),
-    "The built-in profiler module should still be active.");
+  ok(
+    await pmmIsProfilerActive(),
+    "The built-in profiler module should still be active."
+  );
 
   const target1 = await addTabTarget(MAIN_DOMAIN + "doc_perf.html");
   const firstFront = await target1.getFront("performance");
-  await firstFront.connect();
 
   await firstFront.startRecording();
 
@@ -33,15 +39,17 @@ add_task(async function() {
   const secondFront = await target2.getFront("performance");
   await secondFront.connect();
 
-  await secondFront.destroy();
   await target2.destroy();
-  ok((await pmmIsProfilerActive()),
-    "The built-in profiler module should still be active.");
+  ok(
+    await pmmIsProfilerActive(),
+    "The built-in profiler module should still be active."
+  );
 
-  await firstFront.destroy();
   await target1.destroy();
-  ok(!(await pmmIsProfilerActive()),
-    "The built-in profiler module should have been automatically stopped.");
+  ok(
+    !(await pmmIsProfilerActive()),
+    "The built-in profiler module should have been automatically stopped."
+  );
 
   pmmClearFrameScripts();
 

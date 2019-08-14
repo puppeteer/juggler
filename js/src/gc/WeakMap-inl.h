@@ -9,18 +9,32 @@
 
 #include "gc/WeakMap.h"
 
+#include "gc/Zone.h"
 #include "js/TraceKind.h"
 #include "vm/JSContext.h"
 
 namespace js {
 
 template <typename T>
-static T extractUnbarriered(const WriteBarrieredBase<T>& v) {
+static T extractUnbarriered(const WriteBarriered<T>& v) {
   return v.get();
 }
+
 template <typename T>
 static T* extractUnbarriered(T* v) {
   return v;
+}
+
+inline /* static */ JSObject* WeakMapBase::getDelegate(JSObject* key) {
+  return UncheckedUnwrapWithoutExpose(key);
+}
+
+inline /* static */ JSObject* WeakMapBase::getDelegate(JSScript* script) {
+  return nullptr;
+}
+
+inline /* static */ JSObject* WeakMapBase::getDelegate(LazyScript* script) {
+  return nullptr;
 }
 
 template <class K, class V>
@@ -28,13 +42,19 @@ WeakMap<K, V>::WeakMap(JSContext* cx, JSObject* memOf)
     : Base(cx->zone()), WeakMapBase(memOf, cx->zone()) {
   using ElemType = typename K::ElementType;
   using NonPtrType = typename mozilla::RemovePointer<ElemType>::Type;
+
   // The object's TraceKind needs to be added to CC graph if this object is
-  // used as a WeakMap key. See the comments for IsCCTraceKind for details.
+  // used as a WeakMap key, otherwise the key is considered to be pointed from
+  // somewhere unknown, and results in leaking the subgraph which contains the
+  // key. See the comments in NoteWeakMapsTracer::trace for more details.
   static_assert(JS::IsCCTraceKind(NonPtrType::TraceKind),
                 "Object's TraceKind should be added to CC graph.");
 
   zone()->gcWeakMapList().insertFront(this);
-  marked = JS::IsIncrementalGCInProgress(TlsContext.get());
+  if (zone()->wasGCStarted()) {
+    marked = true;
+    markColor = gc::MarkColor::Black;
+  }
 }
 
 // Trace a WeakMap entry based on 'markedCell' getting marked, where 'origKey'
@@ -46,21 +66,18 @@ WeakMap<K, V>::WeakMap(JSContext* cx, JSObject* memOf)
 // markedCell. But a subclass might use it to optimize the liveness check.
 template <class K, class V>
 void WeakMap<K, V>::markEntry(GCMarker* marker, gc::Cell* markedCell,
-                              JS::GCCellPtr origKey) {
+                              gc::Cell* origKey) {
   MOZ_ASSERT(marked);
 
-  // If this cast fails, then you're instantiating the WeakMap with a
-  // Lookup that can't be constructed from a Cell*. The WeakKeyTable
-  // mechanism is indexed with a GCCellPtr, so that won't work.
-  Ptr p = Base::lookup(static_cast<Lookup>(origKey.asCell()));
+  Ptr p = Base::lookup(static_cast<Lookup>(origKey));
   MOZ_ASSERT(p.found());
 
   K key(p->key());
   MOZ_ASSERT((markedCell == extractUnbarriered(key)) ||
              (markedCell == getDelegate(key)));
-  if (gc::IsMarked(marker->runtime(), &key)) {
+  if (marker->isMarked(&key)) {
     TraceEdge(marker, &p->value(), "ephemeron value");
-  } else if (keyNeedsMark(key)) {
+  } else if (keyNeedsMark(marker, key)) {
     TraceEdge(marker, &p->value(), "WeakMap ephemeron value");
     TraceEdge(marker, &key, "proxy-preserved WeakMap ephemeron key");
     MOZ_ASSERT(key == p->key());  // No moving
@@ -76,8 +93,19 @@ void WeakMap<K, V>::trace(JSTracer* trc) {
 
   if (trc->isMarkingTracer()) {
     MOZ_ASSERT(trc->weakMapAction() == ExpandWeakMaps);
+    auto marker = GCMarker::fromTracer(trc);
+
+    // Don't change the map color from black to gray. This can happen when a
+    // barrier pushes the map object onto the black mark stack when it's already
+    // present on the gray mark stack, which is marked later.
+    if (marked && markColor == gc::MarkColor::Black &&
+        marker->markColor() == gc::MarkColor::Gray) {
+      return;
+    }
+
     marked = true;
-    (void)markIteratively(GCMarker::fromTracer(trc));
+    markColor = marker->markColor();
+    (void)markEntries(marker);
     return;
   }
 
@@ -101,10 +129,11 @@ void WeakMap<K, V>::trace(JSTracer* trc) {
 
 template <class K, class V>
 /* static */ void WeakMap<K, V>::addWeakEntry(
-    GCMarker* marker, JS::GCCellPtr key, const gc::WeakMarkable& markable) {
-  Zone* zone = key.asCell()->asTenured().zone();
-
-  auto p = zone->gcWeakKeys().get(key);
+    GCMarker* marker, gc::Cell* key, const gc::WeakMarkable& markable) {
+  Zone* zone = key->asTenured().zone();
+  auto& weakKeys =
+      gc::IsInsideNursery(key) ? zone->gcNurseryWeakKeys() : zone->gcWeakKeys();
+  auto p = weakKeys.get(key);
   if (p) {
     gc::WeakEntryVector& weakEntries = p->value;
     if (!weakEntries.append(markable)) {
@@ -113,22 +142,26 @@ template <class K, class V>
   } else {
     gc::WeakEntryVector weakEntries;
     MOZ_ALWAYS_TRUE(weakEntries.append(markable));
-    if (!zone->gcWeakKeys().put(JS::GCCellPtr(key), std::move(weakEntries))) {
+    if (!weakKeys.put(key, std::move(weakEntries))) {
       marker->abortLinearWeakMarking();
     }
   }
 }
 
 template <class K, class V>
-bool WeakMap<K, V>::markIteratively(GCMarker* marker) {
+bool WeakMap<K, V>::markEntries(GCMarker* marker) {
   MOZ_ASSERT(marked);
+  if (marker->markColor() == gc::MarkColor::Black &&
+      markColor == gc::MarkColor::Gray) {
+    return false;
+  }
 
   bool markedAny = false;
 
   for (Enum e(*this); !e.empty(); e.popFront()) {
     // If the entry is live, ensure its key and value are marked.
-    bool keyIsMarked = gc::IsMarked(marker->runtime(), &e.front().mutableKey());
-    if (!keyIsMarked && keyNeedsMark(e.front().key())) {
+    bool keyIsMarked = marker->isMarked(&e.front().mutableKey());
+    if (!keyIsMarked && keyNeedsMark(marker, e.front().key())) {
       TraceEdge(marker, &e.front().mutableKey(),
                 "proxy-preserved WeakMap entry key");
       keyIsMarked = true;
@@ -136,7 +169,7 @@ bool WeakMap<K, V>::markIteratively(GCMarker* marker) {
     }
 
     if (keyIsMarked) {
-      if (!gc::IsMarked(marker->runtime(), &e.front().value())) {
+      if (!marker->isMarked(&e.front().value())) {
         TraceEdge(marker, &e.front().value(), "WeakMap entry value");
         markedAny = true;
       }
@@ -145,11 +178,11 @@ bool WeakMap<K, V>::markIteratively(GCMarker* marker) {
       // the lookup key in the list of weak keys. Also record the
       // delegate, if any, because marking the delegate also marks
       // the entry.
-      JS::GCCellPtr weakKey(extractUnbarriered(e.front().key()));
+      gc::Cell* weakKey = extractUnbarriered(e.front().key());
       gc::WeakMarkable markable(this, weakKey);
       addWeakEntry(marker, weakKey, markable);
       if (JSObject* delegate = getDelegate(e.front().key())) {
-        addWeakEntry(marker, JS::GCCellPtr(delegate), markable);
+        addWeakEntry(marker, delegate, markable);
       }
     }
   }
@@ -158,51 +191,24 @@ bool WeakMap<K, V>::markIteratively(GCMarker* marker) {
 }
 
 template <class K, class V>
-inline JSObject* WeakMap<K, V>::getDelegate(JSObject* key) const {
-  JS::AutoSuppressGCAnalysis nogc;
-
-  JSWeakmapKeyDelegateOp op = key->getClass()->extWeakmapKeyDelegateOp();
-  if (!op) {
-    return nullptr;
-  }
-
-  JSObject* obj = op(key);
-  if (!obj) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(obj->runtimeFromMainThread() == zone()->runtimeFromMainThread());
-  return obj;
-}
-
-template <class K, class V>
-inline JSObject* WeakMap<K, V>::getDelegate(JSScript* script) const {
-  return nullptr;
-}
-
-template <class K, class V>
-inline JSObject* WeakMap<K, V>::getDelegate(LazyScript* script) const {
-  return nullptr;
-}
-
-template <class K, class V>
-inline bool WeakMap<K, V>::keyNeedsMark(JSObject* key) const {
+inline bool WeakMap<K, V>::keyNeedsMark(GCMarker* marker, JSObject* key) const {
   JSObject* delegate = getDelegate(key);
   /*
    * Check if the delegate is marked with any color to properly handle
    * gray marking when the key's delegate is black and the map is gray.
    */
-  return delegate &&
-         gc::IsMarkedUnbarriered(zone()->runtimeFromMainThread(), &delegate);
+  return delegate && marker->isMarkedUnbarriered(&delegate);
 }
 
 template <class K, class V>
-inline bool WeakMap<K, V>::keyNeedsMark(JSScript* script) const {
+inline bool WeakMap<K, V>::keyNeedsMark(GCMarker* marker,
+                                        JSScript* script) const {
   return false;
 }
 
 template <class K, class V>
-inline bool WeakMap<K, V>::keyNeedsMark(LazyScript* script) const {
+inline bool WeakMap<K, V>::keyNeedsMark(GCMarker* marker,
+                                        LazyScript* script) const {
   return false;
 }
 
@@ -241,9 +247,31 @@ void WeakMap<K, V>::assertEntriesNotAboutToBeFinalized() {
   for (Range r = Base::all(); !r.empty(); r.popFront()) {
     K k(r.front().key());
     MOZ_ASSERT(!gc::IsAboutToBeFinalized(&k));
+    JSObject* delegate = getDelegate(k);
+    if (delegate) {
+      MOZ_ASSERT(!gc::IsAboutToBeFinalizedUnbarriered(&delegate),
+                 "weakmap marking depends on a key tracing its delegate");
+    }
     MOZ_ASSERT(!gc::IsAboutToBeFinalized(&r.front().value()));
     MOZ_ASSERT(k == r.front().key());
   }
+}
+#endif
+
+#ifdef JS_GC_ZEAL
+template <class K, class V>
+bool WeakMap<K, V>::checkMarking() const {
+  bool ok = true;
+  for (Range r = Base::all(); !r.empty(); r.popFront()) {
+    gc::Cell* key = gc::ToMarkable(r.front().key());
+    gc::Cell* value = gc::ToMarkable(r.front().value());
+    if (key && value) {
+      if (!gc::CheckWeakMapEntryMarking(this, key, value)) {
+        ok = false;
+      }
+    }
+  }
+  return ok;
 }
 #endif
 

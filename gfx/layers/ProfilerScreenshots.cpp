@@ -6,16 +6,18 @@
 
 #include "mozilla/layers/ProfilerScreenshots.h"
 
+#include "mozilla/SystemGroup.h"
 #include "mozilla/TimeStamp.h"
 
 #include "GeckoProfiler.h"
 #include "gfxUtils.h"
 #include "nsThreadUtils.h"
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerMarkerPayload.h"
+#  include "ProfilerMarkerPayload.h"
 #endif
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 using namespace mozilla::layers;
 
 ProfilerScreenshots::ProfilerScreenshots()
@@ -30,12 +32,13 @@ ProfilerScreenshots::~ProfilerScreenshots() {
     SystemGroup::Dispatch(
         TaskCategory::Other,
         NewRunnableMethod("ProfilerScreenshots::~ProfilerScreenshots", mThread,
-                          &nsIThread::Shutdown));
+                          &nsIThread::AsyncShutdown));
     mThread = nullptr;
   }
 }
 
-/* static */ bool ProfilerScreenshots::IsEnabled() {
+/* static */
+bool ProfilerScreenshots::IsEnabled() {
 #ifdef MOZ_GECKO_PROFILER
   return profiler_feature_active(ProfilerFeature::Screenshots);
 #else
@@ -59,7 +62,8 @@ void ProfilerScreenshots::SubmitScreenshot(
 
   if (!succeeded) {
     PROFILER_ADD_MARKER(
-        "NoCompositorScreenshot because aPopulateSurface callback failed");
+        "NoCompositorScreenshot because aPopulateSurface callback failed",
+        GRAPHICS);
     ReturnSurface(backingSurface);
     return;
   }
@@ -69,7 +73,8 @@ void ProfilerScreenshots::SubmitScreenshot(
     if (NS_WARN_IF(NS_FAILED(rv))) {
       PROFILER_ADD_MARKER(
           "NoCompositorScreenshot because ProfilerScreenshots thread creation "
-          "failed");
+          "failed",
+          DOM);
       ReturnSurface(backingSurface);
       return;
     }
@@ -81,10 +86,12 @@ void ProfilerScreenshots::SubmitScreenshot(
   IntSize scaledSize = aScaledSize;
   TimeStamp timeStamp = aTimeStamp;
 
+  RefPtr<ProfilerScreenshots> self = this;
+
   mThread->Dispatch(NS_NewRunnableFunction(
       "ProfilerScreenshots::SubmitScreenshot",
-      [this, backingSurface, sourceThread, windowIdentifier, originalSize,
-       scaledSize, timeStamp]() {
+      [self{std::move(self)}, backingSurface, sourceThread, windowIdentifier,
+       originalSize, scaledSize, timeStamp]() {
         // Create a new surface that wraps backingSurface's data but has the
         // correct size.
         {
@@ -98,20 +105,20 @@ void ProfilerScreenshots::SubmitScreenshot(
           // Encode surf to a JPEG data URL.
           nsCString dataURL;
           nsresult rv = gfxUtils::EncodeSourceSurface(
-              surf, NS_LITERAL_CSTRING("image/jpeg"),
-              NS_LITERAL_STRING("quality=85"), gfxUtils::eDataURIEncode,
-              nullptr, &dataURL);
+              surf, ImageType::JPEG, NS_LITERAL_STRING("quality=85"),
+              gfxUtils::eDataURIEncode, nullptr, &dataURL);
           if (NS_SUCCEEDED(rv)) {
             // Add a marker with the data URL.
             profiler_add_marker_for_thread(
-                sourceThread, "CompositorScreenshot",
+                sourceThread, JS::ProfilingCategoryPair::GRAPHICS,
+                "CompositorScreenshot",
                 MakeUnique<ScreenshotPayload>(timeStamp, std::move(dataURL),
                                               originalSize, windowIdentifier));
           }
         }
 
         // Return backingSurface back to the surface pool.
-        ReturnSurface(backingSurface);
+        self->ReturnSurface(backingSurface);
       }));
 #endif
 }

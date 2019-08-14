@@ -6,6 +6,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
+import android.support.annotation.AnyThread;
+import android.support.annotation.NonNull;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -69,7 +71,10 @@ public class CrashReporter {
      * @see GeckoRuntimeSettings.Builder#crashHandler(Class)
      * @see GeckoRuntime#ACTION_CRASHED
      */
-    public static GeckoResult<String> sendCrashReport(Context context, Intent intent, String appName)
+    @AnyThread
+    public static @NonNull GeckoResult<String> sendCrashReport(@NonNull final Context context,
+                                                               @NonNull final Intent intent,
+                                                               @NonNull final String appName)
             throws IOException, URISyntaxException {
         return sendCrashReport(context, intent.getExtras(), appName);
     }
@@ -91,7 +96,10 @@ public class CrashReporter {
      * @see GeckoRuntimeSettings.Builder#crashHandler(Class)
      * @see GeckoRuntime#ACTION_CRASHED
      */
-    public static GeckoResult<String> sendCrashReport(Context context, Bundle intentExtras, String appName)
+    @AnyThread
+    public static @NonNull GeckoResult<String> sendCrashReport(@NonNull final Context context,
+                                                               @NonNull final Bundle intentExtras,
+                                                               @NonNull final String appName)
             throws IOException, URISyntaxException {
         final File dumpFile = new File(intentExtras.getString(GeckoRuntime.EXTRA_MINIDUMP_PATH));
         final File extrasFile = new File(intentExtras.getString(GeckoRuntime.EXTRA_EXTRAS_PATH));
@@ -119,8 +127,13 @@ public class CrashReporter {
      * @see GeckoRuntimeSettings.Builder#crashHandler(Class)
      * @see GeckoRuntime#ACTION_CRASHED
      */
-    public static GeckoResult<String> sendCrashReport(Context context, File minidumpFile, File extrasFile,
-                                       boolean success, String appName) throws IOException, URISyntaxException {
+    @AnyThread
+    public static @NonNull GeckoResult<String> sendCrashReport(@NonNull final Context context,
+                                                               @NonNull final File minidumpFile,
+                                                               @NonNull final File extrasFile,
+                                                               final boolean success,
+                                                               @NonNull final String appName)
+            throws IOException, URISyntaxException {
         // Compute the minidump hash and generate the stack traces
         computeMinidumpHash(extrasFile, minidumpFile);
 
@@ -145,9 +158,11 @@ public class CrashReporter {
      * @see GeckoRuntimeSettings.Builder#crashHandler(Class)
      * @see GeckoRuntime#ACTION_CRASHED
      */
-    public static GeckoResult<String> sendCrashReport(Context context, File minidumpFile,
-                                       Map<String, String> extras, boolean success,
-                                       String appName) throws IOException, URISyntaxException {
+    @AnyThread
+    public static @NonNull GeckoResult<String> sendCrashReport(
+        @NonNull final Context context, @NonNull final File minidumpFile,
+        @NonNull final Map<String, String> extras, final boolean success,
+        @NonNull final String appName) throws IOException, URISyntaxException {
         Log.d(LOGTAG, "Sending crash report: " + minidumpFile.getPath());
 
         String spec = extras.get(SERVER_URL_KEY);
@@ -248,7 +263,7 @@ public class CrashReporter {
         return GeckoResult.fromException(new Exception("Failed to submit crash report"));
     }
 
-    private static void computeMinidumpHash(File extraFile, File minidump) {
+    private static void computeMinidumpHash(final File extraFile, final File minidump) {
         try {
             FileInputStream stream = new FileInputStream(minidump);
             MessageDigest md = MessageDigest.getInstance("SHA-256");
@@ -288,7 +303,8 @@ public class CrashReporter {
         }
     }
 
-    private static HashMap<String, String> readStringsFromFile(String filePath) throws IOException {
+    private static HashMap<String, String> readStringsFromFile(final String filePath)
+            throws IOException {
         FileReader fileReader = null;
         BufferedReader bufReader = null;
         try {
@@ -309,7 +325,8 @@ public class CrashReporter {
         }
     }
 
-    private static HashMap<String, String> readStringsFromReader(BufferedReader reader) throws IOException {
+    private static HashMap<String, String> readStringsFromReader(final BufferedReader reader)
+            throws IOException {
         String line;
         HashMap<String, String> map = new HashMap<>();
         while ((line = reader.readLine()) != null) {
@@ -330,7 +347,8 @@ public class CrashReporter {
         return String.format("---------------------------%08X%08X", r0, r1);
     }
 
-    private static void sendPart(OutputStream os, String boundary, String name, String data) {
+    private static void sendPart(final OutputStream os, final String boundary, final String name,
+                                 final String data) {
         try {
             os.write(("--" + boundary + "\r\n" +
                     "Content-Disposition: form-data; name=\"" + name + "\"\r\n" +
@@ -342,7 +360,8 @@ public class CrashReporter {
         }
     }
 
-    private static void sendFile(OutputStream os, String boundary, String name, File file) throws IOException {
+    private static void sendFile(final OutputStream os, final String boundary, final String name,
+                                 final File file) throws IOException {
         os.write(("--" + boundary + "\r\n" +
                 "Content-Disposition: form-data; name=\"" + name + "\"; " +
                 "filename=\"" + file.getName() + "\"\r\n" +
@@ -354,7 +373,7 @@ public class CrashReporter {
         fc.close();
     }
 
-    private static String unescape(String string) {
+    private static String unescape(final String string) {
         return string.replaceAll("\\\\\\\\", "\\").replaceAll("\\\\n", "\n").replaceAll("\\\\t", "\t");
     }
 }

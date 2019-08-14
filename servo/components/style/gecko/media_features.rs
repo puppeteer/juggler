@@ -4,25 +4,26 @@
 
 //! Gecko's media feature list and evaluator.
 
-use app_units::Au;
 use crate::gecko_bindings::bindings;
 use crate::gecko_bindings::structs;
 use crate::media_queries::media_feature::{AllowsRanges, ParsingRequirements};
 use crate::media_queries::media_feature::{Evaluator, MediaFeatureDescription};
 use crate::media_queries::media_feature_expression::{AspectRatio, RangeOrOperator};
-use crate::media_queries::Device;
+use crate::media_queries::{Device, MediaType};
 use crate::values::computed::CSSPixelLength;
 use crate::values::computed::Resolution;
 use crate::Atom;
+use app_units::Au;
 use euclid::Size2D;
 
 fn viewport_size(device: &Device) -> Size2D<Au> {
-    let pc = device.pres_context();
-    if pc.mIsRootPaginatedDocument() != 0 {
-        // We want the page size, including unprintable areas and margins.
-        // FIXME(emilio, bug 1414600): Not quite!
-        let area = &pc.mPageSize;
-        return Size2D::new(Au(area.width), Au(area.height));
+    if let Some(pc) = device.pres_context() {
+        if pc.mIsRootPaginatedDocument() != 0 {
+            // We want the page size, including unprintable areas and margins.
+            // FIXME(emilio, bug 1414600): Not quite!
+            let area = &pc.mPageSize;
+            return Size2D::new(Au(area.width), Au(area.height));
+        }
     }
     device.au_viewport_size()
 }
@@ -126,10 +127,6 @@ fn eval_device_aspect_ratio(
 }
 
 /// https://compat.spec.whatwg.org/#css-media-queries-webkit-device-pixel-ratio
-///
-/// FIXME(emilio): This should be an alias of `resolution`, according to the
-/// spec, and also according to the code in Chromium. Unify with
-/// `eval_resolution`.
 fn eval_device_pixel_ratio(
     device: &Device,
     query_value: Option<f32>,
@@ -280,6 +277,16 @@ enum PrefersReducedMotion {
     Reduce,
 }
 
+/// Values for the prefers-color-scheme media feature.
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, PartialEq, ToCss)]
+#[repr(u8)]
+#[allow(missing_docs)]
+pub enum PrefersColorScheme {
+    Light,
+    Dark,
+    NoPreference,
+}
+
 /// https://drafts.csswg.org/mediaqueries-5/#prefers-reduced-motion
 fn eval_prefers_reduced_motion(device: &Device, query_value: Option<PrefersReducedMotion>) -> bool {
     let prefers_reduced =
@@ -295,8 +302,71 @@ fn eval_prefers_reduced_motion(device: &Device, query_value: Option<PrefersReduc
     }
 }
 
-/// https://drafts.csswg.org/mediaqueries-4/#mf-interaction
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, ToCss)]
+#[repr(u8)]
+enum OverflowBlock {
+    None,
+    Scroll,
+    OptionalPaged,
+    Paged,
+}
+
+/// https://drafts.csswg.org/mediaqueries-4/#mf-overflow-block
+fn eval_overflow_block(device: &Device, query_value: Option<OverflowBlock>) -> bool {
+    // For the time being, assume that printing (including previews)
+    // is the only time when we paginate, and we are otherwise always
+    // scrolling. This is true at the moment in Firefox, but may need
+    // updating in the future (e.g., ebook readers built with Stylo, a
+    // billboard mode that doesn't support overflow at all).
+    //
+    // If this ever changes, don't forget to change eval_overflow_inline too.
+    let scrolling = device.media_type() != MediaType::print();
+    let query_value = match query_value {
+        Some(v) => v,
+        None => return true,
+    };
+
+    match query_value {
+        OverflowBlock::None | OverflowBlock::OptionalPaged => false,
+        OverflowBlock::Scroll => scrolling,
+        OverflowBlock::Paged => !scrolling,
+    }
+}
+
+#[derive(Clone, Copy, Debug, FromPrimitive, Parse, ToCss)]
+#[repr(u8)]
+enum OverflowInline {
+    None,
+    Scroll,
+}
+
+/// https://drafts.csswg.org/mediaqueries-4/#mf-overflow-inline
+fn eval_overflow_inline(device: &Device, query_value: Option<OverflowInline>) -> bool {
+    // See the note in eval_overflow_block.
+    let scrolling = device.media_type() != MediaType::print();
+    let query_value = match query_value {
+        Some(v) => v,
+        None => return scrolling,
+    };
+
+    match query_value {
+        OverflowInline::None => !scrolling,
+        OverflowInline::Scroll => scrolling,
+    }
+}
+
+/// https://drafts.csswg.org/mediaqueries-5/#prefers-color-scheme
+fn eval_prefers_color_scheme(device: &Device, query_value: Option<PrefersColorScheme>) -> bool {
+    let prefers_color_scheme =
+        unsafe { bindings::Gecko_MediaFeatures_PrefersColorScheme(device.document()) };
+    match query_value {
+        Some(v) => prefers_color_scheme == v,
+        None => prefers_color_scheme != PrefersColorScheme::NoPreference,
+    }
+}
+
 bitflags! {
+    /// https://drafts.csswg.org/mediaqueries-4/#mf-interaction
     struct PointerCapabilities: u8 {
         const COARSE = structs::PointerCapabilities_Coarse;
         const FINE = structs::PointerCapabilities_Fine;
@@ -388,7 +458,7 @@ fn eval_moz_is_glyph(
     query_value: Option<bool>,
     _: Option<RangeOrOperator>,
 ) -> bool {
-    let is_glyph = unsafe { (*device.document()).mIsSVGGlyphsDocument() };
+    let is_glyph = device.document().mIsSVGGlyphsDocument();
     query_value.map_or(is_glyph, |v| v == is_glyph)
 }
 
@@ -473,7 +543,7 @@ lazy_static! {
     /// to support new types in these entries and (2) ensuring that either
     /// nsPresContext::MediaFeatureValuesChanged is called when the value that
     /// would be returned by the evaluator function could change.
-    pub static ref MEDIA_FEATURES: [MediaFeatureDescription; 48] = [
+    pub static ref MEDIA_FEATURES: [MediaFeatureDescription; 53] = [
         feature!(
             atom!("width"),
             AllowsRanges::Yes,
@@ -593,6 +663,24 @@ lazy_static! {
             ParsingRequirements::empty(),
         ),
         feature!(
+            atom!("overflow-block"),
+            AllowsRanges::No,
+            keyword_evaluator!(eval_overflow_block, OverflowBlock),
+            ParsingRequirements::empty(),
+        ),
+        feature!(
+            atom!("overflow-inline"),
+            AllowsRanges::No,
+            keyword_evaluator!(eval_overflow_inline, OverflowInline),
+            ParsingRequirements::empty(),
+        ),
+        feature!(
+            atom!("prefers-color-scheme"),
+            AllowsRanges::No,
+            keyword_evaluator!(eval_prefers_color_scheme, PrefersColorScheme),
+            ParsingRequirements::empty(),
+        ),
+        feature!(
             atom!("pointer"),
             AllowsRanges::No,
             keyword_evaluator!(eval_pointer, Pointer),
@@ -654,10 +742,12 @@ lazy_static! {
         system_metric_feature!(atom!("-moz-menubar-drag")),
         system_metric_feature!(atom!("-moz-swipe-animation-enabled")),
         system_metric_feature!(atom!("-moz-gtk-csd-available")),
+        system_metric_feature!(atom!("-moz-gtk-csd-hide-titlebar-by-default")),
         system_metric_feature!(atom!("-moz-gtk-csd-transparent-background")),
         system_metric_feature!(atom!("-moz-gtk-csd-minimize-button")),
         system_metric_feature!(atom!("-moz-gtk-csd-maximize-button")),
         system_metric_feature!(atom!("-moz-gtk-csd-close-button")),
+        system_metric_feature!(atom!("-moz-gtk-csd-reversed-placement")),
         system_metric_feature!(atom!("-moz-system-dark-theme")),
         // This is the only system-metric media feature that's accessible to
         // content as of today.

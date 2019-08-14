@@ -58,7 +58,7 @@ class CSSKeyframeDeclaration : public nsDOMCSSDeclaration {
       nsIPrincipal* aSubjectPrincipal) const final {
     return GetParsingEnvironmentForRule(mRule);
   }
-  nsIDocument* DocToUpdate() final { return nullptr; }
+  Document* DocToUpdate() final { return nullptr; }
 
   nsINode* GetParentObject() final {
     return mRule ? mRule->GetParentObject() : nullptr;
@@ -127,7 +127,8 @@ bool CSSKeyframeRule::IsCCLeaf() const {
 }
 
 #ifdef DEBUG
-/* virtual */ void CSSKeyframeRule::List(FILE* out, int32_t aIndent) const {
+/* virtual */
+void CSSKeyframeRule::List(FILE* out, int32_t aIndent) const {
   nsAutoCString str;
   for (int32_t i = 0; i < aIndent; i++) {
     str.AppendLiteral("  ");
@@ -139,6 +140,10 @@ bool CSSKeyframeRule::IsCCLeaf() const {
 
 template <typename Func>
 void CSSKeyframeRule::UpdateRule(Func aCallback) {
+  if (IsReadOnly()) {
+    return;
+  }
+
   aCallback();
 
   if (StyleSheet* sheet = GetStyleSheet()) {
@@ -174,8 +179,9 @@ size_t CSSKeyframeRule::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
   return n;
 }
 
-/* virtual */ JSObject* CSSKeyframeRule::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* CSSKeyframeRule::WrapObject(JSContext* aCx,
+                                      JS::Handle<JSObject*> aGivenProto) {
   return CSSKeyframeRule_Binding::Wrap(aCx, this, aGivenProto);
 }
 

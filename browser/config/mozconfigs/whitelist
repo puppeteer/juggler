@@ -5,11 +5,10 @@ whitelist = {
     'nightly': {},
     }
 
-all_platforms = ['win64', 'win32', 'linux32', 'linux64', 'macosx64']
+all_platforms = ['win64', 'win64-aarch64', 'win32', 'linux32', 'linux64', 'macosx64']
 
 for platform in all_platforms:
     whitelist['nightly'][platform] = [
-        'ac_add_options --enable-dmd',
         'ac_add_options --with-branding=browser/branding/nightly',
     ]
 
@@ -36,13 +35,11 @@ whitelist['release']['win64'] += ['export MOZ_PGO=1']
 
 whitelist['release']['linux32'] += [
     'export MOZILLA_OFFICIAL=1',
-    'export MOZ_TELEMETRY_REPORTING=1',
     'export MOZ_PGO=1',
 ]
 whitelist['release']['linux64'] += [
     'export MOZILLA_OFFICIAL=1',
-    'export MOZ_TELEMETRY_REPORTING=1',
-    'export MOZ_PGO=1',
+    '. "$topsrcdir/build/mozconfig.pgo"',
 ]
 
 if __name__ == '__main__':

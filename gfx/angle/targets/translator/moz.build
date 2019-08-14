@@ -10,29 +10,26 @@ DEFINES['ANGLE_ENABLE_HLSL'] = True
 #DEFINES['CHROMIUM_BUILD'] = True
 #DEFINES['COMPONENT_BUILD'] = True
 DEFINES['DYNAMIC_ANNOTATIONS_ENABLED'] = '1'
-DEFINES['EGL_EGLEXT_PROTOTYPES'] = True
-#DEFINES['FIELDTRIAL_TESTING_ENABLED'] = True
 #DEFINES['FULL_SAFE_BROWSING'] = True
-DEFINES['GL_GLEXT_PROTOTYPES'] = True
 DEFINES['NOMINMAX'] = True
 #DEFINES['NO_TCMALLOC'] = True
-DEFINES['NTDDI_VERSION'] = '0x0A000002'
-#DEFINES['PSAPI_VERSION'] = '1'
+DEFINES['NTDDI_VERSION'] = '0x0A000003'
+#DEFINES['PSAPI_VERSION'] = '2'
 #DEFINES['SAFE_BROWSING_CSD'] = True
 #DEFINES['SAFE_BROWSING_DB_LOCAL'] = True
 DEFINES['UNICODE'] = True
 #DEFINES['USE_AURA'] = '1'
-#DEFINES['V8_DEPRECATION_WARNINGS'] = True
 #DEFINES['WIN32'] = True
 #DEFINES['WIN32_LEAN_AND_MEAN'] = True
 #DEFINES['WINAPI_FAMILY'] = 'WINAPI_FAMILY_DESKTOP_APP'
-#DEFINES['WINVER'] = '0x0A00'
+DEFINES['WINVER'] = '0x0A00'
 #DEFINES['WTF_USE_DYNAMIC_ANNOTATIONS'] = '1'
 DEFINES['_ATL_NO_OPENGL'] = True
 DEFINES['_CRT_RAND_S'] = True
 DEFINES['_CRT_SECURE_NO_DEPRECATE'] = True
 #DEFINES['_DEBUG'] = True
 DEFINES['_HAS_EXCEPTIONS'] = '0'
+#DEFINES['_HAS_ITERATOR_DEBUGGING'] = '0'
 DEFINES['_SCL_SECURE_NO_DEPRECATE'] = True
 DEFINES['_SECURE_ATL'] = True
 DEFINES['_UNICODE'] = True
@@ -69,13 +66,21 @@ LOCAL_INCLUDES += [
 #    '/wd4117',
 #    '/wd4121',
 #    '/wd4127',
+#    '/wd4200',
+#    '/wd4201',
+#    '/wd4204',
+#    '/wd4221',
 #    '/wd4244',
+#    '/wd4245',
 #    '/wd4251',
+#    '/wd4267',
 #    '/wd4275',
+#    '/wd4305',
 #    '/wd4312',
 #    '/wd4324',
 #    '/wd4351',
 #    '/wd4355',
+#    '/wd4389',
 #    '/wd4456',
 #    '/wd4457',
 #    '/wd4458',
@@ -88,7 +93,12 @@ LOCAL_INCLUDES += [
 #    '/wd4589',
 #    '/wd4610',
 #    '/wd4611',
+#    '/wd4661',
+#    '/wd4701',
 #    '/wd4702',
+#    '/wd4703',
+#    '/wd4706',
+#    '/wd4715',
 #    '/wd4718',
 #    '/wd4838',
 #    '/wd4995',
@@ -105,6 +115,7 @@ LOCAL_INCLUDES += [
 
 SOURCES += [
     '../../checkout/src/compiler/translator/ASTMetadataHLSL.cpp',
+    '../../checkout/src/compiler/translator/AtomicCounterFunctionHLSL.cpp',
     '../../checkout/src/compiler/translator/blocklayout.cpp',
     '../../checkout/src/compiler/translator/blocklayoutHLSL.cpp',
     '../../checkout/src/compiler/translator/BuiltInFunctionEmulator.cpp',
@@ -145,6 +156,8 @@ SOURCES += [
     '../../checkout/src/compiler/translator/QualifierTypes.cpp',
     '../../checkout/src/compiler/translator/ResourcesHLSL.cpp',
     '../../checkout/src/compiler/translator/ShaderLang.cpp',
+    '../../checkout/src/compiler/translator/ShaderStorageBlockFunctionHLSL.cpp',
+    '../../checkout/src/compiler/translator/ShaderStorageBlockOutputHLSL.cpp',
     '../../checkout/src/compiler/translator/ShaderVars.cpp',
     '../../checkout/src/compiler/translator/StructureHLSL.cpp',
     '../../checkout/src/compiler/translator/Symbol.cpp',
@@ -163,6 +176,7 @@ SOURCES += [
     '../../checkout/src/compiler/translator/tree_ops/ClampPointSize.cpp',
     '../../checkout/src/compiler/translator/tree_ops/DeclareAndInitBuiltinsForInstancedMultiview.cpp',
     '../../checkout/src/compiler/translator/tree_ops/DeferGlobalInitializers.cpp',
+    '../../checkout/src/compiler/translator/tree_ops/EmulateGLDrawID.cpp',
     '../../checkout/src/compiler/translator/tree_ops/EmulateGLFragColorBroadcast.cpp',
     '../../checkout/src/compiler/translator/tree_ops/EmulatePrecision.cpp',
     '../../checkout/src/compiler/translator/tree_ops/ExpandIntegerPowExpressions.cpp',
@@ -182,6 +196,7 @@ SOURCES += [
     '../../checkout/src/compiler/translator/tree_ops/RewriteAtomicFunctionExpressions.cpp',
     '../../checkout/src/compiler/translator/tree_ops/RewriteDoWhile.cpp',
     '../../checkout/src/compiler/translator/tree_ops/RewriteElseBlocks.cpp',
+    '../../checkout/src/compiler/translator/tree_ops/RewriteExpressionsWithShaderStorageBlock.cpp',
     '../../checkout/src/compiler/translator/tree_ops/RewriteRepeatedAssignToSwizzled.cpp',
     '../../checkout/src/compiler/translator/tree_ops/RewriteStructSamplers.cpp',
     '../../checkout/src/compiler/translator/tree_ops/RewriteTexelFetchOffset.cpp',
@@ -209,6 +224,7 @@ SOURCES += [
     '../../checkout/src/compiler/translator/Types.cpp',
     '../../checkout/src/compiler/translator/util.cpp',
     '../../checkout/src/compiler/translator/UtilsHLSL.cpp',
+    '../../checkout/src/compiler/translator/ValidateAST.cpp',
     '../../checkout/src/compiler/translator/ValidateGlobalInitializer.cpp',
     '../../checkout/src/compiler/translator/ValidateLimitations.cpp',
     '../../checkout/src/compiler/translator/ValidateMaxParameters.cpp',
@@ -232,6 +248,7 @@ DIRS += [
 
 #LDFLAGS += [
 #    '/DEBUG',
+#    '/pdbaltpath:%_PDB%',
 #    '/WX',
 #]
 

@@ -5,45 +5,23 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 # Add assembler flags and includes
-ASFLAGS += CONFIG['FFVPX_ASFLAGS']
-ASFLAGS += ['-I%s/media/ffvpx/' % TOPSRCDIR]
-ASFLAGS += ['-I%s/media/ffvpx/libavcodec/x86/' % TOPSRCDIR]
-ASFLAGS += ['-I%s/media/ffvpx/libavutil/x86/' % TOPSRCDIR]
+if CONFIG['CPU_ARCH'] != 'aarch64':
+    ASFLAGS += CONFIG['FFVPX_ASFLAGS']
+    ASFLAGS += ['-I%s/media/ffvpx/' % TOPSRCDIR]
+    ASFLAGS += ['-I%s/media/ffvpx/libavcodec/x86/' % TOPSRCDIR]
+    ASFLAGS += ['-I%s/media/ffvpx/libavutil/x86/' % TOPSRCDIR]
 
 if CONFIG['FFVPX_ASFLAGS']:
-    if CONFIG['OS_ARCH'] == 'WINNT':
+    if CONFIG['FFVPX_USE_YASM']:
         USE_YASM = True
+
+    if CONFIG['OS_ARCH'] == 'WINNT':
        # Fix inline symbols and math defines for windows.
         DEFINES['_USE_MATH_DEFINES'] = True
         DEFINES['inline'] = "__inline"
-        # 32-bit windows need to prefix symbols with an underscore.
-        if CONFIG['CPU_ARCH'] == 'x86':
-            ASFLAGS += ['-DPREFIX']
-            ASFLAGS += ['-Pconfig_win32.asm']
-        else:
-            ASFLAGS += ['-Pconfig_win64.asm']
-    elif CONFIG['OS_ARCH'] == 'Darwin':
-        USE_YASM = True
-        # 32/64-bit macosx assemblers need to prefix symbols with an underscore.
-        ASFLAGS += [
-            '-Pconfig_darwin64.asm',
-            '-DPREFIX'
-        ]
-    elif CONFIG['CPU_ARCH'] != 'arm' and CONFIG['CPU_ARCH'] != 'aarch4':
-        USE_YASM = True
-        # Default to unix, similar to how ASFLAGS setup works in configure.in
-        ASFLAGS += ['-Pconfig_unix64.asm']
 
-    if USE_YASM:
-        # default disabled components
-        ASFLAGS += ['-Pdefaults_disabled.asm']
-        if int(CONFIG['YASM_MAJOR_VERSION']) == 1 and int(CONFIG['YASM_MINOR_VERSION']) < 2:
-            DEFINES['YASM_MISSING_AVX2'] = True
-            ASFLAGS += [
-                '-DHAVE_AVX2=0',
-                '-DHAVE_AVX2_INTERNAL=0',
-                '-DHAVE_AVX2_EXTERNAL=0',
-            ]
+    if USE_YASM and not CONFIG['YASM_HAS_AVX2']:
+        DEFINES['YASM_MISSING_AVX2'] = True
 
 
 LOCAL_INCLUDES += ['/media/ffvpx']
@@ -52,71 +30,42 @@ LOCAL_INCLUDES += ['/media/ffvpx']
 AllowCompilerWarnings()
 
 # Suppress warnings in third-party code.
-if CONFIG['CC_TYPE'] in ('clang', 'clang-cl', 'gcc'):
+CFLAGS += [
+    '-Wno-parentheses',
+    '-Wno-pointer-sign',
+    '-Wno-sign-compare',
+    '-Wno-switch',
+    '-Wno-type-limits',
+    '-Wno-unused-function',
+    # XXX This does not seem to have any effect on some versions of GCC.
+    '-Wno-deprecated-declarations',
+]
+if CONFIG['CC_TYPE'] in ('clang', 'clang-cl'):
     CFLAGS += [
-        '-Wno-parentheses',
-        '-Wno-pointer-sign',
-        '-Wno-sign-compare',
-        '-Wno-switch',
-        '-Wno-type-limits',
-        '-Wno-unused-function',
-        # XXX This does not seem to have any effect on some versions of GCC.
-        '-Wno-deprecated-declarations',
+        '-Wno-absolute-value',
+        '-Wno-incompatible-pointer-types',
+        '-Wno-string-conversion',
+        '-Wno-visibility',
     ]
-    if CONFIG['CC_TYPE'] in ('clang', 'clang-cl'):
+    if CONFIG['CC_TYPE'] == 'clang-cl':
         CFLAGS += [
-            '-Wno-absolute-value',
-            '-Wno-incompatible-pointer-types',
-            '-Wno-string-conversion',
-            '-Wno-visibility',
+            '-Wno-inconsistent-dllimport',
+            '-Wno-macro-redefined', # 'WIN32_LEAN_AND_MEAN' macro redefined
         ]
-        if CONFIG['CC_TYPE'] == 'clang-cl':
-            CFLAGS += [
-                '-Wno-inconsistent-dllimport',
-                '-Wno-macro-redefined', # 'WIN32_LEAN_AND_MEAN' macro redefined
-            ]
-        if CONFIG['CC_TYPE'] == 'clang':
-            CFLAGS += [
-                # Workaround for https://bugs.llvm.org/show_bug.cgi?id=26828#c4 :
-                '-ffreestanding',
-            ]
-    else:
+    if CONFIG['CC_TYPE'] == 'clang':
         CFLAGS += [
-            '-Wno-discarded-qualifiers',
-            '-Wno-maybe-uninitialized',
+            # Workaround for https://bugs.llvm.org/show_bug.cgi?id=26828#c4 :
+            '-ffreestanding',
         ]
-    if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
-        # Force visibility of cpu and av_log symbols.
-        CFLAGS += ['-include', 'libavutil_visibility.h']
-elif CONFIG['CC_TYPE'] == 'msvc':
+else:
     CFLAGS += [
-        '-wd4090', # 'return' : different 'const' qualifiers
-        '-wd4018', # '>' : signed/unsigned mismatch
-        '-wd4305', # 'initializing' : truncation from '__int64' to 'double'
-        '-wd4554', # '>>' : check operator precedence for possible error
-        '-wd4307', # '+' : integral constant overflow'
-        '-wd4028', # formal parameter 1 different from declaration
-        '-wd4056', # overflow in floating-point constant arithmetic
-        '-wd4756', # overflow in constant arithmetic
-        '-wd4005', #'WIN32_LEAN_AND_MEAN' : macro redefinition
-        '-wd4054', # 'type cast' : from function pointer 'FARPROC' to data pointer 'void *'
-        '-wd4189', # local variable is initialized but not referenced
-        '-wd4133', # 'function' : incompatible types - from 'AVSampleFormat *' to 'int *'
-        '-wd4221', # nonstandard extension used
-        '-wd4206', # nonstandard extension used
-        '-wd4702', # unreachable code
-        '-wd4101', # unreferenced local variable
-        '-wd4245', # conversion from 'int' to 'uint32_t', signed/unsigned mismatch
-        '-wd4703', # potentially uninitialized local pointer
-        '-wd4293', # '<<' : shift count negative or too big, undefined behavior
-        '-wd4334', # '<<' : result of 32-bit shift implicitly converted to 64 bits
-        '-wd4996', # The compiler encountered a deprecated declaration.
-        # from FFmpeg configure
-        '-wd4244', '-wd4127', '-wd4018', '-wd4389', '-wd4146', '-wd4701',
-        '-wd4057', '-wd4204', '-wd4706', '-wd4305', '-wd4152', '-wd4324',
-        '-we4013', '-wd4100', '-wd4214', '-wd4307', '-wd4273', '-wd4554',
+        '-Wno-discarded-qualifiers',
+        '-Wno-maybe-uninitialized',
     ]
-if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+    # Force visibility of cpu and av_log symbols.
+    CFLAGS += ['-include', 'libavutil_visibility.h']
+if CONFIG['CC_TYPE'] == 'clang-cl':
     LOCAL_INCLUDES += ['/media/ffvpx/compat/atomics/win32']
 DEFINES['HAVE_AV_CONFIG_H'] = True
 

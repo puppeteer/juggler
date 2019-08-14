@@ -12,31 +12,46 @@ const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const Services = require("Services");
 
 const Strings = Services.strings.createBundle(
-  "chrome://devtools/locale/aboutdebugging.properties");
+  "chrome://devtools/locale/aboutdebugging.properties"
+);
 
 class AddonsInstallError extends Component {
   static get propTypes() {
     return {
-      error: PropTypes.string,
+      error: PropTypes.object,
       retryInstall: PropTypes.func,
     };
   }
 
   render() {
+    const { error } = this.props;
     if (!this.props.error) {
       return null;
     }
-    const text = Strings.formatStringFromName("addonInstallError", [this.props.error], 1);
+    const text = Strings.formatStringFromName("addonInstallError", [
+      error.message,
+    ]);
+
+    const additionalErrors = Array.isArray(error.additionalErrors)
+      ? dom.div(
+          { className: "addons-install-error__additional-errors" },
+          error.additionalErrors.join(" ")
+        )
+      : null;
+
     return dom.div(
       { className: "addons-install-error" },
       dom.span(
         {},
         dom.div({ className: "warning" }),
         dom.span({}, text),
+        additionalErrors
       ),
       dom.button(
         { className: "addons-install-retry", onClick: this.props.retryInstall },
-        Strings.GetStringFromName("retryTemporaryInstall")));
+        Strings.GetStringFromName("retryTemporaryInstall")
+      )
+    );
   }
 }
 

@@ -70,7 +70,7 @@ class XULTreeGridRowAccessible final : public XULTreeItemAccessibleBase {
   using Accessible::GetChildAt;
 
   XULTreeGridRowAccessible(nsIContent* aContent, DocAccessible* aDoc,
-                           Accessible* aParent, nsITreeBoxObject* aTree,
+                           Accessible* aParent, dom::XULTreeElement* aTree,
                            nsITreeView* aTreeView, int32_t aRow);
 
   // nsISupports and cycle collection
@@ -112,7 +112,7 @@ class XULTreeGridCellAccessible : public LeafAccessible,
  public:
   XULTreeGridCellAccessible(nsIContent* aContent, DocAccessible* aDoc,
                             XULTreeGridRowAccessible* aRowAcc,
-                            nsITreeBoxObject* aTree, nsITreeView* aTreeView,
+                            dom::XULTreeElement* aTree, nsITreeView* aTreeView,
                             int32_t aRow, nsTreeColumn* aColumn);
 
   // nsISupports
@@ -160,6 +160,7 @@ class XULTreeGridCellAccessible : public LeafAccessible,
   // Accessible
   virtual Accessible* GetSiblingAtOffset(
       int32_t aOffset, nsresult* aError = nullptr) const override;
+  MOZ_CAN_RUN_SCRIPT
   virtual void DispatchClickEvent(nsIContent* aContent,
                                   uint32_t aActionIndex) const override;
 
@@ -172,7 +173,7 @@ class XULTreeGridCellAccessible : public LeafAccessible,
 
   enum { eAction_Click = 0 };
 
-  nsCOMPtr<nsITreeBoxObject> mTree;
+  RefPtr<dom::XULTreeElement> mTree;
   nsITreeView* mTreeView;
 
   int32_t mRow;

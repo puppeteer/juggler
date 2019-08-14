@@ -14,27 +14,64 @@ from taskgraph.util.taskcluster import get_artifact_prefix
 SECRET_SCOPE = 'secrets:get:project/releng/gecko/{}/level-{}/{}'
 
 
+def add_cache(job, taskdesc, name, mount_point, skip_untrusted=False):
+    """Adds a cache based on the worker's implementation.
+
+    Args:
+        job (dict): Task's job description.
+        taskdesc (dict): Target task description to modify.
+        name (str): Name of the cache.
+        mount_point (path): Path on the host to mount the cache.
+        skip_untrusted (bool): Whether cache is used in untrusted environments
+            (default: False). Only applies to docker-worker.
+    """
+    if not job['run'].get('use-caches', True):
+        return
+
+    worker = job['worker']
+
+    if worker['implementation'] == 'docker-worker':
+        taskdesc['worker'].setdefault('caches', []).append({
+            'type': 'persistent',
+            'name': name,
+            'mount-point': mount_point,
+            'skip-untrusted': skip_untrusted,
+        })
+
+    elif worker['implementation'] == 'generic-worker':
+        taskdesc['worker'].setdefault('mounts', []).append({
+            'cache-name': name,
+            'directory': mount_point,
+        })
+
+    else:
+        # Caches not implemented
+        pass
+
+
 def docker_worker_add_workspace_cache(config, job, taskdesc, extra=None):
     """Add the workspace cache.
 
-    ``extra`` is an optional kwarg passed in that supports extending the cache
-    key name to avoid undesired conflicts with other caches."""
-    taskdesc['worker'].setdefault('caches', []).append({
-        'type': 'persistent',
-        'name': 'level-{}-{}-build-{}-{}-workspace'.format(
-            config.params['level'], config.params['project'],
-            taskdesc['attributes']['build_platform'],
-            taskdesc['attributes']['build_type'],
-        ),
-        'mount-point': "{workdir}/workspace".format(**job['run']),
-        # Don't enable the workspace cache when we can't guarantee its
-        # behavior, like on Try.
-        'skip-untrusted': True,
-    })
+    Args:
+        config (TransformConfig): Transform configuration object.
+        job (dict): Task's job description.
+        taskdesc (dict): Target task description to modify.
+        extra (str): Optional context passed in that supports extending the cache
+            key name to avoid undesired conflicts with other caches.
+    """
+    cache_name = '{}-build-{}-{}-workspace'.format(
+        config.params['project'],
+        taskdesc['attributes']['build_platform'],
+        taskdesc['attributes']['build_type'],
+    )
     if extra:
-        taskdesc['worker']['caches'][-1]['name'] += '-{}'.format(
-            extra
-        )
+        cache_name = '{}-{}'.format(cache_name, extra)
+
+    mount_point = "{workdir}/workspace".format(**job['run'])
+
+    # Don't enable the workspace cache when we can't guarantee its
+    # behavior, like on Try.
+    add_cache(job, taskdesc, cache_name, mount_point, skip_untrusted=True)
 
 
 def add_artifacts(config, job, taskdesc, path):
@@ -64,46 +101,41 @@ def support_vcs_checkout(config, job, taskdesc, sparse=False):
     This can only be used with ``run-task`` tasks, as the cache name is
     reserved for ``run-task`` tasks.
     """
-    is_win = job['worker']['os'] == 'windows'
+    worker = job['worker']
+    is_mac = worker['os'] == 'macosx'
+    is_win = worker['os'] == 'windows'
+    is_linux = worker['os'] == 'linux'
+    assert is_mac or is_win or is_linux
 
     if is_win:
         checkoutdir = './build'
         geckodir = '{}/src'.format(checkoutdir)
         hgstore = 'y:/hg-shared'
+    elif is_mac:
+        checkoutdir = './checkouts'
+        geckodir = '{}/gecko'.format(checkoutdir)
+        hgstore = '{}/hg-shared'.format(checkoutdir)
     else:
         checkoutdir = '{workdir}/checkouts'.format(**job['run'])
         geckodir = '{}/gecko'.format(checkoutdir)
         hgstore = '{}/hg-store'.format(checkoutdir)
 
-    level = config.params['level']
-    # native-engine and generic-worker do not support caches (yet), so we just
-    # do a full clone every time :(
-    if job['worker']['implementation'] in ('docker-worker', 'docker-engine'):
-        name = 'level-%s-checkouts' % level
+    cache_name = 'checkouts'
 
-        # comm-central checkouts need their own cache, because clobber won't
-        # remove the comm-central checkout
-        if job['run'].get('comm-checkout', False):
-            name += '-comm'
+    # Sparse checkouts need their own cache because they can interfere
+    # with clients that aren't sparse aware.
+    if sparse:
+        cache_name += '-sparse'
 
-        # Sparse checkouts need their own cache because they can interfere
-        # with clients that aren't sparse aware.
-        if sparse:
-            name += '-sparse'
-
-        taskdesc['worker'].setdefault('caches', []).append({
-            'type': 'persistent',
-            'name': name,
-            'mount-point': checkoutdir,
-        })
+    add_cache(job, taskdesc, cache_name, checkoutdir)
 
     taskdesc['worker'].setdefault('env', {}).update({
         'GECKO_BASE_REPOSITORY': config.params['base_repository'],
         'GECKO_HEAD_REPOSITORY': config.params['head_repository'],
         'GECKO_HEAD_REV': config.params['head_rev'],
-        'GECKO_PATH': geckodir,
         'HG_STORE_PATH': hgstore,
     })
+    taskdesc['worker']['env'].setdefault('GECKO_PATH', geckodir)
 
     if 'comm_base_repository' in config.params:
         taskdesc['worker']['env'].update({
@@ -117,13 +149,15 @@ def support_vcs_checkout(config, job, taskdesc, sparse=False):
     # Give task access to hgfingerprint secret so it can pin the certificate
     # for hg.mozilla.org.
     taskdesc['scopes'].append('secrets:get:project/taskcluster/gecko/hgfingerprint')
+    taskdesc['scopes'].append('secrets:get:project/taskcluster/gecko/hgmointernal')
 
     # only some worker platforms have taskcluster-proxy enabled
-    if job['worker']['implementation'] in ('docker-worker', 'docker-engine'):
+    if job['worker']['implementation'] in ('docker-worker',):
         taskdesc['worker']['taskcluster-proxy'] = True
 
 
-def generic_worker_hg_commands(base_repo, head_repo, head_rev, path):
+def generic_worker_hg_commands(base_repo, head_repo, head_rev, path,
+                               sparse_profile=None):
     """Obtain commands needed to obtain a Mercurial checkout on generic-worker.
 
     Returns two command strings. One performs the checkout. Another logs.
@@ -135,9 +169,16 @@ def generic_worker_hg_commands(base_repo, head_repo, head_rev, path):
         '--purge',
         '--upstream', base_repo,
         '--revision', head_rev,
+    ]
+
+    if sparse_profile:
+        args.extend(['--config', 'extensions.sparse='])
+        args.extend(['--sparseprofile', sparse_profile])
+
+    args.extend([
         head_repo,
         path,
-    ]
+    ])
 
     logging_args = [
         b":: TinderboxPrint:<a href={source_repo}/rev/{revision} "
@@ -151,7 +192,7 @@ def generic_worker_hg_commands(base_repo, head_repo, head_rev, path):
     return [' '.join(args), ' '.join(logging_args)]
 
 
-def docker_worker_setup_secrets(config, job, taskdesc):
+def setup_secrets(config, job, taskdesc):
     """Set up access to secrets via taskcluster-proxy.  The value of
     run['secrets'] should be a boolean or a list of secret names that
     can be accessed."""
@@ -179,26 +220,22 @@ def docker_worker_add_tooltool(config, job, taskdesc, internal=False):
     reserved for use with ``run-task``.
     """
 
-    assert job['worker']['implementation'] in ('docker-worker', 'docker-engine')
+    assert job['worker']['implementation'] in ('docker-worker',)
 
     level = config.params['level']
-
-    taskdesc['worker'].setdefault('caches', []).append({
-        'type': 'persistent',
-        'name': 'level-%s-tooltool-cache' % level,
-        'mount-point': '{workdir}/tooltool-cache'.format(**job['run']),
-    })
+    add_cache(job, taskdesc, 'tooltool-cache'.format(level),
+              '{workdir}/tooltool-cache'.format(**job['run']))
 
     taskdesc['worker'].setdefault('env', {}).update({
         'TOOLTOOL_CACHE': '{workdir}/tooltool-cache'.format(**job['run']),
     })
 
-    taskdesc['worker']['relengapi-proxy'] = True
+    taskdesc['worker']['taskcluster-proxy'] = True
     taskdesc['scopes'].extend([
-        'docker-worker:relengapi-proxy:tooltool.download.public',
+        'project:releng:services/tooltool/api/download/public',
     ])
 
     if internal:
         taskdesc['scopes'].extend([
-            'docker-worker:relengapi-proxy:tooltool.download.internal',
+            'project:releng:services/tooltool/api/download/internal',
         ])

@@ -7,18 +7,24 @@
 const {
   APPLY_FONT_VARIATION_INSTANCE,
   RESET_EDITOR,
+  SET_FONT_EDITOR_DISABLED,
   UPDATE_AXIS_VALUE,
-  UPDATE_CUSTOM_INSTANCE,
   UPDATE_EDITOR_STATE,
   UPDATE_PROPERTY_VALUE,
   UPDATE_WARNING_MESSAGE,
 } = require("./index");
 
 module.exports = {
-
   resetFontEditor() {
     return {
       type: RESET_EDITOR,
+    };
+  },
+
+  setEditorDisabled(disabled = false) {
+    return {
+      type: SET_FONT_EDITOR_DISABLED,
+      disabled,
     };
   },
 
@@ -27,12 +33,6 @@ module.exports = {
       type: APPLY_FONT_VARIATION_INSTANCE,
       name,
       values,
-    };
-  },
-
-  updateCustomInstance() {
-    return {
-      type: UPDATE_CUSTOM_INSTANCE,
     };
   },
 
@@ -67,5 +67,4 @@ module.exports = {
       warning,
     };
   },
-
 };

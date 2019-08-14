@@ -9,8 +9,7 @@
 
 using mozilla::DataMutex;
 
-struct A
-{
+struct A {
   void Set(int a) { mValue = a; }
   int mValue;
 };
@@ -24,7 +23,7 @@ TEST(DataMutex, Basic)
     ASSERT_EQ(*x, 4u);
   }
   {
-    DataMutex<A> a({ 4 }, "StructA");
+    DataMutex<A> a({4}, "StructA");
     auto x = a.Lock();
     ASSERT_EQ(x->mValue, 4);
     x->Set(8);

@@ -3,15 +3,20 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {addonsSpec} = require("devtools/shared/specs/addon/addons");
-const protocol = require("devtools/shared/protocol");
+const { addonsSpec } = require("devtools/shared/specs/addon/addons");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
 
-const AddonsFront = protocol.FrontClassWithSpec(addonsSpec, {
-  initialize: function(client, {addonsActor}) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = addonsActor;
-    this.manage(this);
-  },
-});
+class AddonsFront extends FrontClassWithSpec(addonsSpec) {
+  constructor(client) {
+    super(client);
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "addonsActor";
+  }
+}
 
 exports.AddonsFront = AddonsFront;
+registerFront(AddonsFront);

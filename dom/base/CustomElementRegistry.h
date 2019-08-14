@@ -15,14 +15,11 @@
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/CustomElementRegistryBinding.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/WebComponentsBinding.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsGenericHTMLElement.h"
 #include "nsWrapperCache.h"
 #include "nsContentUtils.h"
-
-class nsDocument;
 
 namespace mozilla {
 namespace dom {
@@ -32,7 +29,6 @@ struct ElementDefinitionOptions;
 class CallbackFunction;
 class CustomElementReaction;
 class DocGroup;
-class Function;
 class Promise;
 
 struct LifecycleCallbackArgs {
@@ -45,27 +41,27 @@ struct LifecycleCallbackArgs {
 };
 
 struct LifecycleAdoptedCallbackArgs {
-  nsCOMPtr<nsIDocument> mOldDocument;
-  nsCOMPtr<nsIDocument> mNewDocument;
+  RefPtr<Document> mOldDocument;
+  RefPtr<Document> mNewDocument;
 };
 
 class CustomElementCallback {
  public:
   CustomElementCallback(Element* aThisObject,
-                        nsIDocument::ElementCallbackType aCallbackType,
+                        Document::ElementCallbackType aCallbackType,
                         CallbackFunction* aCallback);
   void Traverse(nsCycleCollectionTraversalCallback& aCb) const;
   size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
   void Call();
   void SetArgs(LifecycleCallbackArgs& aArgs) {
-    MOZ_ASSERT(mType == nsIDocument::eAttributeChanged,
+    MOZ_ASSERT(mType == Document::eAttributeChanged,
                "Arguments are only used by attribute changed callback.");
     mArgs = aArgs;
   }
 
   void SetAdoptedCallbackArgs(
       LifecycleAdoptedCallbackArgs& aAdoptedCallbackArgs) {
-    MOZ_ASSERT(mType == nsIDocument::eAdopted,
+    MOZ_ASSERT(mType == Document::eAdopted,
                "Arguments are only used by adopted callback.");
     mAdoptedCallbackArgs = aAdoptedCallbackArgs;
   }
@@ -75,22 +71,11 @@ class CustomElementCallback {
   RefPtr<Element> mThisObject;
   RefPtr<CallbackFunction> mCallback;
   // The type of callback (eCreated, eAttached, etc.)
-  nsIDocument::ElementCallbackType mType;
+  Document::ElementCallbackType mType;
   // Arguments to be passed to the callback,
   // used by the attribute changed callback.
   LifecycleCallbackArgs mArgs;
   LifecycleAdoptedCallbackArgs mAdoptedCallbackArgs;
-};
-
-class CustomElementConstructor final : public CallbackFunction {
- public:
-  explicit CustomElementConstructor(CallbackFunction* aOther)
-      : CallbackFunction(aOther) {
-    MOZ_ASSERT(JS::IsConstructor(mCallback));
-  }
-
-  already_AddRefed<Element> Construct(const char* aExecutionReason,
-                                      ErrorResult& aRv);
 };
 
 // Each custom element has an associated callback queue and an element is
@@ -149,7 +134,8 @@ struct CustomElementDefinition {
   NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(CustomElementDefinition)
 
   CustomElementDefinition(nsAtom* aType, nsAtom* aLocalName,
-                          int32_t aNamespaceID, Function* aConstructor,
+                          int32_t aNamespaceID,
+                          CustomElementConstructor* aConstructor,
                           nsTArray<RefPtr<nsAtom>>&& aObservedAttributes,
                           UniquePtr<LifecycleCallbacks>&& aCallbacks);
 
@@ -205,6 +191,7 @@ struct CustomElementDefinition {
 class CustomElementReaction {
  public:
   virtual ~CustomElementReaction() = default;
+  MOZ_CAN_RUN_SCRIPT
   virtual void Invoke(Element* aElement, ErrorResult& aRv) = 0;
   virtual void Traverse(nsCycleCollectionTraversalCallback& aCb) const = 0;
   virtual size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const = 0;
@@ -275,6 +262,7 @@ class CustomElementReactionsStack {
    *        aWasElementQueuePushed used for restoring status after leaving
    *                               current recursion.
    */
+  MOZ_CAN_RUN_SCRIPT
   void LeaveCEReactions(JSContext* aCx, bool aWasElementQueuePushed) {
     MOZ_ASSERT(mRecursionDepth);
 
@@ -305,7 +293,7 @@ class CustomElementReactionsStack {
    * Pop the element queue from the custom element reactions stack, and invoke
    * custom element reactions in that queue.
    */
-  void PopAndInvokeElementQueue();
+  MOZ_CAN_RUN_SCRIPT void PopAndInvokeElementQueue();
 
   // The choice of 8 for the auto size here is based on gut feeling.
   AutoTArray<UniquePtr<ElementQueue>, 8> mReactionsStack;
@@ -313,12 +301,13 @@ class CustomElementReactionsStack {
   // https://html.spec.whatwg.org/#enqueue-an-element-on-the-appropriate-element-queue
   bool mIsBackupQueueProcessing;
 
-  void InvokeBackupQueue();
+  MOZ_CAN_RUN_SCRIPT void InvokeBackupQueue();
 
   /**
    * Invoke custom element reactions
    * https://html.spec.whatwg.org/multipage/scripting.html#invoke-custom-element-reactions
    */
+  MOZ_CAN_RUN_SCRIPT
   void InvokeReactions(ElementQueue* aElementQueue, nsIGlobalObject* aGlobal);
 
   void Enqueue(Element* aElement, CustomElementReaction* aReaction);
@@ -340,20 +329,17 @@ class CustomElementReactionsStack {
       mReactionStack->mIsBackupQueueProcessing = true;
     }
 
-    virtual void Run(AutoSlowOperation& aAso) override {
+    MOZ_CAN_RUN_SCRIPT virtual void Run(AutoSlowOperation& aAso) override {
       mReactionStack->InvokeBackupQueue();
       mReactionStack->mIsBackupQueueProcessing = false;
     }
 
    private:
-    RefPtr<CustomElementReactionsStack> mReactionStack;
+    const RefPtr<CustomElementReactionsStack> mReactionStack;
   };
 };
 
 class CustomElementRegistry final : public nsISupports, public nsWrapperCache {
-  // Allow nsDocument to access mCustomDefinitions and mCandidatesMap.
-  friend class ::nsDocument;
-
  public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(CustomElementRegistry)
@@ -364,7 +350,11 @@ class CustomElementRegistry final : public nsISupports, public nsWrapperCache {
  private:
   class RunCustomElementCreationCallback : public mozilla::Runnable {
    public:
+    // MOZ_CAN_RUN_SCRIPT_BOUNDARY until Runnable::Run is MOZ_CAN_RUN_SCRIPT.
+    // See bug 1535398.
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY
     NS_DECL_NSIRUNNABLE
+
     explicit RunCustomElementCreationCallback(
         CustomElementRegistry* aRegistry, nsAtom* aAtom,
         CustomElementCreationCallback* aCallback)
@@ -403,7 +393,7 @@ class CustomElementRegistry final : public nsISupports, public nsWrapperCache {
       JSContext* aCx, JSObject* aConstructor) const;
 
   static void EnqueueLifecycleCallback(
-      nsIDocument::ElementCallbackType aType, Element* aCustomElement,
+      Document::ElementCallbackType aType, Element* aCustomElement,
       LifecycleCallbackArgs* aArgs,
       LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
       CustomElementDefinition* aDefinition);
@@ -412,6 +402,7 @@ class CustomElementRegistry final : public nsISupports, public nsWrapperCache {
    * Upgrade an element.
    * https://html.spec.whatwg.org/multipage/scripting.html#upgrades
    */
+  MOZ_CAN_RUN_SCRIPT
   static void Upgrade(Element* aElement, CustomElementDefinition* aDefinition,
                       ErrorResult& aRv);
 
@@ -478,7 +469,7 @@ class CustomElementRegistry final : public nsISupports, public nsWrapperCache {
   ~CustomElementRegistry();
 
   static UniquePtr<CustomElementCallback> CreateCustomElementCallback(
-      nsIDocument::ElementCallbackType aType, Element* aCustomElement,
+      Document::ElementCallbackType aType, Element* aCustomElement,
       LifecycleCallbackArgs* aArgs,
       LifecycleAdoptedCallbackArgs* aAdoptedCallbackArgs,
       CustomElementDefinition* aDefinition);
@@ -559,7 +550,7 @@ class CustomElementRegistry final : public nsISupports, public nsWrapperCache {
                                JS::Handle<JSObject*> aGivenProto) override;
 
   void Define(JSContext* aCx, const nsAString& aName,
-              Function& aFunctionConstructor,
+              CustomElementConstructor& aFunctionConstructor,
               const ElementDefinitionOptions& aOptions, ErrorResult& aRv);
 
   void Get(JSContext* cx, const nsAString& name,
@@ -588,13 +579,14 @@ class MOZ_RAII AutoCEReaction final {
         mReactionsStack->EnterCEReactions();
   }
 
-  ~AutoCEReaction() {
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY because this is called from Maybe<>.reset().
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY ~AutoCEReaction() {
     mReactionsStack->LeaveCEReactions(
         mCx, mIsElementQueuePushedForPreviousRecursionDepth);
   }
 
  private:
-  RefPtr<CustomElementReactionsStack> mReactionsStack;
+  const RefPtr<CustomElementReactionsStack> mReactionsStack;
   JSContext* mCx;
   bool mIsElementQueuePushedForPreviousRecursionDepth;
 };

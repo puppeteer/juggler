@@ -9,9 +9,13 @@ EXPORTS.mozilla += [
     'SandboxReporterCommon.h',
 ]
 
-SOURCES += [
+UNIFIED_SOURCES += [
     'SandboxReporter.cpp',
     'SandboxReporterWrappers.cpp',
+]
+
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 LOCAL_INCLUDES += [

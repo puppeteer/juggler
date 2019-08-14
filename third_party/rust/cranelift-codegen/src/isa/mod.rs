@@ -46,35 +46,38 @@
 //! The configured target ISA trait object is a `Box<TargetIsa>` which can be used for multiple
 //! concurrent function compilations.
 
-pub use isa::call_conv::CallConv;
-pub use isa::constraints::{BranchRange, ConstraintKind, OperandConstraint, RecipeConstraints};
-pub use isa::encoding::{base_size, EncInfo, Encoding};
-pub use isa::registers::{regs_overlap, RegClass, RegClassIndex, RegInfo, RegUnit};
-pub use isa::stack::{StackBase, StackBaseMask, StackRef};
+pub use crate::isa::call_conv::CallConv;
+pub use crate::isa::constraints::{
+    BranchRange, ConstraintKind, OperandConstraint, RecipeConstraints,
+};
+pub use crate::isa::encoding::{base_size, EncInfo, Encoding};
+pub use crate::isa::registers::{regs_overlap, RegClass, RegClassIndex, RegInfo, RegUnit};
+pub use crate::isa::stack::{StackBase, StackBaseMask, StackRef};
 
-use binemit;
-use flowgraph;
-use ir;
-use isa::enc_tables::Encodings;
-use regalloc;
-use result::CodegenResult;
-use settings;
-use settings::SetResult;
+use crate::binemit;
+use crate::flowgraph;
+use crate::ir;
+use crate::isa::enc_tables::Encodings;
+use crate::regalloc;
+use crate::result::CodegenResult;
+use crate::settings;
+use crate::settings::SetResult;
+use crate::timing;
+use core::fmt;
+use failure_derive::Fail;
 use std::boxed::Box;
-use std::fmt;
 use target_lexicon::{Architecture, PointerWidth, Triple};
-use timing;
 
-#[cfg(build_riscv)]
+#[cfg(feature = "riscv")]
 mod riscv;
 
-#[cfg(build_x86)]
+#[cfg(feature = "x86")]
 mod x86;
 
-#[cfg(build_arm32)]
+#[cfg(feature = "arm32")]
 mod arm32;
 
-#[cfg(build_arm64)]
+#[cfg(feature = "arm64")]
 mod arm64;
 
 mod call_conv;
@@ -87,12 +90,12 @@ mod stack;
 /// Returns a builder that can create a corresponding `TargetIsa`
 /// or `Err(LookupError::Unsupported)` if not enabled.
 macro_rules! isa_builder {
-    ($module:ident, $name:ident) => {{
-        #[cfg($name)]
+    ($name:ident, $feature:tt) => {{
+        #[cfg(feature = $feature)]
         fn $name(triple: Triple) -> Result<Builder, LookupError> {
-            Ok($module::isa_builder(triple))
+            Ok($name::isa_builder(triple))
         };
-        #[cfg(not($name))]
+        #[cfg(not(feature = $feature))]
         fn $name(_triple: Triple) -> Result<Builder, LookupError> {
             Err(LookupError::Unsupported)
         }
@@ -104,9 +107,9 @@ macro_rules! isa_builder {
 /// Return a builder that can create a corresponding `TargetIsa`.
 pub fn lookup(triple: Triple) -> Result<Builder, LookupError> {
     match triple.architecture {
-        Architecture::Riscv32 | Architecture::Riscv64 => isa_builder!(riscv, build_riscv)(triple),
+        Architecture::Riscv32 | Architecture::Riscv64 => isa_builder!(riscv, "riscv")(triple),
         Architecture::I386 | Architecture::I586 | Architecture::I686 | Architecture::X86_64 => {
-            isa_builder!(x86, build_x86)(triple)
+            isa_builder!(x86, "x86")(triple)
         }
         Architecture::Thumbv6m
         | Architecture::Thumbv7em
@@ -115,8 +118,8 @@ pub fn lookup(triple: Triple) -> Result<Builder, LookupError> {
         | Architecture::Armv4t
         | Architecture::Armv5te
         | Architecture::Armv7
-        | Architecture::Armv7s => isa_builder!(arm32, build_arm32)(triple),
-        Architecture::Aarch64 => isa_builder!(arm64, build_arm64)(triple),
+        | Architecture::Armv7s => isa_builder!(arm32, "arm32")(triple),
+        Architecture::Aarch64 => isa_builder!(arm64, "arm64")(triple),
         _ => Err(LookupError::Unsupported),
     }
 }
@@ -138,13 +141,13 @@ pub enum LookupError {
 pub struct Builder {
     triple: Triple,
     setup: settings::Builder,
-    constructor: fn(Triple, settings::Flags, settings::Builder) -> Box<TargetIsa>,
+    constructor: fn(Triple, settings::Flags, settings::Builder) -> Box<dyn TargetIsa>,
 }
 
 impl Builder {
     /// Combine the ISA-specific settings with the provided ISA-independent settings and allocate a
     /// fully configured `TargetIsa` trait object.
-    pub fn finish(self, shared_flags: settings::Flags) -> Box<TargetIsa> {
+    pub fn finish(self, shared_flags: settings::Flags) -> Box<dyn TargetIsa> {
         (self.constructor)(self.triple, shared_flags, self.setup)
     }
 }
@@ -164,7 +167,7 @@ impl settings::Configurable for Builder {
 ///
 /// The `Encodings` iterator returns a legalization function to call.
 pub type Legalize =
-    fn(ir::Inst, &mut ir::Function, &mut flowgraph::ControlFlowGraph, &TargetIsa) -> bool;
+    fn(ir::Inst, &mut ir::Function, &mut flowgraph::ControlFlowGraph, &dyn TargetIsa) -> bool;
 
 /// This struct provides information that a frontend may need to know about a target to
 /// produce Cranelift IR for the target.
@@ -208,7 +211,7 @@ pub trait TargetIsa: fmt::Display + Sync {
 
     /// Get the default calling convention of this target.
     fn default_call_conv(&self) -> CallConv {
-        CallConv::default_for_triple(self.triple())
+        CallConv::triple_default(self.triple())
     }
 
     /// Get the pointer type of this ISA.
@@ -334,8 +337,8 @@ pub trait TargetIsa: fmt::Display + Sync {
     fn prologue_epilogue(&self, func: &mut ir::Function) -> CodegenResult<()> {
         let _tt = timing::prologue_epilogue();
         // This default implementation is unlikely to be good enough.
-        use ir::stackslot::{StackOffset, StackSize};
-        use stack_layout::layout_stack;
+        use crate::ir::stackslot::{StackOffset, StackSize};
+        use crate::stack_layout::layout_stack;
 
         let word_size = StackSize::from(self.pointer_bytes());
 
@@ -364,7 +367,7 @@ pub trait TargetIsa: fmt::Display + Sync {
         func: &ir::Function,
         inst: ir::Inst,
         divert: &mut regalloc::RegDiversions,
-        sink: &mut binemit::CodeSink,
+        sink: &mut dyn binemit::CodeSink,
     );
 
     /// Emit a whole function into memory.

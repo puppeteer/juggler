@@ -6,14 +6,15 @@
 
 "use strict";
 
-var {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+var { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 var Services = require("Services");
-var {gDevTools} = require("devtools/client/framework/devtools");
-var {TargetFactory} = require("devtools/client/framework/target");
-var {Toolbox} = require("devtools/client/framework/toolbox");
-var {DebuggerClient} = require("devtools/shared/client/debugger-client");
-var {LocalizationHelper} = require("devtools/shared/l10n");
-var L10N = new LocalizationHelper("devtools/client/locales/connection-screen.properties");
+var { gDevTools } = require("devtools/client/framework/devtools");
+var { Toolbox } = require("devtools/client/framework/toolbox");
+var { DebuggerClient } = require("devtools/shared/client/debugger-client");
+var { LocalizationHelper } = require("devtools/shared/l10n");
+var L10N = new LocalizationHelper(
+  "devtools/client/locales/connection-screen.properties"
+);
 
 var gClient;
 var gConnectionTimeout;
@@ -22,27 +23,31 @@ var gConnectionTimeout;
  * Once DOM is ready, we prefil the host/port inputs with
  * pref-stored values.
  */
-window.addEventListener("DOMContentLoaded", function() {
-  const host = Services.prefs.getCharPref("devtools.debugger.remote-host");
-  const port = Services.prefs.getIntPref("devtools.debugger.remote-port");
+window.addEventListener(
+  "DOMContentLoaded",
+  function() {
+    const host = Services.prefs.getCharPref("devtools.debugger.remote-host");
+    const port = Services.prefs.getIntPref("devtools.debugger.remote-port");
 
-  if (host) {
-    document.getElementById("host").value = host;
-  }
+    if (host) {
+      document.getElementById("host").value = host;
+    }
 
-  if (port) {
-    document.getElementById("port").value = port;
-  }
+    if (port) {
+      document.getElementById("port").value = port;
+    }
 
-  const form = document.querySelector("#connection-form form");
-  form.addEventListener("submit", function() {
-    window.submit().catch(e => {
-      console.error(e);
-      // Bug 921850: catch rare exception from DebuggerClient.socketConnect
-      showError("unexpected");
+    const form = document.querySelector("#connection-form form");
+    form.addEventListener("submit", function() {
+      window.submit().catch(e => {
+        console.error(e);
+        // Bug 921850: catch rare exception from DebuggerClient.socketConnect
+        showError("unexpected");
+      });
     });
-  });
-}, {capture: true, once: true});
+  },
+  { capture: true, once: true }
+);
 
 /**
  * Called when the "connect" button is clicked.
@@ -100,37 +105,24 @@ var onConnectionReady = async function([aType, aTraits]) {
     parent.remove();
   }
 
-  const response = await gClient.listTabs();
-
   parent = document.getElementById("tabTargetActors");
 
-  // Add Global Process debugging...
-  const globals = Cu.cloneInto(response, {});
-  delete globals.tabs;
-  delete globals.selected;
-  // ...only if there are appropriate actors (a 'from' property will always
-  // be there).
-
   // Add one entry for each open tab.
-  for (let i = 0; i < response.tabs.length; i++) {
-    buildTabLink(response.tabs[i], parent, i == response.selected);
+  const tabs = await gClient.mainRoot.listTabs();
+  for (let i = 0; i < tabs.length; i++) {
+    buildTabLink(tabs[i], parent);
   }
 
   const gParent = document.getElementById("globalActors");
 
   // Build the Remote Process button
-  // If Fx<39, chrome target actors were used to be exposed on RootActor
-  // but in Fx>=39, chrome is debuggable via getProcess() and ParentProcessTargetActor
-  if (globals.consoleActor || gClient.mainRoot.traits.allowChromeProcess) {
+  if (gClient.mainRoot.traits.allowChromeProcess) {
     const a = document.createElement("a");
     a.onclick = function() {
       if (gClient.mainRoot.traits.allowChromeProcess) {
-        gClient.mainRoot.getMainProcess()
-               .then(front => {
-                 openToolbox(null, true, null, front);
-               });
-      } else if (globals.consoleActor) {
-        openToolbox(globals, true, "webconsole", false);
+        gClient.mainRoot
+          .getMainProcess()
+          .then(front => openToolbox(front, true));
       }
     };
     a.title = a.textContent = L10N.getStr("mainProcess");
@@ -160,7 +152,7 @@ var onConnectionReady = async function([aType, aTraits]) {
 function buildAddonLink(addon, parent) {
   const a = document.createElement("a");
   a.onclick = async function() {
-    openToolbox(null, true, "webconsole", addon);
+    openToolbox(addon, true);
   };
 
   a.textContent = addon.name;
@@ -173,7 +165,7 @@ function buildAddonLink(addon, parent) {
 /**
  * Build one button for a tab.
  */
-function buildTabLink(tab, parent, selected) {
+function buildTabLink(tab, parent) {
   const a = document.createElement("a");
   a.onclick = function() {
     openToolbox(tab);
@@ -186,7 +178,7 @@ function buildTabLink(tab, parent, selected) {
   }
   a.href = "#";
 
-  if (selected) {
+  if (tab.selected) {
     a.classList.add("selected");
   }
 
@@ -219,20 +211,11 @@ function handleConnectionTimeout() {
  * The user clicked on one of the buttons.
  * Opens the toolbox.
  */
-function openToolbox(form, chrome = false, tool = "webconsole", activeTab = null) {
-  const options = {
-    form,
-    activeTab,
-    client: gClient,
-    chrome,
-  };
-  TargetFactory.forRemoteTab(options).then((target) => {
-    const hostType = Toolbox.HostType.WINDOW;
-    gDevTools.showToolbox(target, tool, hostType).then((toolbox) => {
-      toolbox.once("destroyed", function() {
-        gClient.close();
-      });
-    }, console.error);
-    window.close();
-  }, console.error);
+async function openToolbox(target, chrome = false) {
+  const hostType = Toolbox.HostType.WINDOW;
+  const toolbox = await gDevTools.showToolbox(target, "webconsole", hostType);
+  toolbox.once("destroyed", function() {
+    gClient.close();
+  });
+  window.close();
 }

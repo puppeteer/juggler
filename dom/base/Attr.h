@@ -12,17 +12,18 @@
 #define mozilla_dom_Attr_h
 
 #include "mozilla/Attributes.h"
+#include "nsDOMAttributeMap.h"
 #include "nsINode.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsStubMutationObserver.h"
 
-class nsIDocument;
-
 namespace mozilla {
 class EventChainPreVisitor;
 namespace dom {
+
+class Document;
 
 // Attribute helper class used to wrap up an attribute with a dom
 // object that implements the DOM Attr interface.
@@ -61,7 +62,7 @@ class Attr final : public nsINode {
    * Called when our ownerElement is moved into a new document.
    * Updates the nodeinfo of this node.
    */
-  nsresult SetOwnerDocument(nsIDocument* aDocument);
+  nsresult SetOwnerDocument(Document* aDocument);
 
   // nsINode interface
   virtual bool IsNodeOfType(uint32_t aFlags) const override;

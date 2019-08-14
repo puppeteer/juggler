@@ -16,7 +16,8 @@ extern "C" {
 
 namespace mozilla {
 
-/* static */ const std::string SipccSdpAttributeList::kEmptyString = "";
+/* static */
+const std::string SipccSdpAttributeList::kEmptyString = "";
 
 SipccSdpAttributeList::SipccSdpAttributeList(
     const SipccSdpAttributeList* sessionLevel)
@@ -714,7 +715,8 @@ void SipccSdpAttributeList::LoadFmtp(sdp_t* sdp, uint16_t level) {
         }
         parameters.reset(teParameters);
       } break;
-      default: {}
+      default: {
+      }
     }
 
     fmtps->PushEntry(osPayloadType.str(), std::move(parameters));

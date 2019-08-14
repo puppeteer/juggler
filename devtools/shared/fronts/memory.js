@@ -4,21 +4,32 @@
 "use strict";
 
 const { memorySpec } = require("devtools/shared/specs/memory");
-const protocol = require("devtools/shared/protocol");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
 
-loader.lazyRequireGetter(this, "FileUtils",
-                         "resource://gre/modules/FileUtils.jsm", true);
-loader.lazyRequireGetter(this, "HeapSnapshotFileUtils",
-                         "devtools/shared/heapsnapshot/HeapSnapshotFileUtils");
+loader.lazyRequireGetter(
+  this,
+  "FileUtils",
+  "resource://gre/modules/FileUtils.jsm",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "HeapSnapshotFileUtils",
+  "devtools/shared/heapsnapshot/HeapSnapshotFileUtils"
+);
 
-const MemoryFront = protocol.FrontClassWithSpec(memorySpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client, form);
+class MemoryFront extends FrontClassWithSpec(memorySpec) {
+  constructor(client) {
+    super(client);
     this._client = client;
-    this.actorID = form.memoryActor;
     this.heapSnapshotFileActorID = null;
-    this.manage(this);
-  },
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "memoryActor";
+  }
 
   /**
    * Save a heap snapshot, transfer it from the server to the client if the
@@ -38,18 +49,18 @@ const MemoryFront = protocol.FrontClassWithSpec(memorySpec, {
    *
    * @returns Promise<String>
    */
-  saveHeapSnapshot: protocol.custom(async function(options = {}) {
-    const snapshotId = await this._saveHeapSnapshotImpl(options.boundaries);
+  async saveHeapSnapshot(options = {}) {
+    const snapshotId = await super.saveHeapSnapshot(options.boundaries);
 
-    if (!options.forceCopy &&
-        (await HeapSnapshotFileUtils.haveHeapSnapshotTempFile(snapshotId))) {
+    if (
+      !options.forceCopy &&
+      (await HeapSnapshotFileUtils.haveHeapSnapshotTempFile(snapshotId))
+    ) {
       return HeapSnapshotFileUtils.getHeapSnapshotTempFilePath(snapshotId);
     }
 
     return this.transferHeapSnapshot(snapshotId);
-  }, {
-    impl: "_saveHeapSnapshotImpl",
-  }),
+  }
 
   /**
    * Given that we have taken a heap snapshot with the given id, transfer the
@@ -60,7 +71,7 @@ const MemoryFront = protocol.FrontClassWithSpec(memorySpec, {
    *
    * @returns Promise<String>
    */
-  transferHeapSnapshot: protocol.custom(async function(snapshotId) {
+  async transferHeapSnapshot(snapshotId) {
     if (!this.heapSnapshotFileActorID) {
       const form = await this._client.mainRoot.rootForm;
       this.heapSnapshotFileActorID = form.heapSnapshotFileActor;
@@ -73,8 +84,7 @@ const MemoryFront = protocol.FrontClassWithSpec(memorySpec, {
         snapshotId,
       });
 
-      const outFilePath =
-        HeapSnapshotFileUtils.getNewUniqueHeapSnapshotTempFilePath();
+      const outFilePath = HeapSnapshotFileUtils.getNewUniqueHeapSnapshotTempFilePath();
       const outFile = new FileUtils.File(outFilePath);
       const outFileStream = FileUtils.openSafeFileOutputStream(outFile);
 
@@ -99,7 +109,8 @@ const MemoryFront = protocol.FrontClassWithSpec(memorySpec, {
       // Otherwise, rethrow the error
       throw e;
     }
-  }),
-});
+  }
+}
 
 exports.MemoryFront = MemoryFront;
+registerFront(MemoryFront);

@@ -22,7 +22,7 @@ class nsCSSPropertyIDSet;
 
 namespace mozilla {
 class ComputedStyle;
-enum class CSSPseudoElementType : uint8_t;
+enum class PseudoStyleType : uint8_t;
 struct Keyframe;
 struct StyleTransition;
 }  // namespace mozilla
@@ -34,7 +34,7 @@ struct StyleTransition;
 namespace mozilla {
 
 struct ElementPropertyTransition : public dom::KeyframeEffect {
-  ElementPropertyTransition(nsIDocument* aDocument,
+  ElementPropertyTransition(dom::Document* aDocument,
                             Maybe<OwningAnimationTarget>& aTarget,
                             TimingParams&& aTiming,
                             AnimationValue aStartForReversingTest,
@@ -142,7 +142,7 @@ class CSSTransition final : public Animation {
     MOZ_ASSERT(!rv.Failed(), "Unexpected exception playing transition");
   }
 
-  void CancelFromStyle() override {
+  void CancelFromStyle(PostRestyleMode aPostRestyle) {
     // The animation index to use for compositing will be established when
     // this transition next transitions out of the idle state but we still
     // update it now so that the sort order of this transition remains
@@ -152,10 +152,10 @@ class CSSTransition final : public Animation {
     mAnimationIndex = sNextAnimationIndex++;
     mNeedsNewAnimationIndexWhenRun = true;
 
-    Animation::CancelFromStyle();
+    Animation::Cancel(aPostRestyle);
 
-    // It is important we do this *after* calling CancelFromStyle().
-    // This is because CancelFromStyle() will end up posting a restyle and
+    // It is important we do this *after* calling Cancel().
+    // This is because Cancel() will end up posting a restyle and
     // that restyle should target the *transitions* level of the cascade.
     // However, once we clear the owning element, CascadeLevel() will begin
     // returning CascadeLevel::Animations.
@@ -276,6 +276,9 @@ struct AnimationTypeTraits<dom::CSSTransition> {
   static nsAtom* AfterPropertyAtom() {
     return nsGkAtoms::transitionsOfAfterProperty;
   }
+  static nsAtom* MarkerPropertyAtom() {
+    return nsGkAtoms::transitionsOfMarkerProperty;
+  }
 };
 
 }  // namespace mozilla
@@ -296,7 +299,7 @@ class nsTransitionManager final
    * Update transitions for stylo.
    */
   bool UpdateTransitions(mozilla::dom::Element* aElement,
-                         mozilla::CSSPseudoElementType aPseudoType,
+                         mozilla::PseudoStyleType aPseudoType,
                          const mozilla::ComputedStyle& aOldStyle,
                          const mozilla::ComputedStyle& aNewStyle);
 
@@ -311,7 +314,7 @@ class nsTransitionManager final
   // could be a nullptr if we don't have any transitions.
   bool DoUpdateTransitions(const nsStyleDisplay& aDisp,
                            mozilla::dom::Element* aElement,
-                           mozilla::CSSPseudoElementType aPseudoType,
+                           mozilla::PseudoStyleType aPseudoType,
                            CSSTransitionCollection*& aElementTransitions,
                            const mozilla::ComputedStyle& aOldStyle,
                            const mozilla::ComputedStyle& aNewStyle);
@@ -320,7 +323,7 @@ class nsTransitionManager final
   bool ConsiderInitiatingTransition(
       nsCSSPropertyID aProperty, const nsStyleDisplay& aStyleDisplay,
       uint32_t transitionIdx, mozilla::dom::Element* aElement,
-      mozilla::CSSPseudoElementType aPseudoType,
+      mozilla::PseudoStyleType aPseudoType,
       CSSTransitionCollection*& aElementTransitions,
       const mozilla::ComputedStyle& aOldStyle,
       const mozilla::ComputedStyle& aNewStyle,

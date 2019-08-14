@@ -4,9 +4,11 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
-from StringIO import StringIO
+import contextlib
 import os
+import sys
 import textwrap
+import traceback
 import unittest
 
 from mozunit import (
@@ -35,6 +37,20 @@ class TestLint(unittest.TestCase):
                          'moz.configure'): textwrap.dedent(source)
         })
 
+    @contextlib.contextmanager
+    def assertRaisesFromLine(self, exc_type, line):
+        with self.assertRaises(exc_type) as e:
+            yield e
+
+        _, _, tb = sys.exc_info()
+        self.assertEquals(
+            traceback.extract_tb(tb)[-1][:2],
+            (mozpath.join(test_data_path, 'moz.configure'), line))
+
+    def test_configure_testcase(self):
+        # Lint python/mozbuild/mozbuild/test/configure/data/moz.configure
+        self.lint_test()
+
     def test_depends_failures(self):
         with self.moz_configure('''
             option('--foo', help='foo')
@@ -43,16 +59,16 @@ class TestLint(unittest.TestCase):
                 return value
 
             @depends('--help', foo)
+            @imports('os')
             def bar(help, foo):
                 return foo
         '''):
             self.lint_test()
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 7) as e:
             with self.moz_configure('''
                 option('--foo', help='foo')
                 @depends('--foo')
-                @imports('os')
                 def foo(value):
                     return value
 
@@ -63,10 +79,28 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "`bar` depends on '--help' and `foo`. "
-                          "`foo` must depend on '--help'")
+                          "The dependency on `--help` is unused")
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 3) as e:
+            with self.moz_configure('''
+                option('--foo', help='foo')
+                @depends('--foo')
+                @imports('os')
+                def foo(value):
+                    return value
+
+                @depends('--help', foo)
+                @imports('os')
+                def bar(help, foo):
+                    return foo
+            '''):
+                self.lint_test()
+
+        self.assertEquals(
+            e.exception.message,
+            "Missing '--help' dependency because `bar` depends on '--help' and `foo`")
+
+        with self.assertRaisesFromLine(ConfigureError, 7) as e:
             with self.moz_configure('''
                 @template
                 def tmpl():
@@ -79,15 +113,16 @@ class TestLint(unittest.TestCase):
                         return value
 
                     @depends('--help', foo)
+                    @imports('os')
                     def bar(help, foo):
                         return foo
                 tmpl()
             '''):
                 self.lint_test()
 
-        self.assertEquals(e.exception.message,
-                          "`bar` depends on '--help' and `foo`. "
-                          "`foo` must depend on '--help'")
+        self.assertEquals(
+            e.exception.message,
+            "Missing '--help' dependency because `bar` depends on '--help' and `foo`")
 
         with self.moz_configure('''
             option('--foo', help='foo')
@@ -99,7 +134,7 @@ class TestLint(unittest.TestCase):
         '''):
             self.lint_test()
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 3) as e:
             with self.moz_configure('''
                 option('--foo', help='foo')
                 @depends('--foo')
@@ -112,9 +147,9 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "Missing @depends for `foo`: '--help'")
+                          "Missing '--help' dependency")
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 3) as e:
             with self.moz_configure('''
                 option('--foo', help='foo')
                 @depends('--foo')
@@ -131,9 +166,9 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "Missing @depends for `foo`: '--help'")
+                          "Missing '--help' dependency")
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 3) as e:
             with self.moz_configure('''
                 option('--foo', help='foo')
                 @depends('--foo')
@@ -146,9 +181,9 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "Missing @depends for `foo`: '--help'")
+                          "Missing '--help' dependency")
 
-        # This would have failed with "Missing @depends for `foo`: '--help'"
+        # This would have failed with "Missing '--help' dependency"
         # in the past, because of the reference to the builtin False.
         with self.moz_configure('''
             option('--foo', help='foo')
@@ -162,7 +197,7 @@ class TestLint(unittest.TestCase):
 
         # However, when something that is normally a builtin is overridden,
         # we should still want the dependency on --help.
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 7) as e:
             with self.moz_configure('''
                 @template
                 def tmpl():
@@ -179,7 +214,7 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "Missing @depends for `foo`: '--help'")
+                          "Missing '--help' dependency")
 
         # There is a default restricted `os` module when there is no explicit
         # @imports, and it's fine to use it without a dependency on --help.
@@ -194,7 +229,7 @@ class TestLint(unittest.TestCase):
         '''):
             self.lint_test()
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 3) as e:
             with self.moz_configure('''
                 option('--foo', help='foo')
                 @depends('--foo')
@@ -206,10 +241,9 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "%s:3: The dependency on `--foo` is unused."
-                          % mozpath.join(test_data_path, 'moz.configure'))
+                          "The dependency on `--foo` is unused")
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 5) as e:
             with self.moz_configure('''
                 @depends(when=True)
                 def bar():
@@ -223,10 +257,9 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "%s:5: The dependency on `bar` is unused."
-                          % mozpath.join(test_data_path, 'moz.configure'))
+                          "The dependency on `bar` is unused")
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 2) as e:
             with self.moz_configure('''
                 @depends(depends(when=True)(lambda: None))
                 def foo(value):
@@ -237,10 +270,9 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "%s:2: The dependency on `<lambda>` is unused."
-                          % mozpath.join(test_data_path, 'moz.configure'))
+                          "The dependency on `<lambda>` is unused")
 
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 9) as e:
             with self.moz_configure('''
                 @template
                 def tmpl():
@@ -258,8 +290,7 @@ class TestLint(unittest.TestCase):
                 self.lint_test()
 
         self.assertEquals(e.exception.message,
-                          "%s:9: The dependency on `qux` is unused."
-                          % mozpath.join(test_data_path, 'moz.configure'))
+                          "The dependency on `qux` is unused")
 
     def test_default_enable(self):
         # --enable-* with default=True is not allowed.
@@ -267,7 +298,7 @@ class TestLint(unittest.TestCase):
             option('--enable-foo', default=False, help='foo')
         '''):
             self.lint_test()
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 2) as e:
             with self.moz_configure('''
                 option('--enable-foo', default=True, help='foo')
             '''):
@@ -282,7 +313,7 @@ class TestLint(unittest.TestCase):
             option('--disable-foo', default=True, help='foo')
         '''):
             self.lint_test()
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 2) as e:
             with self.moz_configure('''
                 option('--disable-foo', default=False, help='foo')
             '''):
@@ -297,7 +328,7 @@ class TestLint(unittest.TestCase):
             option('--with-foo', default=False, help='foo')
         '''):
             self.lint_test()
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 2) as e:
             with self.moz_configure('''
                 option('--with-foo', default=True, help='foo')
             '''):
@@ -312,7 +343,7 @@ class TestLint(unittest.TestCase):
             option('--without-foo', default=True, help='foo')
         '''):
             self.lint_test()
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 2) as e:
             with self.moz_configure('''
                 option('--without-foo', default=False, help='foo')
             '''):
@@ -330,7 +361,7 @@ class TestLint(unittest.TestCase):
                    help='{Enable|Disable} bar')
         '''):
             self.lint_test()
-        with self.assertRaises(ConfigureError) as e:
+        with self.assertRaisesFromLine(ConfigureError, 4) as e:
             with self.moz_configure('''
                 option(env='FOO', help='foo')
                 option('--enable-bar', default=depends('FOO')(lambda x: bool(x)),
@@ -338,8 +369,24 @@ class TestLint(unittest.TestCase):
             '''):
                 self.lint_test()
         self.assertEquals(e.exception.message,
-                          '--enable-bar has a non-constant default. '
-                          'Its help should contain "{Enable|Disable}"')
+                          '`help` should contain "{Enable|Disable}" because of '
+                          'non-constant default')
+
+    def test_undefined_global(self):
+        with self.assertRaisesFromLine(NameError, 6) as e:
+            with self.moz_configure('''
+                option(env='FOO', help='foo')
+                @depends('FOO')
+                def foo(value):
+                    if value:
+                        return unknown
+                    return value
+            '''):
+                self.lint_test()
+
+        self.assertEquals(e.exception.message,
+                          "global name 'unknown' is not defined")
+
 
 if __name__ == '__main__':
     main()

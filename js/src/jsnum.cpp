@@ -18,7 +18,7 @@
 #include "mozilla/Utf8.h"
 
 #ifdef HAVE_LOCALECONV
-#include <locale.h>
+#  include <locale.h>
 #endif
 #include <math.h>
 #include <string.h>
@@ -30,13 +30,12 @@
 #include "js/CharacterEncoding.h"
 #include "js/Conversions.h"
 #if !EXPOSE_INTL_API
-#include "js/LocaleSensitive.h"
+#  include "js/LocaleSensitive.h"
 #endif
+#include "js/PropertySpec.h"
 #include "util/DoubleToString.h"
 #include "util/StringBuffer.h"
-#ifdef ENABLE_BIGINT
 #include "vm/BigIntType.h"
-#endif
 #include "vm/GlobalObject.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -82,6 +81,20 @@ static bool EnsureDtoaState(JSContext* cx) {
   return true;
 }
 
+template <typename CharT>
+static inline void AssertWellPlacedNumericSeparator(const CharT* s,
+                                                    const CharT* start,
+                                                    const CharT* end) {
+  MOZ_ASSERT(start < end, "string is non-empty");
+  MOZ_ASSERT(s > start, "number can't start with a separator");
+  MOZ_ASSERT(s + 1 < end,
+             "final character in a numeric literal can't be a separator");
+  MOZ_ASSERT(*(s + 1) != '_',
+             "separator can't be followed by another separator");
+  MOZ_ASSERT(*(s - 1) != '_',
+             "separator can't be preceded by another separator");
+}
+
 /*
  * If we're accumulating a decimal number and the number is >= 2^53, then the
  * fast result from the loop in Get{Prefix,Decimal}Integer may be inaccurate.
@@ -96,12 +109,17 @@ static bool ComputeAccurateDecimalInteger(JSContext* cx, const CharT* start,
     return false;
   }
 
+  size_t j = 0;
   for (size_t i = 0; i < length; i++) {
     char c = char(start[i]);
+    if (c == '_') {
+      AssertWellPlacedNumericSeparator(start + i, start, end);
+      continue;
+    }
     MOZ_ASSERT(IsAsciiAlphanumeric(c));
-    cstr[i] = c;
+    cstr[j++] = c;
   }
-  cstr[length] = 0;
+  cstr[j] = 0;
 
   if (!EnsureDtoaState(cx)) {
     return false;
@@ -120,21 +138,32 @@ class BinaryDigitReader {
   const int base;     /* Base of number; must be a power of 2 */
   int digit;          /* Current digit value in radix given by base */
   int digitMask;      /* Mask to extract the next bit from digit */
-  const CharT* start; /* Pointer to the remaining digits */
+  const CharT* cur;   /* Pointer to the remaining digits */
+  const CharT* start; /* Pointer to the start of the string */
   const CharT* end;   /* Pointer to first non-digit */
 
  public:
   BinaryDigitReader(int base, const CharT* start, const CharT* end)
-      : base(base), digit(0), digitMask(0), start(start), end(end) {}
+      : base(base),
+        digit(0),
+        digitMask(0),
+        cur(start),
+        start(start),
+        end(end) {}
 
   /* Return the next binary digit from the number, or -1 if done. */
   int nextDigit() {
     if (digitMask == 0) {
-      if (start == end) {
+      if (cur == end) {
         return -1;
       }
 
-      int c = *start++;
+      int c = *cur++;
+      if (c == '_') {
+        AssertWellPlacedNumericSeparator(cur - 1, start, end);
+        c = *cur++;
+      }
+
       MOZ_ASSERT(IsAsciiAlphanumeric(c));
       digit = AsciiAlphanumericToNumber(c);
       digitMask = base >> 1;
@@ -223,7 +252,8 @@ template double js::ParseDecimalNumber(
 
 template <typename CharT>
 bool js::GetPrefixInteger(JSContext* cx, const CharT* start, const CharT* end,
-                          int base, const CharT** endp, double* dp) {
+                          int base, IntegerSeparatorHandling separatorHandling,
+                          const CharT** endp, double* dp) {
   MOZ_ASSERT(start <= end);
   MOZ_ASSERT(2 <= base && base <= 36);
 
@@ -232,6 +262,11 @@ bool js::GetPrefixInteger(JSContext* cx, const CharT* start, const CharT* end,
   for (; s < end; s++) {
     CharT c = *s;
     if (!IsAsciiAlphanumeric(c)) {
+      if (c == '_' &&
+          separatorHandling == IntegerSeparatorHandling::SkipUnderscore) {
+        AssertWellPlacedNumericSeparator(s, start, end);
+        continue;
+      }
       break;
     }
 
@@ -254,7 +289,7 @@ bool js::GetPrefixInteger(JSContext* cx, const CharT* start, const CharT* end,
   /*
    * Otherwise compute the correct integer from the prefix of valid digits
    * if we're computing for base ten or a power of two.  Don't worry about
-   * other bases; see 15.1.2.2 step 13.
+   * other bases; see ES2018, 18.2.5 `parseInt(string, radix)`, step 13.
    */
   if (base == 10) {
     return ComputeAccurateDecimalInteger(cx, start, s, dp);
@@ -271,10 +306,12 @@ namespace js {
 
 template bool GetPrefixInteger(JSContext* cx, const char16_t* start,
                                const char16_t* end, int base,
+                               IntegerSeparatorHandling separatorHandling,
                                const char16_t** endp, double* dp);
 
 template bool GetPrefixInteger(JSContext* cx, const Latin1Char* start,
                                const Latin1Char* end, int base,
+                               IntegerSeparatorHandling separatorHandling,
                                const Latin1Char** endp, double* dp);
 
 }  // namespace js
@@ -288,6 +325,10 @@ bool js::GetDecimalInteger(JSContext* cx, const CharT* start, const CharT* end,
   double d = 0.0;
   for (; s < end; s++) {
     CharT c = *s;
+    if (c == '_') {
+      AssertWellPlacedNumericSeparator(s, start, end);
+      continue;
+    }
     MOZ_ASSERT(IsAsciiDigit(c));
     int digit = c - '0';
     d = d * 10 + digit;
@@ -321,6 +362,59 @@ bool GetDecimalInteger<Utf8Unit>(JSContext* cx, const Utf8Unit* start,
 
 }  // namespace js
 
+template <typename CharT>
+bool js::GetDecimalNonInteger(JSContext* cx, const CharT* start,
+                              const CharT* end, double* dp) {
+  MOZ_ASSERT(start <= end);
+
+  size_t length = end - start;
+  Vector<char, 32> chars(cx);
+  if (!chars.growByUninitialized(length + 1)) {
+    return false;
+  }
+
+  const CharT* s = start;
+  size_t i = 0;
+  for (; s < end; s++) {
+    CharT c = *s;
+    if (c == '_') {
+      AssertWellPlacedNumericSeparator(s, start, end);
+      continue;
+    }
+    MOZ_ASSERT(IsAsciiDigit(c) || c == '.' || c == 'e' || c == 'E' ||
+               c == '+' || c == '-');
+    chars[i++] = char(c);
+  }
+  chars[i] = 0;
+
+  if (!EnsureDtoaState(cx)) {
+    return false;
+  }
+
+  char* ep;
+  *dp = js_strtod_harder(cx->dtoaState, chars.begin(), &ep);
+  MOZ_ASSERT(ep >= chars.begin());
+
+  return true;
+}
+
+namespace js {
+
+template bool GetDecimalNonInteger(JSContext* cx, const char16_t* start,
+                                   const char16_t* end, double* dp);
+
+template bool GetDecimalNonInteger(JSContext* cx, const Latin1Char* start,
+                                   const Latin1Char* end, double* dp);
+
+template <>
+bool GetDecimalNonInteger<Utf8Unit>(JSContext* cx, const Utf8Unit* start,
+                                    const Utf8Unit* end, double* dp) {
+  return GetDecimalNonInteger(cx, Utf8AsUnsignedChars(start),
+                              Utf8AsUnsignedChars(end), dp);
+}
+
+}  // namespace js
+
 static bool num_parseFloat(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -329,9 +423,24 @@ static bool num_parseFloat(JSContext* cx, unsigned argc, Value* vp) {
     return true;
   }
 
+  if (args[0].isNumber()) {
+    // ToString(-0) is "0", handle it accordingly.
+    if (args[0].isDouble() && args[0].toDouble() == 0.0) {
+      args.rval().setInt32(0);
+    } else {
+      args.rval().set(args[0]);
+    }
+    return true;
+  }
+
   JSString* str = ToString<CanGC>(cx, args[0]);
   if (!str) {
     return false;
+  }
+
+  if (str->hasIndexValue()) {
+    args.rval().setNumber(str->getIndexValue());
+    return true;
   }
 
   JSLinearString* linear = str->ensureLinear(cx);
@@ -394,7 +503,8 @@ static bool ParseIntImpl(JSContext* cx, const CharT* chars, size_t length,
   /* Steps 11-15. */
   const CharT* actualEnd;
   double d;
-  if (!GetPrefixInteger(cx, s, end, radix, &actualEnd, &d)) {
+  if (!GetPrefixInteger(cx, s, end, radix, IntegerSeparatorHandling::None,
+                        &actualEnd, &d)) {
     return false;
   }
 
@@ -529,11 +639,9 @@ static bool Number(JSContext* cx, unsigned argc, Value* vp) {
     if (!ToNumeric(cx, args[0])) {
       return false;
     }
-#ifdef ENABLE_BIGINT
     if (args[0].isBigInt()) {
       args[0].setNumber(BigInt::numberValue(args[0].toBigInt()));
     }
-#endif
     MOZ_ASSERT(args[0].isNumber());
   }
 
@@ -547,7 +655,7 @@ static bool Number(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Number, &proto)) {
     return false;
   }
 
@@ -574,7 +682,7 @@ static inline double Extract(const Value& v) {
 MOZ_ALWAYS_INLINE bool num_toSource_impl(JSContext* cx, const CallArgs& args) {
   double d = Extract(args.thisv());
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (!sb.append("(new Number(") ||
       !NumberValueToStringBuffer(cx, NumberValue(d), sb) || !sb.append("))")) {
     return false;
@@ -1168,16 +1276,16 @@ bool js::InitRuntimeNumberState(JSRuntime* rt) {
   const char* thousandsSeparator;
   const char* decimalPoint;
   const char* grouping;
-#ifdef HAVE_LOCALECONV
+#  ifdef HAVE_LOCALECONV
   struct lconv* locale = localeconv();
   thousandsSeparator = locale->thousands_sep;
   decimalPoint = locale->decimal_point;
   grouping = locale->grouping;
-#else
+#  else
   thousandsSeparator = getenv("LOCALE_THOUSANDS_SEP");
   decimalPoint = getenv("LOCALE_DECIMAL_POINT");
   grouping = getenv("LOCALE_GROUPING");
-#endif
+#  endif
   if (!thousandsSeparator) {
     thousandsSeparator = "'";
   }
@@ -1306,8 +1414,8 @@ JSObject* js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global) {
     return nullptr;
   }
 
-  RootedValue valueNaN(cx, cx->runtime()->NaNValue);
-  RootedValue valueInfinity(cx, cx->runtime()->positiveInfinityValue);
+  RootedValue valueNaN(cx, JS::NaNValue());
+  RootedValue valueInfinity(cx, JS::InfinityValue());
 
   // ES5 15.1.1.1, 15.1.1.2
   if (!NativeDefineDataProperty(
@@ -1566,7 +1674,8 @@ static bool CharsToNumber(JSContext* cx, const CharT* chars, size_t length,
        */
       const CharT* endptr;
       double d;
-      if (!GetPrefixInteger(cx, bp + 2, end, radix, &endptr, &d) ||
+      if (!GetPrefixInteger(cx, bp + 2, end, radix,
+                            IntegerSeparatorHandling::None, &endptr, &d) ||
           endptr == bp + 2 || SkipSpace(endptr, end) != end) {
         *result = GenericNaN();
       } else {
@@ -1635,7 +1744,7 @@ JS_PUBLIC_API bool js::ToNumberSlow(JSContext* cx, HandleValue v_,
   MOZ_ASSERT(!v.isNumber());
 
   if (!v.isPrimitive()) {
-    if (cx->helperThread()) {
+    if (cx->isHelperThreadContext()) {
       return false;
     }
 
@@ -1659,27 +1768,18 @@ JS_PUBLIC_API bool js::ToNumberSlow(JSContext* cx, HandleValue v_,
     *out = 0.0;
     return true;
   }
-  if (v.isSymbol()) {
-    if (!cx->helperThread()) {
-      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                JSMSG_SYMBOL_TO_NUMBER);
-    }
-    return false;
-  }
 
   if (v.isUndefined()) {
     *out = GenericNaN();
     return true;
   }
 
-  MOZ_ASSERT(v.isSymbol() || IF_BIGINT(v.isBigInt(), false));
-  if (!cx->helperThread()) {
+  MOZ_ASSERT(v.isSymbol() || v.isBigInt());
+  if (!cx->isHelperThreadContext()) {
     unsigned errnum = JSMSG_SYMBOL_TO_NUMBER;
-#ifdef ENABLE_BIGINT
     if (v.isBigInt()) {
       errnum = JSMSG_BIGINT_TO_NUMBER;
     }
-#endif
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, errnum);
   }
   return false;
@@ -1688,13 +1788,11 @@ JS_PUBLIC_API bool js::ToNumberSlow(JSContext* cx, HandleValue v_,
 // BigInt proposal section 3.1.6
 bool js::ToNumericSlow(JSContext* cx, MutableHandleValue vp) {
   MOZ_ASSERT(!vp.isNumber());
-#ifdef ENABLE_BIGINT
   MOZ_ASSERT(!vp.isBigInt());
-#endif
 
   // Step 1.
   if (!vp.isPrimitive()) {
-    if (cx->helperThread()) {
+    if (cx->isHelperThreadContext()) {
       return false;
     }
     if (!ToPrimitive(cx, JSTYPE_NUMBER, vp)) {
@@ -1703,11 +1801,9 @@ bool js::ToNumericSlow(JSContext* cx, MutableHandleValue vp) {
   }
 
   // Step 2.
-#ifdef ENABLE_BIGINT
   if (vp.isBigInt()) {
     return true;
   }
-#endif
 
   // Step 3.
   return ToNumber(cx, vp);
@@ -1836,11 +1932,9 @@ bool js::ToInt32OrBigIntSlow(JSContext* cx, MutableHandleValue vp) {
     return false;
   }
 
-#ifdef ENABLE_BIGINT
   if (vp.isBigInt()) {
     return true;
   }
-#endif
 
   vp.setInt32(ToInt32(vp.toNumber()));
   return true;

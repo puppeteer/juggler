@@ -17,6 +17,8 @@
 #include "nsIURIMutator.h"
 #include "nsProxyRelease.h"
 #include "nsString.h"
+#include "mozilla/dom/ContentProcessManager.h"
+#include "mozilla/dom/BrowserParent.h"
 
 #include "WebrtcProxyChannelCallback.h"
 #include "WebrtcProxyLog.h"
@@ -43,13 +45,12 @@ NS_IMPL_ISUPPORTS(WebrtcProxyChannel, nsIAuthPromptProvider,
                   nsIInterfaceRequestor, nsIOutputStreamCallback,
                   nsIRequestObserver, nsIStreamListener)
 
-WebrtcProxyChannel::WebrtcProxyChannel(nsIAuthPromptProvider* aAuthProvider,
-                                       WebrtcProxyChannelCallback* aCallbacks)
+WebrtcProxyChannel::WebrtcProxyChannel(WebrtcProxyChannelCallback* aCallbacks)
     : mProxyCallbacks(aCallbacks),
       mClosed(false),
       mOpened(false),
       mWriteOffset(0),
-      mAuthProvider(aAuthProvider),
+      mAuthProvider(nullptr),
       mTransport(nullptr),
       mSocketIn(nullptr),
       mSocketOut(nullptr) {
@@ -65,6 +66,12 @@ WebrtcProxyChannel::~WebrtcProxyChannel() {
 
   NS_ProxyRelease("WebrtcProxyChannel::CleanUpAuthProvider", mMainThread,
                   mAuthProvider.forget());
+}
+
+void WebrtcProxyChannel::SetTabId(dom::TabId aTabId) {
+  dom::ContentProcessManager* cpm = dom::ContentProcessManager::GetSingleton();
+  dom::ContentParentId cpId = cpm->GetTabProcessId(aTabId);
+  mAuthProvider = cpm->GetBrowserParentByProcessAndTabId(cpId, aTabId);
 }
 
 nsresult WebrtcProxyChannel::Write(nsTArray<uint8_t>&& aWriteData) {
@@ -128,7 +135,7 @@ void WebrtcProxyChannel::CloseWithReason(nsresult aReason) {
 }
 
 nsresult WebrtcProxyChannel::Open(const nsCString& aHost, const int& aPort,
-                                  nsILoadInfo* aLoadInfo,
+                                  const net::LoadInfoArgs& aArgs,
                                   const nsCString& aAlpn) {
   LOG(("WebrtcProxyChannel::AsyncOpen %p\n", this));
 
@@ -163,17 +170,26 @@ nsresult WebrtcProxyChannel::Open(const nsCString& aHost, const int& aPort,
     return rv;
   }
 
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  Maybe<net::LoadInfoArgs> loadInfoArgs = Some(aArgs);
+  rv = LoadInfoArgsToLoadInfo(loadInfoArgs, getter_AddRefs(loadInfo));
+  if (NS_FAILED(rv)) {
+    LOG(("WebrtcProxyChannel %p: could not init load info\n", this));
+    CloseWithReason(rv);
+    return rv;
+  }
+
   // -need to always tunnel since we're using a proxy
   // -there shouldn't be an opportunity to send cookies, but explicitly disallow
   // them anyway.
   // -the previous proxy tunnel didn't support redirects e.g. 307. don't need to
   // introduce new behavior. can't follow redirects on connect anyway.
   nsCOMPtr<nsIChannel> localChannel;
-  rv = ioService->NewChannelFromURIWithProxyFlags2(
+  rv = ioService->NewChannelFromURIWithProxyFlags(
       uri, nullptr,
       // Proxy flags are overridden by SetConnectOnly()
-      0, aLoadInfo->LoadingNode(), aLoadInfo->LoadingPrincipal(),
-      aLoadInfo->TriggeringPrincipal(),
+      0, loadInfo->LoadingNode(), loadInfo->LoadingPrincipal(),
+      loadInfo->TriggeringPrincipal(),
       nsILoadInfo::SEC_DONT_FOLLOW_REDIRECTS | nsILoadInfo::SEC_COOKIES_OMIT |
           // We need this flag to allow loads from any origin since this channel
           // is being used to CONNECT to an HTTP proxy.
@@ -213,7 +229,7 @@ nsresult WebrtcProxyChannel::Open(const nsCString& aHost, const int& aPort,
   rv = httpChannel->SetConnectOnly();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = NS_MaybeOpenChannelUsingAsyncOpen2(httpChannel, this);
+  rv = NS_MaybeOpenChannelUsingAsyncOpen(httpChannel, this);
 
   if (NS_FAILED(rv)) {
     LOG(("WebrtcProxyChannel %p: cannot async open\n", this));
@@ -331,16 +347,14 @@ WebrtcProxyChannel::OnTransportAvailable(nsISocketTransport* aTransport,
 
 // nsIRequestObserver (from nsIStreamListener)
 NS_IMETHODIMP
-WebrtcProxyChannel::OnStartRequest(nsIRequest* aRequest,
-                                   nsISupports* aContext) {
+WebrtcProxyChannel::OnStartRequest(nsIRequest* aRequest) {
   LOG(("WebrtcProxyChannel::OnStartRequest %p\n", this));
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-WebrtcProxyChannel::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                                  nsresult aStatusCode) {
+WebrtcProxyChannel::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
   LOG(("WebrtcProxyChannel::OnStopRequest %p status=%u\n", this,
        static_cast<uint32_t>(aStatusCode)));
 
@@ -355,7 +369,7 @@ WebrtcProxyChannel::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
 
 // nsIStreamListener
 NS_IMETHODIMP
-WebrtcProxyChannel::OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
+WebrtcProxyChannel::OnDataAvailable(nsIRequest* aRequest,
                                     nsIInputStream* aInputStream,
                                     uint64_t aOffset, uint32_t aCount) {
   LOG(("WebrtcProxyChannel::OnDataAvailable %p count=%u\n", this, aCount));

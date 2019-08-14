@@ -8,15 +8,11 @@
 // escaping checks -- highly dependent on the default index handler output
 // format
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-
 var srv, dir, gDirEntries;
 
 XPCOMUtils.defineLazyGetter(this, "BASE_URL", function() {
   return "http://localhost:" + srv.identity.primaryPort + "/";
 });
-
-Cu.importGlobalProperties(["DOMParser"]);
 
 function run_test() {
   createTestDirectory();
@@ -32,7 +28,9 @@ function run_test() {
   function done() {
     do_test_pending();
     destroyTestDirectory();
-    srv.stop(function() { do_test_finished(); });
+    srv.stop(function() {
+      do_test_finished();
+    });
   }
 
   runHttpTests(tests, done);
@@ -81,7 +79,6 @@ function destroyTestDirectory() {
   dir.remove(true);
 }
 
-
 /** ***********
  * UTILITIES *
  *************/
@@ -119,8 +116,10 @@ function hiddenDataCheck(bytes, uri, path) {
   var top = Services.io.newURI(uri);
 
   // N.B. No ERROR_IF_SEE_THIS.txt^ file!
-  var dirEntries = [{name: "file.txt", isDirectory: false},
-                    {name: "SHOULD_SEE_THIS.txt^", isDirectory: false}];
+  var dirEntries = [
+    { name: "file.txt", isDirectory: false },
+    { name: "SHOULD_SEE_THIS.txt^", isDirectory: false },
+  ];
 
   for (var i = 0; i < items.length; i++) {
     var link = items[i].childNodes[0];
@@ -206,8 +205,10 @@ function makeFile(name, isDirectory, parentDir, lst) {
   try {
     file.append(name);
     file.create(type, 0o755);
-    lst.push({name, isDirectory});
-  } catch (e) { /* OS probably doesn't like file name, skip */ }
+    lst.push({ name, isDirectory });
+  } catch (e) {
+    /* OS probably doesn't like file name, skip */
+  }
 }
 
 /** *******
@@ -218,7 +219,12 @@ XPCOMUtils.defineLazyGetter(this, "tests", function() {
   return [
     new Test(BASE_URL, null, start, stopRootDirectory),
     new Test(BASE_URL + "foo/", null, start, stopFooDirectory),
-    new Test(BASE_URL + "bar/folder^/", null, start, stopTrailingCaretDirectory),
+    new Test(
+      BASE_URL + "bar/folder^/",
+      null,
+      start,
+      stopTrailingCaretDirectory
+    ),
   ];
 });
 
@@ -226,16 +232,16 @@ XPCOMUtils.defineLazyGetter(this, "tests", function() {
 function start(ch) {
   Assert.equal(ch.getResponseHeader("Content-Type"), "text/html;charset=utf-8");
 }
-function stopRootDirectory(ch, cx, status, data) {
+function stopRootDirectory(ch, status, data) {
   dataCheck(data, BASE_URL, "/", gDirEntries[0]);
 }
 
 // check non-top-level, too
-function stopFooDirectory(ch, cx, status, data) {
+function stopFooDirectory(ch, status, data) {
   dataCheck(data, BASE_URL + "foo/", "/foo/", gDirEntries[1]);
 }
 
 // trailing-caret leaf with hidden files
-function stopTrailingCaretDirectory(ch, cx, status, data) {
+function stopTrailingCaretDirectory(ch, status, data) {
   hiddenDataCheck(data, BASE_URL + "bar/folder^/", "/bar/folder^/");
 }

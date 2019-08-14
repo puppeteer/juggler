@@ -17,6 +17,7 @@ using mozilla::layers::ScrollableLayerGuid::ViewID from "mozilla/layers/Scrollab
 using mozilla::layers::MaybeZoomConstraints from "mozilla/layers/ZoomConstraints.h";
 using mozilla::layers::GeckoContentController::APZStateChange from "mozilla/layers/GeckoContentController.h";
 using mozilla::layers::ScrollDirection from "mozilla/layers/LayersTypes.h";
+using mozilla::layers::MatrixMessage from "mozilla/layers/MatrixMessage.h";
 using mozilla::dom::TabId from "mozilla/dom/ipc/IdType.h";
 using mozilla::dom::ContentParentId from "mozilla/dom/ipc/IdType.h";
 using mozilla::layers::AsyncDragMetrics from "mozilla/layers/AsyncDragMetrics.h";
@@ -46,10 +47,10 @@ sync protocol PAPZ
   manager PCompositorBridge;
 
 parent:
-
   async __delete__();
 
 child:
+  async LayerTransforms(MatrixMessage[] aTransforms);
 
   async RequestContentRepaint(RepaintRequest request);
 
@@ -69,6 +70,7 @@ child:
 
   async NotifyAsyncAutoscrollRejected(ViewID aScrollId);
 
+both:
   async Destroy();
 };
 

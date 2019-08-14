@@ -5,14 +5,17 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = [ "HomeProvider" ];
+var EXPORTED_SYMBOLS = ["HomeProvider"];
 
-ChromeUtils.import("resource://gre/modules/Messaging.jsm");
-ChromeUtils.import("resource://gre/modules/osfile.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Sqlite.jsm");
-ChromeUtils.import("resource://gre/modules/Task.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { EventDispatcher } = ChromeUtils.import(
+  "resource://gre/modules/Messaging.jsm"
+);
+const { OS } = ChromeUtils.import("resource://gre/modules/osfile.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { Sqlite } = ChromeUtils.import("resource://gre/modules/Sqlite.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 
 /*
  * SCHEMA_VERSION history:
@@ -37,8 +40,12 @@ XPCOMUtils.defineLazyGetter(this, "gSyncCheckIntervalSecs", function() {
   return Services.prefs.getIntPref(PREF_SYNC_CHECK_INTERVAL_SECS);
 });
 
-XPCOMUtils.defineLazyServiceGetter(this,
-  "gUpdateTimerManager", "@mozilla.org/updates/timer-manager;1", "nsIUpdateTimerManager");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "gUpdateTimerManager",
+  "@mozilla.org/updates/timer-manager;1",
+  "nsIUpdateTimerManager"
+);
 
 /**
  * All SQL statements should be defined here.
@@ -46,33 +53,30 @@ XPCOMUtils.defineLazyServiceGetter(this,
 const SQL = {
   createItemsTable:
     "CREATE TABLE items (" +
-      "_id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-      "dataset_id TEXT NOT NULL, " +
-      "url TEXT," +
-      "title TEXT," +
-      "description TEXT," +
-      "image_url TEXT," +
-      "background_color TEXT," +
-      "background_url TEXT," +
-      "filter TEXT," +
-      "created INTEGER" +
+    "_id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+    "dataset_id TEXT NOT NULL, " +
+    "url TEXT," +
+    "title TEXT," +
+    "description TEXT," +
+    "image_url TEXT," +
+    "background_color TEXT," +
+    "background_url TEXT," +
+    "filter TEXT," +
+    "created INTEGER" +
     ")",
 
-  dropItemsTable:
-    "DROP TABLE items",
+  dropItemsTable: "DROP TABLE items",
 
   insertItem:
     "INSERT INTO items (dataset_id, url, title, description, image_url, background_color, background_url, filter, created) " +
-      "VALUES (:dataset_id, :url, :title, :description, :image_url, :background_color, :background_url, :filter, :created)",
+    "VALUES (:dataset_id, :url, :title, :description, :image_url, :background_color, :background_url, :filter, :created)",
 
-  deleteFromDataset:
-    "DELETE FROM items WHERE dataset_id = :dataset_id",
+  deleteFromDataset: "DELETE FROM items WHERE dataset_id = :dataset_id",
 
   addColumnBackgroundColor:
     "ALTER TABLE items ADD COLUMN background_color TEXT",
 
-  addColumnBackgroundUrl:
-    "ALTER TABLE items ADD COLUMN background_url TEXT",
+  addColumnBackgroundUrl: "ALTER TABLE items ADD COLUMN background_url TEXT",
 };
 
 /**
@@ -80,8 +84,13 @@ const SQL = {
  * but we express this as "wifi" to the user.
  */
 function isUsingWifi() {
-  let network = Cc["@mozilla.org/network/network-link-service;1"].getService(Ci.nsINetworkLinkService);
-  return (network.linkType === Ci.nsINetworkLinkService.LINK_TYPE_WIFI || network.linkType === Ci.nsINetworkLinkService.LINK_TYPE_ETHERNET);
+  let network = Cc["@mozilla.org/network/network-link-service;1"].getService(
+    Ci.nsINetworkLinkService
+  );
+  return (
+    network.linkType === Ci.nsINetworkLinkService.LINK_TYPE_WIFI ||
+    network.linkType === Ci.nsINetworkLinkService.LINK_TYPE_ETHERNET
+  );
 }
 
 function getNowInSeconds() {
@@ -105,7 +114,10 @@ var gSyncCallbacks = {};
  */
 function syncTimerCallback(timer) {
   for (let datasetId in gSyncCallbacks) {
-    let lastSyncTime = Services.prefs.getIntPref(getLastSyncPrefName(datasetId), 0);
+    let lastSyncTime = Services.prefs.getIntPref(
+      getLastSyncPrefName(datasetId),
+      0
+    );
 
     let now = getNowInSeconds();
     let { interval: interval, callback: callback } = gSyncCallbacks[datasetId];
@@ -155,8 +167,13 @@ var HomeProvider = Object.freeze({
    */
   requestSync: function(datasetId, callback) {
     // Make sure it's a good time to sync.
-    if ((Services.prefs.getIntPref(PREF_SYNC_UPDATE_MODE) === 1) && !isUsingWifi()) {
-      Cu.reportError("HomeProvider: Failed to sync because device is not on a local network");
+    if (
+      Services.prefs.getIntPref(PREF_SYNC_UPDATE_MODE) === 1 &&
+      !isUsingWifi()
+    ) {
+      Cu.reportError(
+        "HomeProvider: Failed to sync because device is not on a local network"
+      );
       return false;
     }
 
@@ -174,8 +191,13 @@ var HomeProvider = Object.freeze({
   addPeriodicSync: function(datasetId, interval, callback) {
     // Warn developers if they're expecting more frequent notifications that we allow.
     if (interval < gSyncCheckIntervalSecs) {
-      Cu.reportError("HomeProvider: Warning for dataset " + datasetId +
-        " : Sync notifications are throttled to " + gSyncCheckIntervalSecs + " seconds");
+      Cu.reportError(
+        "HomeProvider: Warning for dataset " +
+          datasetId +
+          " : Sync notifications are throttled to " +
+          gSyncCheckIntervalSecs +
+          " seconds"
+      );
     }
 
     gSyncCallbacks[datasetId] = {
@@ -184,7 +206,11 @@ var HomeProvider = Object.freeze({
     };
 
     if (!gTimerRegistered) {
-      gUpdateTimerManager.registerTimer("home-provider-sync-timer", syncTimerCallback, gSyncCheckIntervalSecs);
+      gUpdateTimerManager.registerTimer(
+        "home-provider-sync-timer",
+        syncTimerCallback,
+        gSyncCheckIntervalSecs
+      );
       gTimerRegistered = true;
     }
   },
@@ -207,33 +233,29 @@ var gDatabaseEnsured = false;
  * Creates the database schema.
  */
 function createDatabase(db) {
-  return Task.spawn(function* create_database_task() {
-    yield db.execute(SQL.createItemsTable);
-  });
+  return db.execute(SQL.createItemsTable);
 }
 
 /**
  * Migrates the database schema to a new version.
  */
-function upgradeDatabase(db, oldVersion, newVersion) {
-  return Task.spawn(function* upgrade_database_task() {
-    switch (oldVersion) {
-      case 1:
-        // Migration from v1 to latest:
-        // Recreate the items table discarding any
-        // existing data.
-        yield db.execute(SQL.dropItemsTable);
-        yield db.execute(SQL.createItemsTable);
-        break;
+async function upgradeDatabase(db, oldVersion, newVersion) {
+  switch (oldVersion) {
+    case 1:
+      // Migration from v1 to latest:
+      // Recreate the items table discarding any
+      // existing data.
+      await db.execute(SQL.dropItemsTable);
+      await db.execute(SQL.createItemsTable);
+      break;
 
-      case 2:
-        // Migration from v2 to latest:
-        // Add new columns: background_color, background_url
-        yield db.execute(SQL.addColumnBackgroundColor);
-        yield db.execute(SQL.addColumnBackgroundUrl);
-        break;
-    }
-  });
+    case 2:
+      // Migration from v2 to latest:
+      // Add new columns: background_color, background_url
+      await db.execute(SQL.addColumnBackgroundColor);
+      await db.execute(SQL.addColumnBackgroundUrl);
+      break;
+  }
 }
 
 /**
@@ -244,35 +266,33 @@ function upgradeDatabase(db, oldVersion, newVersion) {
  * @return Promise
  * @resolves Handle on an opened SQLite database.
  */
-function getDatabaseConnection() {
-  return Task.spawn(function* get_database_connection_task() {
-    let db = yield Sqlite.openConnection({ path: DB_PATH });
-    if (gDatabaseEnsured) {
-      return db;
-    }
-
-    try {
-      // Check to see if we need to perform any migrations.
-      let dbVersion = parseInt(yield db.getSchemaVersion());
-
-      // getSchemaVersion() returns a 0 int if the schema
-      // version is undefined.
-      if (dbVersion === 0) {
-        yield createDatabase(db);
-      } else if (dbVersion < SCHEMA_VERSION) {
-        yield upgradeDatabase(db, dbVersion, SCHEMA_VERSION);
-      }
-
-      yield db.setSchemaVersion(SCHEMA_VERSION);
-    } catch (e) {
-      // Close the DB connection before passing the exception to the consumer.
-      yield db.close();
-      throw e;
-    }
-
-    gDatabaseEnsured = true;
+async function getDatabaseConnection() {
+  let db = await Sqlite.openConnection({ path: DB_PATH });
+  if (gDatabaseEnsured) {
     return db;
-  });
+  }
+
+  try {
+    // Check to see if we need to perform any migrations.
+    let dbVersion = parseInt(await db.getSchemaVersion());
+
+    // getSchemaVersion() returns a 0 int if the schema
+    // version is undefined.
+    if (dbVersion === 0) {
+      await createDatabase(db);
+    } else if (dbVersion < SCHEMA_VERSION) {
+      await upgradeDatabase(db, dbVersion, SCHEMA_VERSION);
+    }
+
+    await db.setSchemaVersion(SCHEMA_VERSION);
+  } catch (e) {
+    // Close the DB connection before passing the exception to the consumer.
+    await db.close();
+    throw e;
+  }
+
+  gDatabaseEnsured = true;
+  return db;
 }
 
 /**
@@ -283,13 +303,17 @@ function getDatabaseConnection() {
  */
 function validateItem(datasetId, item) {
   if (!item.url) {
-    throw new ValidationError("HomeStorage: All rows must have an URL: datasetId = " +
-                              datasetId);
+    throw new ValidationError(
+      "HomeStorage: All rows must have an URL: datasetId = " + datasetId
+    );
   }
 
   if (!item.image_url && !item.title && !item.description) {
-    throw new ValidationError("HomeStorage: All rows must have at least an image URL, " +
-                              "or a title or a description: datasetId = " + datasetId);
+    throw new ValidationError(
+      "HomeStorage: All rows must have at least an image URL, " +
+        "or a title or a description: datasetId = " +
+        datasetId
+    );
   }
 }
 
@@ -306,14 +330,18 @@ function refreshDataset(datasetId) {
   }
 
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
-  timer.initWithCallback(function(timer) {
-    delete gRefreshTimers[datasetId];
+  timer.initWithCallback(
+    function(timer) {
+      delete gRefreshTimers[datasetId];
 
-    EventDispatcher.instance.sendRequest({
-      type: "HomePanels:RefreshDataset",
-      datasetId: datasetId,
-    });
-  }, 100, Ci.nsITimer.TYPE_ONE_SHOT);
+      EventDispatcher.instance.sendRequest({
+        type: "HomePanels:RefreshDataset",
+        datasetId: datasetId,
+      });
+    },
+    100,
+    Ci.nsITimer.TYPE_ONE_SHOT
+  );
 
   gRefreshTimers[datasetId] = timer;
 }
@@ -338,18 +366,22 @@ HomeStorage.prototype = {
    * @return Promise
    * @resolves When the operation has completed.
    */
-  save: function(data, options) {
+  async save(data, options) {
     if (data && data.length > MAX_SAVE_COUNT) {
-      throw "save failed for dataset = " + this.datasetId +
-        ": you cannot save more than " + MAX_SAVE_COUNT + " items at once";
+      throw new Error(
+        `save failed for dataset = ${this.datasetId}: ` +
+          `you cannot save more than ${MAX_SAVE_COUNT} items at once`
+      );
     }
 
-    return Task.spawn(function* save_task() {
-      let db = yield getDatabaseConnection();
-      try {
-        yield db.executeTransaction(function* save_transaction() {
+    let db = await getDatabaseConnection();
+    try {
+      await db.executeTransaction(
+        async function save_transaction() {
           if (options && options.replace) {
-            yield db.executeCached(SQL.deleteFromDataset, { dataset_id: this.datasetId });
+            await db.executeCached(SQL.deleteFromDataset, {
+              dataset_id: this.datasetId,
+            });
           }
 
           // Insert data into DB.
@@ -368,15 +400,15 @@ HomeStorage.prototype = {
               filter: item.filter,
               created: Date.now(),
             };
-            yield db.executeCached(SQL.insertItem, params);
+            await db.executeCached(SQL.insertItem, params);
           }
-        }.bind(this));
-      } finally {
-        yield db.close();
-      }
+        }.bind(this)
+      );
+    } finally {
+      await db.close();
+    }
 
-      refreshDataset(this.datasetId);
-    }.bind(this));
+    refreshDataset(this.datasetId);
   },
 
   /**
@@ -385,17 +417,15 @@ HomeStorage.prototype = {
    * @return Promise
    * @resolves When the operation has completed.
    */
-  deleteAll: function() {
-    return Task.spawn(function* delete_all_task() {
-      let db = yield getDatabaseConnection();
-      try {
-        let params = { dataset_id: this.datasetId };
-        yield db.executeCached(SQL.deleteFromDataset, params);
-      } finally {
-        yield db.close();
-      }
+  async deleteAll() {
+    let db = await getDatabaseConnection();
+    try {
+      let params = { dataset_id: this.datasetId };
+      await db.executeCached(SQL.deleteFromDataset, params);
+    } finally {
+      await db.close();
+    }
 
-      refreshDataset(this.datasetId);
-    }.bind(this));
+    refreshDataset(this.datasetId);
   },
 };

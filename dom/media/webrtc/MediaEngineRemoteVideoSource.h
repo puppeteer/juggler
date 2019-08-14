@@ -63,13 +63,12 @@ enum DistanceCalculation { kFitness, kFeasibility };
  */
 class MediaEngineRemoteVideoSource : public MediaEngineSource,
                                      public camera::FrameRelay {
-  ~MediaEngineRemoteVideoSource() = default;
+  ~MediaEngineRemoteVideoSource();
 
   struct CapabilityCandidate {
-    explicit CapabilityCandidate(webrtc::CaptureCapability&& aCapability,
+    explicit CapabilityCandidate(webrtc::CaptureCapability aCapability,
                                  uint32_t aDistance = 0)
-        : mCapability(std::forward<webrtc::CaptureCapability>(aCapability)),
-          mDistance(aDistance) {}
+        : mCapability(aCapability), mDistance(aDistance) {}
 
     const webrtc::CaptureCapability mCapability;
     uint32_t mDistance;
@@ -110,36 +109,28 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
 
  public:
   MediaEngineRemoteVideoSource(int aIndex, camera::CaptureEngine aCapEngine,
-                               dom::MediaSourceEnum aMediaSource, bool aScary);
+                               bool aScary);
 
   // ExternalRenderer
-  int DeliverFrame(uint8_t* buffer,
-                   const camera::VideoFrameProperties& properties) override;
+  int DeliverFrame(uint8_t* aBuffer,
+                   const camera::VideoFrameProperties& aProps) override;
 
   // MediaEngineSource
-  dom::MediaSourceEnum GetMediaSource() const override { return mMediaSource; }
+  dom::MediaSourceEnum GetMediaSource() const override;
   nsresult Allocate(const dom::MediaTrackConstraints& aConstraints,
                     const MediaEnginePrefs& aPrefs, const nsString& aDeviceId,
                     const ipc::PrincipalInfo& aPrincipalInfo,
-                    AllocationHandle** aOutHandle,
                     const char** aOutBadConstraint) override;
-  nsresult Deallocate(const RefPtr<const AllocationHandle>& aHandle) override;
-  void SetTrack(const RefPtr<const AllocationHandle>& aHandle,
-                const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
+  nsresult Deallocate() override;
+  void SetTrack(const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
                 const PrincipalHandle& aPrincipal) override;
-  nsresult Start(const RefPtr<const AllocationHandle>& aHandle) override;
-  nsresult Reconfigure(const RefPtr<AllocationHandle>& aHandle,
-                       const dom::MediaTrackConstraints& aConstraints,
+  nsresult Start() override;
+  nsresult Reconfigure(const dom::MediaTrackConstraints& aConstraints,
                        const MediaEnginePrefs& aPrefs,
                        const nsString& aDeviceId,
                        const char** aOutBadConstraint) override;
-  nsresult FocusOnSelectedSource(
-      const RefPtr<const AllocationHandle>& aHandle) override;
-  nsresult Stop(const RefPtr<const AllocationHandle>& aHandle) override;
-  void Pull(const RefPtr<const AllocationHandle>& aHandle,
-            const RefPtr<SourceMediaStream>& aStream, TrackID aTrackID,
-            StreamTime aEndOfAppendedData, StreamTime aDesiredTime,
-            const PrincipalHandle& aPrincipalHandle) override;
+  nsresult FocusOnSelectedSource() override;
+  nsresult Stop() override;
 
   void GetSettings(dom::MediaTrackSettings& aOutSettings) const override;
 
@@ -153,7 +144,14 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
   nsCString GetUUID() const override;
   void SetUUID(const char* aUUID);
 
+  nsString GetGroupId() const override;
+  void SetGroupId(nsString aGroupId);
+
   bool GetScary() const override { return mScary; }
+
+  RefPtr<GenericNonExclusivePromise> GetFirstFramePromise() const override {
+    return mFirstFramePromise;
+  }
 
  private:
   // Initialize the needed Video engine interfaces.
@@ -174,9 +172,7 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
   webrtc::CaptureCapability GetCapability(size_t aIndex) const;
 
   int mCaptureIndex;
-  const dom::MediaSourceEnum
-      mMediaSource;  // source of media (camera | application | screen)
-  const camera::CaptureEngine mCapEngine;
+  const camera::CaptureEngine mCapEngine;  // source of media (cam, screen etc)
   const bool mScary;
 
   // mMutex protects certain members on 3 threads:
@@ -204,10 +200,6 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
   // after Start() and before the end of Stop().
   RefPtr<layers::ImageContainer> mImageContainer;
 
-  // The latest frame delivered from the video capture backend.
-  // Protected by mMutex.
-  RefPtr<layers::Image> mImage;
-
   // A buffer pool used to manage the temporary buffer used when rescaling
   // incoming images. Cameras IPC thread only.
   webrtc::I420BufferPool mRescalingBufferPool;
@@ -231,6 +223,8 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
   // since we scale frames to avoid fingerprinting.
   // Members are main thread only.
   const RefPtr<media::Refcountable<dom::MediaTrackSettings>> mSettings;
+  MozPromiseHolder<GenericNonExclusivePromise> mFirstFramePromiseHolder;
+  RefPtr<GenericNonExclusivePromise> mFirstFramePromise;
 
   // The capability currently chosen by constraints of the user of this source.
   // Set under mMutex on the owning thread. Accessed under one of the two.
@@ -246,6 +240,7 @@ class MediaEngineRemoteVideoSource : public MediaEngineSource,
 
   nsString mDeviceName;
   nsCString mUniqueId;
+  nsString mGroupId;
   nsString mFacingMode;
 
   // Whether init has successfully completed.

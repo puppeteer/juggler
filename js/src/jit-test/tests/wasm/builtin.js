@@ -16,26 +16,26 @@ function unary(name) {
         (import $f32 "math" "func" (param f32) (result f32))
         (import $f64 "math" "func" (param f64) (result f64))
 
-        (table $t 10 anyfunc)
+        (table $t 10 funcref)
         (type $f_f (func (param f32) (result f32)))
         (type $d_d (func (param f64) (result f64)))
         (elem (i32.const 0) $f32 $f64)
 
         (func (export "f32") (param f32) (result f32)
-            get_local 0
+            local.get 0
             call $f32
         )
         (func (export "f32_t") (param f32) (result f32)
-            get_local 0
+            local.get 0
             i32.const 0
             call_indirect $f_f
         )
         (func (export "f64") (param f64) (result f64)
-            get_local 0
+            local.get 0
             call $f64
         )
         (func (export "f64_t") (param f64) (result f64)
-            get_local 0
+            local.get 0
             i32.const 1
             call_indirect $d_d
         )
@@ -65,30 +65,30 @@ function binary(name) {
         (import $f32 "math" "func" (param f32) (param f32) (result f32))
         (import $f64 "math" "func" (param f64) (param f64) (result f64))
 
-        (table $t 10 anyfunc)
+        (table $t 10 funcref)
         (type $ff_f (func (param f32) (param f32) (result f32)))
         (type $dd_d (func (param f64) (param f64) (result f64)))
         (elem (i32.const 0) $f32 $f64)
 
         (func (export "f32") (param f32) (param f32) (result f32)
-            get_local 0
-            get_local 1
+            local.get 0
+            local.get 1
             call $f32
         )
         (func (export "f32_t") (param f32) (param f32) (result f32)
-            get_local 0
-            get_local 1
+            local.get 0
+            local.get 1
             i32.const 0
             call_indirect $ff_f
         )
         (func (export "f64") (param f64) (param f64) (result f64)
-            get_local 0
-            get_local 1
+            local.get 0
+            local.get 1
             call $f64
         )
         (func (export "f64_t") (param f64) (param f64) (result f64)
-            get_local 0
-            get_local 1
+            local.get 0
+            local.get 1
             i32.const 1
             call_indirect $dd_d
         )

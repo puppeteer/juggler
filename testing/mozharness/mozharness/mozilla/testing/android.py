@@ -8,6 +8,7 @@
 import datetime
 import glob
 import os
+import posixpath
 import re
 import signal
 import subprocess
@@ -32,6 +33,7 @@ class AndroidMixin(object):
         self.device_ip = os.environ.get('DEVICE_IP', None)
         self.logcat_proc = None
         self.logcat_file = None
+        self.use_gles3 = False
         super(AndroidMixin, self).__init__(**kwargs)
 
     @property
@@ -59,9 +61,9 @@ class AndroidMixin(object):
         if not self._device and self.adb_path:
             try:
                 import mozdevice
-                self._device = mozdevice.ADBAndroid(adb=self.adb_path,
-                                                    device=self.device_serial,
-                                                    verbose=True)
+                self._device = mozdevice.ADBDevice(adb=self.adb_path,
+                                                   device=self.device_serial,
+                                                   verbose=True)
                 self.info("New mozdevice with adb=%s, device=%s" %
                           (self.adb_path, self.device_serial))
             except AttributeError:
@@ -162,6 +164,13 @@ class AndroidMixin(object):
         else:
             self.warning("Android sdk missing? Not found at %s" % sdk_path)
 
+        if self.use_gles3:
+            # enable EGL 3.0 in advancedFeatures.ini
+            AF_FILE = os.path.join(sdk_path, "advancedFeatures.ini")
+            with open(AF_FILE, 'w') as f:
+                f.write("GLESDynamicVersion=on\n")
+            self.info("set GLESDynamicVersion=on in %s" % AF_FILE)
+
         # extra diagnostics for kvm acceleration
         emu = self.config.get('emulator_process_name')
         if os.path.exists('/dev/kvm') and emu and 'x86' in emu:
@@ -241,6 +250,12 @@ class AndroidMixin(object):
         perf_path = os.path.join(dir, "android-performance.log")
         with open(perf_path, "w") as f:
 
+            f.write('\n\nHost cpufreq/scaling_governor:\n')
+            cpus = glob.glob('/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor')
+            for cpu in cpus:
+                out = subprocess.check_output(['cat', cpu])
+                f.write("%s: %s" % (cpu, out))
+
             f.write('\n\nHost /proc/cpuinfo:\n')
             out = subprocess.check_output(['cat', '/proc/cpuinfo'])
             f.write(out)
@@ -277,7 +292,7 @@ class AndroidMixin(object):
         # low bogomips can be a good predictor of that condition.
         bogomips_minimum = int(self.config.get('bogomips_minimum') or 0)
         for line in cpuinfo.split('\n'):
-            m = re.match("BogoMIPS.*: (\d*)", line)
+            m = re.match("BogoMIPS.*: (\d*)", line, re.IGNORECASE)
             if m:
                 bogomips = int(m.group(1))
                 if bogomips_minimum > 0 and bogomips < bogomips_minimum:
@@ -287,6 +302,11 @@ class AndroidMixin(object):
                 self.info("Found Android bogomips: %d" % bogomips)
                 break
 
+    def logcat_path(self):
+        logcat_filename = 'logcat-%s.log' % self.device_serial
+        return os.path.join(self.query_abs_dirs()['abs_blob_upload_dir'],
+                            logcat_filename)
+
     def logcat_start(self):
         """
            Start recording logcat. Writes logcat to the upload directory.
@@ -295,10 +315,7 @@ class AndroidMixin(object):
         # corresponding device is stopped. Output is written directly to
         # the blobber upload directory so that it is uploaded automatically
         # at the end of the job.
-        logcat_filename = 'logcat-%s.log' % self.device_serial
-        logcat_path = os.path.join(self.abs_dirs['abs_blob_upload_dir'],
-                                   logcat_filename)
-        self.logcat_file = open(logcat_path, 'w')
+        self.logcat_file = open(self.logcat_path(), 'w')
         logcat_cmd = [self.adb_path, '-s', self.device_serial, 'logcat', '-v',
                       'threadtime', 'Trace:S', 'StrictMode:S',
                       'ExchangeService:S']
@@ -315,16 +332,19 @@ class AndroidMixin(object):
             self.logcat_proc.kill()
             self.logcat_file.close()
 
-    def install_apk(self, apk):
+    def install_apk(self, apk, replace=False):
         """
            Install the specified apk.
         """
         import mozdevice
         try:
-            self.device.install_app(apk)
-        except mozdevice.ADBError:
-            self.fatal('INFRA-ERROR: Failed to install %s on %s' %
-                       (self.installer_path, self.device_name),
+            self.device.install_app(apk, replace=replace)
+        except (mozdevice.ADBError, mozdevice.ADBTimeoutError), e:
+            self.info('Failed to install %s on %s: %s %s' %
+                      (apk, self.device_name,
+                       type(e).__name__, e))
+            self.fatal('INFRA-ERROR: Failed to install %s' %
+                       os.path.basename(apk),
                        EXIT_STATUS_DICT[TBPL_RETRY])
 
     def is_boot_completed(self):
@@ -333,9 +353,7 @@ class AndroidMixin(object):
             out = self.device.get_prop('sys.boot_completed', timeout=30)
             if out.strip() == '1':
                 return True
-        except ValueError:
-            pass
-        except mozdevice.ADBError:
+        except (ValueError, mozdevice.ADBError, mozdevice.ADBTimeoutError):
             pass
         return False
 
@@ -414,6 +432,70 @@ class AndroidMixin(object):
                 pid = int(line.split(None, 1)[0])
                 self.info("Killing pid %d." % pid)
                 os.kill(pid, signal.SIGKILL)
+
+    def delete_ANRs(self):
+        remote_dir = self.device.stack_trace_dir
+        try:
+            if not self.device.is_dir(remote_dir, root=True):
+                self.mkdir(remote_dir, root=True)
+                self.chmod(remote_dir, root=True)
+                self.info("%s created" % remote_dir)
+                return
+            for trace_file in self.device.ls(remote_dir, root=True):
+                trace_path = posixpath.join(remote_dir, trace_file)
+                self.device.chmod(trace_path, root=True)
+                self.device.rm(trace_path, root=True)
+                self.info("%s deleted" % trace_path)
+        except Exception as e:
+            self.info("failed to delete %s: %s %s" % (remote_dir, type(e).__name__, str(e)))
+
+    def check_for_ANRs(self):
+        """
+        Copy ANR (stack trace) files from device to upload directory.
+        """
+        dirs = self.query_abs_dirs()
+        remote_dir = self.device.stack_trace_dir
+        try:
+            if not self.device.is_dir(remote_dir):
+                self.info("%s not found; ANR check skipped" % remote_dir)
+                return
+            self.device.chmod(remote_dir, recursive=True, root=True)
+            self.device.pull(remote_dir, dirs['abs_blob_upload_dir'])
+            self.delete_ANRs()
+        except Exception as e:
+            self.info("failed to pull %s: %s %s" % (remote_dir, type(e).__name__, str(e)))
+
+    def delete_tombstones(self):
+        remote_dir = "/data/tombstones"
+        try:
+            if not self.device.is_dir(remote_dir, root=True):
+                self.mkdir(remote_dir, root=True)
+                self.chmod(remote_dir, root=True)
+                self.info("%s created" % remote_dir)
+                return
+            for trace_file in self.device.ls(remote_dir, root=True):
+                trace_path = posixpath.join(remote_dir, trace_file)
+                self.device.chmod(trace_path, root=True)
+                self.device.rm(trace_path, root=True)
+                self.info("%s deleted" % trace_path)
+        except Exception as e:
+            self.info("failed to delete %s: %s %s" % (remote_dir, type(e).__name__, str(e)))
+
+    def check_for_tombstones(self):
+        """
+        Copy tombstone files from device to upload directory.
+        """
+        dirs = self.query_abs_dirs()
+        remote_dir = "/data/tombstones"
+        try:
+            if not self.device.is_dir(remote_dir):
+                self.info("%s not found; tombstone check skipped" % remote_dir)
+                return
+            self.device.chmod(remote_dir, recursive=True, root=True)
+            self.device.pull(remote_dir, dirs['abs_blob_upload_dir'])
+            self.delete_tombstones()
+        except Exception as e:
+            self.info("failed to pull %s: %s %s" % (remote_dir, type(e).__name__, str(e)))
 
     # Script actions
 
@@ -500,6 +582,8 @@ class AndroidMixin(object):
         self.mkdir_p(self.query_abs_dirs()['abs_blob_upload_dir'])
         self.dump_perf_info()
         self.logcat_start()
+        self.delete_ANRs()
+        self.delete_tombstones()
         # Get a post-boot device process list for diagnostics
         self.info(self.shell_output('ps'))
 
@@ -532,6 +616,11 @@ class AndroidMixin(object):
 
         for t in self.timers:
             t.cancel()
+        if self.worst_status != TBPL_RETRY:
+            self.check_for_ANRs()
+            self.check_for_tombstones()
+        else:
+            self.info("ANR and tombstone checks skipped due to TBPL_RETRY")
         self.logcat_stop()
         if self.is_emulator:
             self.kill_processes(self.config["emulator_process_name"])

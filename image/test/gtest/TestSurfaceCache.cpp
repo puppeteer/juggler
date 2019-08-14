@@ -11,6 +11,7 @@
 #include "ImageFactory.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/StaticPrefs.h"
 #include "nsIInputStream.h"
 #include "nsString.h"
 #include "ProgressTracker.h"
@@ -19,19 +20,17 @@ using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
-class ImageSurfaceCache : public ::testing::Test
-{
-protected:
+class ImageSurfaceCache : public ::testing::Test {
+ protected:
   AutoInitializeImageLib mInit;
 };
 
-TEST_F(ImageSurfaceCache, Factor2)
-{
+TEST_F(ImageSurfaceCache, Factor2) {
   ImageTestCase testCase = GreenPNGTestCase();
 
   // Create an image.
-  RefPtr<Image> image =
-    ImageFactory::CreateAnonymousImage(nsDependentCString(testCase.mMimeType));
+  RefPtr<Image> image = ImageFactory::CreateAnonymousImage(
+      nsDependentCString(testCase.mMimeType));
   ASSERT_TRUE(!image->HasError());
 
   nsCOMPtr<nsIInputStream> inputStream = LoadFile(testCase.mPath);
@@ -44,11 +43,12 @@ TEST_F(ImageSurfaceCache, Factor2)
 
   // Ensures we meet the threshold for FLAG_SYNC_DECODE_IF_FAST to do sync
   // decoding without the implications of FLAG_SYNC_DECODE.
-  ASSERT_LT(length, static_cast<uint64_t>(gfxPrefs::ImageMemDecodeBytesAtATime()));
+  ASSERT_LT(length, static_cast<uint64_t>(
+                        StaticPrefs::image_mem_decode_bytes_at_a_time()));
 
   // Write the data into the image.
   rv = image->OnImageDataAvailable(nullptr, nullptr, inputStream, 0,
-                                       static_cast<uint32_t>(length));
+                                   static_cast<uint32_t>(length));
   ASSERT_TRUE(NS_SUCCEEDED(rv));
 
   // Let the image know we've sent all the data.
@@ -73,7 +73,7 @@ TEST_F(ImageSurfaceCache, Factor2)
 
   // We need the default threshold to be enabled (otherwise we should disable
   // this test).
-  int32_t threshold = gfxPrefs::ImageCacheFactor2ThresholdSurfaces();
+  int32_t threshold = StaticPrefs::image_cache_factor2_threshold_surfaces();
   ASSERT_TRUE(threshold >= 0);
 
   // We need to know what the native sizes are, otherwise factor of 2 mode will
@@ -92,7 +92,7 @@ TEST_F(ImageSurfaceCache, Factor2)
   IntSize size = testCase.mSize;
   for (int32_t i = 0; i <= totalThreshold; ++i) {
     RefPtr<SourceSurface> surf =
-      image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
+        image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
     ASSERT_TRUE(surf);
     EXPECT_EQ(surf->GetSize(), size);
 
@@ -103,7 +103,7 @@ TEST_F(ImageSurfaceCache, Factor2)
   // Now let's ask for a new size. Despite this being sync, it will return
   // the closest factor of 2 size we have and not the requested size.
   RefPtr<SourceSurface> surf =
-    image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
+      image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
   ASSERT_TRUE(surf);
 
   EXPECT_EQ(surf->GetSize(), testCase.mSize);
@@ -113,7 +113,7 @@ TEST_F(ImageSurfaceCache, Factor2)
   size = testCase.mSize;
   for (int32_t i = 0; i < totalThreshold; ++i) {
     RefPtr<SourceSurface> surf =
-      image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
+        image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
     ASSERT_TRUE(surf);
     EXPECT_EQ(surf->GetSize(), size);
 
@@ -143,7 +143,7 @@ TEST_F(ImageSurfaceCache, Factor2)
   size = testCase.mSize;
   for (int32_t i = 0; i < totalThreshold - 1; ++i) {
     RefPtr<SourceSurface> surf =
-      image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
+        image->GetFrameAtSize(size, whichFrame, bestMatchFlags);
     ASSERT_TRUE(surf);
     EXPECT_EQ(surf->GetSize(), testCase.mSize);
 

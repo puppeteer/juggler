@@ -7,7 +7,6 @@
 #include "nsISupports.idl"
 
 [scriptable, uuid(5d1acf82-223a-46fb-a8f3-a1b16e2ceb04)]
-
 interface nsISecurityUITelemetry : nsISupports {
 
 /*
@@ -25,7 +24,7 @@ const uint32_t WARNING_CONFIRM_ADDON_INSTALL_CLICK_THROUGH  = 4;
 
 
 /*
- * modal dialogs/warnings 
+ * modal dialogs/warnings
  */
 
 //     removed WARNING_ENTERING_SECURE_SITE = 5;
@@ -56,7 +55,7 @@ const uint32_t WARNING_CONFIRM_POST_TO_INSECURE_FROM_SECURE_CLICK_THROUGH = 10;
 //     removed WARNING_PHISHING_PAGE_GET_ME_OUT_OF_HERE = 19;
 //     removed WARNING_PHISHING_PAGE_IGNORE_WARNING = 20;
 
-/* 
+/*
  * SSL Error dialogs
  * deprecated: we use the _TOP versions below
  */
@@ -84,17 +83,6 @@ const uint32_t WARNING_BAD_CERT_CONFIRM_ADD_EXCEPTION_FLAG_UNTRUSTED = 1;
 const uint32_t WARNING_BAD_CERT_CONFIRM_ADD_EXCEPTION_FLAG_DOMAIN = 2;
 const uint32_t WARNING_BAD_CERT_CONFIRM_ADD_EXCEPTION_FLAG_TIME = 4;
 // This uses up buckets till 45
-
-/*
- * Geolocation Popup Telemetry
- */
-
-const uint32_t WARNING_GEOLOCATION_REQUEST = 46;
-const uint32_t WARNING_GEOLOCATION_REQUEST_SHARE_LOCATION = 47;
-const uint32_t WARNING_GEOLOCATION_REQUEST_ALWAYS_SHARE = 48;
-const uint32_t WARNING_GEOLOCATION_REQUEST_NEVER_SHARE = 49;
-// It would be nice to measure the two cases of user clicking
-// "not now", and user closing the popup. This is currently not implemented.
 
 // const uint32_t WARNING_MALWARE_PAGE_TOP = 52;
 // const uint32_t WARNING_MALWARE_PAGE_TOP_WHY_BLOCKED = 53;

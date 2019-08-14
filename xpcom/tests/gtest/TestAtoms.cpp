@@ -83,7 +83,7 @@ TEST(Atoms, Invalid)
     EXPECT_EQ(count, NS_GetNumberOfAtoms());
   }
 #ifndef DEBUG
-// Don't run this test in debug builds as that intentionally asserts.
+  // Don't run this test in debug builds as that intentionally asserts.
   for (unsigned int i = 0; i < ArrayLength(Invalid8Strings); ++i) {
     nsrefcnt count = NS_GetNumberOfAtoms();
 
@@ -115,9 +115,7 @@ TEST(Atoms, Invalid)
 #define SECOND_ATOM_STR "second static atom. @World!"
 #define THIRD_ATOM_STR "third static atom?!"
 
-bool
-isStaticAtom(nsAtom* atom)
-{
+static bool isStaticAtom(nsAtom* atom) {
   // Don't use logic && in order to ensure that all addrefs/releases are always
   // run, even if one of the tests fail. This allows us to run this code on a
   // non-static atom without affecting its refcount.
@@ -143,20 +141,18 @@ TEST(Atoms, Table)
   EXPECT_EQ(NS_GetNumberOfAtoms(), count + 1);
 }
 
-class nsAtomRunner final : public nsIRunnable
-{
-public:
+class nsAtomRunner final : public nsIRunnable {
+ public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  NS_IMETHOD Run() final
-  {
+  NS_IMETHOD Run() final {
     for (int i = 0; i < 10000; i++) {
       RefPtr<nsAtom> atom = NS_Atomize(u"A Testing Atom");
     }
     return NS_OK;
   }
 
-private:
+ private:
   ~nsAtomRunner() {}
 };
 
@@ -180,4 +176,4 @@ TEST(Atoms, ConcurrentAccessing)
   EXPECT_EQ(NS_GetUnusedAtomCount(), int32_t(1));
 }
 
-}
+}  // namespace TestAtoms

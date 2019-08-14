@@ -12,7 +12,7 @@
 #include "nsString.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 
 class nsINode;
 class txIParseContext;
@@ -31,14 +31,14 @@ class XPathResult;
  */
 class XPathEvaluator final : public NonRefcountedDOMObject {
  public:
-  explicit XPathEvaluator(nsIDocument* aDocument = nullptr);
+  explicit XPathEvaluator(Document* aDocument = nullptr);
   ~XPathEvaluator();
 
   // WebIDL API
   bool WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto,
                   JS::MutableHandle<JSObject*> aReflector);
-  nsIDocument* GetParentObject() {
-    nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocument);
+  Document* GetParentObject() {
+    nsCOMPtr<Document> doc = do_QueryReferent(mDocument);
     return doc;
   }
   static XPathEvaluator* Constructor(const GlobalObject& aGlobal,
@@ -48,6 +48,9 @@ class XPathEvaluator final : public NonRefcountedDOMObject {
                                     ErrorResult& rv);
   XPathExpression* CreateExpression(const nsAString& aExpression,
                                     nsINode* aResolver, ErrorResult& aRv);
+  XPathExpression* CreateExpression(const nsAString& aExpression,
+                                    txIParseContext* aContext,
+                                    Document* aDocument, ErrorResult& aRv);
   nsINode* CreateNSResolver(nsINode& aNodeResolver) { return &aNodeResolver; }
   already_AddRefed<XPathResult> Evaluate(
       JSContext* aCx, const nsAString& aExpression, nsINode& aContextNode,
@@ -55,10 +58,6 @@ class XPathEvaluator final : public NonRefcountedDOMObject {
       ErrorResult& rv);
 
  private:
-  XPathExpression* CreateExpression(const nsAString& aExpression,
-                                    txIParseContext* aContext,
-                                    nsIDocument* aDocument, ErrorResult& aRv);
-
   nsWeakPtr mDocument;
   RefPtr<txResultRecycler> mRecycler;
 };

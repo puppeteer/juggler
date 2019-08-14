@@ -36,13 +36,7 @@ class AnimationCollection
   typedef AnimationTypeTraits<AnimationType> TraitsType;
 
   AnimationCollection(dom::Element* aElement, nsAtom* aElementProperty)
-      : mElement(aElement),
-        mElementProperty(aElementProperty)
-#ifdef DEBUG
-        ,
-        mCalledPropertyDtor(false)
-#endif
-  {
+      : mElement(aElement), mElementProperty(aElementProperty) {
     MOZ_COUNT_CTOR(AnimationCollection);
   }
 
@@ -55,6 +49,8 @@ class AnimationCollection
   }
 
   void Destroy() {
+    mCalledDestroy = true;
+
     // This will call our destructor.
     mElement->DeleteProperty(mElementProperty);
   }
@@ -65,7 +61,7 @@ class AnimationCollection
   // Get the collection of animations for the given |aElement| and
   // |aPseudoType|.
   static AnimationCollection<AnimationType>* GetAnimationCollection(
-      const dom::Element* aElement, CSSPseudoElementType aPseudoType);
+      const dom::Element* aElement, PseudoStyleType aPseudoType);
 
   // Given the frame |aFrame| with possibly animated content, finds its
   // associated collection of animations. If |aFrame| is a generated content
@@ -81,7 +77,7 @@ class AnimationCollection
   // to create the collection and we successfully do so. Otherwise,
   // we'll set it to false.
   static AnimationCollection<AnimationType>* GetOrCreateAnimationCollection(
-      dom::Element* aElement, CSSPseudoElementType aPseudoType,
+      dom::Element* aElement, PseudoStyleType aPseudoType,
       bool* aCreatedCollection);
 
   dom::Element* mElement;
@@ -93,10 +89,20 @@ class AnimationCollection
   InfallibleTArray<RefPtr<AnimationType>> mAnimations;
 
  private:
-  static nsAtom* GetPropertyAtomForPseudoType(CSSPseudoElementType aPseudoType);
+  static nsAtom* GetPropertyAtomForPseudoType(PseudoStyleType aPseudoType);
+
+  // We distinguish between destroying this by calling Destroy() vs directly
+  // calling DeleteProperty on an element.
+  //
+  // The former case represents regular updating due to style changes and should
+  // trigger subsequent restyles.
+  //
+  // The latter case represents document tear-down or other DOM surgery in
+  // which case we should not trigger restyles.
+  bool mCalledDestroy = false;
 
 #ifdef DEBUG
-  bool mCalledPropertyDtor;
+  bool mCalledPropertyDtor = false;
 #endif
 };
 

@@ -53,12 +53,14 @@ extern "C" {
     output_params.format = CUBEB_SAMPLE_FLOAT32NE;
     output_params.rate = rate;
     output_params.channels = 2;
+    output_params.layout = CUBEB_LAYOUT_UNDEFINED;
     output_params.prefs = CUBEB_STREAM_PREF_NONE;
 
     cubeb_stream_params input_params;
     input_params.format = CUBEB_SAMPLE_FLOAT32NE;
     input_params.rate = rate;
     input_params.channels = 1;
+    input_params.layout = CUBEB_LAYOUT_UNDEFINED;
     input_params.prefs = CUBEB_STREAM_PREF_NONE;
 
     cubeb_stream * stm;
@@ -102,7 +104,7 @@ extern "C" {
 
       for (i = 0; i < nframes; ++i) {
         for (c = 0; c < 2; ++c) {
-          buf[i][c] = in[i];
+          out[i][c] = in[i];
         }
       }
       return nframes;
@@ -222,12 +224,18 @@ enum {
 typedef enum {
   CUBEB_STREAM_PREF_NONE     = 0x00, /**< No stream preferences are requested. */
   CUBEB_STREAM_PREF_LOOPBACK = 0x01, /**< Request a loopback stream. Should be
-                                          specified on the input params and an
-                                          output device to loopback from should
-                                          be passed in place of an input device. */
+                                         specified on the input params and an
+                                         output device to loopback from should
+                                         be passed in place of an input device. */
   CUBEB_STREAM_PREF_DISABLE_DEVICE_SWITCHING = 0x02, /**< Disable switching
                                                           default device on OS
                                                           changes. */
+  CUBEB_STREAM_PREF_VOICE = 0x04  /**< This stream is going to transport voice data.
+                                       Depending on the backend and platform, this can
+                                       change the audio input or output devices
+                                       selected, as well as the quality of the stream,
+                                       for example to accomodate bluetooth SCO modes on
+                                       bluetooth devices. */
 } cubeb_stream_prefs;
 
 /** Stream format initialization parameters. */

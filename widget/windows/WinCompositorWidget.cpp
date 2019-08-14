@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WinCompositorWidget.h"
-#include "gfxPrefs.h"
+
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/layers/Compositor.h"
@@ -27,7 +27,7 @@ WinCompositorWidget::WinCompositorWidget(
     : CompositorWidget(aOptions),
       mWidgetKey(aInitData.widgetKey()),
       mWnd(reinterpret_cast<HWND>(aInitData.hWnd())),
-      mCompositorWnd(nullptr),
+      mCompositorWnds(nullptr, nullptr),
       mTransparentSurfaceLock("mTransparentSurfaceLock"),
       mTransparencyMode(aInitData.transparencyMode()),
       mMemoryDC(nullptr),
@@ -37,9 +37,9 @@ WinCompositorWidget::WinCompositorWidget(
 
   // mNotDeferEndRemoteDrawing is set on the main thread during init,
   // but is only accessed after on the compositor thread.
-  mNotDeferEndRemoteDrawing = gfxPrefs::LayersCompositionFrameRate() == 0 ||
-                              gfxPlatform::IsInLayoutAsapMode() ||
-                              gfxPlatform::ForceSoftwareVsync();
+  mNotDeferEndRemoteDrawing =
+      StaticPrefs::layers_offmainthreadcomposition_frame_rate() == 0 ||
+      gfxPlatform::IsInLayoutAsapMode() || gfxPlatform::ForceSoftwareVsync();
 }
 
 WinCompositorWidget::~WinCompositorWidget() { DestroyCompositorWindow(); }
@@ -297,23 +297,27 @@ void WinCompositorWidget::FreeWindowSurface(HDC dc) {
 bool WinCompositorWidget::IsHidden() const { return ::IsIconic(mWnd); }
 
 void WinCompositorWidget::EnsureCompositorWindow() {
-  if (mCompositorWnd) {
+  if (mCompositorWnds.mCompositorWnd || mCompositorWnds.mInitialParentWnd) {
     return;
   }
-  mCompositorWnd = WinCompositorWindowThread::CreateCompositorWindow(mWnd);
-  MOZ_ASSERT(mCompositorWnd);
+
+  mCompositorWnds = WinCompositorWindowThread::CreateCompositorWindow();
+  UpdateCompositorWnd(mCompositorWnds.mCompositorWnd, mWnd);
+
+  MOZ_ASSERT(mCompositorWnds.mCompositorWnd);
+  MOZ_ASSERT(mCompositorWnds.mInitialParentWnd);
 }
 
 void WinCompositorWidget::DestroyCompositorWindow() {
-  if (!mCompositorWnd) {
+  if (!mCompositorWnds.mCompositorWnd && !mCompositorWnds.mInitialParentWnd) {
     return;
   }
-  WinCompositorWindowThread::DestroyCompositorWindow(mCompositorWnd);
-  mCompositorWnd = nullptr;
+  WinCompositorWindowThread::DestroyCompositorWindow(mCompositorWnds);
+  mCompositorWnds = WinCompositorWnds(nullptr, nullptr);
 }
 
 void WinCompositorWidget::UpdateCompositorWndSizeIfNecessary() {
-  if (!mCompositorWnd) {
+  if (!mCompositorWnds.mCompositorWnd) {
     return;
   }
 
@@ -323,7 +327,8 @@ void WinCompositorWidget::UpdateCompositorWndSizeIfNecessary() {
   }
 
   // Force a resize and redraw (but not a move, activate, etc.).
-  if (!::SetWindowPos(mCompositorWnd, nullptr, 0, 0, size.width, size.height,
+  if (!::SetWindowPos(mCompositorWnds.mCompositorWnd, nullptr, 0, 0, size.width,
+                      size.height,
                       SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOCOPYBITS |
                           SWP_NOOWNERZORDER | SWP_NOZORDER)) {
     return;

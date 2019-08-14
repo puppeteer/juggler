@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsISupports.idl"
+#include "domstubs.idl"
 
 interface nsIPrincipal;
 interface mozIDOMWindow;
@@ -88,6 +89,8 @@ interface nsIContentPermissionRequest : nsISupports {
   readonly attribute Element element;
 
   readonly attribute boolean isHandlingUserInput;
+  readonly attribute boolean userHadInteractedWithDocument;
+  readonly attribute DOMTimeStamp documentDOMContentLoadedTimestamp;
 
   /**
    *  The requester to get the required information of
@@ -98,8 +101,9 @@ interface nsIContentPermissionRequest : nsISupports {
   /**
    * allow or cancel the request
    */
-
+  [can_run_script]
   void cancel();
+  [can_run_script]
   void allow([optional] in jsval choices); // {"type1": "choice1", "type2": "choiceA"}
 };
 

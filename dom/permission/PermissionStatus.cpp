@@ -11,11 +11,13 @@
 #include "nsIPermissionManager.h"
 #include "PermissionObserver.h"
 #include "PermissionUtils.h"
+#include "nsPermission.h"
 
 namespace mozilla {
 namespace dom {
 
-/* static */ already_AddRefed<PermissionStatus> PermissionStatus::Create(
+/* static */
+already_AddRefed<PermissionStatus> PermissionStatus::Create(
     nsPIDOMWindowInner* aWindow, PermissionName aName, ErrorResult& aRv) {
   RefPtr<PermissionStatus> status = new PermissionStatus(aWindow, aName);
   aRv = status->Init();
@@ -89,14 +91,13 @@ already_AddRefed<nsIPrincipal> PermissionStatus::GetPrincipal() const {
     return nullptr;
   }
 
-  nsIDocument* doc = window->GetExtantDoc();
+  Document* doc = window->GetExtantDoc();
   if (NS_WARN_IF(!doc)) {
     return nullptr;
   }
 
   nsCOMPtr<nsIPrincipal> principal =
-      mozilla::BasePrincipal::Cast(doc->NodePrincipal())
-          ->CloneStrippingUserContextIdAndFirstPartyDomain();
+      nsPermission::ClonePrincipalForPermission(doc->NodePrincipal());
   NS_ENSURE_TRUE(principal, nullptr);
 
   return principal.forget();

@@ -116,16 +116,6 @@ void MIRGraph::insertBlockBefore(MBasicBlock* at, MBasicBlock* block) {
   numBlocks_++;
 }
 
-void MIRGraph::renumberBlocksAfter(MBasicBlock* at) {
-  MBasicBlockIterator iter = begin(at);
-  iter++;
-
-  uint32_t id = at->id();
-  for (; iter != end(); iter++) {
-    iter->setId(++id);
-  }
-}
-
 bool MIRGraph::removeSuccessorBlocks(MBasicBlock* start) {
   if (!start->hasLastIns()) {
     return true;
@@ -489,7 +479,7 @@ MBasicBlock::MBasicBlock(MIRGraph& graph, const CompileInfo& info,
       trackedSite_(site),
       hitCount_(0),
       hitState_(HitState::NotDefined)
-#if defined(JS_ION_PERF)
+#if defined(JS_ION_PERF) || defined(DEBUG)
       ,
       lineno_(0u),
       columnIndex_(0u)

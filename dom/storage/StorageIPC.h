@@ -11,6 +11,8 @@
 #include "mozilla/dom/PBackgroundLocalStorageCacheParent.h"
 #include "mozilla/dom/PBackgroundStorageChild.h"
 #include "mozilla/dom/PBackgroundStorageParent.h"
+#include "mozilla/dom/PSessionStorageObserverChild.h"
+#include "mozilla/dom/PSessionStorageObserverParent.h"
 #include "StorageDBThread.h"
 #include "LocalStorageCache.h"
 #include "StorageObserver.h"
@@ -32,6 +34,8 @@ namespace dom {
 
 class LocalStorageManager;
 class PBackgroundStorageParent;
+class PSessionStorageObserverParent;
+class SessionStorageObserver;
 
 class LocalStorageCacheChild final : public PBackgroundLocalStorageCacheChild {
   friend class mozilla::ipc::BackgroundChildImpl;
@@ -66,6 +70,7 @@ class LocalStorageCacheChild final : public PBackgroundLocalStorageCacheChild {
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
   mozilla::ipc::IPCResult RecvObserve(const PrincipalInfo& aPrincipalInfo,
+                                      const PrincipalInfo& aCachePrincipalInfo,
                                       const uint32_t& aPrivateBrowsingId,
                                       const nsString& aDocumentURI,
                                       const nsString& aKey,
@@ -167,6 +172,41 @@ class StorageDBChild final : public PBackgroundStorageChild {
   bool mIPCOpen;
 };
 
+class SessionStorageObserverChild final : public PSessionStorageObserverChild {
+  friend class SessionStorageManager;
+  friend class SessionStorageObserver;
+
+  // SessionStorageObserver effectively owns this instance, although IPC handles
+  // its allocation/deallocation.  When the SessionStorageObserver destructor
+  // runs, it will invoke SendDeleteMeInternal() which will trigger both
+  // instances to drop their mutual references and cause IPC to destroy the
+  // actor after the DeleteMe round-trip.
+  SessionStorageObserver* MOZ_NON_OWNING_REF mObserver;
+
+  NS_DECL_OWNINGTHREAD
+
+ public:
+  void AssertIsOnOwningThread() const {
+    NS_ASSERT_OWNINGTHREAD(LocalStorageCacheChild);
+  }
+
+ private:
+  // Only created by SessionStorageManager.
+  explicit SessionStorageObserverChild(SessionStorageObserver* aObserver);
+
+  ~SessionStorageObserverChild();
+
+  // Only called by SessionStorageObserver.
+  void SendDeleteMeInternal();
+
+  // IPDL methods are only called by IPDL.
+  void ActorDestroy(ActorDestroyReason aWhy) override;
+
+  mozilla::ipc::IPCResult RecvObserve(const nsCString& aTopic,
+                                      const nsString& aOriginAttributesPattern,
+                                      const nsCString& aOriginScope) override;
+};
+
 class LocalStorageCacheParent final
     : public PBackgroundLocalStorageCacheParent {
   const PrincipalInfo mPrincipalInfo;
@@ -176,11 +216,13 @@ class LocalStorageCacheParent final
 
  public:
   // Created in AllocPBackgroundLocalStorageCacheParent.
-  LocalStorageCacheParent(const PrincipalInfo& aPrincipalInfo,
+  LocalStorageCacheParent(const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
                           const nsACString& aOriginKey,
                           uint32_t aPrivateBrowsingId);
 
   NS_INLINE_DECL_REFCOUNTING(mozilla::dom::LocalStorageCacheParent)
+
+  const PrincipalInfo& PrincipalInfo() const { return mPrincipalInfo; }
 
  private:
   // Reference counted.
@@ -352,6 +394,30 @@ class StorageDBParent final : public PBackgroundStorageParent {
   bool mIPCOpen;
 };
 
+class SessionStorageObserverParent final : public PSessionStorageObserverParent,
+                                           public StorageObserverSink {
+  bool mActorDestroyed;
+
+ public:
+  // Created in AllocPSessionStorageObserverParent.
+  SessionStorageObserverParent();
+
+  NS_INLINE_DECL_REFCOUNTING(mozilla::dom::SessionStorageObserverParent)
+
+ private:
+  // Reference counted.
+  ~SessionStorageObserverParent();
+
+  // IPDL methods are only called by IPDL.
+  void ActorDestroy(ActorDestroyReason aWhy) override;
+
+  mozilla::ipc::IPCResult RecvDeleteMe() override;
+
+  // StorageObserverSink
+  nsresult Observe(const char* aTopic, const nsAString& aOriginAttrPattern,
+                   const nsACString& aOriginScope) override;
+};
+
 PBackgroundLocalStorageCacheParent* AllocPBackgroundLocalStorageCacheParent(
     const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
     const nsCString& aOriginKey, const uint32_t& aPrivateBrowsingId);
@@ -372,6 +438,14 @@ mozilla::ipc::IPCResult RecvPBackgroundStorageConstructor(
     PBackgroundStorageParent* aActor, const nsString& aProfilePath);
 
 bool DeallocPBackgroundStorageParent(PBackgroundStorageParent* aActor);
+
+PSessionStorageObserverParent* AllocPSessionStorageObserverParent();
+
+bool RecvPSessionStorageObserverConstructor(
+    PSessionStorageObserverParent* aActor);
+
+bool DeallocPSessionStorageObserverParent(
+    PSessionStorageObserverParent* aActor);
 
 }  // namespace dom
 }  // namespace mozilla

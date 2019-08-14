@@ -2,7 +2,6 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 function run_test() {
-
   /**
    * Creates MAR from the passed files, compares it to the reference MAR.
    *
@@ -84,8 +83,11 @@ function run_test() {
     },
     // Test creating a MAR file with multiple files inside of it.
     test_multiple_file: function _test_multiple_file() {
-      return run_one_test("multiple_file.mar",
-                          ["0_sized_file", "1_byte_file", "binary_data_file"]);
+      return run_one_test("multiple_file.mar", [
+        "0_sized_file",
+        "1_byte_file",
+        "binary_data_file",
+      ]);
     },
     // Test creating a MAR file on top of a different one that already exists
     // at the location the new one will be created at.
@@ -102,7 +104,7 @@ function run_test() {
       if (outMAR.exists()) {
         outMAR.remove(false);
       }
-    }
+    },
   };
 
   // Run all the tests

@@ -37,14 +37,14 @@
 #include "nsINodeList.h"
 #include "nsPIDOMWindow.h"
 
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/HTMLFormElement.h"
 #include "nsIContent.h"
 #include "nsIForm.h"
 #include "nsIFormControl.h"
 
 #include "nsDeckFrame.h"
 #include "nsLayoutUtils.h"
-#include "nsIPresShell.h"
 #include "nsIStringBundle.h"
 #include "nsPresContext.h"
 #include "nsIFrame.h"
@@ -74,6 +74,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MouseEvents.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/Unused.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/CanvasRenderingContext2D.h"
@@ -265,7 +266,7 @@ KeyBinding Accessible::AccessKey() const {
   }
 
   // Determine the access modifier used in this context.
-  nsIDocument* document = mContent->GetUncomposedDoc();
+  dom::Document* document = mContent->GetUncomposedDoc();
   if (!document) return KeyBinding();
 
   nsCOMPtr<nsIDocShellTreeItem> treeItem(document->GetDocShell());
@@ -315,13 +316,19 @@ uint64_t Accessible::VisibilityState() const {
     return states::INVISIBLE;
   }
 
-  // Walk the parent frame chain to see if there's invisible parent or the frame
-  // is in background tab.
   if (!frame->StyleVisibility()->IsVisible()) return states::INVISIBLE;
+
+  // It's invisible if the presshell is hidden by a visibility:hidden element in
+  // an ancestor document.
+  if (frame->PresShell()->IsUnderHiddenEmbedderElement()) {
+    return states::INVISIBLE;
+  }
 
   // Offscreen state if the document's visibility state is not visible.
   if (Document()->IsHidden()) return states::OFFSCREEN;
 
+  // Walk the parent frame chain to see if the frame is in background tab or
+  // scrolled out.
   nsIFrame* curFrame = frame;
   do {
     nsView* view = curFrame->GetView();
@@ -335,8 +342,15 @@ uint64_t Accessible::VisibilityState() const {
     nsIFrame* parentFrame = curFrame->GetParent();
     nsDeckFrame* deckFrame = do_QueryFrame(parentFrame);
     if (deckFrame && deckFrame->GetSelectedBox() != curFrame) {
+#if defined(ANDROID)
+      // In Fennec instead of a <tabpanels> container there is a <deck>
+      // with direct <browser> children.
+      if (curFrame->GetContent()->IsXULElement(nsGkAtoms::browser))
+        return states::OFFSCREEN;
+#else
       if (deckFrame->GetContent()->IsXULElement(nsGkAtoms::tabpanels))
         return states::OFFSCREEN;
+#endif
 
       MOZ_ASSERT_UNREACHABLE(
           "Children of not selected deck panel are not accessible.");
@@ -359,8 +373,6 @@ uint64_t Accessible::VisibilityState() const {
 
     if (!parentFrame) {
       parentFrame = nsLayoutUtils::GetCrossDocParentFrame(curFrame);
-      if (parentFrame && !parentFrame->StyleVisibility()->IsVisible())
-        return states::INVISIBLE;
     }
 
     curFrame = parentFrame;
@@ -374,8 +386,8 @@ uint64_t Accessible::VisibilityState() const {
   if (frame->IsTextFrame() && !(frame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) &&
       frame->GetRect().IsEmpty()) {
     nsIFrame::RenderedText text = frame->GetRenderedText(
-        0, UINT32_MAX, nsIFrame::TextOffsetType::OFFSETS_IN_CONTENT_TEXT,
-        nsIFrame::TrailingWhitespace::DONT_TRIM_TRAILING_WHITESPACE);
+        0, UINT32_MAX, nsIFrame::TextOffsetType::OffsetsInContentText,
+        nsIFrame::TrailingWhitespace::DontTrim);
     if (text.mString.IsEmpty()) {
       return states::INVISIBLE;
     }
@@ -526,7 +538,22 @@ Accessible* Accessible::ChildAtPoint(int32_t aX, int32_t aY,
   // This happens in mobile platforms with async pinch zooming.
   offset = offset.RemoveResolution(presContext->PresShell()->GetResolution());
 
-  nsIFrame* foundFrame = nsLayoutUtils::GetFrameForPoint(startFrame, offset);
+  // We need to translate with the offset of the edge of the visual
+  // viewport from top edge of the layout viewport.
+  offset += presContext->PresShell()->GetVisualViewportOffset() -
+            presContext->PresShell()->GetLayoutViewportOffset();
+
+  EnumSet<nsLayoutUtils::FrameForPointOption> options = {
+#ifdef MOZ_WIDGET_ANDROID
+      // This is needed in Android to ignore the clipping of the scroll frame
+      // when zoomed in. May regress something on other platforms, so
+      // keeping it Android-exclusive for now.
+      nsLayoutUtils::FrameForPointOption::IgnoreRootScrollFrame
+#endif
+  };
+
+  nsIFrame* foundFrame =
+      nsLayoutUtils::GetFrameForPoint(startFrame, offset, options);
 
   nsIContent* content = nullptr;
   if (!foundFrame || !(content = foundFrame->GetContent()))
@@ -634,11 +661,18 @@ nsRect Accessible::BoundsInAppUnits() const {
     return nsRect();
   }
 
+  PresShell* presShell = mDoc->PresContext()->PresShell();
+
+  // We need to inverse translate with the offset of the edge of the visual
+  // viewport from top edge of the layout viewport.
+  nsPoint viewportOffset = presShell->GetVisualViewportOffset() -
+                           presShell->GetLayoutViewportOffset();
+  unionRectTwips.MoveBy(-viewportOffset);
+
   // We need to take into account a non-1 resolution set on the presshell.
   // This happens in mobile platforms with async pinch zooming. Here we
   // scale the bounds before adding the screen-relative offset.
-  unionRectTwips.ScaleRoundOut(
-      mDoc->PresContext()->PresShell()->GetResolution());
+  unionRectTwips.ScaleRoundOut(presShell->GetResolution());
   // We have the union of the rectangle, now we need to put it in absolute
   // screen coords.
   nsRect orgRectPixels = boundingFrame->GetScreenRectInAppUnits();
@@ -709,8 +743,7 @@ void Accessible::TakeFocus() const {
 
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    AutoHandlingUserInputStatePusher inputStatePusher(true, nullptr,
-                                                      focusContent->OwnerDoc());
+    AutoHandlingUserInputStatePusher inputStatePusher(true);
     // XXXbz: Can we actually have a non-element content here?
     RefPtr<Element> element =
         focusContent->IsElement() ? focusContent->AsElement() : nullptr;
@@ -734,13 +767,15 @@ void Accessible::XULElmName(DocAccessible* aDocument, nsIContent* aElm,
    */
 
   // CASE #1 (via label attribute) -- great majority of the cases
-  nsCOMPtr<nsIDOMXULSelectControlItemElement> itemEl = do_QueryInterface(aElm);
+  nsCOMPtr<nsIDOMXULSelectControlItemElement> itemEl =
+      aElm->AsElement()->AsXULSelectControlItem();
   if (itemEl) {
     itemEl->GetLabel(aName);
   } else {
     // Use @label if this is not a select control element, which uses label
     // attribute to indicate, which option is selected.
-    nsCOMPtr<nsIDOMXULSelectControlElement> select = do_QueryInterface(aElm);
+    nsCOMPtr<nsIDOMXULSelectControlElement> select =
+        aElm->AsElement()->AsXULSelectControl();
     if (!select) {
       aElm->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::label, aName);
     }
@@ -802,7 +837,7 @@ nsresult Accessible::HandleAccEvent(AccEvent* aEvent) {
     nsAutoCString strMarker;
     strMarker.AppendLiteral("A11y Event - ");
     strMarker.Append(strEventType);
-    profiler_add_marker(strMarker.get());
+    profiler_add_marker(strMarker.get(), JS::ProfilingCategoryPair::OTHER);
   }
 #endif
 
@@ -844,10 +879,23 @@ nsresult Accessible::HandleAccEvent(AccEvent* aEvent) {
         case nsIAccessibleEvent::EVENT_TEXT_INSERTED:
         case nsIAccessibleEvent::EVENT_TEXT_REMOVED: {
           AccTextChangeEvent* event = downcast_accEvent(aEvent);
-          ipcDoc->SendTextChangeEvent(
-              id, event->ModifiedText(), event->GetStartOffset(),
-              event->GetLength(), event->IsTextInserted(),
-              event->IsFromUserInput());
+          const nsString& text = event->ModifiedText();
+#if defined(XP_WIN)
+          // On Windows, events for live region updates containing embedded
+          // objects require us to dispatch synchronous events.
+          bool sync = text.Contains(L'\xfffc') &&
+                      nsAccUtils::IsARIALive(aEvent->GetAccessible());
+#endif
+          ipcDoc->SendTextChangeEvent(id, text, event->GetStartOffset(),
+                                      event->GetLength(),
+                                      event->IsTextInserted(),
+                                      event->IsFromUserInput()
+#if defined(XP_WIN)
+                                      // This parameter only exists on Windows.
+                                      ,
+                                      sync
+#endif
+          );
           break;
         }
         case nsIAccessibleEvent::EVENT_SELECTION:
@@ -891,6 +939,14 @@ nsresult Accessible::HandleAccEvent(AccEvent* aEvent) {
               scrollingEvent->MaxScrollY());
           break;
         }
+#if !defined(XP_WIN)
+        case nsIAccessibleEvent::EVENT_ANNOUNCEMENT: {
+          AccAnnouncementEvent* announcementEvent = downcast_accEvent(aEvent);
+          ipcDoc->SendAnnouncementEvent(id, announcementEvent->Announcement(),
+                                        announcementEvent->Priority());
+          break;
+        }
+#endif
         default:
           ipcDoc->SendEvent(id, aEvent->GetEventType());
       }
@@ -1010,7 +1066,7 @@ already_AddRefed<nsIPersistentProperties> Accessible::NativeAttributes() {
   // override properties on a widget they used in an iframe.
   nsIContent* startContent = mContent;
   while (startContent) {
-    nsIDocument* doc = startContent->GetComposedDoc();
+    dom::Document* doc = startContent->GetComposedDoc();
     if (!doc) break;
 
     nsAccUtils::SetLiveContainerAttributes(attributes, startContent,
@@ -1024,7 +1080,7 @@ already_AddRefed<nsIPersistentProperties> Accessible::NativeAttributes() {
     docShellTreeItem->GetSameTypeParent(getter_AddRefs(sameTypeParent));
     if (!sameTypeParent || sameTypeParent == docShellTreeItem) break;
 
-    nsIDocument* parentDoc = doc->GetParentDocument();
+    dom::Document* parentDoc = doc->GetParentDocument();
     if (!parentDoc) break;
 
     startContent = parentDoc->FindContentForSubDocument(doc);
@@ -1246,6 +1302,18 @@ void Accessible::ApplyARIAState(uint64_t* aState) const {
         *aState |= states::UNAVAILABLE;
         break;
       }
+    }
+  } else {
+    // Sometimes, we use aria-activedescendant targeting something which isn't
+    // actually a descendant. This is technically a spec violation, but it's a
+    // useful hack which makes certain things much easier. For example, we use
+    // this for "fake focus" for multi select browser tabs and Quantumbar
+    // autocomplete suggestions.
+    // In these cases, the aria-activedescendant code above won't make the
+    // active item focusable. It doesn't make sense for something to have
+    // focus when it isn't focusable, so fix that here.
+    if (FocusMgr()->IsActiveItem(this)) {
+      *aState |= states::FOCUSABLE;
     }
   }
 
@@ -1663,8 +1731,7 @@ Relation Accessible::RelationByType(RelationType aType) const {
         // HTML form controls implements nsIFormControl interface.
         nsCOMPtr<nsIFormControl> control(do_QueryInterface(mContent));
         if (control) {
-          nsCOMPtr<nsIForm> form(do_QueryInterface(control->GetFormElement()));
-          if (form) {
+          if (dom::HTMLFormElement* form = control->GetFormElement()) {
             nsCOMPtr<nsIContent> formContent =
                 do_QueryInterface(form->GetDefaultSubmitElement());
             return Relation(mDoc, formContent);
@@ -1672,18 +1739,23 @@ Relation Accessible::RelationByType(RelationType aType) const {
         }
       } else {
         // In XUL, use first <button default="true" .../> in the document
-        nsIDocument* doc = mContent->OwnerDoc();
-        nsCOMPtr<nsIDOMXULButtonElement> buttonEl;
-        if (doc->IsXULDocument()) {
-          dom::XULDocument* xulDoc = doc->AsXULDocument();
+        dom::Document* doc = mContent->OwnerDoc();
+        nsIContent* buttonEl = nullptr;
+        if (doc->AllowXULXBL()) {
           nsCOMPtr<nsIHTMLCollection> possibleDefaultButtons =
-              xulDoc->GetElementsByAttribute(NS_LITERAL_STRING("default"),
-                                             NS_LITERAL_STRING("true"));
+              doc->GetElementsByAttribute(NS_LITERAL_STRING("default"),
+                                          NS_LITERAL_STRING("true"));
           if (possibleDefaultButtons) {
             uint32_t length = possibleDefaultButtons->Length();
             // Check for button in list of default="true" elements
             for (uint32_t count = 0; count < length && !buttonEl; count++) {
-              buttonEl = do_QueryInterface(possibleDefaultButtons->Item(count));
+              nsIContent* item = possibleDefaultButtons->Item(count);
+              RefPtr<nsIDOMXULButtonElement> button =
+                  item->IsElement() ? item->AsElement()->AsXULButton()
+                                    : nullptr;
+              if (button) {
+                buttonEl = item;
+              }
             }
           }
           if (!buttonEl) {  // Check for anonymous accept button in <dialog>
@@ -1692,11 +1764,16 @@ Relation Accessible::RelationByType(RelationType aType) const {
               nsIContent* possibleButtonEl =
                   rootElm->OwnerDoc()->GetAnonymousElementByAttribute(
                       rootElm, nsGkAtoms::_default, NS_LITERAL_STRING("true"));
-              buttonEl = do_QueryInterface(possibleButtonEl);
+              if (possibleButtonEl && possibleButtonEl->IsElement()) {
+                RefPtr<nsIDOMXULButtonElement> button =
+                    possibleButtonEl->AsElement()->AsXULButton();
+                if (button) {
+                  buttonEl = possibleButtonEl;
+                }
+              }
             }
           }
-          nsCOMPtr<nsIContent> relatedContent(do_QueryInterface(buttonEl));
-          return Relation(mDoc, relatedContent);
+          return Relation(mDoc, buttonEl);
         }
       }
       return Relation();
@@ -1759,9 +1836,12 @@ void Accessible::DoCommand(nsIContent* aContent, uint32_t aActionIndex) const {
           mContent(aContent),
           mIdx(aIdx) {}
 
-    NS_IMETHOD Run() override {
-      if (mAcc) mAcc->DispatchClickEvent(mContent, mIdx);
-
+    // XXX Cannot mark as MOZ_CAN_RUN_SCRIPT because the base class change
+    //     requires too big changes across a lot of modules.
+    MOZ_CAN_RUN_SCRIPT_BOUNDARY NS_IMETHOD Run() override {
+      if (mAcc) {
+        MOZ_KnownLive(mAcc)->DispatchClickEvent(MOZ_KnownLive(mContent), mIdx);
+      }
       return NS_OK;
     }
 
@@ -1785,12 +1865,11 @@ void Accessible::DispatchClickEvent(nsIContent* aContent,
                                     uint32_t aActionIndex) const {
   if (IsDefunct()) return;
 
-  nsCOMPtr<nsIPresShell> presShell = mDoc->PresShell();
+  RefPtr<PresShell> presShell = mDoc->PresShellPtr();
 
   // Scroll into view.
-  presShell->ScrollContentIntoView(aContent, nsIPresShell::ScrollAxis(),
-                                   nsIPresShell::ScrollAxis(),
-                                   nsIPresShell::SCROLL_OVERFLOW_HIDDEN);
+  presShell->ScrollContentIntoView(aContent, ScrollAxis(), ScrollAxis(),
+                                   ScrollFlags::ScrollOverflowHidden);
 
   AutoWeakFrame frame = aContent->GetPrimaryFrame();
   if (!frame) return;
@@ -2124,8 +2203,11 @@ void Accessible::MoveChild(uint32_t aNewIndex, Accessible* aChild) {
 
   for (uint32_t idx = startIdx; idx <= endIdx; idx++) {
     mChildren[idx]->mIndexInParent = idx;
-    mChildren[idx]->mStateFlags |= eGroupInfoDirty;
     mChildren[idx]->mInt.mIndexOfEmbeddedChild = -1;
+  }
+
+  for (uint32_t idx = 0; idx < mChildren.Length(); idx++) {
+    mChildren[idx]->mStateFlags |= eGroupInfoDirty;
   }
 
   RefPtr<AccShowEvent> showEvent = new AccShowEvent(aChild);
@@ -2367,9 +2449,15 @@ Accessible* Accessible::CurrentItem() const {
   if (HasOwnContent() && mContent->IsElement() &&
       mContent->AsElement()->GetAttr(kNameSpaceID_None,
                                      nsGkAtoms::aria_activedescendant, id)) {
-    nsIDocument* DOMDoc = mContent->OwnerDoc();
+    dom::Document* DOMDoc = mContent->OwnerDoc();
     dom::Element* activeDescendantElm = DOMDoc->GetElementById(id);
     if (activeDescendantElm) {
+      if (nsContentUtils::ContentIsDescendantOf(mContent,
+                                                activeDescendantElm)) {
+        // Don't want a cyclical descendant relationship. That would be bad.
+        return nullptr;
+      }
+
       DocAccessible* document = Document();
       if (document) return document->GetAccessible(activeDescendantElm);
     }
@@ -2402,6 +2490,12 @@ Accessible* Accessible::ContainerWidget() const {
     }
   }
   return nullptr;
+}
+
+void Accessible::Announce(const nsAString& aAnnouncement, uint16_t aPriority) {
+  RefPtr<AccAnnouncementEvent> event =
+      new AccAnnouncementEvent(this, aAnnouncement, aPriority);
+  nsEventShell::FireEvent(event);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

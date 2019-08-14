@@ -13,6 +13,7 @@
 #include "build/build_config.h"
 #include "mozilla/ipc/EnvironmentMap.h"
 #include "nsXULAppAPI.h"
+#include "nsISupportsImpl.h"
 
 namespace sandbox {
 class BrokerServices;
@@ -21,45 +22,31 @@ class TargetPolicy;
 
 namespace mozilla {
 
-class SandboxBroker {
+class AbstractSandboxBroker {
  public:
-  SandboxBroker();
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AbstractSandboxBroker)
 
-  static void Initialize(sandbox::BrokerServices *aBrokerServices);
+  static AbstractSandboxBroker* Create(GeckoProcessType aProcessType);
 
-  /**
-   * Do initialization that depends on parts of the Gecko machinery having been
-   * created first.
-   */
-  static void GeckoDependentInitialize();
-
-  bool LaunchApp(const wchar_t *aPath, const wchar_t *aArguments,
-                 base::EnvironmentMap &aEnvironment,
-                 GeckoProcessType aProcessType, const bool aEnableLogging,
-                 void **aProcessHandle);
-  virtual ~SandboxBroker();
+  virtual void Shutdown() = 0;
+  virtual bool LaunchApp(const wchar_t* aPath, const wchar_t* aArguments,
+                         base::EnvironmentMap& aEnvironment,
+                         GeckoProcessType aProcessType,
+                         const bool aEnableLogging, void** aProcessHandle) = 0;
 
   // Security levels for different types of processes
-#if defined(MOZ_CONTENT_SANDBOX)
-  void SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
-                                         bool aIsFileProcess);
-#endif
+  virtual void SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
+                                                 bool aIsFileProcess) = 0;
 
-  void SetSecurityLevelForGPUProcess(int32_t aSandboxLevel);
-  bool SetSecurityLevelForRDDProcess();
+  virtual void SetSecurityLevelForGPUProcess(int32_t aSandboxLevel) = 0;
+  virtual bool SetSecurityLevelForRDDProcess() = 0;
 
-  bool SetSecurityLevelForPluginProcess(int32_t aSandboxLevel);
+  virtual bool SetSecurityLevelForPluginProcess(int32_t aSandboxLevel) = 0;
   enum SandboxLevel { LockDown, Restricted };
-  bool SetSecurityLevelForGMPlugin(SandboxLevel aLevel);
+  virtual bool SetSecurityLevelForGMPlugin(SandboxLevel aLevel) = 0;
 
   // File system permissions
-  bool AllowReadFile(wchar_t const *file);
-
-  /**
-   * Exposes AddTargetPeer from broker services, so that non-sandboxed
-   * processes can be added as handle duplication targets.
-   */
-  bool AddTargetPeer(HANDLE aPeerProcess);
+  virtual bool AllowReadFile(wchar_t const* file) = 0;
 
   /**
    * Share a HANDLE with the child process. The HANDLE will be made available
@@ -67,15 +54,66 @@ class SandboxBroker {
    * |reinterpret_cast<uintptr_t>(aHandle)|. It is the caller's responsibility
    * to communicate this address to the child.
    */
-  void AddHandleToShare(HANDLE aHandle);
+  virtual void AddHandleToShare(HANDLE aHandle) = 0;
+
+ protected:
+  virtual ~AbstractSandboxBroker() {}
+};
+
+class SandboxBroker : public AbstractSandboxBroker {
+ public:
+  SandboxBroker();
+
+  static void Initialize(sandbox::BrokerServices* aBrokerServices);
+
+  void Shutdown() override {}
+
+  /**
+   * Do initialization that depends on parts of the Gecko machinery having been
+   * created first.
+   */
+  static void GeckoDependentInitialize();
+
+  bool LaunchApp(const wchar_t* aPath, const wchar_t* aArguments,
+                 base::EnvironmentMap& aEnvironment,
+                 GeckoProcessType aProcessType, const bool aEnableLogging,
+                 void** aProcessHandle) override;
+  virtual ~SandboxBroker();
+
+  // Security levels for different types of processes
+  void SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
+                                         bool aIsFileProcess) override;
+
+  void SetSecurityLevelForGPUProcess(int32_t aSandboxLevel) override;
+  bool SetSecurityLevelForRDDProcess() override;
+
+  bool SetSecurityLevelForPluginProcess(int32_t aSandboxLevel) override;
+  bool SetSecurityLevelForGMPlugin(SandboxLevel aLevel) override;
+
+  // File system permissions
+  bool AllowReadFile(wchar_t const* file) override;
+
+  /**
+   * Exposes AddTargetPeer from broker services, so that non-sandboxed
+   * processes can be added as handle duplication targets.
+   */
+  static bool AddTargetPeer(HANDLE aPeerProcess);
+
+  /**
+   * Share a HANDLE with the child process. The HANDLE will be made available
+   * in the child process at the memory address
+   * |reinterpret_cast<uintptr_t>(aHandle)|. It is the caller's responsibility
+   * to communicate this address to the child.
+   */
+  void AddHandleToShare(HANDLE aHandle) override;
 
   // Set up dummy interceptions via the broker, so we can log calls.
   void ApplyLoggingPolicy();
 
  private:
-  static sandbox::BrokerServices *sBrokerService;
+  static sandbox::BrokerServices* sBrokerService;
   static bool sRunningFromNetworkDrive;
-  sandbox::TargetPolicy *mPolicy;
+  sandbox::TargetPolicy* mPolicy;
 };
 
 }  // namespace mozilla

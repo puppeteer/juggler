@@ -11,7 +11,6 @@ use crate::values::CSSFloat;
 use cssparser::Parser;
 use std::fmt::{self, Write};
 use std::iter::{Cloned, Peekable};
-use std::ops::AddAssign;
 use std::slice;
 use style_traits::values::SequenceWriter;
 use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
@@ -20,18 +19,24 @@ use style_traits::{CssWriter, ParseError, StyleParseErrorKind, ToCss};
 ///
 /// https://www.w3.org/TR/SVG11/paths.html#PathData
 #[derive(
-    Clone, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToAnimatedZero, ToComputedValue,
+    Clone,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    SpecifiedValueInfo,
+    ToAnimatedZero,
+    ToComputedValue,
+    ToResolvedValue,
+    ToShmem,
 )]
-pub struct SVGPathData(Box<[PathCommand]>);
+#[repr(C)]
+pub struct SVGPathData(
+    // TODO(emilio): Should probably measure this somehow only from the
+    // specified values.
+    #[ignore_malloc_size_of = "Arc"] pub crate::ArcSlice<PathCommand>,
+);
 
 impl SVGPathData {
-    /// Return SVGPathData by a slice of PathCommand.
-    #[inline]
-    pub fn new(cmd: Box<[PathCommand]>) -> Self {
-        debug_assert!(!cmd.is_empty());
-        SVGPathData(cmd)
-    }
-
     /// Get the array of PathCommand.
     #[inline]
     pub fn commands(&self) -> &[PathCommand] {
@@ -39,9 +44,9 @@ impl SVGPathData {
         &self.0
     }
 
-    /// Create a normalized copy of this path by converting each relative command to an absolute
-    /// command.
-    fn normalize(&self) -> Self {
+    /// Create a normalized copy of this path by converting each relative
+    /// command to an absolute command.
+    fn normalize(&self) -> Box<[PathCommand]> {
         let mut state = PathTraversalState {
             subpath_start: CoordPair::new(0.0, 0.0),
             pos: CoordPair::new(0.0, 0.0),
@@ -51,7 +56,7 @@ impl SVGPathData {
             .iter()
             .map(|seg| seg.normalize(&mut state))
             .collect::<Vec<_>>();
-        SVGPathData(result.into_boxed_slice())
+        result.into_boxed_slice()
     }
 }
 
@@ -64,7 +69,7 @@ impl ToCss for SVGPathData {
         dest.write_char('"')?;
         {
             let mut writer = SequenceWriter::new(dest, " ");
-            for command in self.0.iter() {
+            for command in self.commands() {
                 writer.item(command)?;
             }
         }
@@ -97,7 +102,9 @@ impl Parse for SVGPathData {
             }
         }
 
-        Ok(SVGPathData::new(path_parser.path.into_boxed_slice()))
+        Ok(SVGPathData(crate::ArcSlice::from_iter(
+            path_parser.path.into_iter(),
+        )))
     }
 }
 
@@ -107,14 +114,17 @@ impl Animate for SVGPathData {
             return Err(());
         }
 
+        // FIXME(emilio): This allocates three copies of the path, that's not
+        // great! Specially, once we're normalized once, we don't need to
+        // re-normalize again.
         let result = self
             .normalize()
-            .0
             .iter()
-            .zip(other.normalize().0.iter())
+            .zip(other.normalize().iter())
             .map(|(a, b)| a.animate(&b, procedure))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(SVGPathData::new(result.into_boxed_slice()))
+
+        Ok(SVGPathData(crate::ArcSlice::from_iter(result.into_iter())))
     }
 }
 
@@ -124,9 +134,8 @@ impl ComputeSquaredDistance for SVGPathData {
             return Err(());
         }
         self.normalize()
-            .0
             .iter()
-            .zip(other.normalize().0.iter())
+            .zip(other.normalize().iter())
             .map(|(this, other)| this.compute_squared_distance(&other))
             .sum()
     }
@@ -148,6 +157,7 @@ impl ComputeSquaredDistance for SVGPathData {
     PartialEq,
     SpecifiedValueInfo,
     ToAnimatedZero,
+    ToShmem,
 )]
 #[allow(missing_docs)]
 #[repr(C, u8)]
@@ -474,6 +484,7 @@ impl ToCss for PathCommand {
     PartialEq,
     SpecifiedValueInfo,
     ToAnimatedZero,
+    ToShmem,
 )]
 #[repr(u8)]
 pub enum IsAbsolute {
@@ -491,6 +502,7 @@ impl IsAbsolute {
 
 /// The path coord type.
 #[derive(
+    AddAssign,
     Animate,
     Clone,
     ComputeSquaredDistance,
@@ -501,6 +513,7 @@ impl IsAbsolute {
     SpecifiedValueInfo,
     ToAnimatedZero,
     ToCss,
+    ToShmem,
 )]
 #[repr(C)]
 pub struct CoordPair(CSSFloat, CSSFloat);
@@ -513,16 +526,8 @@ impl CoordPair {
     }
 }
 
-impl AddAssign for CoordPair {
-    #[inline]
-    fn add_assign(&mut self, other: Self) {
-        self.0 += other.0;
-        self.1 += other.1;
-    }
-}
-
 /// The EllipticalArc flag type.
-#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo)]
+#[derive(Clone, Copy, Debug, MallocSizeOf, PartialEq, SpecifiedValueInfo, ToShmem)]
 #[repr(C)]
 pub struct ArcFlag(bool);
 

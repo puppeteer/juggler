@@ -13,7 +13,6 @@
 #include "nsIDOMWindow.h"
 #include "nsIObserverService.h"
 #include "nsIPrincipal.h"
-#include "nsPIDOMWindow.h"
 #include "nsXULAppAPI.h"
 
 namespace mozilla {
@@ -27,7 +26,7 @@ namespace {
 #define IDB_PREFIX "indexedDB"
 #define TOPIC_PREFIX IDB_PREFIX "-permissions-"
 
-const char kPermissionString[] = IDB_PREFIX;
+const nsLiteralCString kPermissionString = NS_LITERAL_CSTRING(IDB_PREFIX);
 
 const char kPermissionPromptTopic[] = TOPIC_PREFIX "prompt";
 

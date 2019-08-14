@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <vector>
+#include <string>
 
 #include "ClearKeyCDM.h"
 #include "ClearKeySessionManager.h"
@@ -28,13 +29,13 @@
 #include "content_decryption_module_ext.h"
 
 #ifndef XP_WIN
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#  include <sys/types.h>
+#  include <sys/stat.h>
+#  include <unistd.h>
 #endif
 
 #ifdef ENABLE_WMF
-#include "WMFUtils.h"
+#  include "WMFUtils.h"
 #endif  // ENABLE_WMF
 
 extern "C" {
@@ -50,7 +51,7 @@ void* CreateCdmInstance(int cdm_interface_version, const char* key_system,
                         GetCdmHostFunc get_cdm_host_func, void* user_data) {
   CK_LOGE("ClearKey CreateCDMInstance");
 
-  if (cdm_interface_version != cdm::ContentDecryptionModule_9::kVersion) {
+  if (cdm_interface_version != cdm::ContentDecryptionModule_10::kVersion) {
     CK_LOGE(
         "ClearKey CreateCDMInstance failed due to requesting unsupported "
         "version %d.",
@@ -71,7 +72,7 @@ void* CreateCdmInstance(int cdm_interface_version, const char* key_system,
   }
 #endif
 
-  cdm::Host_9* host = static_cast<cdm::Host_9*>(
+  cdm::Host_10* host = static_cast<cdm::Host_10*>(
       get_cdm_host_func(cdm_interface_version, user_data));
   ClearKeyCDM* clearKey = new ClearKeyCDM(host);
 
@@ -102,10 +103,40 @@ void ClosePlatformFile(cdm::PlatformFile aFile) {
 #endif
 }
 
+static uint32_t NumExpectedHostFiles(const cdm::HostFile* aHostFiles,
+                                     uint32_t aNumFiles) {
+#if !defined(XP_WIN)
+  // We expect 4 binaries: clearkey, libxul, plugin-container, and Firefox.
+  return 4;
+#else
+  // Windows running x64 or x86 natively should also have 4 as above.
+  // For Windows on ARM64, we run an x86 plugin-contianer process under
+  // emulation, and so we expect one additional binary; the x86
+  // xul.dll used by plugin-container.exe.
+  bool i686underAArch64 = false;
+  // Assume that we're running under x86 emulation on an aarch64 host if
+  // one of the paths ends with the x86 plugin-container path we'd expect.
+  const std::wstring plugincontainer = L"i686\\plugin-container.exe";
+  for (uint32_t i = 0; i < aNumFiles; i++) {
+    const cdm::HostFile& hostFile = aHostFiles[i];
+    if (hostFile.file != cdm::kInvalidPlatformFile) {
+      std::wstring path = hostFile.file_path;
+      auto offset = path.find(plugincontainer);
+      if (offset != std::string::npos &&
+          offset == path.size() - plugincontainer.size()) {
+        i686underAArch64 = true;
+        break;
+      }
+    }
+  }
+  return i686underAArch64 ? 5 : 4;
+#endif
+}
+
 CDM_API
 bool VerifyCdmHost_0(const cdm::HostFile* aHostFiles, uint32_t aNumFiles) {
-  // We expect 4 binaries: clearkey, libxul, plugin-container, and Firefox.
-  bool rv = (aNumFiles == 4);
+  // Check that we've received the expected number of host files.
+  bool rv = (aNumFiles == NumExpectedHostFiles(aHostFiles, aNumFiles));
   // Verify that each binary is readable inside the sandbox,
   // and close the handle.
   for (uint32_t i = 0; i < aNumFiles; i++) {

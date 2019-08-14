@@ -8,9 +8,9 @@
 
 #include "builtin/TypedObject.h"
 #include "gc/Policy.h"
-#include "gc/Zone.h"
 #include "js/HashTable.h"
 #include "js/Value.h"
+#include "vm/BigIntType.h"  // JS::BigInt
 #include "vm/EnvironmentObject.h"
 #include "vm/JSObject.h"
 #include "vm/Realm.h"
@@ -55,7 +55,7 @@ void HeapSlot::assertPreconditionForWriteBarrierPost(
             ->get() == target);
   }
 
-  CheckTargetIsNotGray(obj);
+  AssertTargetIsNotGray(obj);
 }
 
 bool CurrentThreadIsIonCompiling() { return TlsContext.get()->ionCompiling; }
@@ -82,34 +82,17 @@ AutoTouchingGrayThings::~AutoTouchingGrayThings() {
 
 #endif  // DEBUG
 
-template <typename S>
-template <typename T>
-void ReadBarrierFunctor<S>::operator()(T* t) {
-  InternalBarrierMethods<T*>::readBarrier(t);
+/* static */ void InternalBarrierMethods<Value>::readBarrier(const Value& v) {
+  ApplyGCThingTyped(v, [](auto t) { t->readBarrier(t); });
 }
 
-// All GC things may be held in a Value, either publicly or as a private GC
-// thing.
-#define JS_EXPAND_DEF(name, type, _) \
-  template void ReadBarrierFunctor<JS::Value>::operator()<type>(type*);
-JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
-#undef JS_EXPAND_DEF
-
-template <typename S>
-template <typename T>
-void PreBarrierFunctor<S>::operator()(T* t) {
-  InternalBarrierMethods<T*>::preBarrier(t);
+/* static */ void InternalBarrierMethods<Value>::preBarrier(const Value& v) {
+  ApplyGCThingTyped(v, [](auto t) { t->writeBarrierPre(t); });
 }
 
-// All GC things may be held in a Value, either publicly or as a private GC
-// thing.
-#define JS_EXPAND_DEF(name, type, _) \
-  template void PreBarrierFunctor<JS::Value>::operator()<type>(type*);
-JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
-#undef JS_EXPAND_DEF
-
-template void PreBarrierFunctor<jsid>::operator()<JS::Symbol>(JS::Symbol*);
-template void PreBarrierFunctor<jsid>::operator()<JSString>(JSString*);
+/* static */ void InternalBarrierMethods<jsid>::preBarrier(jsid id) {
+  ApplyGCThingTyped(id, [](auto t) { t->writeBarrierPre(t); });
+}
 
 template <typename T>
 /* static */ bool MovableCellHasher<T>::hasHash(const Lookup& l) {
@@ -187,12 +170,10 @@ template <typename T>
   return keyId == zone->getUniqueIdInfallible(l);
 }
 
-#ifdef JS_BROKEN_GCC_ATTRIBUTE_WARNING
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wattributes"
-#endif  // JS_BROKEN_GCC_ATTRIBUTE_WARNING
-
+#if !MOZ_IS_GCC
 template struct JS_PUBLIC_API MovableCellHasher<JSObject*>;
+#endif
+
 template struct JS_PUBLIC_API MovableCellHasher<GlobalObject*>;
 template struct JS_PUBLIC_API MovableCellHasher<SavedFrame*>;
 template struct JS_PUBLIC_API MovableCellHasher<EnvironmentObject*>;
@@ -200,27 +181,33 @@ template struct JS_PUBLIC_API MovableCellHasher<WasmInstanceObject*>;
 template struct JS_PUBLIC_API MovableCellHasher<JSScript*>;
 template struct JS_PUBLIC_API MovableCellHasher<LazyScript*>;
 
-#ifdef JS_BROKEN_GCC_ATTRIBUTE_WARNING
-#pragma GCC diagnostic pop
-#endif  // JS_BROKEN_GCC_ATTRIBUTE_WARNING
-
 }  // namespace js
 
-JS_PUBLIC_API void JS::HeapObjectPostBarrier(JSObject** objp, JSObject* prev,
-                                             JSObject* next) {
+JS_PUBLIC_API void JS::HeapObjectWriteBarriers(JSObject** objp, JSObject* prev,
+                                               JSObject* next) {
   MOZ_ASSERT(objp);
+  js::InternalBarrierMethods<JSObject*>::preBarrier(prev);
   js::InternalBarrierMethods<JSObject*>::postBarrier(objp, prev, next);
 }
 
-JS_PUBLIC_API void JS::HeapStringPostBarrier(JSString** strp, JSString* prev,
-                                             JSString* next) {
+JS_PUBLIC_API void JS::HeapStringWriteBarriers(JSString** strp, JSString* prev,
+                                               JSString* next) {
   MOZ_ASSERT(strp);
+  js::InternalBarrierMethods<JSString*>::preBarrier(prev);
   js::InternalBarrierMethods<JSString*>::postBarrier(strp, prev, next);
 }
 
-JS_PUBLIC_API void JS::HeapValuePostBarrier(JS::Value* valuep,
-                                            const Value& prev,
-                                            const Value& next) {
+JS_PUBLIC_API void JS::HeapScriptWriteBarriers(JSScript** scriptp,
+                                               JSScript* prev, JSScript* next) {
+  MOZ_ASSERT(scriptp);
+  js::InternalBarrierMethods<JSScript*>::preBarrier(prev);
+  js::InternalBarrierMethods<JSScript*>::postBarrier(scriptp, prev, next);
+}
+
+JS_PUBLIC_API void JS::HeapValueWriteBarriers(JS::Value* valuep,
+                                              const Value& prev,
+                                              const Value& next) {
   MOZ_ASSERT(valuep);
+  js::InternalBarrierMethods<JS::Value>::preBarrier(prev);
   js::InternalBarrierMethods<JS::Value>::postBarrier(valuep, prev, next);
 }

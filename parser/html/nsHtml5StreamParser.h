@@ -11,6 +11,7 @@
 #include "nsICharsetDetectionObserver.h"
 #include "nsHtml5MetaScanner.h"
 #include "mozilla/Encoding.h"
+#include "mozilla/JapaneseDetector.h"
 #include "nsHtml5TreeOpExecutor.h"
 #include "nsHtml5OwningUTF16Buffer.h"
 #include "nsIInputStream.h"
@@ -25,9 +26,6 @@
 #include "mozilla/Buffer.h"
 
 class nsHtml5Parser;
-
-#define NS_HTML5_STREAM_PARSER_READ_BUFFER_SIZE 1024
-#define NS_HTML5_STREAM_PARSER_SNIFFING_BUFFER_SIZE 1024
 
 enum eParserMode {
   /**
@@ -108,6 +106,10 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   using NotNull = mozilla::NotNull<T>;
   using Encoding = mozilla::Encoding;
 
+  const uint32_t SNIFFING_BUFFER_SIZE = 1024;
+  const uint32_t READ_BUFFER_SIZE = 1024;
+  const uint32_t LOCAL_FILE_UTF_8_BUFFER_SIZE = 1024 * 1024 * 4;  // 4 MB
+
   friend class nsHtml5RequestStopper;
   friend class nsHtml5DataAvailable;
   friend class nsHtml5StreamParserContinuation;
@@ -125,14 +127,12 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   // Methods that nsHtml5StreamListener calls
   nsresult CheckListenerChain();
 
-  nsresult OnStartRequest(nsIRequest* aRequest, nsISupports* aContext);
+  nsresult OnStartRequest(nsIRequest* aRequest);
 
-  nsresult OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
-                           nsIInputStream* aInStream, uint64_t aSourceOffset,
-                           uint32_t aLength);
+  nsresult OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aInStream,
+                           uint64_t aSourceOffset, uint32_t aLength);
 
-  nsresult OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                         nsresult status);
+  nsresult OnStopRequest(nsIRequest* aRequest, nsresult status);
 
   // nsICharsetDetectionObserver
   /**
@@ -148,6 +148,16 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   bool internalEncodingDeclaration(nsHtml5String aEncoding);
 
   // Not from an external interface
+
+  /**
+   * Pass a buffer to the JapaneseDetector.
+   */
+  void FeedJapaneseDetector(mozilla::Span<const uint8_t> aBuffer, bool aLast);
+
+  /**
+   * Pass a buffer to the Japanese or Cyrillic detector as appropriate.
+   */
+  void FeedDetector(mozilla::Span<const uint8_t> aBuffer, bool aLast);
 
   /**
    *  Call this method once you've created a parser, and want to instruct it
@@ -244,6 +254,8 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
 
   void DoStopRequest();
 
+  void DoDataAvailableBuffer(mozilla::Buffer<uint8_t>&& aBuffer);
+
   void DoDataAvailable(mozilla::Span<const uint8_t> aBuffer);
 
   static nsresult CopySegmentsToParser(nsIInputStream* aInStream,
@@ -282,6 +294,12 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   void SniffBOMlessUTF16BasicLatin(mozilla::Span<const uint8_t> aFromSegment);
 
   /**
+   * Write the start of the stream to detector.
+   */
+  void FinalizeSniffingWithDetector(mozilla::Span<const uint8_t> aFromSegment,
+                                    uint32_t aCountToSniffingLimit, bool aEof);
+
+  /**
    * <meta charset> scan failed. Try chardet if applicable. After this, the
    * the parser will have some encoding even if a last resolt fallback.
    *
@@ -311,6 +329,19 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
    *                            been swallowed)
    */
   nsresult SetupDecodingFromBom(NotNull<const Encoding*> aEncoding);
+
+  /**
+   * When speculatively decoding from file: URL as UTF-8, commit
+   * to UTF-8 as the non-speculative encoding and start processing
+   * the decoded data.
+   */
+  void CommitLocalFileToUTF8();
+
+  /**
+   * When speculatively decoding from file: URL as UTF-8, redecode
+   * using fallback and then continue normally with the fallback.
+   */
+  void ReDecodeLocalFile();
 
   /**
    * Become confident or resolve and encoding name to its preferred form.
@@ -395,6 +426,11 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
    * The character encoding in use
    */
   NotNull<const Encoding*> mEncoding;
+
+  /**
+   * Whether the Cyrillic or Japanese detector should still be fed.
+   */
+  bool mFeedChardet;
 
   /**
    * Whether reparse is forbidden
@@ -486,6 +522,14 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   uint32_t mSpeculationFailureCount;
 
   /**
+   * Number of bytes already buffered into mBufferedLocalFileData.
+   * Never counts above LOCAL_FILE_UTF_8_BUFFER_SIZE.
+   */
+  uint32_t mLocalFileBytesBuffered;
+
+  nsTArray<mozilla::Buffer<uint8_t>> mBufferedLocalFileData;
+
+  /**
    * True to terminate early; protected by mTerminatedMutex
    */
   bool mTerminated;
@@ -502,14 +546,14 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   nsCOMPtr<nsIRunnable> mLoadFlusher;
 
   /**
-   * The chardet instance if chardet is enabled.
+   * The Cyrillic detector if enabled.
    */
   nsCOMPtr<nsICharsetDetector> mChardet;
 
   /**
-   * If false, don't push data to chardet.
+   * The Japanese detector.
    */
-  bool mFeedChardet;
+  mozilla::UniquePtr<mozilla::JapaneseDetector> mJapaneseDetector;
 
   /**
    * Whether the initial charset source was kCharsetFromParentFrame
@@ -517,6 +561,12 @@ class nsHtml5StreamParser final : public nsICharsetDetectionObserver {
   bool mInitialEncodingWasFromParentFrame;
 
   bool mHasHadErrors;
+
+  /**
+   * If true, we are decoding a local file that lacks an encoding
+   * declaration as UTF-8 and we are not tokenizing yet.
+   */
+  bool mDecodingLocalFileAsUTF8;
 
   /**
    * Timer for flushing tree ops once in a while when not speculating.

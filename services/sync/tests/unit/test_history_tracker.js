@@ -1,20 +1,18 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-ChromeUtils.import("resource://gre/modules/PlacesDBUtils.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://services-common/utils.js");
-ChromeUtils.import("resource://services-sync/engines.js");
-ChromeUtils.import("resource://services-sync/constants.js");
-ChromeUtils.import("resource://services-sync/engines/history.js");
-ChromeUtils.import("resource://services-sync/service.js");
-ChromeUtils.import("resource://services-sync/util.js");
+const { PlacesDBUtils } = ChromeUtils.import(
+  "resource://gre/modules/PlacesDBUtils.jsm"
+);
+const { HistoryEngine } = ChromeUtils.import(
+  "resource://services-sync/engines/history.js"
+);
+const { Service } = ChromeUtils.import("resource://services-sync/service.js");
 
 let engine;
 let tracker;
 
 add_task(async function setup() {
-
   await Service.engineManager.clear();
   await Service.engineManager.register(HistoryEngine);
   engine = Service.engineManager.get("history");
@@ -43,8 +41,11 @@ async function verifyTrackedItems(tracked) {
     ok(changes[guid] > 0, `${guid} should have a modified time`);
     trackedIDs.delete(guid);
   }
-  equal(trackedIDs.size, 0, `Unhandled tracked IDs: ${
-    JSON.stringify(Array.from(trackedIDs))}`);
+  equal(
+    trackedIDs.size,
+    0,
+    `Unhandled tracked IDs: ${JSON.stringify(Array.from(trackedIDs))}`
+  );
 }
 
 async function resetTracker() {
@@ -228,14 +229,20 @@ add_task(async function test_filter_hidden() {
   _(`Hidden visit GUID: ${hiddenGUID}`);
 
   _("Add redirect visit; should be tracked");
-  let trackedURI = await addVisit("redirect", hiddenURI.spec,
-    PlacesUtils.history.TRANSITION_REDIRECT_PERMANENT);
+  let trackedURI = await addVisit(
+    "redirect",
+    hiddenURI.spec,
+    PlacesUtils.history.TRANSITION_REDIRECT_PERMANENT
+  );
   let trackedGUID = await engine._store.GUIDForUri(trackedURI.spec);
   _(`Tracked visit GUID: ${trackedGUID}`);
 
   _("Add visit for framed link; should be ignored");
-  let embedURI = await addVisit("framed_link", null,
-    PlacesUtils.history.TRANSITION_FRAMED_LINK);
+  let embedURI = await addVisit(
+    "framed_link",
+    null,
+    PlacesUtils.history.TRANSITION_FRAMED_LINK
+  );
   let embedGUID = await engine._store.GUIDForUri(embedURI.spec);
   _(`Framed link visit GUID: ${embedGUID}`);
 

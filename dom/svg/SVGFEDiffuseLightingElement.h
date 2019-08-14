@@ -7,7 +7,7 @@
 #ifndef mozilla_dom_SVGFEDiffuseLightingElement_h
 #define mozilla_dom_SVGFEDiffuseLightingElement_h
 
-#include "nsSVGFilters.h"
+#include "SVGFilters.h"
 
 nsresult NS_NewSVGFEDiffuseLightingElement(
     nsIContent** aResult, already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
@@ -15,7 +15,7 @@ nsresult NS_NewSVGFEDiffuseLightingElement(
 namespace mozilla {
 namespace dom {
 
-typedef nsSVGFELightingElement SVGFEDiffuseLightingElementBase;
+typedef SVGFELightingElement SVGFEDiffuseLightingElementBase;
 
 class SVGFEDiffuseLightingElement : public SVGFEDiffuseLightingElementBase {
   friend nsresult(::NS_NewSVGFEDiffuseLightingElement(
@@ -40,11 +40,11 @@ class SVGFEDiffuseLightingElement : public SVGFEDiffuseLightingElementBase {
   virtual nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 
   // WebIDL
-  already_AddRefed<SVGAnimatedString> In1();
-  already_AddRefed<SVGAnimatedNumber> SurfaceScale();
-  already_AddRefed<SVGAnimatedNumber> DiffuseConstant();
-  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthX();
-  already_AddRefed<SVGAnimatedNumber> KernelUnitLengthY();
+  already_AddRefed<DOMSVGAnimatedString> In1();
+  already_AddRefed<DOMSVGAnimatedNumber> SurfaceScale();
+  already_AddRefed<DOMSVGAnimatedNumber> DiffuseConstant();
+  already_AddRefed<DOMSVGAnimatedNumber> KernelUnitLengthX();
+  already_AddRefed<DOMSVGAnimatedNumber> KernelUnitLengthY();
 };
 
 }  // namespace dom

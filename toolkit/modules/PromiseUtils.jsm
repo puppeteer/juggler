@@ -6,8 +6,7 @@
 
 var EXPORTED_SYMBOLS = ["PromiseUtils"];
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/Timer.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 var PromiseUtils = {
   /*
@@ -34,15 +33,13 @@ var PromiseUtils = {
    */
   idleDispatch(callback, timeout = 0) {
     return new Promise((resolve, reject) => {
-      Services.tm.idleDispatchToMainThread(
-        () => {
-          try {
-            resolve(callback());
-          } catch (e) {
-            reject(e);
-          }
-        },
-        timeout);
+      Services.tm.idleDispatchToMainThread(() => {
+        try {
+          resolve(callback());
+        } catch (e) {
+          reject(e);
+        }
+      }, timeout);
     });
   },
 };

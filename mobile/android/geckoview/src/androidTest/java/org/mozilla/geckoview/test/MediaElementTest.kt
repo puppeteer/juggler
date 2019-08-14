@@ -15,9 +15,12 @@ import android.support.test.filters.MediumTest
 import android.support.test.runner.AndroidJUnit4
 import org.hamcrest.Matchers.*
 import org.junit.Assume.assumeThat
+import org.junit.Assume.assumeTrue
 import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mozilla.geckoview.GeckoRuntimeSettings
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule
 
 @RunWith(AndroidJUnit4::class)
 @TimeoutMillis(45000)
@@ -36,13 +39,15 @@ class MediaElementTest : BaseSessionTest() {
         override fun onError(mediaElement: MediaElement, errorCode: Int) {}
     }
 
-    private fun setupPrefsAndDelegates(path: String) {
+    private fun setupPrefs() {
+
         sessionRule.setPrefsUntilTestEnd(mapOf(
-                "media.autoplay.enabled.user-gestures-needed" to false,
                 "media.autoplay.default" to 0,
-                "media.autoplay.ask-permission" to false,
                 "full-screen-api.allow-trusted-requests-only" to false))
 
+    }
+
+    private fun setupDelegate(path: String) {
         sessionRule.session.loadTestPath(path)
         sessionRule.waitUntilCalled(object : Callbacks.MediaDelegate {
             @AssertCalled
@@ -56,8 +61,12 @@ class MediaElementTest : BaseSessionTest() {
         })
     }
 
-    private fun waitUntilVideoReady(path: String, waitState: Int = MediaElement.MEDIA_READY_STATE_HAVE_ENOUGH_DATA): MediaElement {
-        setupPrefsAndDelegates(path)
+    private fun setupPrefsAndDelegates(path: String) {
+        setupPrefs()
+        setupDelegate(path)
+    }
+
+    private fun waitUntilState(waitState: Int = MediaElement.MEDIA_READY_STATE_HAVE_ENOUGH_DATA): MediaElement {
         var ready = false
         var result: MediaElement? = null
         while (!ready) {
@@ -75,6 +84,16 @@ class MediaElementTest : BaseSessionTest() {
             throw IllegalStateException("No MediaElement Found")
         }
         return result!!
+    }
+
+    private fun waitUntilVideoReady(path: String, waitState: Int = MediaElement.MEDIA_READY_STATE_HAVE_ENOUGH_DATA): MediaElement {
+        setupPrefsAndDelegates(path)
+        return waitUntilState(waitState)
+    }
+
+    private fun waitUntilVideoReadyNoPrefs(path: String, waitState: Int = MediaElement.MEDIA_READY_STATE_HAVE_ENOUGH_DATA): MediaElement {
+        setupDelegate(path)
+        return waitUntilState(waitState)
     }
 
     private fun waitForPlaybackStateChange(waitState: Int, lambda: (element: MediaElement, state: Int) -> Unit = { _: MediaElement, _: Int -> }) {
@@ -203,6 +222,7 @@ class MediaElementTest : BaseSessionTest() {
     }
 
     @WithDevToolsAPI
+    @Ignore //disable test for frequent failures Bug 1554117
     @Test
     fun oggPlayMediaFromScript() {
         playMediaFromScript(VIDEO_OGG_PATH)
@@ -255,7 +275,9 @@ class MediaElementTest : BaseSessionTest() {
     @WithDevToolsAPI
     @Test
     fun webmPlayMediaFromScript() {
-        playMediaFromScript(VIDEO_WEBM_PATH)
+        // disable test on pgo and debug for frequently failing Bug 1532404
+        assumeTrue(false)
+        playMediaFromScript(VIDEO_WEBM_PATH)        
     }
 
     @WithDevToolsAPI
@@ -410,4 +432,54 @@ class MediaElementTest : BaseSessionTest() {
             }
         })
     }
+
+    @WithDevToolsAPI
+    @Test fun autoplayBlocked() {
+        sessionRule.runtime.settings.autoplayDefault = GeckoRuntimeSettings.AUTOPLAY_DEFAULT_BLOCKED
+
+        val media = waitUntilVideoReadyNoPrefs(AUTOPLAY_PATH)
+        val promise = sessionRule.evaluateJS(mainSession, "$('video').play()").asJSPromise()
+        var exceptionCaught = false
+        try {
+            val result = promise.value as Boolean
+            assertThat("Promise should not resolve", result, equalTo(false))
+        } catch (e: GeckoSessionTestRule.RejectedPromiseException) {
+            exceptionCaught = true;
+        }
+
+        assertThat("video.play() failed with exception", exceptionCaught, equalTo(true))
+        media.play()
+        /*
+        // Fails due to bug 1524092
+        waitForPlaybackStateChange(MediaElement.MEDIA_STATE_PLAY)
+        waitForPlaybackStateChange(MediaElement.MEDIA_STATE_PLAYING)
+        */
+    }
+
+    @WithDevToolsAPI
+    @Test fun autoplayAllowed() {
+        sessionRule.runtime.settings.autoplayDefault = GeckoRuntimeSettings.AUTOPLAY_DEFAULT_ALLOWED
+
+        val media = waitUntilVideoReadyNoPrefs(VIDEO_WEBM_PATH)
+        val promise = sessionRule.evaluateJS(mainSession, "$('video').play()").asJSPromise()
+        var exceptionCaught = false
+        try {
+            promise.value
+        } catch (e: GeckoSessionTestRule.RejectedPromiseException) {
+            exceptionCaught = true;
+        }
+
+        assertThat("video.play() did not fail", exceptionCaught, equalTo(false))
+        waitForPlaybackStateChange(MediaElement.MEDIA_STATE_PLAY)
+        waitForPlaybackStateChange(MediaElement.MEDIA_STATE_PLAYING)
+        media.pause()
+
+        media.play()
+        waitForPlaybackStateChange(MediaElement.MEDIA_STATE_PLAY)
+        waitForPlaybackStateChange(MediaElement.MEDIA_STATE_PLAYING)
+
+        // Restore default runtime settings
+        sessionRule.runtime.settings.autoplayDefault = GeckoRuntimeSettings.AUTOPLAY_DEFAULT_BLOCKED
+    }
+
 }

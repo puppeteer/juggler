@@ -5,17 +5,18 @@
 
 const CRASH_URL = "about:mozilla";
 const CRASH_FAVICON = "chrome://branding/content/icon32.png";
-const CRASH_SHENTRY = {url: CRASH_URL, triggeringPrincipal_base64};
-const CRASH_TAB = {entries: [CRASH_SHENTRY], image: CRASH_FAVICON};
-const CRASH_STATE = {windows: [{tabs: [CRASH_TAB]}]};
+const CRASH_SHENTRY = { url: CRASH_URL, triggeringPrincipal_base64 };
+const CRASH_TAB = { entries: [CRASH_SHENTRY], image: CRASH_FAVICON };
+const CRASH_STATE = { windows: [{ tabs: [CRASH_TAB] }] };
 
 const TAB_URL = "about:sessionrestore";
-const TAB_FORMDATA = {url: TAB_URL, id: {sessionData: CRASH_STATE}};
-const TAB_SHENTRY = {url: TAB_URL, triggeringPrincipal_base64};
-const TAB_STATE = {entries: [TAB_SHENTRY], formdata: TAB_FORMDATA};
+const TAB_FORMDATA = { url: TAB_URL, id: { sessionData: CRASH_STATE } };
+const TAB_SHENTRY = { url: TAB_URL, triggeringPrincipal_base64 };
+const TAB_STATE = { entries: [TAB_SHENTRY], formdata: TAB_FORMDATA };
 
-const FRAME_SCRIPT = "data:," +
-                     "content.document.getElementById('errorTryAgain').click()";
+const FRAME_SCRIPT =
+  // eslint-disable-next-line no-useless-concat
+  "data:," + "content.document.getElementById('errorTryAgain').click()";
 
 add_task(async function() {
   // Prepare a blank tab.
@@ -33,25 +34,31 @@ add_task(async function() {
   let view = tree.view;
   ok(view.isContainer(0), "first entry is the window");
   let titleColumn = tree.columns.title;
-  is(view.getCellProperties(1, titleColumn), "icon",
-    "second entry is the tab and has a favicon");
+  is(
+    view.getCellProperties(1, titleColumn),
+    "icon",
+    "second entry is the tab and has a favicon"
+  );
+
+  let newWindowOpened = BrowserTestUtils.waitForNewWindow();
 
   browser.messageManager.loadFrameScript(FRAME_SCRIPT, true);
 
   // Wait until the new window was restored.
-  let win = await waitForNewWindow();
+  let win = await newWindowOpened;
+
+  BrowserTestUtils.removeTab(tab);
   await BrowserTestUtils.closeWindow(win);
 
-  let [{tabs: [{entries: [{url}]}]}] = JSON.parse(ss.getClosedWindowData());
+  let [
+    {
+      tabs: [
+        {
+          entries: [{ url }],
+        },
+      ],
+    },
+  ] = JSON.parse(ss.getClosedWindowData());
   is(url, CRASH_URL, "session was restored correctly");
   ss.forgetClosedWindow(0);
 });
-
-function waitForNewWindow() {
-  return new Promise(resolve => {
-    Services.obs.addObserver(function observe(win, topic) {
-      Services.obs.removeObserver(observe, topic);
-      resolve(win);
-    }, "browser-delayed-startup-finished");
-  });
-}

@@ -12,9 +12,9 @@
 #include "mozilla/RefCounted.h"
 
 #ifdef WIN32
-#include "mozilla/gfx/JobScheduler_win32.h"
+#  include "mozilla/gfx/JobScheduler_win32.h"
 #else
-#include "mozilla/gfx/JobScheduler_posix.h"
+#  include "mozilla/gfx/JobScheduler_posix.h"
 #endif
 
 #include <vector>
@@ -142,7 +142,7 @@ class SetEventJob : public Job {
                        SyncObject* aCompletion = nullptr,
                        WorkerThread* aPinToWorker = nullptr);
 
-  ~SetEventJob();
+  virtual ~SetEventJob();
 
   JobStatus Run() override;
 
@@ -179,7 +179,7 @@ class SyncObject final : public external::AtomicRefCounted<SyncObject> {
   /// using muteces.
   explicit SyncObject(uint32_t aNumPrerequisites = 1);
 
-  ~SyncObject();
+  virtual ~SyncObject();
 
   /// Attempt to register a task.
   ///
@@ -237,7 +237,7 @@ class WorkerThread {
  public:
   static WorkerThread* Create(MultiThreadedJobQueue* aJobQueue);
 
-  virtual ~WorkerThread() {}
+  virtual ~WorkerThread() = default;
 
   void Run();
 

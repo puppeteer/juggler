@@ -9,13 +9,12 @@
 
 #include "gfxMatrix.h"
 #include "gfxRect.h"
-#include "nsSVGFilters.h"
-#include "nsSVGNumber2.h"
-#include "nsSVGNumberPair.h"
-#include "nsTArray.h"
+#include "SVGAnimatedNumber.h"
+#include "SVGAnimatedNumberPair.h"
+#include "SVGFilters.h"
+#include "mozilla/ServoStyleConsts.h"
 
 class nsSVGFilterFrame;
-struct nsStyleFilter;
 
 namespace mozilla {
 namespace dom {
@@ -65,10 +64,14 @@ class SVGFilterElement;
  *   "filter space point" = (20, 20)
  */
 class nsSVGFilterInstance {
+  using StyleFilter = mozilla::StyleFilter;
+  typedef mozilla::SVGAnimatedNumber SVGAnimatedNumber;
+  typedef mozilla::SVGAnimatedNumberPair SVGAnimatedNumberPair;
   typedef mozilla::gfx::Point3D Point3D;
   typedef mozilla::gfx::IntRect IntRect;
   typedef mozilla::gfx::SourceSurface SourceSurface;
   typedef mozilla::gfx::FilterPrimitiveDescription FilterPrimitiveDescription;
+  typedef mozilla::dom::SVGFE SVGFE;
   typedef mozilla::dom::UserSpaceMetrics UserSpaceMetrics;
 
  public:
@@ -80,7 +83,7 @@ class nsSVGFilterInstance {
    * @param aTargetBBox The SVG bbox to use for the target frame, computed by
    *   the caller. The caller may decide to override the actual SVG bbox.
    */
-  nsSVGFilterInstance(const nsStyleFilter& aFilter, nsIFrame* aTargetFrame,
+  nsSVGFilterInstance(const StyleFilter& aFilter, nsIFrame* aTargetFrame,
                       nsIContent* aTargetContent,
                       const UserSpaceMetrics& aMetrics,
                       const gfxRect& aTargetBBox,
@@ -109,11 +112,12 @@ class nsSVGFilterInstance {
       nsTArray<RefPtr<SourceSurface>>& aInputImages, bool aInputIsTainted);
 
   float GetPrimitiveNumber(uint8_t aCtxType,
-                           const nsSVGNumber2* aNumber) const {
+                           const SVGAnimatedNumber* aNumber) const {
     return GetPrimitiveNumber(aCtxType, aNumber->GetAnimValue());
   }
-  float GetPrimitiveNumber(uint8_t aCtxType, const nsSVGNumberPair* aNumberPair,
-                           nsSVGNumberPair::PairIndex aIndex) const {
+  float GetPrimitiveNumber(uint8_t aCtxType,
+                           const SVGAnimatedNumberPair* aNumberPair,
+                           SVGAnimatedNumberPair::PairIndex aIndex) const {
     return GetPrimitiveNumber(aCtxType, aNumberPair->GetAnimValue(aIndex));
   }
 
@@ -139,7 +143,7 @@ class nsSVGFilterInstance {
    * Computes the filter primitive subregion for the given primitive.
    */
   IntRect ComputeFilterPrimitiveSubregion(
-      nsSVGFE* aFilterElement,
+      SVGFE* aFilterElement,
       const nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
       const nsTArray<int32_t>& aInputIndices);
 
@@ -184,7 +188,7 @@ class nsSVGFilterInstance {
    * FilterPrimitiveDescription representing "another-primitive".
    */
   nsresult GetSourceIndices(
-      nsSVGFE* aPrimitiveElement,
+      SVGFE* aPrimitiveElement,
       nsTArray<FilterPrimitiveDescription>& aPrimitiveDescrs,
       const nsDataHashtable<nsStringHashKey, int32_t>& aImageTable,
       nsTArray<int32_t>& aSourceIndices);
@@ -198,7 +202,7 @@ class nsSVGFilterInstance {
   /**
    * The SVG reference filter originally from the style system.
    */
-  const nsStyleFilter& mFilter;
+  const StyleFilter& mFilter;
 
   /**
    * The filtered element.

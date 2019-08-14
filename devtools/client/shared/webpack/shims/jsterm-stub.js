@@ -6,9 +6,9 @@
 
 const { ConsoleCommand } = require("devtools/client/webconsole/types");
 
-function JSTerm(webConsoleFrame) {
-  this.hud = webConsoleFrame;
-  this.hudId = this.hud.hudId;
+function JSTerm(webConsoleUI) {
+  this.ui = webConsoleUI;
+  this.hudId = this.ui.hudId;
   this.historyLoaded = new Promise(r => {
     r();
   });
@@ -21,7 +21,7 @@ JSTerm.prototype = {
     return this.hud.webConsoleClient;
   },
 
-  openVariablesView() { },
+  openVariablesView() {},
 
   init() {
     this.doc = this.hud.window.document;
@@ -32,7 +32,7 @@ JSTerm.prototype = {
     this.root.appendChild(this.inputNode);
     this.doc.querySelector("#app-wrapper").appendChild(this.root);
 
-    this.inputNode.onkeypress = (e) => {
+    this.inputNode.onkeypress = e => {
       if (e.key === "Enter") {
         this.execute();
       }
@@ -48,7 +48,7 @@ JSTerm.prototype = {
    *        The new value to set.
    * @returns void
    */
-  setInputValue(newValue) {
+  _setValue(newValue) {
     this.inputNode.value = newValue;
     // this.resizeInput();
   },
@@ -57,14 +57,14 @@ JSTerm.prototype = {
    * Gets the value from the input field
    * @returns string
    */
-  getInputValue() {
+  _getValue() {
     return this.inputNode.value || "";
   },
 
   execute(executeString) {
     return new Promise(resolve => {
       // attempt to execute the content of the inputNode
-      executeString = executeString || this.getInputValue();
+      executeString = executeString || this._getValue();
       if (!executeString) {
         return;
       }
@@ -72,21 +72,22 @@ JSTerm.prototype = {
       const message = new ConsoleCommand({
         messageText: executeString,
       });
-      this.hud.proxy.dispatchMessageAdd(message);
+      this.ui.proxy.dispatchMessageAdd(message);
 
       let selectedNodeActor = null;
-      const inspectorSelection = this.hud.owner.getInspectorSelection();
+      const inspectorSelection = this.ui.owner.getInspectorSelection();
       if (inspectorSelection && inspectorSelection.nodeFront) {
         selectedNodeActor = inspectorSelection.nodeFront.actorID;
       }
 
-      const onResult = (response) => {
+      const onResult = response => {
         if (response.error) {
-          console.error("Evaluation error " + response.error + ": " +
-                        response.message);
+          console.error(
+            "Evaluation error " + response.error + ": " + response.message
+          );
           return;
         }
-        this.hud.consoleOutput.dispatchMessageAdd(response, true).then(resolve);
+        this.ui.wrapper.dispatchMessageAdd(response, true).then(resolve);
       };
 
       const options = {
@@ -95,7 +96,7 @@ JSTerm.prototype = {
       };
 
       this.requestEvaluation(executeString, options).then(onResult, onResult);
-      this.setInputValue("");
+      this._setValue("");
     });
   },
 
@@ -124,27 +125,18 @@ JSTerm.prototype = {
    *         received.
    */
   requestEvaluation(str, options = {}) {
-    return new Promise((resolve, reject) => {
-      let frameActor = null;
-      if ("frame" in options) {
-        frameActor = this.getFrameActor(options.frame);
-      }
-      const evalOptions = {
-        bindObjectActor: options.bindObjectActor,
-        frameActor: frameActor,
-        selectedNodeActor: options.selectedNodeActor,
-        selectedObjectActor: options.selectedObjectActor,
-      };
-      const onResponse = response => {
-        if (!response.error) {
-          resolve(response);
-        } else {
-          reject(response);
-        }
-      };
+    let frameActor = null;
+    if ("frame" in options) {
+      frameActor = this.getFrameActor(options.frame);
+    }
+    const evalOptions = {
+      bindObjectActor: options.bindObjectActor,
+      frameActor: frameActor,
+      selectedNodeActor: options.selectedNodeActor,
+      selectedObjectActor: options.selectedObjectActor,
+    };
 
-      this.webConsoleClient.evaluateJSAsync(str, onResponse, evalOptions);
-    });
+    return this.webConsoleClient.evaluateJSAsync(str, evalOptions);
   },
 
   /**
@@ -156,7 +148,7 @@ JSTerm.prototype = {
    *         The FrameActor ID for the given frame depth.
    */
   getFrameActor(frame) {
-    const state = this.hud.owner.getDebuggerFrames();
+    const state = this.ui.owner.getDebuggerFrames();
     if (!state) {
       return null;
     }

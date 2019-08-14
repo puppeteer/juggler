@@ -19,25 +19,71 @@ pref("devtools.webconsole.filter.debug", true);
 pref("devtools.webconsole.filter.css", false);
 pref("devtools.webconsole.filter.net", false);
 pref("devtools.webconsole.filter.netxhr", false);
-pref("devtools.webconsole.ui.filterbar", false);
 pref("devtools.webconsole.inputHistoryCount", 300);
 pref("devtools.webconsole.persistlog", false);
 pref("devtools.webconsole.timestampMessages", false);
 pref("devtools.webconsole.sidebarToggle", true);
 pref("devtools.webconsole.jsterm.codeMirror", true);
-pref("devtools.webconsole.jsterm.reverse-search", true);
+pref("devtools.webconsole.groupWarningMessages", false);
+pref("devtools.webconsole.input.editor", false);
+pref("devtools.webconsole.input.autocomplete", true);
+pref("devtools.browserconsole.contentMessages", true);
+pref("devtools.webconsole.features.editor", true);
 
 global.loader = {
   lazyServiceGetter: () => {},
-  lazyRequireGetter: (context, name, path) => {
+  lazyGetter: (context, name, fn) => {
+
+  },
+  lazyRequireGetter: (context, name, path, destruct) => {
     if (path === "devtools/shared/async-storage") {
       global[name] = require("devtools/client/webconsole/test/fixtures/async-storage");
+    }
+    const excluded = [
+      "Debugger",
+      "devtools/shared/event-emitter",
+      "devtools/client/shared/autocomplete-popup",
+      "devtools/client/framework/devtools",
+      "devtools/client/shared/keycodes",
+      "devtools/client/shared/sourceeditor/editor",
+      "devtools/client/shared/telemetry",
+      "devtools/shared/screenshot/save",
+      "devtools/client/shared/focus",
+    ];
+    if (!excluded.includes(path)) {
+      const module = require(path);
+      global[name] = destruct ? module[name] : module;
     }
   },
 };
 
+// Setting up globals used in some modules.
+global.isWorker = false;
+global.indexedDB = {open: () => ({})};
+
+// URLSearchParams was added to the global object in Node 10.0.0. To not cause any issue
+// with prior versions, we add it to the global object if it is not defined there.
+if (!global.URLSearchParams) {
+  global.URLSearchParams = require("url").URLSearchParams;
+}
+
+if (!global.ResizeObserver) {
+  global.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
+// Mock ChromeUtils.
+global.ChromeUtils = {
+  import: () => {},
+  defineModuleGetter: () => {},
+};
+
 // Point to vendored-in files and mocks when needed.
 const requireHacker = require("require-hacker");
+/* eslint-disable complexity */
 requireHacker.global_hook("default", (path, module) => {
   switch (path) {
     // For Enzyme
@@ -72,17 +118,25 @@ requireHacker.global_hook("default", (path, module) => {
     case "devtools/shared/client/object-client":
     case "devtools/shared/client/long-string-client":
       return `() => {}`;
+    case "devtools/client/shared/components/SmartTrace":
     case "devtools/client/netmonitor/src/components/TabboxPanel":
     case "devtools/client/webconsole/utils/context-menu":
       return "{}";
     case "devtools/client/shared/telemetry":
       return `module.exports = function() {
         this.recordEvent = () => {};
+        this.getKeyedHistogramById = () => ({add: () => {}});
       }`;
     case "devtools/shared/event-emitter":
       return `module.exports = require("devtools-modules/src/utils/event-emitter")`;
     case "devtools/client/shared/unicode-url":
       return `module.exports = require("devtools-modules/src/unicode-url")`;
+    case "devtools/shared/DevToolsUtils":
+      return "{}";
+    case "devtools/server/actors/reflow":
+      return "{}";
+    case "devtools/shared/layout/utils":
+      return "{getCurrentZoom = () => {}}";
   }
 
   // We need to rewrite all the modules assuming the root is mozilla-central and give them
@@ -93,6 +147,7 @@ requireHacker.global_hook("default", (path, module) => {
 
   return undefined;
 });
+/* eslint-enable complexity */
 
 // Configure enzyme with React 16 adapter. This needs to be done after we set the
 // requireHack hook so `require()` calls in Enzyme are handled as well.

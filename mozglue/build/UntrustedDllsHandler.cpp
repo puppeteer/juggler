@@ -4,18 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef MOZ_MEMORY
-#define MOZ_MEMORY_IMPL
-#include "mozmemory_wrap.h"
-#define MALLOC_FUNCS MALLOC_FUNCS_MALLOC
-// See mozmemory_wrap.h for more details. This file is part of libmozglue, so
-// it needs to use _impl suffixes.
-#define MALLOC_DECL(name, return_type, ...) \
-  MOZ_MEMORY_API return_type name##_impl(__VA_ARGS__);
-#include "malloc_decls.h"
-#include "mozilla/mozalloc.h"
-#endif
-
 #include "UntrustedDllsHandler.h"
 
 #include <windows.h>
@@ -277,7 +265,8 @@ void UntrustedDllsHandler::ExitLoaderCall() {
 
 /* static */
 void UntrustedDllsHandler::OnAfterModuleLoad(uintptr_t aBaseAddr,
-                                             PUNICODE_STRING aLdrModuleName) {
+                                             PUNICODE_STRING aLdrModuleName,
+                                             double aLoadDurationMS) {
   RefPtr<UntrustedDllsHandlerImpl> p(UntrustedDllsHandlerImpl::GetInstance());
   if (!p) {
     return;
@@ -295,6 +284,7 @@ void UntrustedDllsHandler::OnAfterModuleLoad(uintptr_t aBaseAddr,
   moduleInfo.mLdrName = CopyString(aLdrModuleName);
   moduleInfo.mBase = aBaseAddr;
   moduleInfo.mFullPath = GetModuleFullPath(aBaseAddr);
+  moduleInfo.mLoadDurationMS = aLoadDurationMS;
 
   Unused << tlsData->mModulesLoaded.emplaceBack(std::move(moduleInfo));
 

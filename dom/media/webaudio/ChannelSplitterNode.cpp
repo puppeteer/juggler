@@ -54,13 +54,10 @@ ChannelSplitterNode::ChannelSplitterNode(AudioContext* aContext,
       AudioNodeStream::NO_STREAM_FLAGS, aContext->Graph());
 }
 
-/* static */ already_AddRefed<ChannelSplitterNode> ChannelSplitterNode::Create(
+/* static */
+already_AddRefed<ChannelSplitterNode> ChannelSplitterNode::Create(
     AudioContext& aAudioContext, const ChannelSplitterOptions& aOptions,
     ErrorResult& aRv) {
-  if (aAudioContext.CheckClosed(aRv)) {
-    return nullptr;
-  }
-
   if (aOptions.mNumberOfOutputs == 0 ||
       aOptions.mNumberOfOutputs > WebAudioUtils::MaxChannelCount) {
     aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);

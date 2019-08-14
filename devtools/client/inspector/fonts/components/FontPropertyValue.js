@@ -11,19 +11,19 @@ const {
 } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
-const { KeyCodes } = require("devtools/client/shared/keycodes");
 
 const { toFixed } = require("../utils/font-utils");
-
-// Milliseconds between auto-increment interval iterations.
-const AUTOINCREMENT_DELAY = 1000;
 
 class FontPropertyValue extends PureComponent {
   static get propTypes() {
     return {
-      autoIncrement: PropTypes.bool,
+      // Whether to allow input values above the value defined by the `max` prop.
+      allowOverflow: PropTypes.bool,
+      // Whether to allow input values below the value defined by the `min` prop.
+      allowUnderflow: PropTypes.bool,
       className: PropTypes.string,
       defaultValue: PropTypes.number,
+      disabled: PropTypes.bool.isRequired,
       label: PropTypes.string.isRequired,
       min: PropTypes.number.isRequired,
       // Whether to show the `min` prop value as a label.
@@ -36,20 +36,28 @@ class FontPropertyValue extends PureComponent {
       nameLabel: PropTypes.bool,
       onChange: PropTypes.func.isRequired,
       step: PropTypes.number,
+      // Whether to show the value input field.
+      showInput: PropTypes.bool,
+      // Whether to show the unit select dropdown.
+      showUnit: PropTypes.bool,
       unit: PropTypes.string,
       unitOptions: PropTypes.array,
       value: PropTypes.number,
+      valueLabel: PropTypes.string,
     };
   }
 
   static get defaultProps() {
     return {
-      autoIncrement: false,
+      allowOverflow: false,
+      allowUnderflow: false,
       className: "",
       minLabel: false,
       maxLabel: false,
       nameLabel: false,
       step: 1,
+      showInput: true,
+      showUnit: true,
       unit: null,
       unitOptions: [],
     };
@@ -57,8 +65,6 @@ class FontPropertyValue extends PureComponent {
 
   constructor(props) {
     super(props);
-    // Interval ID for the auto-increment operation.
-    this.interval = null;
     this.state = {
       // Whether the user is dragging the slider thumb or pressing on the numeric stepper.
       interactive: false,
@@ -70,36 +76,12 @@ class FontPropertyValue extends PureComponent {
       value: this.props.value,
     };
 
-    this.autoIncrement = this.autoIncrement.bind(this);
     this.onBlur = this.onBlur.bind(this);
     this.onChange = this.onChange.bind(this);
     this.onFocus = this.onFocus.bind(this);
-    this.onKeyDown = this.onKeyDown.bind(this);
-    this.onKeyUp = this.onKeyUp.bind(this);
     this.onMouseDown = this.onMouseDown.bind(this);
-    this.onMouseMove = this.onMouseMove.bind(this);
     this.onMouseUp = this.onMouseUp.bind(this);
     this.onUnitChange = this.onUnitChange.bind(this);
-    this.stopAutoIncrement = this.stopAutoIncrement.bind(this);
-  }
-
-  componentDidUpdate(prevProps, prevState) {
-    // Clear the auto-increment interval if interactive state changed from true to false.
-    if (prevState.interactive && !this.state.interactive) {
-      this.stopAutoIncrement();
-    }
-  }
-
-  componentWillUnmount() {
-    this.stopAutoIncrement();
-  }
-
-  /**
-   * Increment the current value with a step of the next order of magnitude.
-   */
-  autoIncrement() {
-    const value = this.props.value + this.props.step * 10;
-    this.updateValue(value);
   }
 
   /**
@@ -119,23 +101,9 @@ class FontPropertyValue extends PureComponent {
   }
 
   /**
-   * Check if the given value is at or exceeds the maximum value for the slider and number
-   * inputs. Using Math.floor() on maximum value because unit conversion can yield numbers
-   * with decimals that can't be reached with the step increment for the converted unit.
-   * For example: max = 1000.75% and step = 1
-   *
-   * @param  {Number} value
-   *         Numeric value.
-   * @return {Boolean}
-   */
-  isAtUpperBound(value) {
-    return value >= Math.floor(this.props.max);
-  }
-
-  /**
    * Check if the given value is valid according to the constraints of this component.
    * Ensure it is a number and that it does not go outside the min/max limits, unless
-   * allowed by the `autoIncrement` props flag.
+   * allowed by the `allowOverflow` and `allowUnderflow` props.
    *
    * @param  {Number} value
    *         Numeric value
@@ -143,18 +111,19 @@ class FontPropertyValue extends PureComponent {
    *         Whether the value conforms to the components contraints.
    */
   isValueValid(value) {
-    const { autoIncrement, min, max } = this.props;
+    const { allowOverflow, allowUnderflow, min, max } = this.props;
 
     if (typeof value !== "number" || isNaN(value)) {
       return false;
     }
 
-    if (min !== undefined && value < min) {
+    // Ensure it does not go below minimum value, unless underflow is allowed.
+    if (min !== undefined && value < min && !allowUnderflow) {
       return false;
     }
 
-    // Ensure it does not exceed maximum value, unless auto-incrementing is permitted.
-    if (max !== undefined && value > this.props.max && !autoIncrement) {
+    // Ensure it does not go over maximum value, unless overflow is allowed.
+    if (max !== undefined && value > max && !allowOverflow) {
       return false;
     }
 
@@ -173,7 +142,10 @@ class FontPropertyValue extends PureComponent {
     if (isValid) {
       value = this.state.value;
     } else if (this.state.value !== null) {
-      value = Math.max(this.props.min, Math.min(this.state.value, this.props.max));
+      value = Math.max(
+        this.props.min,
+        Math.min(this.state.value, this.props.max)
+      );
     } else {
       value = this.state.initialValue;
     }
@@ -197,9 +169,10 @@ class FontPropertyValue extends PureComponent {
     // Regular expresion to check for floating point or integer numbers. Accept negative
     // numbers only if the min value is negative. Otherwise, expect positive numbers.
     // Whitespace and non-digit characters are invalid (aside from a single dot).
-    const regex = (this.props.min && this.props.min < 0)
-      ? /^-?[0-9]+(.[0-9]+)?$/
-      : /^[0-9]+(.[0-9]+)?$/;
+    const regex =
+      this.props.min && this.props.min < 0
+        ? /^-?[0-9]+(.[0-9]+)?$/
+        : /^[0-9]+(.[0-9]+)?$/;
     let string = e.target.value.trim();
 
     if (e.target.validity.badInput) {
@@ -215,7 +188,7 @@ class FontPropertyValue extends PureComponent {
     // Accept empty strings to allow the input value to be completely erased while typing.
     // A null value will be handled on blur. @see this.onBlur()
     if (string === "") {
-      this.setState((prevState) => {
+      this.setState(prevState => {
         return {
           ...prevState,
           value: null,
@@ -238,7 +211,7 @@ class FontPropertyValue extends PureComponent {
       e.target.select();
     }
 
-    this.setState((prevState) => {
+    this.setState(prevState => {
       return {
         ...prevState,
         interactive: true,
@@ -247,32 +220,15 @@ class FontPropertyValue extends PureComponent {
     });
   }
 
-  /**
-   * Handler for "keydown" events from the range input field.
-   * Begin auto-incrementing if the slider value is already at the upper boun and the
-   * keyboard gesture requests a higher value.
-   *
-   * @param {Event} e
-   *        KeyDown event.
-   */
-  onKeyDown(e) {
-    if (this.isAtUpperBound(this.props.value) &&
-        e.keyCode === KeyCodes.DOM_VK_UP || e.keyCode === KeyCodes.DOM_VK_RIGHT) {
-      this.startAutoIncrement();
-    }
-  }
-
-  onKeyUp(e) {
-    if (e.keyCode === KeyCodes.DOM_VK_UP || e.keyCode === KeyCodes.DOM_VK_RIGHT) {
-      this.stopAutoIncrement();
-    }
-  }
-
   onUnitChange(e) {
-    this.props.onChange(this.props.name, this.props.value, this.props.unit,
-       e.target.value);
+    this.props.onChange(
+      this.props.name,
+      this.props.value,
+      this.props.unit,
+      e.target.value
+    );
     // Reset internal state value and wait for converted value from props.
-    this.setState((prevState) => {
+    this.setState(prevState => {
       return {
         ...prevState,
         value: null,
@@ -284,38 +240,8 @@ class FontPropertyValue extends PureComponent {
     this.toggleInteractiveState(true);
   }
 
-  /**
-   * Handler for "mousemove" event from range input. If the user is actively interacting
-   * by dragging the slider thumb, start or stop the auto-incrementing behavior depending
-   * on whether the input value is at the upper bound or not.
-   *
-   * @param {MouseEvent} e
-   */
-  onMouseMove(e) {
-    if (this.state.interactive && e.buttons) {
-      this.isAtUpperBound(this.props.value)
-        ? this.startAutoIncrement()
-        : this.stopAutoIncrement();
-    }
-  }
-
   onMouseUp() {
-    this.stopAutoIncrement();
     this.toggleInteractiveState(false);
-  }
-
-  startAutoIncrement() {
-    // Do not set auto-increment interval if not allowed to or if one is already set.
-    if (!this.props.autoIncrement || this.interval) {
-      return;
-    }
-
-    this.interval = setInterval(this.autoIncrement, AUTOINCREMENT_DELAY);
-  }
-
-  stopAutoIncrement() {
-    clearInterval(this.interval);
-    this.interval = null;
   }
 
   /**
@@ -327,7 +253,7 @@ class FontPropertyValue extends PureComponent {
    *        Whether to mark the interactive state on or off.
    */
   toggleInteractiveState(isInteractive) {
-    this.setState((prevState) => {
+    this.setState(prevState => {
       return {
         ...prevState,
         interactive: isInteractive,
@@ -352,7 +278,7 @@ class FontPropertyValue extends PureComponent {
       this.props.onChange(this.props.name, value, this.props.unit);
     }
 
-    this.setState((prevState) => {
+    this.setState(prevState => {
       return {
         ...prevState,
         value,
@@ -367,20 +293,21 @@ class FontPropertyValue extends PureComponent {
 
     // Ensure the select element has the current unit type even if we don't recognize it.
     // The unit conversion function will use a 1-to-1 scale for unrecognized units.
-    const options = this.props.unitOptions.includes(this.props.unit) ?
-      this.props.unitOptions
-      :
-      this.props.unitOptions.concat([this.props.unit]);
+    const options = this.props.unitOptions.includes(this.props.unit)
+      ? this.props.unitOptions
+      : this.props.unitOptions.concat([this.props.unit]);
 
     return dom.select(
       {
         className: "font-value-select",
+        disabled: this.props.disabled,
         onChange: this.onUnitChange,
+        value: this.props.unit,
       },
       options.map(unit => {
         return dom.option(
           {
-            selected: unit === this.props.unit,
+            key: unit,
             value: unit,
           },
           unit
@@ -390,11 +317,7 @@ class FontPropertyValue extends PureComponent {
   }
 
   renderLabelContent() {
-    const {
-      label,
-      name,
-      nameLabel,
-    } = this.props;
+    const { label, name, nameLabel } = this.props;
 
     const labelEl = dom.span(
       {
@@ -405,18 +328,25 @@ class FontPropertyValue extends PureComponent {
     );
 
     // Show the `name` prop value as an additional label if the `nameLabel` prop is true.
-    const detailEl = nameLabel ?
-      dom.span(
-        {
-          className: "font-control-label-detail",
-          id: `detail-${name}`,
-        },
-        this.getPropLabel("name")
-      )
-      :
-      null;
+    const detailEl = nameLabel
+      ? dom.span(
+          {
+            className: "font-control-label-detail",
+            id: `detail-${name}`,
+          },
+          this.getPropLabel("name")
+        )
+      : null;
 
     return createElement(Fragment, null, labelEl, detailEl);
+  }
+
+  renderValueLabel() {
+    if (!this.props.valueLabel) {
+      return null;
+    }
+
+    return dom.div({ className: "font-value-label" }, this.props.valueLabel);
   }
 
   render() {
@@ -425,9 +355,8 @@ class FontPropertyValue extends PureComponent {
       return null;
     }
 
-    const propsValue = this.props.value !== null
-      ? this.props.value
-      : this.props.defaultValue;
+    const propsValue =
+      this.props.value !== null ? this.props.value : this.props.defaultValue;
 
     const defaults = {
       min: this.props.min,
@@ -441,35 +370,33 @@ class FontPropertyValue extends PureComponent {
       value: this.state.interactive ? this.state.value : propsValue,
     };
 
-    const range = dom.input(
-      {
-        ...defaults,
-        onKeyDown: this.onKeyDown,
-        onKeyUp: this.onKeyUp,
-        onMouseDown: this.onMouseDown,
-        onMouseMove: this.onMouseMove,
-        onMouseUp: this.onMouseUp,
-        className: "font-value-slider",
-        name: this.props.name,
-        title: this.props.label,
-        type: "range",
-      }
-    );
+    const range = dom.input({
+      ...defaults,
+      onMouseDown: this.onMouseDown,
+      onMouseUp: this.onMouseUp,
+      className: "font-value-slider",
+      disabled: this.props.disabled,
+      name: this.props.name,
+      title: this.props.label,
+      type: "range",
+    });
 
-    const input = dom.input(
-      {
-        ...defaults,
-        // Remove upper limit from number input if it is allowed to auto-increment.
-        max: this.props.autoIncrement ? null : this.props.max,
-        name: this.props.name,
-        className: "font-value-input",
-        type: "number",
-      }
-    );
+    const input = dom.input({
+      ...defaults,
+      // Remove lower limit from number input if it is allowed to underflow.
+      min: this.props.allowUnderflow ? null : this.props.min,
+      // Remove upper limit from number input if it is allowed to overflow.
+      max: this.props.allowOverflow ? null : this.props.max,
+      name: this.props.name,
+      className: "font-value-input",
+      disabled: this.props.disabled,
+      type: "number",
+    });
 
     return dom.label(
       {
         className: `font-control ${this.props.className}`,
+        disabled: this.props.disabled,
       },
       dom.div(
         {
@@ -490,8 +417,9 @@ class FontPropertyValue extends PureComponent {
           },
           range
         ),
-        input,
-        this.renderUnitSelect()
+        this.renderValueLabel(),
+        this.props.showInput && input,
+        this.props.showUnit && this.renderUnitSelect()
       )
     );
   }

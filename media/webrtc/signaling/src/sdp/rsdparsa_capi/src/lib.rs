@@ -16,6 +16,7 @@ use rsdparsa::{SdpTiming, SdpBandwidth, SdpSession};
 use rsdparsa::error::SdpParserError;
 use rsdparsa::media_type::{SdpMediaValue, SdpProtocolValue};
 use rsdparsa::attribute_type::{SdpAttribute};
+use rsdparsa::anonymizer::{StatefulSdpAnonymizer, AnonymizingClone};
 
 pub mod types;
 pub mod network;
@@ -45,10 +46,10 @@ pub unsafe extern "C" fn parse_sdp(sdp: StringView,
 
     let parser_result = rsdparsa::parse_sdp(&sdp_str, fail_on_warning);
     match parser_result {
-        Ok(parsed) => {
+        Ok(mut parsed) => {
             *error = match parsed.warnings.len(){
                 0 => ptr::null(),
-                _ => Box::into_raw(Box::new(parsed.warnings[0].clone())),
+                _ => Box::into_raw(Box::new(parsed.warnings.remove(0))),
             };
             *session = Rc::into_raw(Rc::new(parsed));
             NS_OK
@@ -61,6 +62,11 @@ pub unsafe extern "C" fn parse_sdp(sdp: StringView,
             NS_ERROR_INVALID_ARG
         }
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn create_anonymized_sdp_clone(session: *const SdpSession) -> *const SdpSession {
+    Rc::into_raw(Rc::new((*session).masked_clone(&mut StatefulSdpAnonymizer::new())))
 }
 
 #[no_mangle]
@@ -153,11 +159,14 @@ pub unsafe extern "C" fn sdp_add_media_section(session: *mut SdpSession,
     };
     let protocol = match protocol {
         20 => SdpProtocolValue::RtpSavpf,        // Protocol::kRtpSavpf
-        24 => SdpProtocolValue::UdpTlsRtpSavpf,  // Protocol::kUdpTlsRtpSavpf
-        25 => SdpProtocolValue::TcpTlsRtpSavpf,  // Protocol::kTcpTlsRtpSavpf
-        37 => SdpProtocolValue::DtlsSctp,        // Protocol::kDtlsSctp
-        38 => SdpProtocolValue::UdpDtlsSctp,     // Protocol::kUdpDtlsSctp
-        39 => SdpProtocolValue::TcpDtlsSctp,     // Protocol::kTcpDtlsSctp
+        21 => SdpProtocolValue::UdpTlsRtpSavp,   // Protocol::kUdpTlsRtpSavp
+        23 => SdpProtocolValue::TcpDtlsRtpSavp,  // Protocol::kTcpDtlsRtpSavp
+        25 => SdpProtocolValue::UdpTlsRtpSavpf,  // Protocol::kUdpTlsRtpSavpf
+        26 => SdpProtocolValue::TcpTlsRtpSavpf,  // Protocol::kTcpTlsRtpSavpf
+        27 => SdpProtocolValue::TcpDtlsRtpSavpf,  // Protocol::kTcpTlsRtpSavpf
+        39 => SdpProtocolValue::DtlsSctp,        // Protocol::kDtlsSctp
+        40 => SdpProtocolValue::UdpDtlsSctp,     // Protocol::kUdpDtlsSctp
+        41 => SdpProtocolValue::TcpDtlsSctp,     // Protocol::kTcpDtlsSctp
         _ => {
           return NS_ERROR_INVALID_ARG;
       }
@@ -176,7 +185,7 @@ pub unsafe extern "C" fn sdp_add_media_section(session: *mut SdpSession,
     match addr_type {
       // enum AddrType { kAddrTypeNone, kIPv4, kIPv6 };
       // kAddrTypeNone is explicitly not covered as it is an 'invalid' flag
-      1...2 => (),
+      1 | 2 => (),
       _ => {
           return NS_ERROR_INVALID_ARG;
       }

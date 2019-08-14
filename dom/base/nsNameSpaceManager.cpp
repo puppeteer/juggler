@@ -17,7 +17,7 @@
 #include "nsCOMArray.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsGkAtoms.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsString.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -34,7 +34,8 @@ static const char* kObservedNSPrefs[] = {kPrefMathMLDisabled, kPrefSVGDisabled,
                                          nullptr};
 StaticRefPtr<nsNameSpaceManager> nsNameSpaceManager::sInstance;
 
-/* static */ nsNameSpaceManager* nsNameSpaceManager::GetInstance() {
+/* static */
+nsNameSpaceManager* nsNameSpaceManager::GetInstance() {
   if (!sInstance) {
     sInstance = new nsNameSpaceManager();
     if (sInstance->Init()) {

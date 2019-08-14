@@ -36,22 +36,24 @@
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "js/ArrayBuffer.h"  // JS::GetArrayBufferByteLength,IsArrayBufferObject,NewArrayBufferWithContents,StealArrayBufferContents
 #include "js/Conversions.h"
 #include "js/MemoryFunctions.h"
+#include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "xpcpublic.h"
 
 #include <algorithm>
 #if defined(XP_UNIX)
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/uio.h>
+#  include <unistd.h>
+#  include <errno.h>
+#  include <fcntl.h>
+#  include <sys/stat.h>
+#  include <sys/uio.h>
 #endif  // defined (XP_UNIX)
 
 #if defined(XP_WIN)
-#include <windows.h>
+#  include <windows.h>
 #endif  // defined (XP_WIN)
 
 namespace mozilla {
@@ -140,19 +142,19 @@ struct MOZ_NON_TEMPORARY_CLASS ScopedArrayBufferContents
 // errors, we need to map a few high-level errors to OS-level
 // constants.
 #if defined(XP_UNIX)
-#define OS_ERROR_FILE_EXISTS EEXIST
-#define OS_ERROR_NOMEM ENOMEM
-#define OS_ERROR_INVAL EINVAL
-#define OS_ERROR_TOO_LARGE EFBIG
-#define OS_ERROR_RACE EIO
+#  define OS_ERROR_FILE_EXISTS EEXIST
+#  define OS_ERROR_NOMEM ENOMEM
+#  define OS_ERROR_INVAL EINVAL
+#  define OS_ERROR_TOO_LARGE EFBIG
+#  define OS_ERROR_RACE EIO
 #elif defined(XP_WIN)
-#define OS_ERROR_FILE_EXISTS ERROR_ALREADY_EXISTS
-#define OS_ERROR_NOMEM ERROR_NOT_ENOUGH_MEMORY
-#define OS_ERROR_INVAL ERROR_BAD_ARGUMENTS
-#define OS_ERROR_TOO_LARGE ERROR_FILE_TOO_LARGE
-#define OS_ERROR_RACE ERROR_SHARING_VIOLATION
+#  define OS_ERROR_FILE_EXISTS ERROR_ALREADY_EXISTS
+#  define OS_ERROR_NOMEM ERROR_NOT_ENOUGH_MEMORY
+#  define OS_ERROR_INVAL ERROR_BAD_ARGUMENTS
+#  define OS_ERROR_TOO_LARGE ERROR_FILE_TOO_LARGE
+#  define OS_ERROR_RACE ERROR_SHARING_VIOLATION
 #else
-#error "We do not have platform-specific constants for this platform"
+#  error "We do not have platform-specific constants for this platform"
 #endif
 
 ///////// Results of OS.File operations
@@ -355,8 +357,9 @@ nsresult TypedArrayResult::GetCacheableResult(
   const ArrayBufferContents& contents = mContents.get();
   MOZ_ASSERT(contents.data);
 
+  // This takes ownership of the buffer and notes the memory allocation.
   JS::Rooted<JSObject*> arrayBuffer(
-      cx, JS_NewArrayBufferWithContents(cx, contents.nbytes, contents.data));
+      cx, JS::NewArrayBufferWithContents(cx, contents.nbytes, contents.data));
   if (!arrayBuffer) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -366,10 +369,6 @@ nsresult TypedArrayResult::GetCacheableResult(
   if (!result) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
-  // The memory of contents has been allocated on a thread that
-  // doesn't have a JSRuntime, hence without a context. Now that we
-  // have a context, attach the memory to where it belongs.
-  JS_updateMallocCounter(cx, contents.nbytes);
   mContents.forget();
 
   aResult.setObject(*result);
@@ -889,9 +888,9 @@ class DoWriteAtomicEvent : public AbstractDoEvent {
    * @param aPath The path of the file.
    */
   DoWriteAtomicEvent(
-      const nsAString& aPath, UniquePtr<char> aBuffer, const uint64_t aBytes,
-      const nsAString& aTmpPath, const nsAString& aBackupTo, const bool aFlush,
-      const bool aNoOverwrite,
+      const nsAString& aPath, UniquePtr<char[], JS::FreePolicy> aBuffer,
+      const uint64_t aBytes, const nsAString& aTmpPath,
+      const nsAString& aBackupTo, const bool aFlush, const bool aNoOverwrite,
       nsMainThreadPtrHandle<nsINativeOSFileSuccessCallback>& aOnSuccess,
       nsMainThreadPtrHandle<nsINativeOSFileErrorCallback>& aOnError)
       : AbstractDoEvent(aOnSuccess, aOnError),
@@ -1120,7 +1119,7 @@ class DoWriteAtomicEvent : public AbstractDoEvent {
   }
 
   const nsString mPath;
-  const UniquePtr<char> mBuffer;
+  const UniquePtr<char[], JS::FreePolicy> mBuffer;
   const int32_t mBytes;
   const nsString mTmpPath;
   const nsString mBackupTo;
@@ -1201,7 +1200,7 @@ NativeOSFileInternalsService::WriteAtomic(
   MOZ_ASSERT(NS_IsMainThread());
   // Extract typed-array/string into buffer. We also need to store the length
   // of the buffer as that may be required if not provided in `aOptions`.
-  UniquePtr<char> buffer;
+  UniquePtr<char[], JS::FreePolicy> buffer;
   int32_t bytes;
 
   // The incoming buffer must be an Object.
@@ -1213,13 +1212,13 @@ NativeOSFileInternalsService::WriteAtomic(
   if (!JS_ValueToObject(cx, aBuffer, &bufferObject)) {
     return NS_ERROR_FAILURE;
   }
-  if (!JS_IsArrayBufferObject(bufferObject.get())) {
+  if (!JS::IsArrayBufferObject(bufferObject.get())) {
     return NS_ERROR_INVALID_ARG;
   }
 
-  bytes = JS_GetArrayBufferByteLength(bufferObject.get());
+  bytes = JS::GetArrayBufferByteLength(bufferObject.get());
   buffer.reset(
-      static_cast<char*>(JS_StealArrayBufferContents(cx, bufferObject)));
+      static_cast<char*>(JS::StealArrayBufferContents(cx, bufferObject)));
 
   if (!buffer) {
     return NS_ERROR_FAILURE;

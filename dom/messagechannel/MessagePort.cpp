@@ -33,13 +33,12 @@
 #include "SharedMessagePortMessage.h"
 
 #include "nsIBFCacheEntry.h"
-#include "nsIDocument.h"
-#include "nsIPresShell.h"
+#include "mozilla/dom/Document.h"
 #include "nsISupportsPrimitives.h"
 #include "nsServiceManagerUtils.h"
 
 #ifdef XP_WIN
-#undef PostMessage
+#  undef PostMessage
 #endif
 
 namespace mozilla {
@@ -207,9 +206,11 @@ MessagePort::~MessagePort() {
   MOZ_ASSERT(!mWorkerRef);
 }
 
-/* static */ already_AddRefed<MessagePort> MessagePort::Create(
-    nsIGlobalObject* aGlobal, const nsID& aUUID, const nsID& aDestinationUUID,
-    ErrorResult& aRv) {
+/* static */
+already_AddRefed<MessagePort> MessagePort::Create(nsIGlobalObject* aGlobal,
+                                                  const nsID& aUUID,
+                                                  const nsID& aDestinationUUID,
+                                                  ErrorResult& aRv) {
   MOZ_ASSERT(aGlobal);
 
   RefPtr<MessagePort> mp = new MessagePort(aGlobal, eStateUnshippedEntangled);
@@ -218,7 +219,8 @@ MessagePort::~MessagePort() {
   return mp.forget();
 }
 
-/* static */ already_AddRefed<MessagePort> MessagePort::Create(
+/* static */
+already_AddRefed<MessagePort> MessagePort::Create(
     nsIGlobalObject* aGlobal, const MessagePortIdentifier& aIdentifier,
     ErrorResult& aRv) {
   MOZ_ASSERT(aGlobal);
@@ -809,7 +811,7 @@ void MessagePort::RemoveDocFromBFCache() {
     return;
   }
 
-  nsIDocument* doc = window->GetExtantDoc();
+  Document* doc = window->GetExtantDoc();
   if (!doc) {
     return;
   }
@@ -822,8 +824,8 @@ void MessagePort::RemoveDocFromBFCache() {
   bfCacheEntry->RemoveFromBFCacheSync();
 }
 
-/* static */ void MessagePort::ForceClose(
-    const MessagePortIdentifier& aIdentifier) {
+/* static */
+void MessagePort::ForceClose(const MessagePortIdentifier& aIdentifier) {
   mozilla::ipc::PBackgroundChild* actorChild =
       mozilla::ipc::BackgroundChild::GetOrCreateForCurrentThread();
   if (NS_WARN_IF(!actorChild)) {

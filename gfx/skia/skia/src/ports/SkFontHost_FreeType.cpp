@@ -14,6 +14,7 @@
 #include "SkFDot6.h"
 #include "SkFontDescriptor.h"
 #include "SkFontHost_FreeType_common.h"
+#include "SkFontMetrics.h"
 #include "SkGlyph.h"
 #include "SkMakeUnique.h"
 #include "SkMalloc.h"
@@ -502,8 +503,7 @@ protected:
     void generateMetrics(SkGlyph* glyph) override;
     void generateImage(const SkGlyph& glyph) override;
     bool generatePath(SkGlyphID glyphID, SkPath* path) override;
-    void generateFontMetrics(SkPaint::FontMetrics*) override;
-    SkUnichar generateGlyphToChar(uint16_t glyph) override;
+    void generateFontMetrics(SkFontMetrics*) override;
 
 private:
     using UnrefFTFace = SkFunctionWrapper<void, SkFaceRec, unref_ft_face>;
@@ -698,7 +698,7 @@ std::unique_ptr<SkFontData> SkTypeface_FreeType::cloneFontData(
     Scanner::computeAxisValues(axisDefinitions, args.getVariationDesignPosition(),
                                axisValues, name);
     int ttcIndex;
-    auto stream = std::unique_ptr<SkStreamAsset>(this->openStream(&ttcIndex));
+    std::unique_ptr<SkStreamAsset> stream = this->openStream(&ttcIndex);
     return skstd::make_unique<SkFontData>(std::move(stream), ttcIndex, axisValues.get(),
                                           axisDefinitions.count());
 }
@@ -724,15 +724,15 @@ void SkTypeface_FreeType::onFilterRec(SkScalerContextRec* rec) const {
         unref_ft_library();
     }
 
-    SkPaint::Hinting h = rec->getHinting();
-    if (SkPaint::kFull_Hinting == h && !isLCD(*rec)) {
+    SkFontHinting h = rec->getHinting();
+    if (kFull_SkFontHinting == h && !isLCD(*rec)) {
         // collapse full->normal hinting if we're not doing LCD
-        h = SkPaint::kNormal_Hinting;
+        h = kNormal_SkFontHinting;
     }
 
     // rotated text looks bad with hinting, so we disable it as needed
     if (!isAxisAligned(*rec)) {
-        h = SkPaint::kNo_Hinting;
+        h = kNo_SkFontHinting;
     }
     rec->setHinting(h);
 
@@ -847,23 +847,23 @@ SkScalerContext_FreeType::SkScalerContext_FreeType(sk_sp<SkTypeface> typeface,
         if (SkMask::kBW_Format == fRec.fMaskFormat) {
             // See http://code.google.com/p/chromium/issues/detail?id=43252#c24
             loadFlags = FT_LOAD_TARGET_MONO;
-            if (fRec.getHinting() == SkPaint::kNo_Hinting) {
+            if (fRec.getHinting() == kNo_SkFontHinting) {
                 loadFlags = FT_LOAD_NO_HINTING;
                 linearMetrics = true;
             }
         } else {
             switch (fRec.getHinting()) {
-            case SkPaint::kNo_Hinting:
+            case kNo_SkFontHinting:
                 loadFlags = FT_LOAD_NO_HINTING;
                 linearMetrics = true;
                 break;
-            case SkPaint::kSlight_Hinting:
+            case kSlight_SkFontHinting:
                 loadFlags = FT_LOAD_TARGET_LIGHT;  // This implies FORCE_AUTOHINT
                 break;
-            case SkPaint::kNormal_Hinting:
+            case kNormal_SkFontHinting:
                 loadFlags = FT_LOAD_TARGET_NORMAL;
                 break;
-            case SkPaint::kFull_Hinting:
+            case kFull_SkFontHinting:
                 loadFlags = FT_LOAD_TARGET_NORMAL;
                 if (isLCD(fRec)) {
                     if (fLCDIsVert) {
@@ -1032,22 +1032,6 @@ unsigned SkScalerContext_FreeType::generateGlyphCount() {
 uint16_t SkScalerContext_FreeType::generateCharToGlyph(SkUnichar uni) {
     SkAutoMutexAcquire  ac(gFTMutex);
     return SkToU16(FT_Get_Char_Index( fFace, uni ));
-}
-
-SkUnichar SkScalerContext_FreeType::generateGlyphToChar(uint16_t glyph) {
-    SkAutoMutexAcquire  ac(gFTMutex);
-    // iterate through each cmap entry, looking for matching glyph indices
-    FT_UInt glyphIndex;
-    SkUnichar charCode = FT_Get_First_Char( fFace, &glyphIndex );
-
-    while (glyphIndex != 0) {
-        if (glyphIndex == glyph) {
-            return charCode;
-        }
-        charCode = FT_Get_Next_Char( fFace, charCode, &glyphIndex );
-    }
-
-    return 0;
 }
 
 bool SkScalerContext_FreeType::generateAdvance(SkGlyph* glyph) {
@@ -1388,7 +1372,7 @@ bool SkScalerContext_FreeType::generatePath(SkGlyphID glyphID, SkPath* path) {
     return true;
 }
 
-void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* metrics) {
+void SkScalerContext_FreeType::generateFontMetrics(SkFontMetrics* metrics) {
     if (nullptr == metrics) {
         return;
     }
@@ -1416,8 +1400,8 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* metrics
         avgCharWidth = SkIntToScalar(os2->xAvgCharWidth) / upem;
         strikeoutThickness = SkIntToScalar(os2->yStrikeoutSize) / upem;
         strikeoutPosition = -SkIntToScalar(os2->yStrikeoutPosition) / upem;
-        metrics->fFlags |= SkPaint::FontMetrics::kStrikeoutThicknessIsValid_Flag;
-        metrics->fFlags |= SkPaint::FontMetrics::kStrikeoutPositionIsValid_Flag;
+        metrics->fFlags |= SkFontMetrics::kStrikeoutThicknessIsValid_Flag;
+        metrics->fFlags |= SkFontMetrics::kStrikeoutPositionIsValid_Flag;
         if (os2->version != 0xFFFF && os2->version >= 2) {
             cap_height = SkIntToScalar(os2->sCapHeight) / upem * fScale.y();
         }
@@ -1449,8 +1433,8 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* metrics
         underlinePosition = -SkIntToScalar(face->underline_position +
                                            face->underline_thickness / 2) / upem;
 
-        metrics->fFlags |= SkPaint::FontMetrics::kUnderlineThicknessIsValid_Flag;
-        metrics->fFlags |= SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
+        metrics->fFlags |= SkFontMetrics::kUnderlineThicknessIsValid_Flag;
+        metrics->fFlags |= SkFontMetrics::kUnderlinePositionIsValid_Flag;
 
         // we may be able to synthesize x_height and cap_height from outline
         if (!x_height) {
@@ -1477,15 +1461,15 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* metrics
         ymax = ascent;
         underlineThickness = 0;
         underlinePosition = 0;
-        metrics->fFlags &= ~SkPaint::FontMetrics::kUnderlineThicknessIsValid_Flag;
-        metrics->fFlags &= ~SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
+        metrics->fFlags &= ~SkFontMetrics::kUnderlineThicknessIsValid_Flag;
+        metrics->fFlags &= ~SkFontMetrics::kUnderlinePositionIsValid_Flag;
 
         TT_Postscript* post = (TT_Postscript*) FT_Get_Sfnt_Table(face, ft_sfnt_post);
         if (post) {
             underlineThickness = SkIntToScalar(post->underlineThickness) / upem;
             underlinePosition = -SkIntToScalar(post->underlinePosition) / upem;
-            metrics->fFlags |= SkPaint::FontMetrics::kUnderlineThicknessIsValid_Flag;
-            metrics->fFlags |= SkPaint::FontMetrics::kUnderlinePositionIsValid_Flag;
+            metrics->fFlags |= SkFontMetrics::kUnderlineThicknessIsValid_Flag;
+            metrics->fFlags |= SkFontMetrics::kUnderlinePositionIsValid_Flag;
         }
     } else {
         sk_bzero(metrics, sizeof(*metrics));

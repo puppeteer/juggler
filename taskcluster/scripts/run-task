@@ -27,6 +27,8 @@ import errno
 import io
 import json
 import os
+import platform
+import random
 import re
 import shutil
 import socket
@@ -36,13 +38,13 @@ import subprocess
 import urllib.error
 import urllib.request
 
-
 FINGERPRINT_URL = 'http://taskcluster/secrets/v1/secret/project/taskcluster/gecko/hgfingerprint'
 FALLBACK_FINGERPRINT = {
     'fingerprints':
         "sha256:17:38:aa:92:0b:84:3e:aa:8e:52:52:e9:4c:2f:98:a9:0e:bf:6c:3e:e9"
         ":15:ff:0a:29:80:f7:06:02:5b:e8:48"}
 
+HGMOINTERNAL_CONFIG_URL = 'http://taskcluster/secrets/v1/secret/project/taskcluster/gecko/hgmointernal'
 
 CACHE_UID_GID_MISMATCH = '''
 There is a UID/GID mismatch on the cache. This likely means:
@@ -92,6 +94,7 @@ or added to the task's docker image then added to the PATH.
 EXIT_PURGE_CACHE = 72
 
 
+IS_MACOSX = sys.platform == 'darwin'
 IS_POSIX = os.name == 'posix'
 IS_WINDOWS = os.name == 'nt'
 
@@ -133,7 +136,6 @@ def run_and_prefix_output(prefix, args, extra_env=None):
                          stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT,
                          stdin=sys.stdin.fileno(),
-                         cwd='/',
                          env=env)
 
     stdout = io.TextIOWrapper(p.stdout, encoding='latin1')
@@ -402,7 +404,14 @@ def vcs_checkout(source_repo, dest, store_path,
         print('revision is not specified for checkout')
         sys.exit(1)
 
-    if IS_POSIX:
+    if IS_MACOSX:
+        release = platform.mac_ver()
+        versionNums = release[0].split('.')[:2]
+        os_version = "%s.%s" % (versionNums[0], versionNums[1])
+        hg_bin = '/tools/python27-mercurial/bin/hg'
+        if os_version == "10.14":
+            hg_bin = 'hg'
+    elif IS_POSIX:
         hg_bin = 'hg'
     elif IS_WINDOWS:
         # This is where OCC installs it in the AMIs.
@@ -411,6 +420,7 @@ def vcs_checkout(source_repo, dest, store_path,
             print('could not find Mercurial executable: %s' % hg_bin)
             sys.exit(1)
 
+    store_path = os.path.abspath(store_path)
     args = [
         hg_bin,
         'robustcheckout',
@@ -490,12 +500,156 @@ def fetch_artifacts():
                                      'scripts', 'misc', 'fetch-content')
 
     if not fetch_content or not os.path.isfile(fetch_content):
+        fetch_content = os.path.join(os.path.dirname(__file__),
+                                     'fetch-content')
+
+    if not os.path.isfile(fetch_content):
         print(FETCH_CONTENT_NOT_FOUND)
         sys.exit(1)
 
-    cmd = [fetch_content, 'task-artifacts']
+    cmd = [sys.executable, '-u', fetch_content, 'task-artifacts']
+    print_line(b'fetches', b'executing %r\n' % cmd)
     subprocess.run(cmd, check=True, env=os.environ)
     print_line(b'fetches', b'finished fetching artifacts\n')
+
+
+def add_vcs_arguments(parser, project, name):
+    """Adds arguments to ArgumentParser to control VCS options for a project."""
+
+    parser.add_argument('--%s-checkout' % project,
+                        help='Directory where %s checkout should be created' %
+                             name)
+    parser.add_argument('--%s-sparse-profile' % project,
+                        help='Path to sparse profile for %s checkout' % name)
+
+
+def resolve_checkout_url(base_repo, head_repo):
+    """Resolve the Mercurial URL to perform a checkout against, either the
+    public hg.mozilla.org service or a CI-only regional mirror.
+
+    The config will be of the form:
+        {
+            "us-west-2": {  # value of `TASKCLUSTER_WORKER_GROUP`
+                "rate": 0.5,
+                "domain": "us-west-2.hgmointernal.net"
+            },
+            "us-east-1": {...}
+        }
+    """
+    region = os.getenv('TASKCLUSTER_WORKER_GROUP')
+
+    try:
+        print_line(b'vcs', b'fetching hgmointernal config from %s\n' %
+                   HGMOINTERNAL_CONFIG_URL.encode('utf-8'))
+
+        # Get the hgmointernal config Taskcluster secret
+        res = urllib.request.urlopen(HGMOINTERNAL_CONFIG_URL, timeout=10)
+        hgmointernal_config = json.loads(res.read().decode('utf-8'))['secret']
+
+        # Use public hg service if region not yet supported
+        if region not in hgmointernal_config:
+            if region:
+                print_line(b'vcs', b'region %s not yet supported; using public '
+                                   b'hg.mozilla.org service\n' % region.encode('utf-8'))
+            else:
+                print_line(b'vcs', b'unspecified region; using public '
+                                   b'hg.mozilla.org service\n')
+            return base_repo, head_repo
+
+        # Only send a percentage of traffic to the internal mirror
+        rate = float(hgmointernal_config[region]['rate'])
+
+        if random.random() > rate:
+            print_line(b'vcs', b'hgmointernal rate miss; using '
+                               b'public hg.mozilla.org service\n')
+            return base_repo, head_repo
+
+        print_line(b'vcs', b'hgmointernal rate hit; cloning from '
+                           b'private hgweb mirror\n')
+
+        mirror_domain = hgmointernal_config[region]['domain']
+
+        if base_repo and base_repo.startswith('https://hg.mozilla.org'):
+            base_repo = base_repo.replace('hg.mozilla.org', mirror_domain, 1)
+
+        if head_repo and head_repo.startswith('https://hg.mozilla.org'):
+            head_repo = head_repo.replace('hg.mozilla.org', mirror_domain, 1)
+
+        return base_repo, head_repo
+
+    except (KeyError, ValueError):
+        print_line(b'vcs', b'invalid JSON in hgmointernal config; '
+                           b'falling back to public hg.mozilla.org service\n')
+
+    except (urllib.error.URLError, socket.timeout):
+        print_line(b'vcs', b'Unable to retrieve hgmointernal config using '
+                           b'the secret service; falling back to public hg.mozilla.org '
+                           b'service\n')
+
+    return base_repo, head_repo
+
+
+def collect_vcs_options(args, project):
+    checkout = getattr(args, '%s_checkout' % project)
+    sparse_profile = getattr(args, '%s_sparse_profile' % project)
+
+    env_prefix = project.upper()
+
+    base_repo = os.environ.get('%s_BASE_REPOSITORY' % env_prefix)
+    head_repo = os.environ.get('%s_HEAD_REPOSITORY' % env_prefix)
+    revision = os.environ.get('%s_HEAD_REV' % env_prefix)
+    branch = os.environ.get('%s_HEAD_REF' % env_prefix)
+
+    store_path = os.environ.get('HG_STORE_PATH')
+
+    # Expand ~ in some paths.
+    if checkout:
+        checkout = os.path.expanduser(checkout)
+    if store_path:
+        store_path = os.path.expanduser(store_path)
+
+    # Some callers set the base repository to mozilla-central for historical
+    # reasons. Switch to mozilla-unified because robustcheckout works best
+    # with it.
+    if base_repo == 'https://hg.mozilla.org/mozilla-central':
+        base_repo = 'https://hg.mozilla.org/mozilla-unified'
+
+    # No need to check the hgmointernal config if we aren't performing
+    # a checkout.
+    if checkout:
+        base_repo, head_repo = resolve_checkout_url(base_repo, head_repo)
+
+    return {
+        'store-path': store_path,
+        'project': project,
+        'env-prefix': env_prefix,
+        'checkout': checkout,
+        'sparse-profile': sparse_profile,
+        'base-repo': base_repo,
+        'head-repo': head_repo,
+        'revision': revision,
+        'branch': branch,
+    }
+
+
+def vcs_checkout_from_args(args, project):
+    options = collect_vcs_options(args, project)
+
+    if not options['checkout']:
+        if options['branch'] and not options['revision']:
+            print('task should be defined in terms of non-symbolic revision')
+            sys.exit(1)
+        return
+
+    os.environ['%s_HEAD_REV' % options['env-prefix']] = vcs_checkout(
+        options['head-repo'],
+        options['checkout'],
+        options['store-path'],
+        base_repo=options['base-repo'],
+        revision=options['revision'],
+        fetch_hgfingerprint=args.fetch_hgfingerprint,
+        branch=options['branch'],
+        sparse_profile=options['sparse-profile'])
 
 
 def main(args):
@@ -515,27 +669,15 @@ def main(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('--user', default='worker', help='user to run as')
     parser.add_argument('--group', default='worker', help='group to run as')
-    parser.add_argument('--vcs-checkout',
-                        help='Directory where Gecko checkout should be created')
-    parser.add_argument('--sparse-profile',
-                        help='Path to sparse checkout profile to use')
-    parser.add_argument('--comm-checkout',
-                        help='Directory where Comm checkout should be created')
-    parser.add_argument('--tools-checkout',
-                        help='Directory where build/tools checkout should be created')
+
+    add_vcs_arguments(parser, 'gecko', 'Firefox')
+    add_vcs_arguments(parser, 'comm', 'Comm')
+
     parser.add_argument('--fetch-hgfingerprint', action='store_true',
                         help='Fetch the latest hgfingerprint from the secrets store, '
                         'using the taskclsuerProxy')
 
     args = parser.parse_args(our_args)
-
-    # expand ~ in some paths
-    if args.vcs_checkout:
-        args.vcs_checkout = os.path.expanduser(args.vcs_checkout)
-    if args.tools_checkout:
-        args.tools_checkout = os.path.expanduser(args.tools_checkout)
-    if 'HG_STORE_PATH' in os.environ:
-        os.environ['HG_STORE_PATH'] = os.path.expanduser(os.environ['HG_STORE_PATH'])
 
     uid = gid = gids = None
     if IS_POSIX and running_as_root:
@@ -666,9 +808,8 @@ def main(args):
         if running_as_root:
             os.chown(store_path, uid, gid)
 
-    prepare_checkout_dir(args.vcs_checkout)
-    prepare_checkout_dir(args.tools_checkout)
-    if args.vcs_checkout or args.tools_checkout or args.comm_checkout:
+    prepare_checkout_dir(args.gecko_checkout)
+    if args.gecko_checkout or args.comm_checkout:
         prepare_hg_store_path()
 
     if IS_POSIX and running_as_root:
@@ -684,62 +825,8 @@ def main(args):
         os.setresgid(gid, gid, gid)
         os.setresuid(uid, uid, uid)
 
-    # Checkout the repository, setting the GECKO_HEAD_REV to the current
-    # revision hash. Revision hashes have priority over symbolic revisions. We
-    # disallow running tasks with symbolic revisions unless they have been
-    # resolved by a checkout.
-    if args.vcs_checkout:
-        base_repo = os.environ.get('GECKO_BASE_REPOSITORY')
-        # Some callers set the base repository to mozilla-central for historical
-        # reasons. Switch to mozilla-unified because robustcheckout works best
-        # with it.
-        if base_repo == 'https://hg.mozilla.org/mozilla-central':
-            base_repo = 'https://hg.mozilla.org/mozilla-unified'
-
-        os.environ['GECKO_HEAD_REV'] = vcs_checkout(
-            os.environ['GECKO_HEAD_REPOSITORY'],
-            args.vcs_checkout,
-            os.environ['HG_STORE_PATH'],
-            fetch_hgfingerprint=args.fetch_hgfingerprint,
-            base_repo=base_repo,
-            revision=os.environ.get('GECKO_HEAD_REV'),
-            branch=os.environ.get('GECKO_HEAD_REF'),
-            sparse_profile=args.sparse_profile)
-
-    elif not os.environ.get('GECKO_HEAD_REV') and \
-            os.environ.get('GECKO_HEAD_REF'):
-        print('task should be defined in terms of non-symbolic revision')
-        return 1
-
-    if args.tools_checkout:
-        vcs_checkout('https://hg.mozilla.org/build/tools',
-                     args.tools_checkout,
-                     os.environ['HG_STORE_PATH'],
-                     fetch_hgfingerprint=args.fetch_hgfingerprint,
-                     # Always check out the latest commit on default branch.
-                     # This is non-deterministic!
-                     branch='default')
-
-    # Checkout the repository, setting the COMM_HEAD_REV to the current
-    # revision hash. Revision hashes have priority over symbolic revisions. We
-    # disallow running tasks with symbolic revisions unless they have been
-    # resolved by a checkout.
-    if args.comm_checkout:
-        base_repo = os.environ.get('COMM_BASE_REPOSITORY')
-
-        os.environ['COMM_HEAD_REV'] = vcs_checkout(
-            os.environ['COMM_HEAD_REPOSITORY'],
-            args.comm_checkout,
-            os.environ['HG_STORE_PATH'],
-            fetch_hgfingerprint=args.fetch_hgfingerprint,
-            base_repo=base_repo,
-            revision=os.environ.get('COMM_HEAD_REV'),
-            branch=os.environ.get('COMM_HEAD_REF'))
-
-    elif not os.environ.get('COMM_HEAD_REV') and \
-            os.environ.get('COMM_HEAD_REF'):
-        print('task should be defined in terms of non-symbolic revision')
-        return 1
+    vcs_checkout_from_args(args, 'gecko')
+    vcs_checkout_from_args(args, 'comm')
 
     try:
         if 'GECKO_PATH' in os.environ:

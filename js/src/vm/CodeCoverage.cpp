@@ -12,10 +12,10 @@
 
 #include <stdio.h>
 #ifdef XP_WIN
-#include <process.h>
-#define getpid _getpid
+#  include <process.h>
+#  define getpid _getpid
 #else
-#include <unistd.h>
+#  include <unistd.h>
 #endif
 
 #include "util/Text.h"
@@ -599,6 +599,21 @@ bool LCovRealm::writeRealmName(JS::Realm* realm) {
   return !outTN_.hadOutOfMemory();
 }
 
+bool gLCovIsEnabled = false;
+
+void InitLCov() {
+  const char* outDir = getenv("JS_CODE_COVERAGE_OUTPUT_DIR");
+  if (outDir && *outDir != 0) {
+    EnableLCov();
+  }
+}
+
+void EnableLCov() {
+  MOZ_ASSERT(!JSRuntime::hasLiveRuntimes(),
+             "EnableLCov must not be called after creating a runtime!");
+  gLCovIsEnabled = true;
+}
+
 LCovRuntime::LCovRuntime() : out_(), pid_(getpid()), isEmpty_(true) {}
 
 LCovRuntime::~LCovRuntime() {
@@ -620,7 +635,8 @@ bool LCovRuntime::fillWithFilename(char* name, size_t length) {
   int len = snprintf(name, length, "%s/%" PRId64 "-%" PRIu32 "-%zu.info",
                      outDir, timestamp, pid_, rid);
   if (len < 0 || size_t(len) >= length) {
-    fprintf(stderr, "Warning: LCovRuntime::init: Cannot serialize file name.");
+    fprintf(stderr,
+            "Warning: LCovRuntime::init: Cannot serialize file name.\n");
     return false;
   }
 
@@ -635,8 +651,8 @@ void LCovRuntime::init() {
 
   // If we cannot open the file, report a warning.
   if (!out_.init(name)) {
-    fprintf(stderr, "Warning: LCovRuntime::init: Cannot open file named '%s'.",
-            name);
+    fprintf(stderr,
+            "Warning: LCovRuntime::init: Cannot open file named '%s'.\n", name);
   }
   isEmpty_ = true;
 }

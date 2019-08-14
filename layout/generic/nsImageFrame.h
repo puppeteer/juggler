@@ -84,7 +84,7 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   virtual nscoord GetMinISize(gfxContext* aRenderingContext) override;
   virtual nscoord GetPrefISize(gfxContext* aRenderingContext) override;
   virtual mozilla::IntrinsicSize GetIntrinsicSize() override;
-  virtual nsSize GetIntrinsicRatio() override;
+  virtual mozilla::AspectRatio GetIntrinsicRatio() override;
   virtual void Reflow(nsPresContext* aPresContext, ReflowOutput& aDesiredSize,
                       const ReflowInput& aReflowInput,
                       nsReflowStatus& aStatus) override;
@@ -94,8 +94,7 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
                                nsEventStatus* aEventStatus) override;
-  virtual nsresult GetCursor(const nsPoint& aPoint,
-                             nsIFrame::Cursor& aCursor) override;
+  mozilla::Maybe<Cursor> GetCursor(const nsPoint&) override;
   virtual nsresult AttributeChanged(int32_t aNameSpaceID, nsAtom* aAttribute,
                                     int32_t aModType) override;
 
@@ -135,6 +134,9 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
     NS_IF_RELEASE(sIOService);
   }
 
+  virtual nsresult RestartAnimation();
+  virtual nsresult StopAnimation();
+
   already_AddRefed<imgIRequest> GetCurrentRequest() const;
   nsresult Notify(imgIRequest* aRequest, int32_t aType, const nsIntRect* aData);
 
@@ -149,6 +151,13 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   ImgDrawResult DisplayAltFeedback(gfxContext& aRenderingContext,
                                    const nsRect& aDirtyRect, nsPoint aPt,
                                    uint32_t aFlags);
+
+  ImgDrawResult DisplayAltFeedbackWithoutLayer(
+      nsDisplayItem* aItem, mozilla::wr::DisplayListBuilder& aBuilder,
+      mozilla::wr::IpcResourceUpdateQueue& aResources,
+      const mozilla::layers::StackingContextHelper& aSc,
+      mozilla::layers::RenderRootStateManager* aManager,
+      nsDisplayListBuilder* aDisplayListBuilder, nsPoint aPt, uint32_t aFlags);
 
   nsRect GetInnerArea() const;
 
@@ -186,23 +195,24 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   };
 
   // Creates a suitable continuing frame for this frame.
-  nsImageFrame* CreateContinuingFrame(nsIPresShell*, ComputedStyle*) const;
+  nsImageFrame* CreateContinuingFrame(mozilla::PresShell*,
+                                      ComputedStyle*) const;
 
  private:
-  friend nsIFrame* NS_NewImageFrame(nsIPresShell*, ComputedStyle*);
-  friend nsIFrame* NS_NewImageFrameForContentProperty(nsIPresShell*,
+  friend nsIFrame* NS_NewImageFrame(mozilla::PresShell*, ComputedStyle*);
+  friend nsIFrame* NS_NewImageFrameForContentProperty(mozilla::PresShell*,
                                                       ComputedStyle*);
-  friend nsIFrame* NS_NewImageFrameForGeneratedContentIndex(nsIPresShell*,
+  friend nsIFrame* NS_NewImageFrameForGeneratedContentIndex(mozilla::PresShell*,
                                                             ComputedStyle*);
 
-  nsImageFrame(ComputedStyle* aStyle, Kind aKind)
-      : nsImageFrame(aStyle, kClassID, aKind) {}
+  nsImageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext, Kind aKind)
+      : nsImageFrame(aStyle, aPresContext, kClassID, aKind) {}
 
-  nsImageFrame(ComputedStyle*, ClassID, Kind);
+  nsImageFrame(ComputedStyle*, nsPresContext* aPresContext, ClassID, Kind);
 
  protected:
-  nsImageFrame(ComputedStyle* aStyle, ClassID aID)
-      : nsImageFrame(aStyle, aID, Kind::ImageElement) {}
+  nsImageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext, ClassID aID)
+      : nsImageFrame(aStyle, aPresContext, aID, Kind::ImageElement) {}
 
   virtual ~nsImageFrame();
 
@@ -324,6 +334,12 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   bool IsPendingLoad(imgIRequest* aRequest) const;
 
   /**
+   * Updates mImage based on the current image request (cannot be null), and the
+   * image passed in (can be null), and invalidate layout and paint as needed.
+   */
+  void UpdateImage(imgIRequest* aRequest, imgIContainer* aImage);
+
+  /**
    * Function to convert a dirty rect in the source image to a dirty
    * rect for the image frame.
    */
@@ -352,7 +368,7 @@ class nsImageFrame : public nsAtomicContainerFrame, public nsIReflowCallback {
   nsCOMPtr<imgIContainer> mPrevImage;
   nsSize mComputedSize;
   mozilla::IntrinsicSize mIntrinsicSize;
-  nsSize mIntrinsicRatio;
+  mozilla::AspectRatio mIntrinsicRatio;
 
   const Kind mKind;
   bool mContentURLRequestRegistered;
@@ -483,7 +499,7 @@ class nsDisplayImage final : public nsDisplayImageContainer {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
 
   NS_DISPLAY_DECL_NAME("Image", TYPE_IMAGE)

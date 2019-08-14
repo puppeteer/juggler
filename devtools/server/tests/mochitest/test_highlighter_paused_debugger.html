@@ -6,7 +6,7 @@ Test the PausedDebuggerOverlay highlighter.
 <head>
   <meta charset="utf-8">
   <title>PausedDebuggerOverlay test</title>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
 </head>
 <body>
@@ -17,7 +17,7 @@ Test the PausedDebuggerOverlay highlighter.
 window.onload = function() {
   SimpleTest.waitForExplicitFinish();
 
-  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
   require("devtools/server/actors/inspector/inspector");
   const {HighlighterEnvironment} = require("devtools/server/actors/highlighters");
   const {PausedDebuggerOverlay} = require("devtools/server/actors/highlighters/paused-debugger");

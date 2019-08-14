@@ -14,6 +14,7 @@
 #include "mozilla/EventStateManager.h"     // for EventStateManager
 #include "mozilla/IMEStateManager.h"       // for IMEStateManager
 #include "mozilla/Preferences.h"           // for Preferences
+#include "mozilla/PresShell.h"             // for PresShell
 #include "mozilla/TextEditor.h"            // for TextEditor
 #include "mozilla/TextEvents.h"            // for WidgetCompositionEvent
 #include "mozilla/dom/Element.h"           // for Element
@@ -33,12 +34,11 @@
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DragEvent.h"
-#include "nsIDocument.h"             // for nsIDocument
+#include "mozilla/dom/Document.h"    // for Document
 #include "nsIFocusManager.h"         // for nsIFocusManager
 #include "nsIFormControl.h"          // for nsIFormControl, etc.
 #include "nsINode.h"                 // for nsINode, ::NODE_IS_EDITABLE, etc.
 #include "nsIPlaintextEditor.h"      // for nsIPlaintextEditor, etc.
-#include "nsIPresShell.h"            // for nsIPresShell
 #include "nsISelectionController.h"  // for nsISelectionController, etc.
 #include "nsITransferable.h"         // for kFileMime, kHTMLMime, etc.
 #include "nsIWidget.h"               // for nsIWidget
@@ -50,11 +50,11 @@
 #include "nsString.h"               // for nsAutoString
 #include "nsQueryObject.h"          // for do_QueryObject
 #ifdef HANDLE_NATIVE_TEXT_DIRECTION_SWITCH
-#include "nsContentUtils.h"   // for nsContentUtils, etc.
-#include "nsIBidiKeyboard.h"  // for nsIBidiKeyboard
+#  include "nsContentUtils.h"   // for nsContentUtils, etc.
+#  include "nsIBidiKeyboard.h"  // for nsIBidiKeyboard
 #endif
 
-#include "mozilla/dom/TabParent.h"
+#include "mozilla/dom/BrowserParent.h"
 
 class nsPresContext;
 
@@ -62,8 +62,9 @@ namespace mozilla {
 
 using namespace dom;
 
+MOZ_CAN_RUN_SCRIPT
 static void DoCommandCallback(Command aCommand, void* aData) {
-  nsIDocument* doc = static_cast<nsIDocument*>(aData);
+  Document* doc = static_cast<Document*>(aData);
   nsPIDOMWindowOuter* win = doc->GetWindow();
   if (!win) {
     return;
@@ -169,15 +170,14 @@ nsresult EditorEventListener::InstallToEditor() {
                                TrustedEventsAtCapture());
   elmP->AddEventListenerByType(this, NS_LITERAL_STRING("click"),
                                TrustedEventsAtCapture());
-  // Focus event doesn't bubble so adding the listener to capturing phase.
-  // XXX Should we listen focus/blur events of system group too? Or should
-  //     editor notified focus/blur of the element from nsFocusManager
-  //     directly?  Because if the event propagation is stopped by JS,
-  //     editor cannot initialize selection as expected.
+  elmP->AddEventListenerByType(this, NS_LITERAL_STRING("auxclick"),
+                               TrustedEventsAtSystemGroupCapture());
+  // Focus event doesn't bubble so adding the listener to capturing phase as
+  // system event group.
   elmP->AddEventListenerByType(this, NS_LITERAL_STRING("blur"),
-                               TrustedEventsAtCapture());
+                               TrustedEventsAtSystemGroupCapture());
   elmP->AddEventListenerByType(this, NS_LITERAL_STRING("focus"),
-                               TrustedEventsAtCapture());
+                               TrustedEventsAtSystemGroupCapture());
   elmP->AddEventListenerByType(this, NS_LITERAL_STRING("text"),
                                TrustedEventsAtSystemGroupBubble());
   elmP->AddEventListenerByType(this, NS_LITERAL_STRING("compositionstart"),
@@ -210,6 +210,8 @@ void EditorEventListener::Disconnect() {
 }
 
 void EditorEventListener::UninstallFromEditor() {
+  CleanupDragDropCaret();
+
   nsCOMPtr<EventTarget> piTarget = mEditorBase->GetDOMEventTarget();
   if (!piTarget) {
     return;
@@ -242,10 +244,12 @@ void EditorEventListener::UninstallFromEditor() {
                                   TrustedEventsAtCapture());
   elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("click"),
                                   TrustedEventsAtCapture());
+  elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("auxclick"),
+                                  TrustedEventsAtSystemGroupCapture());
   elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("blur"),
-                                  TrustedEventsAtCapture());
+                                  TrustedEventsAtSystemGroupCapture());
   elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("focus"),
-                                  TrustedEventsAtCapture());
+                                  TrustedEventsAtSystemGroupCapture());
   elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("text"),
                                   TrustedEventsAtSystemGroupBubble());
   elmP->RemoveEventListenerByType(this, NS_LITERAL_STRING("compositionstart"),
@@ -254,13 +258,13 @@ void EditorEventListener::UninstallFromEditor() {
                                   TrustedEventsAtSystemGroupBubble());
 }
 
-nsIPresShell* EditorEventListener::GetPresShell() const {
+PresShell* EditorEventListener::GetPresShell() const {
   MOZ_ASSERT(!DetachedFromEditor());
   return mEditorBase->GetPresShell();
 }
 
 nsPresContext* EditorEventListener::GetPresContext() const {
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  PresShell* presShell = GetPresShell();
   return presShell ? presShell->GetPresContext() : nullptr;
 }
 
@@ -271,7 +275,7 @@ nsIContent* EditorEventListener::GetFocusedRootContent() {
     return nullptr;
   }
 
-  nsIDocument* composedDoc = focusedContent->GetComposedDoc();
+  Document* composedDoc = focusedContent->GetComposedDoc();
   NS_ENSURE_TRUE(composedDoc, nullptr);
 
   if (composedDoc->HasFlag(NODE_IS_EDITABLE)) {
@@ -287,7 +291,7 @@ bool EditorEventListener::EditorHasFocus() {
   if (!focusedContent) {
     return false;
   }
-  nsIDocument* composedDoc = focusedContent->GetComposedDoc();
+  Document* composedDoc = focusedContent->GetComposedDoc();
   return !!composedDoc;
 }
 
@@ -397,6 +401,15 @@ EditorEventListener::HandleEvent(Event* aEvent) {
     }
     // click
     case eMouseClick: {
+      WidgetMouseEvent* widgetMouseEvent = internalEvent->AsMouseEvent();
+      // Don't handle non-primary click events
+      if (widgetMouseEvent->mButton != MouseButton::eLeft) {
+        return NS_OK;
+      }
+      MOZ_FALLTHROUGH;
+    }
+    // auxclick
+    case eMouseAuxClick: {
       WidgetMouseEvent* widgetMouseEvent = internalEvent->AsMouseEvent();
       if (NS_WARN_IF(!widgetMouseEvent)) {
         return NS_OK;
@@ -558,13 +571,17 @@ nsresult EditorEventListener::KeyPress(WidgetKeyboardEvent* aKeyboardEvent) {
   nsIWidget* widget = aKeyboardEvent->mWidget;
   // If the event is created by chrome script, the widget is always nullptr.
   if (!widget) {
-    nsCOMPtr<nsIPresShell> ps = GetPresShell();
-    nsPresContext* pc = ps ? ps->GetPresContext() : nullptr;
-    widget = pc ? pc->GetNearestWidget() : nullptr;
-    NS_ENSURE_TRUE(widget, NS_OK);
+    nsPresContext* presContext = GetPresContext();
+    if (NS_WARN_IF(!presContext)) {
+      return NS_OK;
+    }
+    widget = presContext->GetNearestWidget();
+    if (NS_WARN_IF(!widget)) {
+      return NS_OK;
+    }
   }
 
-  nsCOMPtr<nsIDocument> doc = editorBase->GetDocument();
+  RefPtr<Document> doc = editorBase->GetDocument();
 
   // WidgetKeyboardEvent::ExecuteEditCommands() requires non-nullptr mWidget.
   // If the event is created by chrome script, it is nullptr but we need to
@@ -625,12 +642,12 @@ nsresult EditorEventListener::MouseClick(WidgetMouseEvent* aMouseClickEvent) {
   //     though this makes web apps cannot prevent middle click paste with
   //     calling preventDefault() of "click" nor "auxclick".
 
-  if (aMouseClickEvent->button != WidgetMouseEventBase::eMiddleButton ||
+  if (aMouseClickEvent->mButton != MouseButton::eMiddle ||
       !WidgetMouseEvent::IsMiddleClickPasteEnabled()) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  RefPtr<PresShell> presShell = GetPresShell();
   if (NS_WARN_IF(!presShell)) {
     return NS_OK;
   }
@@ -646,9 +663,9 @@ nsresult EditorEventListener::MouseClick(WidgetMouseEvent* aMouseClickEvent) {
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                        "Failed to paste for the middle button click");
   if (status == nsEventStatus_eConsumeNoDefault) {
-    // Prevent the event from propagating up to be possibly handled
-    // again by the containing window:
-    aMouseClickEvent->StopImmediatePropagation();
+    // We no longer need to StopImmediatePropagation here since
+    // ClickHandlerChild.jsm checks for and ignores editables, so won't
+    // re-handle the event
     aMouseClickEvent->PreventDefault();
   }
   return NS_OK;
@@ -689,8 +706,10 @@ nsresult EditorEventListener::DragEnter(DragEvent* aDragEvent) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
-  NS_ENSURE_TRUE(presShell, NS_OK);
+  RefPtr<PresShell> presShell = GetPresShell();
+  if (NS_WARN_IF(!presShell)) {
+    return NS_OK;
+  }
 
   if (!mCaret) {
     mCaret = new nsCaret();
@@ -751,7 +770,7 @@ void EditorEventListener::CleanupDragDropCaret() {
 
   mCaret->SetVisible(false);  // hide it, so that it turns off its timer
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
+  RefPtr<PresShell> presShell = GetPresShell();
   if (presShell) {
     presShell->RestoreCaret();
   }
@@ -806,11 +825,6 @@ nsresult EditorEventListener::Drop(DragEvent* aDragEvent) {
 
   RefPtr<TextEditor> textEditor = mEditorBase->AsTextEditor();
   nsresult rv = textEditor->OnDrop(aDragEvent);
-  if (rv == NS_ERROR_EDITOR_DESTROYED) {
-    // If the editor has been destroyed, it means that this is handled as
-    // expected by the web app.  So, return NS_OK.
-    return NS_OK;
-  }
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -853,10 +867,10 @@ bool EditorEventListener::CanDrop(DragEvent* aEvent) {
   // There is a source node, so compare the source documents and this document.
   // Disallow drops on the same document.
 
-  nsCOMPtr<nsIDocument> domdoc = editorBase->GetDocument();
+  RefPtr<Document> domdoc = editorBase->GetDocument();
   NS_ENSURE_TRUE(domdoc, false);
 
-  nsCOMPtr<nsIDocument> sourceDoc = sourceNode->OwnerDoc();
+  RefPtr<Document> sourceDoc = sourceNode->OwnerDoc();
 
   // If the source and the dest are not same document, allow to drop it always.
   if (domdoc != sourceDoc) {
@@ -866,7 +880,7 @@ bool EditorEventListener::CanDrop(DragEvent* aEvent) {
   // If the source node is a remote browser, treat this as coming from a
   // different document and allow the drop.
   nsCOMPtr<nsIContent> sourceContent = do_QueryInterface(sourceNode);
-  TabParent* tp = TabParent::GetFrom(sourceContent);
+  BrowserParent* tp = BrowserParent::GetFrom(sourceContent);
   if (tp) {
     return true;
   }
@@ -1030,11 +1044,12 @@ nsresult EditorEventListener::Focus(InternalFocusEvent* aFocusEvent) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsIPresShell> ps = GetPresShell();
-  NS_ENSURE_TRUE(ps, NS_OK);
+  nsPresContext* presContext = GetPresContext();
+  if (NS_WARN_IF(!presContext)) {
+    return NS_OK;
+  }
   nsCOMPtr<nsIContent> focusedContent = editorBase->GetFocusedContentForIME();
-  IMEStateManager::OnFocusInEditor(ps->GetPresContext(), focusedContent,
-                                   *editorBase);
+  IMEStateManager::OnFocusInEditor(presContext, focusedContent, *editorBase);
 
   return NS_OK;
 }
@@ -1108,7 +1123,7 @@ bool EditorEventListener::ShouldHandleNativeKeyBindings(
     return false;
   }
 
-  nsCOMPtr<nsIDocument> doc = editorBase->GetDocument();
+  RefPtr<Document> doc = editorBase->GetDocument();
   if (doc->HasFlag(NODE_IS_EDITABLE)) {
     // Don't need to perform any checks in designMode documents.
     return true;

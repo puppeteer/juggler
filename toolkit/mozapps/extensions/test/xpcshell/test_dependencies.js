@@ -32,10 +32,23 @@ let addonFiles = [];
 
 let events = [];
 
+function promiseAddonStartup(id) {
+  return new Promise(resolve => {
+    const onBootstrapMethod = (event, { method, params }) => {
+      if (method == "startup" && params.id == id) {
+        AddonTestUtils.off("bootstrap-method", onBootstrapMethod);
+        resolve();
+      }
+    };
+
+    AddonTestUtils.on("bootstrap-method", onBootstrapMethod);
+  });
+}
+
 add_task(async function setup() {
   await promiseStartupManager();
 
-  const onBootstrapMethod = (event, {method, params}) => {
+  const onBootstrapMethod = (event, { method, params }) => {
     if (method == "startup" || method == "shutdown") {
       events.push([method, params.id]);
     }
@@ -48,11 +61,11 @@ add_task(async function setup() {
 
   for (let addon of ADDONS) {
     let manifest = {
-      applications: {gecko: {id: addon.id}},
+      applications: { gecko: { id: addon.id } },
       permissions: addon.dependencies,
     };
 
-    addonFiles.push(await createTempWebExtensionFile({manifest}));
+    addonFiles.push(await createTempWebExtensionFile({ manifest }));
   }
 });
 
@@ -61,9 +74,7 @@ add_task(async function() {
 
   await promiseInstallFile(addonFiles[3]);
 
-  deepEqual(events, [
-    ["startup", ADDONS[3].id],
-  ]);
+  deepEqual(events, [["startup", ADDONS[3].id]]);
 
   events.length = 0;
 
@@ -73,7 +84,10 @@ add_task(async function() {
   await promiseInstallFile(addonFiles[1]);
   deepEqual(events, [], "Should have no events");
 
-  await promiseInstallFile(addonFiles[2]);
+  await Promise.all([
+    promiseInstallFile(addonFiles[2]),
+    promiseAddonStartup(ADDONS[0].id),
+  ]);
 
   deepEqual(events, [
     ["startup", ADDONS[2].id],
@@ -83,7 +97,10 @@ add_task(async function() {
 
   events.length = 0;
 
-  await promiseInstallFile(addonFiles[2]);
+  await Promise.all([
+    promiseInstallFile(addonFiles[2]),
+    promiseAddonStartup(ADDONS[0].id),
+  ]);
 
   deepEqual(events, [
     ["shutdown", ADDONS[0].id],
@@ -99,9 +116,7 @@ add_task(async function() {
 
   await promiseInstallFile(addonFiles[4]);
 
-  deepEqual(events, [
-    ["startup", ADDONS[4].id],
-  ]);
+  deepEqual(events, [["startup", ADDONS[4].id]]);
 
   events.length = 0;
 
@@ -123,4 +138,3 @@ add_task(async function() {
 
   await promiseShutdownManager();
 });
-

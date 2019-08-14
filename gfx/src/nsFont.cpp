@@ -21,12 +21,10 @@ using namespace mozilla;
 nsFont::nsFont(const FontFamilyList& aFontlist, nscoord aSize)
     : fontlist(aFontlist), size(aSize) {}
 
-nsFont::nsFont(FontFamilyType aGenericType, nscoord aSize)
+nsFont::nsFont(StyleGenericFontFamily aGenericType, nscoord aSize)
     : fontlist(aGenericType), size(aSize) {}
 
 nsFont::nsFont(const nsFont& aOther) = default;
-
-nsFont::nsFont() {}
 
 nsFont::~nsFont() {}
 
@@ -51,8 +49,7 @@ nsFont::MaxDifference nsFont::CalcDifference(const nsFont& aOther) const {
       (variantNumeric != aOther.variantNumeric) ||
       (variantPosition != aOther.variantPosition) ||
       (variantWidth != aOther.variantWidth) ||
-      (alternateValues != aOther.alternateValues) ||
-      (featureValueLookup != aOther.featureValueLookup)) {
+      (alternateValues != aOther.alternateValues)) {
     return MaxDifference::eLayoutAffecting;
   }
 
@@ -69,7 +66,6 @@ nsFont& nsFont::operator=(const nsFont& aOther) = default;
 void nsFont::CopyAlternates(const nsFont& aOther) {
   variantAlternates = aOther.variantAlternates;
   alternateValues = aOther.alternateValues;
-  featureValueLookup = aOther.featureValueLookup;
 }
 
 // mapping from bitflag to font feature tag/value pair
@@ -186,7 +182,6 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle* aStyle,
   // -- copy font-specific alternate info into style
   //    (this will be resolved after font-matching occurs)
   aStyle->alternateValues.AppendElements(alternateValues);
-  aStyle->featureValueLookup = featureValueLookup;
 
   // -- caps
   aStyle->variantCaps = variantCaps;
@@ -259,7 +254,7 @@ void nsFont::AddFontFeaturesToStyle(gfxFontStyle* aStyle,
     aStyle->useGrayscaleAntialiasing = true;
   }
 
-  aStyle->fontSmoothingBackgroundColor = fontSmoothingBackgroundColor;
+  aStyle->fontSmoothingBackgroundColor = fontSmoothingBackgroundColor.ToColor();
 }
 
 void nsFont::AddFontVariationsToStyle(gfxFontStyle* aStyle) const {

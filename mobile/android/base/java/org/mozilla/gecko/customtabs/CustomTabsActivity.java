@@ -31,6 +31,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.ProgressBar;
 
+import org.json.JSONObject;
 import org.mozilla.gecko.ActivityHandlerHelper;
 import org.mozilla.gecko.BrowserApp;
 import org.mozilla.gecko.Clipboard;
@@ -61,6 +62,7 @@ import org.mozilla.geckoview.GeckoResult;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
+import org.mozilla.geckoview.GeckoViewBridge;
 import org.mozilla.geckoview.WebRequestError;
 
 import java.util.List;
@@ -123,8 +125,9 @@ public class CustomTabsActivity extends AppCompatActivity
 
         mGeckoView = (GeckoView) findViewById(R.id.gecko_view);
 
-        final GeckoSessionSettings settings = new GeckoSessionSettings();
-        settings.setBoolean(GeckoSessionSettings.USE_MULTIPROCESS, false);
+        final GeckoSessionSettings settings = new GeckoSessionSettings.Builder()
+                .useMultiprocess(false)
+                .build();
         mGeckoSession = new GeckoSession(settings);
         mGeckoSession.setNavigationDelegate(this);
         mGeckoSession.setProgressDelegate(this);
@@ -132,8 +135,9 @@ public class CustomTabsActivity extends AppCompatActivity
 
         mGeckoView.setSession(mGeckoSession, GeckoApplication.ensureRuntime(this));
 
-        mPromptService = new PromptService(this, mGeckoView.getEventDispatcher());
-        mDoorHangerPopup = new DoorHangerPopup(this, mGeckoView.getEventDispatcher());
+        mPromptService = new PromptService(this, GeckoViewBridge.getEventDispatcher(mGeckoView));
+        mDoorHangerPopup = new DoorHangerPopup(this,
+                                               GeckoViewBridge.getEventDispatcher(mGeckoView));
 
         mFormAssistPopup = (FormAssistPopup) findViewById(R.id.form_assist_popup);
         mFormAssistPopup.create(mGeckoView);
@@ -629,12 +633,6 @@ public class CustomTabsActivity extends AppCompatActivity
         throw new IllegalStateException("Unexpected new session");
     }
 
-    @Override
-    public GeckoResult<String> onLoadError(final GeckoSession session, final String urlStr,
-                                           final WebRequestError error) {
-        return null;
-    }
-
     /* GeckoSession.ProgressDelegate */
     @Override
     public void onPageStart(GeckoSession session, String url) {
@@ -680,11 +678,6 @@ public class CustomTabsActivity extends AppCompatActivity
     }
 
     @Override
-    public void onCloseRequest(GeckoSession session) {
-        // Ignore
-    }
-
-    @Override
     public void onFullScreen(GeckoSession session, boolean fullScreen) {
         ActivityUtils.setFullScreen(this, fullScreen);
         if (fullScreen) {
@@ -712,20 +705,6 @@ public class CustomTabsActivity extends AppCompatActivity
                 WebApps.openInFennec(validUri, CustomTabsActivity.this);
             }
         });
-    }
-
-    @Override
-    public void onExternalResponse(final GeckoSession session, final GeckoSession.WebResponseInfo request) {
-        // Won't happen, as we don't use the GeckoView download support in Fennec
-    }
-
-    @Override
-    public void onCrash(final GeckoSession session) {
-        // Won't happen, as we don't use e10s in Fennec
-    }
-
-    @Override
-    public void onFirstComposite(final GeckoSession session) {
     }
 
     @Override // ActionModePresenter

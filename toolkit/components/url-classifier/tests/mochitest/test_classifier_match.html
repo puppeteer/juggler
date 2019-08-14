@@ -2,7 +2,7 @@
 <html>
 <head>
   <title>Test the URI Classifier Matched Info (bug 1288633) </title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <script type="text/javascript" src="classifierHelper.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
@@ -154,7 +154,7 @@ function runTest() {
       let test = testDatas.shift();
       let uri = SpecialPowers.Services.io.newURI(test.url);
       let prin = SpecialPowers.Services.scriptSecurityManager.createCodebasePrincipal(uri, {});
-      SpecialPowers.doUrlClassify(prin, null, false, function(errorCode, table, provider, fullhash) {
+      SpecialPowers.doUrlClassify(prin, null, function(errorCode, table, provider, fullhash) {
         is(errorCode, test.expect.error, `Test url ${test.url} correct error`);
         is(table, test.expect.table, `Test url ${test.url} correct table`);
         is(provider, test.expect.provider, `Test url ${test.url} correct provider`);

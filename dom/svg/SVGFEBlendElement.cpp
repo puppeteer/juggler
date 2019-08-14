@@ -8,7 +8,7 @@
 #include "mozilla/dom/SVGFEBlendElementBinding.h"
 #include "nsSVGUtils.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEBlend)
+NS_IMPL_NS_NEW_SVG_ELEMENT(FEBlend)
 
 using namespace mozilla::gfx;
 
@@ -20,7 +20,7 @@ JSObject* SVGFEBlendElement::WrapNode(JSContext* aCx,
   return SVGFEBlendElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGEnumMapping SVGFEBlendElement::sModeMap[] = {
+SVGEnumMapping SVGFEBlendElement::sModeMap[] = {
     {nsGkAtoms::normal, SVG_FEBLEND_MODE_NORMAL},
     {nsGkAtoms::multiply, SVG_FEBLEND_MODE_MULTIPLY},
     {nsGkAtoms::screen, SVG_FEBLEND_MODE_SCREEN},
@@ -39,10 +39,10 @@ nsSVGEnumMapping SVGFEBlendElement::sModeMap[] = {
     {nsGkAtoms::luminosity, SVG_FEBLEND_MODE_LUMINOSITY},
     {nullptr, 0}};
 
-nsSVGElement::EnumInfo SVGFEBlendElement::sEnumInfo[1] = {
+SVGElement::EnumInfo SVGFEBlendElement::sEnumInfo[1] = {
     {nsGkAtoms::mode, sModeMap, SVG_FEBLEND_MODE_NORMAL}};
 
-nsSVGElement::StringInfo SVGFEBlendElement::sStringInfo[3] = {
+SVGElement::StringInfo SVGFEBlendElement::sStringInfo[3] = {
     {nsGkAtoms::result, kNameSpaceID_None, true},
     {nsGkAtoms::in, kNameSpaceID_None, true},
     {nsGkAtoms::in2, kNameSpaceID_None, true}};
@@ -55,15 +55,15 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFEBlendElement)
 //----------------------------------------------------------------------
 // nsIDOMSVGFEBlendElement methods
 
-already_AddRefed<SVGAnimatedString> SVGFEBlendElement::In1() {
+already_AddRefed<DOMSVGAnimatedString> SVGFEBlendElement::In1() {
   return mStringAttributes[IN1].ToDOMAnimatedString(this);
 }
 
-already_AddRefed<SVGAnimatedString> SVGFEBlendElement::In2() {
+already_AddRefed<DOMSVGAnimatedString> SVGFEBlendElement::In2() {
   return mStringAttributes[IN2].ToDOMAnimatedString(this);
 }
 
-already_AddRefed<SVGAnimatedEnumeration> SVGFEBlendElement::Mode() {
+already_AddRefed<DOMSVGAnimatedEnumeration> SVGFEBlendElement::Mode() {
   return mEnumAttributes[MODE].ToDOMAnimatedEnum(this);
 }
 
@@ -86,20 +86,19 @@ bool SVGFEBlendElement::AttributeAffectsRendering(int32_t aNameSpaceID,
            aAttribute == nsGkAtoms::mode));
 }
 
-void SVGFEBlendElement::GetSourceImageNames(
-    nsTArray<nsSVGStringInfo>& aSources) {
-  aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN1], this));
-  aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN2], this));
+void SVGFEBlendElement::GetSourceImageNames(nsTArray<SVGStringInfo>& aSources) {
+  aSources.AppendElement(SVGStringInfo(&mStringAttributes[IN1], this));
+  aSources.AppendElement(SVGStringInfo(&mStringAttributes[IN2], this));
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-nsSVGElement::EnumAttributesInfo SVGFEBlendElement::GetEnumInfo() {
+SVGElement::EnumAttributesInfo SVGFEBlendElement::GetEnumInfo() {
   return EnumAttributesInfo(mEnumAttributes, sEnumInfo, ArrayLength(sEnumInfo));
 }
 
-nsSVGElement::StringAttributesInfo SVGFEBlendElement::GetStringInfo() {
+SVGElement::StringAttributesInfo SVGFEBlendElement::GetStringInfo() {
   return StringAttributesInfo(mStringAttributes, sStringInfo,
                               ArrayLength(sStringInfo));
 }

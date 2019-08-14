@@ -2,8 +2,7 @@
 <html>
 <head>
   <title>Test for disabled registerProtocolHandler</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -15,7 +14,7 @@ add_task(async function() {
     set: [
       ["dom.registerContentHandler.enabled", true],
       ["dom.registerProtocolHandler.insecure.enabled", false],
-    ]
+    ],
   });
 
   let result = "registerProtocolHandler" in navigator;

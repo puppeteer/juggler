@@ -241,8 +241,7 @@ void ConvolverNodeEngine::ProcessBlock(AudioNodeStream* aStream,
         aStream->ScheduleCheckForInactive();
         RefPtr<PlayingRefChanged> refchanged =
             new PlayingRefChanged(aStream, PlayingRefChanged::RELEASE);
-        aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-            refchanged.forget());
+        aStream->Graph()->DispatchToMainThreadStableState(refchanged.forget());
       }
       aOutput->SetNull(WEBAUDIO_BLOCK_SIZE);
       return;
@@ -251,8 +250,7 @@ void ConvolverNodeEngine::ProcessBlock(AudioNodeStream* aStream,
     if (mRemainingLeftOutput <= 0) {
       RefPtr<PlayingRefChanged> refchanged =
           new PlayingRefChanged(aStream, PlayingRefChanged::ADDREF);
-      aStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(
-          refchanged.forget());
+      aStream->Graph()->DispatchToMainThreadStableState(refchanged.forget());
     }
 
     // Use mVolume as a flag to detect whether AllocateReverbInput() gets
@@ -387,20 +385,24 @@ ConvolverNode::ConvolverNode(AudioContext* aContext)
     : AudioNode(aContext, 2, ChannelCountMode::Clamped_max,
                 ChannelInterpretation::Speakers),
       mNormalize(true) {
-  uint64_t windowID = aContext->GetParentObject()->WindowID();
+  uint64_t windowID;
+  if (aContext->GetParentObject()) {
+    windowID = aContext->GetParentObject()->WindowID();
+  } else {
+    // This is used to send a message to the developer console, but the page is
+    // being closed so it doesn't matter too much.
+    windowID = 0;
+  }
   ConvolverNodeEngine* engine =
       new ConvolverNodeEngine(this, mNormalize, windowID);
   mStream = AudioNodeStream::Create(
       aContext, engine, AudioNodeStream::NO_STREAM_FLAGS, aContext->Graph());
 }
 
-/* static */ already_AddRefed<ConvolverNode> ConvolverNode::Create(
+/* static */
+already_AddRefed<ConvolverNode> ConvolverNode::Create(
     JSContext* aCx, AudioContext& aAudioContext,
     const ConvolverOptions& aOptions, ErrorResult& aRv) {
-  if (aAudioContext.CheckClosed(aRv)) {
-    return nullptr;
-  }
-
   RefPtr<ConvolverNode> audioNode = new ConvolverNode(&aAudioContext);
 
   audioNode->Initialize(aOptions, aRv);

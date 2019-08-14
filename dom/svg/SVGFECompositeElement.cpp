@@ -7,7 +7,7 @@
 #include "mozilla/dom/SVGFECompositeElement.h"
 #include "mozilla/dom/SVGFECompositeElementBinding.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FEComposite)
+NS_IMPL_NS_NEW_SVG_ELEMENT(FEComposite)
 
 using namespace mozilla::gfx;
 
@@ -19,13 +19,13 @@ JSObject* SVGFECompositeElement::WrapNode(JSContext* aCx,
   return SVGFECompositeElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::NumberInfo SVGFECompositeElement::sNumberInfo[4] = {
+SVGElement::NumberInfo SVGFECompositeElement::sNumberInfo[4] = {
     {nsGkAtoms::k1, 0, false},
     {nsGkAtoms::k2, 0, false},
     {nsGkAtoms::k3, 0, false},
     {nsGkAtoms::k4, 0, false}};
 
-nsSVGEnumMapping SVGFECompositeElement::sOperatorMap[] = {
+SVGEnumMapping SVGFECompositeElement::sOperatorMap[] = {
     {nsGkAtoms::over, SVG_FECOMPOSITE_OPERATOR_OVER},
     {nsGkAtoms::in, SVG_FECOMPOSITE_OPERATOR_IN},
     {nsGkAtoms::out, SVG_FECOMPOSITE_OPERATOR_OUT},
@@ -34,10 +34,10 @@ nsSVGEnumMapping SVGFECompositeElement::sOperatorMap[] = {
     {nsGkAtoms::arithmetic, SVG_FECOMPOSITE_OPERATOR_ARITHMETIC},
     {nullptr, 0}};
 
-nsSVGElement::EnumInfo SVGFECompositeElement::sEnumInfo[1] = {
+SVGElement::EnumInfo SVGFECompositeElement::sEnumInfo[1] = {
     {nsGkAtoms::_operator, sOperatorMap, SVG_FECOMPOSITE_OPERATOR_OVER}};
 
-nsSVGElement::StringInfo SVGFECompositeElement::sStringInfo[3] = {
+SVGElement::StringInfo SVGFECompositeElement::sStringInfo[3] = {
     {nsGkAtoms::result, kNameSpaceID_None, true},
     {nsGkAtoms::in, kNameSpaceID_None, true},
     {nsGkAtoms::in2, kNameSpaceID_None, true}};
@@ -47,31 +47,31 @@ nsSVGElement::StringInfo SVGFECompositeElement::sStringInfo[3] = {
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGFECompositeElement)
 
-already_AddRefed<SVGAnimatedString> SVGFECompositeElement::In1() {
+already_AddRefed<DOMSVGAnimatedString> SVGFECompositeElement::In1() {
   return mStringAttributes[IN1].ToDOMAnimatedString(this);
 }
 
-already_AddRefed<SVGAnimatedString> SVGFECompositeElement::In2() {
+already_AddRefed<DOMSVGAnimatedString> SVGFECompositeElement::In2() {
   return mStringAttributes[IN2].ToDOMAnimatedString(this);
 }
 
-already_AddRefed<SVGAnimatedEnumeration> SVGFECompositeElement::Operator() {
+already_AddRefed<DOMSVGAnimatedEnumeration> SVGFECompositeElement::Operator() {
   return mEnumAttributes[OPERATOR].ToDOMAnimatedEnum(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFECompositeElement::K1() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFECompositeElement::K1() {
   return mNumberAttributes[ATTR_K1].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFECompositeElement::K2() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFECompositeElement::K2() {
   return mNumberAttributes[ATTR_K2].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFECompositeElement::K3() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFECompositeElement::K3() {
   return mNumberAttributes[ATTR_K3].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFECompositeElement::K4() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFECompositeElement::K4() {
   return mNumberAttributes[ATTR_K4].ToDOMAnimatedNumber(this);
 }
 
@@ -111,24 +111,24 @@ bool SVGFECompositeElement::AttributeAffectsRendering(
 }
 
 void SVGFECompositeElement::GetSourceImageNames(
-    nsTArray<nsSVGStringInfo>& aSources) {
-  aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN1], this));
-  aSources.AppendElement(nsSVGStringInfo(&mStringAttributes[IN2], this));
+    nsTArray<SVGStringInfo>& aSources) {
+  aSources.AppendElement(SVGStringInfo(&mStringAttributes[IN1], this));
+  aSources.AppendElement(SVGStringInfo(&mStringAttributes[IN2], this));
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-nsSVGElement::NumberAttributesInfo SVGFECompositeElement::GetNumberInfo() {
+SVGElement::NumberAttributesInfo SVGFECompositeElement::GetNumberInfo() {
   return NumberAttributesInfo(mNumberAttributes, sNumberInfo,
                               ArrayLength(sNumberInfo));
 }
 
-nsSVGElement::EnumAttributesInfo SVGFECompositeElement::GetEnumInfo() {
+SVGElement::EnumAttributesInfo SVGFECompositeElement::GetEnumInfo() {
   return EnumAttributesInfo(mEnumAttributes, sEnumInfo, ArrayLength(sEnumInfo));
 }
 
-nsSVGElement::StringAttributesInfo SVGFECompositeElement::GetStringInfo() {
+SVGElement::StringAttributesInfo SVGFECompositeElement::GetStringInfo() {
   return StringAttributesInfo(mStringAttributes, sStringInfo,
                               ArrayLength(sStringInfo));
 }

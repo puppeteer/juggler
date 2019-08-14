@@ -3,25 +3,22 @@
 <head>
   <meta charset="utf-8">
   <title>Test autofilling of fields outside of a form</title>
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <script src="pwmgr_common.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
 <script type="application/javascript">
-let chromeScript = runInParent(SimpleTest.getTestFileURL("pwmgr_common.js"));
-
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("loginFrame").addEventListener("load", (evt) => {
     // Tell the parent to setup test logins.
-    chromeScript.sendAsyncMessage("setupParent", { selfFilling: true });
+    PWMGR_COMMON_PARENT.sendAsyncMessage("setupParent", { selfFilling: true, testDependsOnDeprecatedLogin: true });
   });
 });
 
 let doneSetupPromise = new Promise(resolve => {
   // When the setup is done, load a recipe for this test.
-  chromeScript.addMessageListener("doneSetup", function doneSetup() {
+  PWMGR_COMMON_PARENT.addMessageListener("doneSetup", function doneSetup() {
     resolve();
   });
 });

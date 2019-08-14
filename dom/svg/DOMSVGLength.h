@@ -15,8 +15,6 @@
 #include "mozilla/Attributes.h"
 #include "nsWrapperCache.h"
 
-class nsSVGElement;
-
 // We make DOMSVGLength a pseudo-interface to allow us to QI to it in order to
 // check that the objects that scripts pass to DOMSVGLengthList methods are our
 // *native* length objects.
@@ -35,6 +33,9 @@ namespace mozilla {
 
 class ErrorResult;
 
+namespace dom {
+class SVGElement;
+
 /**
  * Class DOMSVGLength
  *
@@ -42,7 +43,7 @@ class ErrorResult;
  * are in an SVGLengthList. It is also used to create the objects returned by
  * SVGSVGElement.createSVGLength().
  *
- * For the DOM wrapper classes for non-list SVGLength, see nsSVGLength2.h.
+ * For the DOM wrapper classes for non-list SVGLength, see SVGAnimatedLength.h.
  *
  * See the architecture comment in DOMSVGAnimatedLengthList.h.
  *
@@ -65,7 +66,7 @@ class ErrorResult;
  * Objects of this type are also used to reflect the baseVal and animVal of
  * a single, non-list SVGLength attribute. Getting and settings values of the
  * DOMSVGLength in this case requires reading and writing to the corresponding
- * nsSVGLength2 object.
+ * SVGAnimatedLength object.
  *
  * This class also stores its current list index, attribute enum, and whether
  * it belongs to a baseVal or animVal list. This is so that objects of this
@@ -82,9 +83,10 @@ class DOMSVGLength final : public nsISupports, public nsWrapperCache {
 
   /**
    * Ctor for creating the object returned by
-   * nsSVGLength2::ToDOMBaseVal/ToDOMAnimVal
+   * SVGAnimatedLength::ToDOMBaseVal/ToDOMAnimVal
    */
-  DOMSVGLength(nsSVGLength2* aVal, nsSVGElement* aSVGElement, bool aAnimVal);
+  DOMSVGLength(SVGAnimatedLength* aVal, dom::SVGElement* aSVGElement,
+               bool aAnimVal);
 
   ~DOMSVGLength();
 
@@ -105,8 +107,8 @@ class DOMSVGLength final : public nsISupports, public nsWrapperCache {
    */
   DOMSVGLength();
 
-  static already_AddRefed<DOMSVGLength> GetTearOff(nsSVGLength2* aVal,
-                                                   nsSVGElement* aSVGElement,
+  static already_AddRefed<DOMSVGLength> GetTearOff(SVGAnimatedLength* aVal,
+                                                   dom::SVGElement* aSVGElement,
                                                    bool aAnimVal);
 
   /**
@@ -163,7 +165,7 @@ class DOMSVGLength final : public nsISupports, public nsWrapperCache {
   // WebIDL
   uint16_t UnitType();
   float GetValue(ErrorResult& aRv);
-  void SetValue(float aValue, ErrorResult& aRv);
+  void SetValue(float aUserUnitValue, ErrorResult& aRv);
   float ValueInSpecifiedUnits();
   void SetValueInSpecifiedUnits(float aValue, ErrorResult& aRv);
   void GetValueAsString(nsAString& aValue);
@@ -180,7 +182,7 @@ class DOMSVGLength final : public nsISupports, public nsWrapperCache {
                        JS::Handle<JSObject*> aGivenProto) override;
 
  private:
-  nsSVGElement* Element() const { return mList->Element(); }
+  dom::SVGElement* Element() const { return mList->Element(); }
 
   uint8_t AttrEnum() const { return mAttrEnum; }
 
@@ -226,13 +228,14 @@ class DOMSVGLength final : public nsISupports, public nsWrapperCache {
                        // vh, wm, calc + future additions)
   float mValue;
 
-  // The following members are only used when we have an nsSVGLength2
-  nsSVGLength2* mVal;  // kept alive because it belongs to mSVGElement
-  RefPtr<nsSVGElement> mSVGElement;
+  // The following members are only used when we have an SVGAnimatedLength
+  SVGAnimatedLength* mVal;  // kept alive because it belongs to mSVGElement
+  RefPtr<dom::SVGElement> mSVGElement;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(DOMSVGLength, MOZILLA_DOMSVGLENGTH_IID)
 
+}  // namespace dom
 }  // namespace mozilla
 
 #undef MOZ_SVG_LIST_INDEX_BIT_COUNT

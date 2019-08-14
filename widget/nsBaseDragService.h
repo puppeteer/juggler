@@ -16,6 +16,7 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
+#include "mozilla/dom/RemoteDragStartData.h"
 #include "nsTArray.h"
 #include "nsRegion.h"
 #include "Units.h"
@@ -24,7 +25,7 @@
 #define DRAG_TRANSLUCENCY 0.65
 
 class nsIContent;
-class nsIDocument;
+
 class nsINode;
 class nsPresContext;
 class nsIImageLoadingContent;
@@ -77,7 +78,7 @@ class nsBaseDragService : public nsIDragService, public nsIDragSession {
    * in this process.  This is expected to ensure that StartDragSession() and
    * EndDragSession() get called if the platform drag is successfully invoked.
    */
-  virtual nsresult InvokeDragSessionImpl(
+  MOZ_CAN_RUN_SCRIPT virtual nsresult InvokeDragSessionImpl(
       nsIArray* aTransferableArray,
       const mozilla::Maybe<mozilla::CSSIntRegion>& aRegion,
       uint32_t aActionType) = 0;
@@ -159,13 +160,16 @@ class nsBaseDragService : public nsIDragService, public nsIDragSession {
   uint32_t mDragActionFromChildProcess;
 
   nsCOMPtr<nsINode> mSourceNode;
-  nsCString mTriggeringPrincipalURISpec;
-  nsCOMPtr<nsIDocument>
-      mSourceDocument;  // the document at the drag source. will be null
-                        //  if it came from outside the app.
-  nsContentPolicyType
-      mContentPolicyType;  // the contentpolicy type passed to the channel
-                           // when initiating the drag session
+  nsCOMPtr<nsIPrincipal> mTriggeringPrincipal;
+
+  // the document at the drag source. will be null if it came from outside the
+  // app.
+  RefPtr<mozilla::dom::Document> mSourceDocument;
+
+  // the contentpolicy type passed to the channel when initiating the drag
+  // session
+  nsContentPolicyType mContentPolicyType;
+
   RefPtr<mozilla::dom::DataTransfer> mDataTransfer;
 
   // used to determine the image to appear on the cursor while dragging
@@ -175,6 +179,9 @@ class nsBaseDragService : public nsIDragService, public nsIDragSession {
 
   // set if a selection is being dragged
   RefPtr<mozilla::dom::Selection> mSelection;
+
+  // remote drag data
+  RefPtr<mozilla::dom::RemoteDragStartData> mDragStartData;
 
   // set if the image in mImage is a popup. If this case, the popup will be
   // opened and moved instead of using a drag image.

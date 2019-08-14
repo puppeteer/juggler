@@ -1,6 +1,6 @@
 [package]
 name = "geckodriver"
-version = "0.23.0"
+version = "0.24.0"
 description = "Proxy for using WebDriver clients to interact with Gecko-based browsers."
 keywords = ["webdriver", "w3c", "httpd", "mozilla", "firefox"]
 repository = "https://hg.mozilla.org/mozilla-central/file/tip/testing/geckodriver"
@@ -9,7 +9,7 @@ license = "MPL-2.0"
 publish = false
 
 [dependencies]
-base64 = "0.9"
+base64 = "0.10"
 chrono = "0.4.6"
 clap = { version = "^2.19", default-features = false, features = ["suggestions", "wrap_help"] }
 hyper = "0.12"

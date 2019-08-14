@@ -17,7 +17,8 @@
 #include "nsDeviceContext.h"
 #include "nsIBaseWindow.h"
 #include "nsIDocShell.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "nsIWidget.h"
 #include "nsContentUtils.h"
 #include "mozilla/StyleSheet.h"
@@ -25,6 +26,7 @@
 #include "mozilla/GeckoBindings.h"
 
 using namespace mozilla;
+using mozilla::dom::Document;
 
 static nsTArray<const nsStaticAtom*>* sSystemMetrics = nullptr;
 
@@ -42,7 +44,7 @@ const OperatingSystemVersionInfo kOsVersionStrings[] = {
 #endif
 
 // A helper for four features below
-static nsSize GetSize(nsIDocument* aDocument) {
+static nsSize GetSize(const Document* aDocument) {
   nsPresContext* pc = aDocument->GetPresContext();
 
   // Per spec, return a 0x0 viewport if we're not being rendered. See:
@@ -64,7 +66,7 @@ static nsSize GetSize(nsIDocument* aDocument) {
   return pc->GetVisibleArea().Size();
 }
 
-static bool IsDeviceSizePageSize(nsIDocument* aDocument) {
+static bool IsDeviceSizePageSize(const Document* aDocument) {
   nsIDocShell* docShell = aDocument->GetDocShell();
   if (!docShell) {
     return false;
@@ -73,7 +75,7 @@ static bool IsDeviceSizePageSize(nsIDocument* aDocument) {
 }
 
 // A helper for three features below.
-static nsSize GetDeviceSize(nsIDocument* aDocument) {
+static nsSize GetDeviceSize(const Document* aDocument) {
   if (nsContentUtils::ShouldResistFingerprinting(aDocument) ||
       IsDeviceSizePageSize(aDocument)) {
     return GetSize(aDocument);
@@ -99,11 +101,11 @@ static nsSize GetDeviceSize(nsIDocument* aDocument) {
   return size;
 }
 
-bool Gecko_MediaFeatures_IsResourceDocument(nsIDocument* aDocument) {
+bool Gecko_MediaFeatures_IsResourceDocument(const Document* aDocument) {
   return aDocument->IsResourceDoc();
 }
 
-static nsDeviceContext* GetDeviceContextFor(nsIDocument* aDocument) {
+static nsDeviceContext* GetDeviceContextFor(const Document* aDocument) {
   nsPresContext* pc = aDocument->GetPresContext();
   if (!pc) {
     return nullptr;
@@ -115,14 +117,14 @@ static nsDeviceContext* GetDeviceContextFor(nsIDocument* aDocument) {
   return pc->DeviceContext();
 }
 
-void Gecko_MediaFeatures_GetDeviceSize(nsIDocument* aDocument, nscoord* aWidth,
-                                       nscoord* aHeight) {
+void Gecko_MediaFeatures_GetDeviceSize(const Document* aDocument,
+                                       nscoord* aWidth, nscoord* aHeight) {
   nsSize size = GetDeviceSize(aDocument);
   *aWidth = size.width;
   *aHeight = size.height;
 }
 
-uint32_t Gecko_MediaFeatures_GetColorDepth(nsIDocument* aDocument) {
+uint32_t Gecko_MediaFeatures_GetColorDepth(const Document* aDocument) {
   // Use depth of 24 when resisting fingerprinting, or when we're not being
   // rendered.
   uint32_t depth = 24;
@@ -140,7 +142,7 @@ uint32_t Gecko_MediaFeatures_GetColorDepth(nsIDocument* aDocument) {
   return depth / 3;
 }
 
-float Gecko_MediaFeatures_GetResolution(nsIDocument* aDocument) {
+float Gecko_MediaFeatures_GetResolution(const Document* aDocument) {
   // We're returning resolution in terms of device pixels per css pixel, since
   // that is the preferred unit for media queries of resolution. This avoids
   // introducing precision error from conversion to and from less-used
@@ -162,16 +164,16 @@ float Gecko_MediaFeatures_GetResolution(nsIDocument* aDocument) {
          pc->DeviceContext()->AppUnitsPerDevPixel();
 }
 
-static nsIDocument* TopDocument(nsIDocument* aDocument) {
-  nsIDocument* current = aDocument;
-  while (nsIDocument* parent = current->GetParentDocument()) {
+static const Document* TopDocument(const Document* aDocument) {
+  const Document* current = aDocument;
+  while (const Document* parent = current->GetParentDocument()) {
     current = parent;
   }
   return current;
 }
 
-StyleDisplayMode Gecko_MediaFeatures_GetDisplayMode(nsIDocument* aDocument) {
-  nsIDocument* rootDocument = TopDocument(aDocument);
+StyleDisplayMode Gecko_MediaFeatures_GetDisplayMode(const Document* aDocument) {
+  const Document* rootDocument = TopDocument(aDocument);
 
   nsCOMPtr<nsISupports> container = rootDocument->GetContainer();
   if (nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container)) {
@@ -199,7 +201,7 @@ StyleDisplayMode Gecko_MediaFeatures_GetDisplayMode(nsIDocument* aDocument) {
   return static_cast<StyleDisplayMode>(docShell->GetDisplayMode());
 }
 
-bool Gecko_MediaFeatures_HasSystemMetric(nsIDocument* aDocument,
+bool Gecko_MediaFeatures_HasSystemMetric(const Document* aDocument,
                                          nsAtom* aMetric,
                                          bool aIsAccessibleFromContent) {
   if (aIsAccessibleFromContent &&
@@ -211,7 +213,8 @@ bool Gecko_MediaFeatures_HasSystemMetric(nsIDocument* aDocument,
   return sSystemMetrics->IndexOf(aMetric) != sSystemMetrics->NoIndex;
 }
 
-nsAtom* Gecko_MediaFeatures_GetOperatingSystemVersion(nsIDocument* aDocument) {
+nsAtom* Gecko_MediaFeatures_GetOperatingSystemVersion(
+    const Document* aDocument) {
   if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     return nullptr;
   }
@@ -232,14 +235,40 @@ nsAtom* Gecko_MediaFeatures_GetOperatingSystemVersion(nsIDocument* aDocument) {
   return nullptr;
 }
 
-bool Gecko_MediaFeatures_PrefersReducedMotion(nsIDocument* aDocument) {
+bool Gecko_MediaFeatures_PrefersReducedMotion(const Document* aDocument) {
   if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     return false;
   }
   return LookAndFeel::GetInt(LookAndFeel::eIntID_PrefersReducedMotion, 0) == 1;
 }
 
-static PointerCapabilities GetPointerCapabilities(nsIDocument* aDocument,
+StylePrefersColorScheme Gecko_MediaFeatures_PrefersColorScheme(
+    const Document* aDocument) {
+  if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
+    return StylePrefersColorScheme::Light;
+  }
+  if (nsPresContext* pc = aDocument->GetPresContext()) {
+    if (pc->IsPrintingOrPrintPreview()) {
+      return StylePrefersColorScheme::Light;
+    }
+  }
+  // If LookAndFeel::eIntID_SystemUsesDarkTheme fails then return 2
+  // (no-preference)
+  switch (LookAndFeel::GetInt(LookAndFeel::eIntID_SystemUsesDarkTheme, 2)) {
+    case 0:
+      return StylePrefersColorScheme::Light;
+    case 1:
+      return StylePrefersColorScheme::Dark;
+    case 2:
+      return StylePrefersColorScheme::NoPreference;
+    default:
+      // This only occurs if the user has set the ui.systemUsesDarkTheme pref to
+      // an invalid value.
+      return StylePrefersColorScheme::Light;
+  }
+}
+
+static PointerCapabilities GetPointerCapabilities(const Document* aDocument,
                                                   LookAndFeel::IntID aID) {
   MOZ_ASSERT(aID == LookAndFeel::eIntID_PrimaryPointerCapabilities ||
              aID == LookAndFeel::eIntID_AllPointerCapabilities);
@@ -272,18 +301,19 @@ static PointerCapabilities GetPointerCapabilities(nsIDocument* aDocument,
 }
 
 PointerCapabilities Gecko_MediaFeatures_PrimaryPointerCapabilities(
-    nsIDocument* aDocument) {
+    const Document* aDocument) {
   return GetPointerCapabilities(aDocument,
                                 LookAndFeel::eIntID_PrimaryPointerCapabilities);
 }
 
 PointerCapabilities Gecko_MediaFeatures_AllPointerCapabilities(
-    nsIDocument* aDocument) {
+    const Document* aDocument) {
   return GetPointerCapabilities(aDocument,
                                 LookAndFeel::eIntID_AllPointerCapabilities);
 }
 
-/* static */ void nsMediaFeatures::InitSystemMetrics() {
+/* static */
+void nsMediaFeatures::InitSystemMetrics() {
   if (sSystemMetrics) return;
 
   MOZ_ASSERT(NS_IsMainThread());
@@ -391,6 +421,13 @@ PointerCapabilities Gecko_MediaFeatures_AllPointerCapabilities(
         (nsStaticAtom*)nsGkAtoms::_moz_gtk_csd_available);
   }
 
+  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDHideTitlebarByDefault,
+                           &metricResult);
+  if (NS_SUCCEEDED(rv) && metricResult) {
+    sSystemMetrics->AppendElement(
+        (nsStaticAtom*)nsGkAtoms::_moz_gtk_csd_hide_titlebar_by_default);
+  }
+
   rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDTransparentBackground,
                            &metricResult);
   if (NS_SUCCEEDED(rv) && metricResult) {
@@ -419,16 +456,26 @@ PointerCapabilities Gecko_MediaFeatures_AllPointerCapabilities(
         (nsStaticAtom*)nsGkAtoms::_moz_gtk_csd_close_button);
   }
 
-  metricResult = LookAndFeel::GetInt(LookAndFeel::eIntID_SystemUsesDarkTheme);
-  if (metricResult) {
+  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_GTKCSDReversedPlacement,
+                           &metricResult);
+  if (NS_SUCCEEDED(rv) && metricResult) {
+    sSystemMetrics->AppendElement(
+        (nsStaticAtom*)nsGkAtoms::_moz_gtk_csd_reversed_placement);
+  }
+
+  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_SystemUsesDarkTheme,
+                           &metricResult);
+  if (NS_SUCCEEDED(rv) && metricResult) {
     sSystemMetrics->AppendElement(
         (nsStaticAtom*)nsGkAtoms::_moz_system_dark_theme);
   }
 }
 
-/* static */ void nsMediaFeatures::FreeSystemMetrics() {
+/* static */
+void nsMediaFeatures::FreeSystemMetrics() {
   delete sSystemMetrics;
   sSystemMetrics = nullptr;
 }
 
-/* static */ void nsMediaFeatures::Shutdown() { FreeSystemMetrics(); }
+/* static */
+void nsMediaFeatures::Shutdown() { FreeSystemMetrics(); }

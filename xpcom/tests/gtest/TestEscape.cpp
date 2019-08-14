@@ -72,45 +72,38 @@ TEST(Escape, BadEscapeSequences)
 TEST(Escape, nsAppendEscapedHTML)
 {
   const char* srcs[] = {
-    "a",
-    "bcdefgh",
-    "<",
-    ">",
-    "&",
-    "\"",
-    "'",
-    "'bad'",
-    "Foo<T>& foo",
-    "'\"&><abc",
-    "",
+      "a", "bcdefgh", "<",           ">",         "&", "\"",
+      "'", "'bad'",   "Foo<T>& foo", "'\"&><abc", "",
   };
 
   const char* dsts1[] = {
-    "a",
-    "bcdefgh",
-    "&lt;",
-    "&gt;",
-    "&amp;",
-    "&quot;",
-    "&#39;",
-    "&#39;bad&#39;",
-    "Foo&lt;T&gt;&amp; foo",
-    "&#39;&quot;&amp;&gt;&lt;abc",
-    "",
+      "a",
+      "bcdefgh",
+      "&lt;",
+      "&gt;",
+      "&amp;",
+      "&quot;",
+      "&#39;",
+      "&#39;bad&#39;",
+      "Foo&lt;T&gt;&amp; foo",
+      "&#39;&quot;&amp;&gt;&lt;abc",
+      "",
   };
 
   const char* dsts2[] = {
-    "a",
-    "abcdefgh",
-    "abcdefgh&lt;",
-    "abcdefgh&lt;&gt;",
-    "abcdefgh&lt;&gt;&amp;",
-    "abcdefgh&lt;&gt;&amp;&quot;",
-    "abcdefgh&lt;&gt;&amp;&quot;&#39;",
-    "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;",
-    "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;Foo&lt;T&gt;&amp; foo",
-    "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;Foo&lt;T&gt;&amp; foo&#39;&quot;&amp;&gt;&lt;abc",
-    "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;Foo&lt;T&gt;&amp; foo&#39;&quot;&amp;&gt;&lt;abc",
+      "a",
+      "abcdefgh",
+      "abcdefgh&lt;",
+      "abcdefgh&lt;&gt;",
+      "abcdefgh&lt;&gt;&amp;",
+      "abcdefgh&lt;&gt;&amp;&quot;",
+      "abcdefgh&lt;&gt;&amp;&quot;&#39;",
+      "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;",
+      "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;Foo&lt;T&gt;&amp; foo",
+      "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;Foo&lt;T&gt;&amp; "
+      "foo&#39;&quot;&amp;&gt;&lt;abc",
+      "abcdefgh&lt;&gt;&amp;&quot;&#39;&#39;bad&#39;Foo&lt;T&gt;&amp; "
+      "foo&#39;&quot;&amp;&gt;&lt;abc",
   };
 
   ASSERT_EQ(ArrayLength(srcs), ArrayLength(dsts1));

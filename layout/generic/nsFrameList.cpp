@@ -7,11 +7,11 @@
 #include "nsFrameList.h"
 
 #include "mozilla/ArenaObjectID.h"
+#include "mozilla/PresShell.h"
 #include "nsBidiPresUtils.h"
 #include "nsContainerFrame.h"
 #include "nsGkAtoms.h"
 #include "nsILineIterator.h"
-#include "nsIPresShell.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 
@@ -25,11 +25,11 @@ const AlignedFrameListBytes gEmptyFrameListBytes = {0};
 }  // namespace layout
 }  // namespace mozilla
 
-void* nsFrameList::operator new(size_t sz, nsIPresShell* aPresShell) {
+void* nsFrameList::operator new(size_t sz, mozilla::PresShell* aPresShell) {
   return aPresShell->AllocateByObjectID(eArenaObjectID_nsFrameList, sz);
 }
 
-void nsFrameList::Delete(nsIPresShell* aPresShell) {
+void nsFrameList::Delete(mozilla::PresShell* aPresShell) {
   MOZ_ASSERT(this != &EmptyList(), "Shouldn't Delete() this list");
   NS_ASSERTION(IsEmpty(), "Shouldn't Delete() a non-empty list");
 
@@ -281,7 +281,8 @@ void nsFrameList::ApplySetParent(nsContainerFrame* aParent) const {
   }
 }
 
-/* static */ void nsFrameList::UnhookFrameFromSiblings(nsIFrame* aFrame) {
+/* static */
+void nsFrameList::UnhookFrameFromSiblings(nsIFrame* aFrame) {
   MOZ_ASSERT(aFrame->GetPrevSibling() && aFrame->GetNextSibling());
   nsIFrame* const nextSibling = aFrame->GetNextSibling();
   nsIFrame* const prevSibling = aFrame->GetPrevSibling();

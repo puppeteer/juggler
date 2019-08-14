@@ -8,17 +8,18 @@
 #define SHARED_LIBRARIES_H_
 
 #ifndef MOZ_GECKO_PROFILER
-#error This header does not have a useful implementation on your platform!
+#  error This header does not have a useful implementation on your platform!
 #endif
 
-#include <algorithm>
-#include <vector>
-#include <string>
-#include <stdlib.h>
-#include <stdint.h>
-#include <nsID.h>
-#include "nsString.h"
 #include "nsNativeCharsetUtils.h"
+#include "nsString.h"
+#include <nsID.h>
+
+#include <algorithm>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string>
+#include <vector>
 
 class SharedLibrary {
  public:

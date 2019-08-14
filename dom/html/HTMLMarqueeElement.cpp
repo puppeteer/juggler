@@ -22,12 +22,6 @@ namespace dom {
 
 HTMLMarqueeElement::~HTMLMarqueeElement() {}
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(HTMLMarqueeElement, nsGenericHTMLElement,
-                                   mStartStopCallback)
-
-NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(HTMLMarqueeElement,
-                                               nsGenericHTMLElement)
-
 NS_IMPL_ELEMENT_CLONE(HTMLMarqueeElement)
 
 static const nsAttrValue::EnumTable kBehaviorTable[] = {
@@ -52,14 +46,12 @@ JSObject* HTMLMarqueeElement::WrapNode(JSContext* aCx,
   return dom::HTMLMarqueeElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsresult HTMLMarqueeElement::BindToTree(nsIDocument* aDocument,
-                                        nsIContent* aParent,
-                                        nsIContent* aBindingParent) {
-  nsresult rv =
-      nsGenericHTMLElement::BindToTree(aDocument, aParent, aBindingParent);
+nsresult HTMLMarqueeElement::BindToTree(BindContext& aContext,
+                                        nsINode& aParent) {
+  nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (nsContentUtils::IsUAWidgetEnabled() && IsInComposedDoc()) {
+  if (IsInComposedDoc()) {
     AttachAndSetUAShadowRoot();
     NotifyUAWidgetSetupOrChange();
   }
@@ -67,19 +59,14 @@ nsresult HTMLMarqueeElement::BindToTree(nsIDocument* aDocument,
   return rv;
 }
 
-void HTMLMarqueeElement::UnbindFromTree(bool aDeep, bool aNullParent) {
-  if (nsContentUtils::IsUAWidgetEnabled() && IsInComposedDoc()) {
+void HTMLMarqueeElement::UnbindFromTree(bool aNullParent) {
+  if (IsInComposedDoc()) {
     // We don't want to unattach the shadow root because it used to
     // contain a <slot>.
     NotifyUAWidgetTeardown(UnattachShadowRoot::No);
   }
 
-  nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
-}
-
-void HTMLMarqueeElement::SetStartStopCallback(
-    FunctionStringCallback* aCallback) {
-  mStartStopCallback = aCallback;
+  nsGenericHTMLElement::UnbindFromTree(aNullParent);
 }
 
 void HTMLMarqueeElement::GetBehavior(nsAString& aValue) {
@@ -97,7 +84,7 @@ bool HTMLMarqueeElement::ParseAttribute(int32_t aNamespaceID,
                                         nsAttrValue& aResult) {
   if (aNamespaceID == kNameSpaceID_None) {
     if ((aAttribute == nsGkAtoms::width) || (aAttribute == nsGkAtoms::height)) {
-      return aResult.ParseSpecialIntValue(aValue);
+      return aResult.ParseHTMLDimension(aValue);
     }
     if (aAttribute == nsGkAtoms::bgcolor) {
       return aResult.ParseColor(aValue);
@@ -110,9 +97,8 @@ bool HTMLMarqueeElement::ParseAttribute(int32_t aNamespaceID,
       return aResult.ParseEnumValue(aValue, kDirectionTable, false,
                                     kDefaultDirection);
     }
-    if ((aAttribute == nsGkAtoms::hspace) ||
-        (aAttribute == nsGkAtoms::vspace)) {
-      return aResult.ParseIntWithBounds(aValue, 0);
+    if (aAttribute == nsGkAtoms::hspace || aAttribute == nsGkAtoms::vspace) {
+      return aResult.ParseHTMLDimension(aValue);
     }
 
     if (aAttribute == nsGkAtoms::loop) {
@@ -134,8 +120,8 @@ nsresult HTMLMarqueeElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
                                           const nsAttrValue* aOldValue,
                                           nsIPrincipal* aMaybeScriptedPrincipal,
                                           bool aNotify) {
-  if (nsContentUtils::IsUAWidgetEnabled() && IsInComposedDoc() &&
-      aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::direction) {
+  if (IsInComposedDoc() && aNameSpaceID == kNameSpaceID_None &&
+      aName == nsGkAtoms::direction) {
     NotifyUAWidgetSetupOrChange();
   }
   return nsGenericHTMLElement::AfterSetAttr(
@@ -178,16 +164,12 @@ void HTMLMarqueeElement::DispatchEventToShadowRoot(
 void HTMLMarqueeElement::Start() {
   if (GetShadowRoot()) {
     DispatchEventToShadowRoot(NS_LITERAL_STRING("marquee-start"));
-  } else if (mStartStopCallback) {
-    mStartStopCallback->Call(NS_LITERAL_STRING("start"));
   }
 }
 
 void HTMLMarqueeElement::Stop() {
   if (GetShadowRoot()) {
     DispatchEventToShadowRoot(NS_LITERAL_STRING("marquee-stop"));
-  } else if (mStartStopCallback) {
-    mStartStopCallback->Call(NS_LITERAL_STRING("stop"));
   }
 }
 

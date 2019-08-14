@@ -6,6 +6,7 @@
  * The origin of this IDL file is
  * http://www.whatwg.org/specs/web-apps/current-work/#the-input-element
  * http://www.whatwg.org/specs/web-apps/current-work/#other-elements,-attributes-and-apis
+ * https://wicg.github.io/entries-api/#idl-index
  *
  * © Copyright 2004-2011 Apple Computer, Inc., Mozilla Foundation, and
  * Opera Software ASA. You are granted a license to use, reproduce
@@ -89,8 +90,8 @@ interface HTMLInputElement : HTMLElement {
            attribute DOMString type;
   [CEReactions, Pure, SetterThrows]
            attribute DOMString defaultValue;
-  [CEReactions, Pure, TreatNullAs=EmptyString, SetterThrows, NeedsCallerType]
-           attribute DOMString value;
+  [CEReactions, Pure, SetterThrows, NeedsCallerType]
+           attribute [TreatNullAs=EmptyString] DOMString value;
   [Throws, Func="HTMLInputElement::ValueAsDateEnabled"]
            attribute Date? valueAsDate;
   [Pure, SetterThrows]
@@ -182,6 +183,12 @@ partial interface HTMLInputElement {
   boolean mozIsTextField(boolean aExcludePassword);
 
   [ChromeOnly]
+  readonly attribute boolean hasBeenTypePassword;
+
+  [ChromeOnly]
+  attribute DOMString previewValue;
+
+  [ChromeOnly]
   // This function will return null if @autocomplete is not defined for the
   // current @type
   AutocompleteInfo? getAutocompleteInfo();
@@ -226,7 +233,7 @@ partial interface HTMLInputElement {
 
 HTMLInputElement implements MozImageLoadingContent;
 
-// Webkit/Blink
+// https://wicg.github.io/entries-api/#idl-index
 partial interface HTMLInputElement {
   [Pref="dom.webkitBlink.filesystem.enabled", Frozen, Cached, Pure]
   readonly attribute sequence<FileSystemEntry> webkitEntries;
@@ -259,10 +266,10 @@ partial interface HTMLInputElement {
   double getMaximum();
 
   [Pref="dom.forms.datetime", Func="IsChromeOrXBLOrUAWidget"]
-  void openDateTimePicker(optional DateTimeValue initialValue);
+  void openDateTimePicker(optional DateTimeValue initialValue = {});
 
   [Pref="dom.forms.datetime", Func="IsChromeOrXBLOrUAWidget"]
-  void updateDateTimePicker(optional DateTimeValue value);
+  void updateDateTimePicker(optional DateTimeValue value = {});
 
   [Pref="dom.forms.datetime", Func="IsChromeOrXBLOrUAWidget"]
   void closeDateTimePicker();
@@ -280,9 +287,4 @@ partial interface HTMLInputElement {
   [Pref="dom.forms.datetime", Func="IsChromeOrXBLOrUAWidget",
    BinaryName="getStepBaseAsDouble"]
   double getStepBase();
-};
-
-partial interface HTMLInputElement {
-  [ChromeOnly]
-  attribute DOMString previewValue;
 };

@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Monitor.h"
 
 #include "nsIconChannel.h"
 #include "nsIIconURI.h"
@@ -17,7 +18,6 @@
 #include "nsMemory.h"
 #include "nsIStringStream.h"
 #include "nsIURL.h"
-#include "nsIOutputStream.h"
 #include "nsIPipe.h"
 #include "nsNetCID.h"
 #include "nsIFile.h"
@@ -29,6 +29,10 @@
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
+#include "nsThreadUtils.h"
+
+#include "Decoder.h"
+#include "DecodePool.h"
 
 // we need windows.h to read out registry information...
 #include <windows.h>
@@ -38,6 +42,7 @@
 #include <wchar.h>
 
 using namespace mozilla;
+using namespace mozilla::image;
 
 struct ICONFILEHEADER {
   uint16_t ifhReserved;
@@ -61,6 +66,102 @@ static SHSTOCKICONID GetStockIconIDForName(const nsACString& aStockName) {
   return aStockName.EqualsLiteral("uac-shield") ? SIID_SHIELD : SIID_INVALID;
 }
 
+class nsIconChannel::IconAsyncOpenTask final : public Runnable {
+ public:
+  IconAsyncOpenTask(nsIconChannel* aChannel, nsIEventTarget* aTarget,
+                    nsCOMPtr<nsIFile>&& aLocalFile, nsAutoString& aPath,
+                    UINT aInfoFlags)
+      : Runnable("IconAsyncOpenTask"),
+        mChannel(aChannel),
+
+        mTarget(aTarget),
+        mLocalFile(std::move(aLocalFile)),
+        mPath(aPath),
+        mInfoFlags(aInfoFlags) {}
+
+  NS_IMETHOD Run() override;
+
+ private:
+  RefPtr<nsIconChannel> mChannel;
+  nsCOMPtr<nsIEventTarget> mTarget;
+  nsCOMPtr<nsIFile> mLocalFile;
+  nsAutoString mPath;
+  UINT mInfoFlags;
+};
+
+NS_IMETHODIMP nsIconChannel::IconAsyncOpenTask::Run() {
+  HICON hIcon = nullptr;
+  nsresult rv =
+      mChannel->GetHIconFromFile(mLocalFile, mPath, mInfoFlags, &hIcon);
+  // Effectively give ownership of mChannel to the runnable so it get released
+  // on the main thread.
+  RefPtr<nsIconChannel> channel = mChannel.forget();
+  nsCOMPtr<nsIRunnable> task = NewRunnableMethod<HICON, nsresult>(
+      "nsIconChannel::FinishAsyncOpen", channel,
+      &nsIconChannel::FinishAsyncOpen, hIcon, rv);
+  mTarget->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
+  return NS_OK;
+}
+
+class nsIconChannel::IconSyncOpenTask final : public Runnable {
+ public:
+  IconSyncOpenTask(nsIconChannel* aChannel, nsIEventTarget* aTarget,
+                   nsCOMPtr<nsIFile>&& aLocalFile, nsAutoString& aPath,
+                   UINT aInfoFlags)
+      : Runnable("IconSyncOpenTask"),
+        mMonitor("IconSyncOpenTask"),
+        mDone(false),
+        mChannel(aChannel),
+        mTarget(aTarget),
+        mLocalFile(std::move(aLocalFile)),
+        mPath(aPath),
+        mInfoFlags(aInfoFlags),
+        mHIcon(nullptr),
+        mRv(NS_OK) {}
+
+  NS_IMETHOD Run() override;
+
+  Monitor& GetMonitor() { return mMonitor; }
+  bool Done() const {
+    mMonitor.AssertCurrentThreadOwns();
+    return mDone;
+  }
+  HICON GetHIcon() const {
+    mMonitor.AssertCurrentThreadOwns();
+    return mHIcon;
+  }
+  nsresult GetRv() const {
+    mMonitor.AssertCurrentThreadOwns();
+    return mRv;
+  }
+
+ private:
+  Monitor mMonitor;
+  bool mDone;
+  // Parameters in
+  RefPtr<nsIconChannel> mChannel;
+  nsCOMPtr<nsIEventTarget> mTarget;
+  nsCOMPtr<nsIFile> mLocalFile;
+  nsAutoString mPath;
+  UINT mInfoFlags;
+  // Return values
+  HICON mHIcon;
+  nsresult mRv;
+};
+
+NS_IMETHODIMP
+nsIconChannel::IconSyncOpenTask::Run() {
+  MonitorAutoLock lock(mMonitor);
+  mRv = mChannel->GetHIconFromFile(mLocalFile, mPath, mInfoFlags, &mHIcon);
+  mDone = true;
+  mMonitor.NotifyAll();
+  // Do this little dance because nsIconChannel multiple inherits from
+  // nsISupports.
+  nsCOMPtr<nsIChannel> channel = mChannel.forget();
+  NS_ProxyRelease("IconSyncOpenTask::mChannel", mTarget, channel.forget());
+  return NS_OK;
+}
+
 // nsIconChannel methods
 nsIconChannel::nsIconChannel() {}
 
@@ -68,6 +169,10 @@ nsIconChannel::~nsIconChannel() {
   if (mLoadInfo) {
     NS_ReleaseOnMainThreadSystemGroup("nsIconChannel::mLoadInfo",
                                       mLoadInfo.forget());
+  }
+  if (mLoadGroup) {
+    NS_ReleaseOnMainThreadSystemGroup("nsIconChannel::mLoadGroup",
+                                      mLoadGroup.forget());
   }
 }
 
@@ -156,17 +261,19 @@ nsIconChannel::GetURI(nsIURI** aURI) {
 }
 
 NS_IMETHODIMP
-nsIconChannel::Open(nsIInputStream** _retval) {
-  return MakeInputStream(_retval, false);
-}
-
-NS_IMETHODIMP
-nsIconChannel::Open2(nsIInputStream** aStream) {
+nsIconChannel::Open(nsIInputStream** aStream) {
   nsCOMPtr<nsIStreamListener> listener;
   nsresult rv =
       nsContentSecurityManager::doContentSecurityCheck(this, listener);
   NS_ENSURE_SUCCESS(rv, rv);
-  return Open(aStream);
+
+  HICON hIcon = nullptr;
+  rv = GetHIcon(/* aNonBlocking */ false, &hIcon);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  return MakeInputStream(aStream, /* aNonBlocking */ false, hIcon);
 }
 
 nsresult nsIconChannel::ExtractIconInfoFromUrl(nsIFile** aLocalFile,
@@ -195,49 +302,41 @@ nsresult nsIconChannel::ExtractIconInfoFromUrl(nsIFile** aLocalFile,
   return file->Clone(aLocalFile);
 }
 
-NS_IMETHODIMP
-nsIconChannel::AsyncOpen(nsIStreamListener* aListener, nsISupports* ctxt) {
-  MOZ_ASSERT(
-      !mLoadInfo || mLoadInfo->GetSecurityMode() == 0 ||
-          mLoadInfo->GetInitialSecurityCheckDone() ||
-          (mLoadInfo->GetSecurityMode() ==
-               nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
-           nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
-      "security flags in loadInfo but asyncOpen2() not called");
+void nsIconChannel::OnAsyncError(nsresult aStatus) {
+  OnStartRequest(this);
+  OnStopRequest(this, aStatus);
+}
+
+void nsIconChannel::FinishAsyncOpen(HICON aIcon, nsresult aStatus) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (NS_FAILED(aStatus)) {
+    OnAsyncError(aStatus);
+    return;
+  }
 
   nsCOMPtr<nsIInputStream> inStream;
-  nsresult rv = MakeInputStream(getter_AddRefs(inStream), true);
+  nsresult rv = MakeInputStream(getter_AddRefs(inStream),
+                                /* aNonBlocking */ true, aIcon);
   if (NS_FAILED(rv)) {
-    mCallbacks = nullptr;
-    return rv;
+    OnAsyncError(rv);
+    return;
   }
 
-  // Init our streampump
-  nsCOMPtr<nsIEventTarget> target = nsContentUtils::GetEventTargetByLoadInfo(
-      mLoadInfo, mozilla::TaskCategory::Other);
-  rv = mPump->Init(inStream, 0, 0, false, target);
+  rv = mPump->Init(inStream, 0, 0, false, mListenerTarget);
   if (NS_FAILED(rv)) {
-    mCallbacks = nullptr;
-    return rv;
+    OnAsyncError(rv);
+    return;
   }
 
-  rv = mPump->AsyncRead(this, ctxt);
-  if (NS_SUCCEEDED(rv)) {
-    // Store our real listener
-    mListener = aListener;
-    // Add ourself to the load group, if available
-    if (mLoadGroup) {
-      mLoadGroup->AddRequest(this, nullptr);
-    }
-  } else {
-    mCallbacks = nullptr;
+  rv = mPump->AsyncRead(this, nullptr);
+  if (NS_FAILED(rv)) {
+    OnAsyncError(rv);
   }
-
-  return rv;
 }
 
 NS_IMETHODIMP
-nsIconChannel::AsyncOpen2(nsIStreamListener* aListener) {
+nsIconChannel::AsyncOpen(nsIStreamListener* aListener) {
   nsCOMPtr<nsIStreamListener> listener = aListener;
   nsresult rv =
       nsContentSecurityManager::doContentSecurityCheck(this, listener);
@@ -245,7 +344,51 @@ nsIconChannel::AsyncOpen2(nsIStreamListener* aListener) {
     mCallbacks = nullptr;
     return rv;
   }
-  return AsyncOpen(listener, nullptr);
+
+  MOZ_ASSERT(
+      !mLoadInfo || mLoadInfo->GetSecurityMode() == 0 ||
+          mLoadInfo->GetInitialSecurityCheckDone() ||
+          (mLoadInfo->GetSecurityMode() ==
+               nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
+           nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+      "security flags in loadInfo but doContentSecurityCheck() not called");
+
+  nsCOMPtr<nsIInputStream> inStream;
+  rv = EnsurePipeCreated(/* aIconSize */ 0, /* aNonBlocking */ true);
+  if (NS_FAILED(rv)) {
+    mCallbacks = nullptr;
+    return rv;
+  }
+
+  mListenerTarget = nsContentUtils::GetEventTargetByLoadInfo(
+      mLoadInfo, mozilla::TaskCategory::Other);
+  if (!mListenerTarget) {
+    mListenerTarget = do_GetMainThread();
+  }
+
+  // If we pass aNonBlocking as true, GetHIcon will always have dispatched
+  // upon success.
+  HICON hIcon = nullptr;
+  rv = GetHIcon(/* aNonBlocking */ true, &hIcon);
+  if (NS_FAILED(rv)) {
+    mCallbacks = nullptr;
+    mInputStream = nullptr;
+    mOutputStream = nullptr;
+    mListenerTarget = nullptr;
+    return rv;
+  }
+
+  // We shouldn't have the icon yet if it is non-blocking.
+  MOZ_ASSERT(!hIcon);
+
+  // Add ourself to the load group, if available
+  if (mLoadGroup) {
+    mLoadGroup->AddRequest(this, nullptr);
+  }
+
+  // Store our real listener
+  mListener = aListener;
+  return NS_OK;
 }
 
 static DWORD GetSpecialFolderIcon(nsIFile* aFile, int aFolder,
@@ -284,7 +427,7 @@ static UINT GetSizeInfoFlag(uint32_t aDesiredImageSize) {
   return (UINT)(aDesiredImageSize > 16 ? SHGFI_SHELLICONSIZE : SHGFI_SMALLICON);
 }
 
-nsresult nsIconChannel::GetHIconFromFile(HICON* hIcon) {
+nsresult nsIconChannel::GetHIconFromFile(bool aNonBlocking, HICON* hIcon) {
   nsCString contentType;
   nsCString fileExt;
   nsCOMPtr<nsIFile> localFile;  // file we want an icon for
@@ -295,7 +438,6 @@ nsresult nsIconChannel::GetHIconFromFile(HICON* hIcon) {
 
   // if the file exists, we are going to use it's real attributes...
   // otherwise we only want to use it for it's extension...
-  SHFILEINFOW sfi;
   UINT infoFlags = SHGFI_ICON;
 
   bool fileExists = false;
@@ -342,13 +484,41 @@ nsresult nsIconChannel::GetHIconFromFile(HICON* hIcon) {
     filePath = NS_LITERAL_STRING(".") + NS_ConvertUTF8toUTF16(defFileExt);
   }
 
+  if (aNonBlocking) {
+    RefPtr<nsIEventTarget> target = DecodePool::Singleton()->GetIOEventTarget();
+    RefPtr<IconAsyncOpenTask> task = new IconAsyncOpenTask(
+        this, mListenerTarget, std::move(localFile), filePath, infoFlags);
+    target->Dispatch(task.forget(), NS_DISPATCH_NORMAL);
+    return NS_OK;
+  }
+
+  // We cannot call SHGetFileInfo on more than one thread (at a time), so it
+  // must be called on the same thread every time, even now when we need sync
+  // behaviour. So we synchronously wait on the other thread to finish.
+  RefPtr<nsIEventTarget> target = DecodePool::Singleton()->GetIOEventTarget();
+  RefPtr<IconSyncOpenTask> task = new IconSyncOpenTask(
+      this, mListenerTarget, std::move(localFile), filePath, infoFlags);
+  MonitorAutoLock lock(task->GetMonitor());
+  target->Dispatch(task, NS_DISPATCH_NORMAL);
+  do {
+    task->GetMonitor().Wait();
+  } while (!task->Done());
+  *hIcon = task->GetHIcon();
+  return task->GetRv();
+}
+
+nsresult nsIconChannel::GetHIconFromFile(nsIFile* aLocalFile,
+                                         const nsAutoString& aPath,
+                                         UINT aInfoFlags, HICON* hIcon) {
+  SHFILEINFOW sfi;
+
   // Is this the "Desktop" folder?
   DWORD shellResult =
-      GetSpecialFolderIcon(localFile, CSIDL_DESKTOP, &sfi, infoFlags);
+      GetSpecialFolderIcon(aLocalFile, CSIDL_DESKTOP, &sfi, aInfoFlags);
   if (!shellResult) {
     // Is this the "My Documents" folder?
     shellResult =
-        GetSpecialFolderIcon(localFile, CSIDL_PERSONAL, &sfi, infoFlags);
+        GetSpecialFolderIcon(aLocalFile, CSIDL_PERSONAL, &sfi, aInfoFlags);
   }
 
   // There are other "Special Folders" and Namespace entities that we
@@ -359,17 +529,16 @@ nsresult nsIconChannel::GetHIconFromFile(HICON* hIcon) {
 
   // Not a special folder, or something else failed above.
   if (!shellResult) {
-    shellResult = ::SHGetFileInfoW(filePath.get(), FILE_ATTRIBUTE_ARCHIVE, &sfi,
-                                   sizeof(sfi), infoFlags);
+    shellResult = ::SHGetFileInfoW(aPath.get(), FILE_ATTRIBUTE_ARCHIVE, &sfi,
+                                   sizeof(sfi), aInfoFlags);
   }
 
-  if (shellResult && sfi.hIcon) {
-    *hIcon = sfi.hIcon;
-  } else {
-    rv = NS_ERROR_NOT_AVAILABLE;
+  if (!shellResult || !sfi.hIcon) {
+    return NS_ERROR_NOT_AVAILABLE;
   }
 
-  return rv;
+  *hIcon = sfi.hIcon;
+  return NS_OK;
 }
 
 nsresult nsIconChannel::GetStockHIcon(nsIMozIconURI* aIconURI, HICON* hIcon) {
@@ -462,32 +631,43 @@ static BITMAPINFO* CreateBitmapInfo(BITMAPINFOHEADER* aHeader,
   return bmi;
 }
 
-nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval,
-                                        bool aNonBlocking) {
+nsresult nsIconChannel::EnsurePipeCreated(uint32_t aIconSize,
+                                          bool aNonBlocking) {
+  if (mInputStream || mOutputStream) {
+    return NS_OK;
+  }
+
+  return NS_NewPipe(getter_AddRefs(mInputStream), getter_AddRefs(mOutputStream),
+                    aIconSize, aIconSize > 0 ? aIconSize : UINT32_MAX,
+                    aNonBlocking);
+}
+
+nsresult nsIconChannel::GetHIcon(bool aNonBlocking, HICON* aIcon) {
   // Check whether the icon requested's a file icon or a stock icon
   nsresult rv = NS_ERROR_NOT_AVAILABLE;
 
   // GetDIBits does not exist on windows mobile.
-  HICON hIcon = nullptr;
-
   nsCOMPtr<nsIMozIconURI> iconURI(do_QueryInterface(mUrl, &rv));
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsAutoCString stockIcon;
   iconURI->GetStockIcon(stockIcon);
   if (!stockIcon.IsEmpty()) {
-    rv = GetStockHIcon(iconURI, &hIcon);
-  } else {
-    rv = GetHIconFromFile(&hIcon);
+    return GetStockHIcon(iconURI, aIcon);
   }
 
-  NS_ENSURE_SUCCESS(rv, rv);
+  return GetHIconFromFile(aNonBlocking, aIcon);
+}
 
-  if (hIcon) {
+nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval,
+                                        bool aNonBlocking, HICON aIcon) {
+  nsresult rv = NS_ERROR_FAILURE;
+
+  if (aIcon) {
     // we got a handle to an icon. Now we want to get a bitmap for the icon
     // using GetIconInfo....
     ICONINFO iconInfo;
-    if (GetIconInfo(hIcon, &iconInfo)) {
+    if (GetIconInfo(aIcon, &iconInfo)) {
       // we got the bitmaps, first find out their size
       HDC hDC = CreateCompatibleDC(nullptr);  // get a device context for
                                               // the screen.
@@ -568,16 +748,12 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval,
                 GetDIBits(hDC, iconInfo.hbmMask, 0, maskHeader.biHeight,
                           whereTo, maskInfo, DIB_RGB_COLORS)) {
               // Now, create a pipe and stuff our data into it
-              nsCOMPtr<nsIInputStream> inStream;
-              nsCOMPtr<nsIOutputStream> outStream;
-              rv = NS_NewPipe(getter_AddRefs(inStream),
-                              getter_AddRefs(outStream), iconSize, iconSize,
-                              aNonBlocking);
+              rv = EnsurePipeCreated(iconSize, aNonBlocking);
               if (NS_SUCCEEDED(rv)) {
                 uint32_t written;
-                rv = outStream->Write(buffer.get(), iconSize, &written);
+                rv = mOutputStream->Write(buffer.get(), iconSize, &written);
                 if (NS_SUCCEEDED(rv)) {
-                  NS_ADDREF(*_retval = inStream);
+                  NS_ADDREF(*_retval = mInputStream);
                 }
               }
 
@@ -592,13 +768,16 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval,
       DeleteObject(iconInfo.hbmColor);
       DeleteObject(iconInfo.hbmMask);
     }  // if we got icon info
-    DestroyIcon(hIcon);
+    DestroyIcon(aIcon);
   }  // if we got an hIcon
 
   // If we didn't make a stream, then fail.
   if (!*_retval && NS_SUCCEEDED(rv)) {
     rv = NS_ERROR_NOT_AVAILABLE;
   }
+
+  mInputStream = nullptr;
+  mOutputStream = nullptr;
   return rv;
 }
 
@@ -688,6 +867,7 @@ nsIconChannel::GetLoadInfo(nsILoadInfo** aLoadInfo) {
 
 NS_IMETHODIMP
 nsIconChannel::SetLoadInfo(nsILoadInfo* aLoadInfo) {
+  MOZ_RELEASE_ASSERT(aLoadInfo, "loadinfo can't be null");
   mLoadInfo = aLoadInfo;
   return NS_OK;
 }
@@ -714,19 +894,17 @@ nsIconChannel::GetSecurityInfo(nsISupports** aSecurityInfo) {
 }
 
 // nsIRequestObserver methods
-NS_IMETHODIMP nsIconChannel::OnStartRequest(nsIRequest* aRequest,
-                                            nsISupports* aContext) {
+NS_IMETHODIMP nsIconChannel::OnStartRequest(nsIRequest* aRequest) {
   if (mListener) {
-    return mListener->OnStartRequest(this, aContext);
+    return mListener->OnStartRequest(this);
   }
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsIconChannel::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
-                             nsresult aStatus) {
+nsIconChannel::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   if (mListener) {
-    mListener->OnStopRequest(this, aContext, aStatus);
+    mListener->OnStopRequest(this, aStatus);
     mListener = nullptr;
   }
 
@@ -737,17 +915,17 @@ nsIconChannel::OnStopRequest(nsIRequest* aRequest, nsISupports* aContext,
 
   // Drop notification callbacks to prevent cycles.
   mCallbacks = nullptr;
+  mListenerTarget = nullptr;
 
   return NS_OK;
 }
 
 // nsIStreamListener methods
 NS_IMETHODIMP
-nsIconChannel::OnDataAvailable(nsIRequest* aRequest, nsISupports* aContext,
-                               nsIInputStream* aStream, uint64_t aOffset,
-                               uint32_t aCount) {
+nsIconChannel::OnDataAvailable(nsIRequest* aRequest, nsIInputStream* aStream,
+                               uint64_t aOffset, uint32_t aCount) {
   if (mListener) {
-    return mListener->OnDataAvailable(this, aContext, aStream, aOffset, aCount);
+    return mListener->OnDataAvailable(this, aStream, aOffset, aCount);
   }
   return NS_OK;
 }

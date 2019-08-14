@@ -13,11 +13,9 @@ BROWSER_CHROME_MANIFESTS += [
     'test/browser/google_codes/browser.ini',
 ]
 
-XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
+MARIONETTE_LAYOUT_MANIFESTS += ['test/marionette/manifest.ini']
 
-TESTING_JS_MODULES += [
-    'test/browser/SearchTestUtils.jsm',
-]
+XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
 
 JAR_MANIFESTS += ['jar.mn']
 

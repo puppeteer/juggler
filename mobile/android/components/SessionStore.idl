@@ -45,12 +45,6 @@ interface nsISessionStore : nsISupports
   Node undoCloseTab(in nsIDOMWindow aWindow, in jsval aCloseTabData);
 
   /**
-   * @param aWindow is the browser window associated with the closed tab.
-   * @param aIndex  is the index of the closed tab to be removed (FIFO ordered).
-   */
-  Node forgetClosedTab(in nsIDOMWindow aWindow, in unsigned long aIndex);
-
-  /**
    * Whether the "Undo close tab" message should be shown or not after a tab has been closed.
    */
  readonly attribute boolean canUndoLastCloseTab;
@@ -58,7 +52,7 @@ interface nsISessionStore : nsISupports
   /**
    * @param aTab is the browser tab to get the value for.
    * @param aKey is the value's name.
-   * 
+   *
    * @returns A string value or an empty string if none is set.
    */
   AString getTabValue(in jsval aTab, in AString aKey);

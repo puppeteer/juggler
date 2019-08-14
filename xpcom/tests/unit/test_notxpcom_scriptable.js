@@ -3,22 +3,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-
 const kCID = Components.ID("{1f9f7181-e6c5-4f4c-8f71-08005cec8468}");
 const kContract = "@testing/notxpcomtest";
 
 function run_test() {
   let registrar = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
 
-  ok(Ci.ScriptableWithNotXPCOM);
+  ok(Ci.nsIScriptableWithNotXPCOM);
 
   let method1Called = false;
 
   let testObject = {
-    QueryInterface: ChromeUtils.generateQI([Ci.ScriptableOK,
-                                            Ci.ScriptableWithNotXPCOM,
-                                            Ci.ScriptableWithNotXPCOMBase]),
+    QueryInterface: ChromeUtils.generateQI([
+      Ci.nsIScriptableOK,
+      Ci.nsIScriptableWithNotXPCOM,
+    ]),
 
     method1() {
       method1Called = true;
@@ -52,24 +51,20 @@ function run_test() {
   ok(xpcomObject);
   strictEqual(xpcomObject.jsonly, undefined);
 
-  xpcomObject.QueryInterface(Ci.ScriptableOK);
+  xpcomObject.QueryInterface(Ci.nsIScriptableOK);
 
   xpcomObject.method1();
   ok(method1Called);
 
   try {
-    xpcomObject.QueryInterface(Ci.ScriptableWithNotXPCOM);
-    ok(false, "Should not have implemented ScriptableWithNotXPCOM");
+    xpcomObject.QueryInterface(Ci.nsIScriptableWithNotXPCOM);
+    ok(false, "Should not have implemented nsIScriptableWithNotXPCOM");
   } catch (e) {
-    ok(true, "Should not have implemented ScriptableWithNotXPCOM. Correctly threw error: " + e);
+    ok(
+      true,
+      "Should not have implemented nsIScriptableWithNotXPCOM. Correctly threw error: " +
+        e
+    );
   }
   strictEqual(xpcomObject.method2, undefined);
-
-  try {
-    xpcomObject.QueryInterface(Ci.ScriptableWithNotXPCOMBase);
-    ok(false, "Should not have implemented ScriptableWithNotXPCOMBase");
-  } catch (e) {
-    ok(true, "Should not have implemented ScriptableWithNotXPCOMBase. Correctly threw error: " + e);
-  }
-  strictEqual(xpcomObject.method3, undefined);
 }

@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxContext.h"
+#include "mozilla/PresShell.h"
 #include "nsMathMLmoFrame.h"
 #include "nsPresContext.h"
 #include "nsContentUtils.h"
@@ -21,8 +22,8 @@ using namespace mozilla;
 // additional ComputedStyle to be used by our MathMLChar.
 #define NS_MATHML_CHAR_STYLE_CONTEXT_INDEX 0
 
-nsIFrame* NS_NewMathMLmoFrame(nsIPresShell* aPresShell, ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmoFrame(aStyle);
+nsIFrame* NS_NewMathMLmoFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell) nsMathMLmoFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmoFrame)
@@ -968,7 +969,8 @@ nsresult nsMathMLmoFrame::Place(DrawTarget* aDrawTarget, bool aPlaceOrigin,
   return NS_OK;
 }
 
-/* virtual */ void nsMathMLmoFrame::MarkIntrinsicISizesDirty() {
+/* virtual */
+void nsMathMLmoFrame::MarkIntrinsicISizesDirty() {
   // if we get this, it may mean that something changed in the text
   // content. So blow away everything an re-build the automatic data
   // from the parent of our outermost embellished container (we ensure
@@ -991,8 +993,9 @@ nsresult nsMathMLmoFrame::Place(DrawTarget* aDrawTarget, bool aPlaceOrigin,
   nsMathMLContainerFrame::MarkIntrinsicISizesDirty();
 }
 
-/* virtual */ void nsMathMLmoFrame::GetIntrinsicISizeMetrics(
-    gfxContext* aRenderingContext, ReflowOutput& aDesiredSize) {
+/* virtual */
+void nsMathMLmoFrame::GetIntrinsicISizeMetrics(gfxContext* aRenderingContext,
+                                               ReflowOutput& aDesiredSize) {
   ProcessOperatorData();
   if (UseMathMLChar()) {
     uint32_t stretchHint =

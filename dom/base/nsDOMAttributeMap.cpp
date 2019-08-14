@@ -19,7 +19,7 @@
 #include "nsContentUtils.h"
 #include "nsError.h"
 #include "nsIContentInlines.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsNameSpaceManager.h"
 #include "nsNodeInfoManager.h"
 #include "nsUnicharUtils.h"
@@ -96,7 +96,7 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsDOMAttributeMap)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsDOMAttributeMap)
 
-nsresult nsDOMAttributeMap::SetOwnerDocument(nsIDocument* aDocument) {
+nsresult nsDOMAttributeMap::SetOwnerDocument(Document* aDocument) {
   for (auto iter = mAttributeCache.Iter(); !iter.Done(); iter.Next()) {
     nsresult rv = iter.Data()->SetOwnerDocument(aDocument);
     NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
@@ -400,8 +400,9 @@ size_t nsDOMAttributeMap::SizeOfIncludingThis(
   return n;
 }
 
-/* virtual */ JSObject* nsDOMAttributeMap::WrapObject(
-    JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
+/* virtual */
+JSObject* nsDOMAttributeMap::WrapObject(JSContext* aCx,
+                                        JS::Handle<JSObject*> aGivenProto) {
   return NamedNodeMap_Binding::Wrap(aCx, this, aGivenProto);
 }
 

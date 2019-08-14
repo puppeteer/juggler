@@ -7,6 +7,7 @@
 #include "mozilla/DebugOnly.h"
 
 #include "gc/GCInternals.h"
+#include "gc/GCLock.h"
 #include "js/HashTable.h"
 #include "vm/Realm.h"
 #include "vm/Runtime.h"
@@ -36,7 +37,7 @@ static void IterateRealmsArenasCellsUnbarriered(
     for (ArenaIter aiter(zone, thingKind); !aiter.done(); aiter.next()) {
       Arena* arena = aiter.get();
       (*arenaCallback)(cx->runtime(), data, arena, traceKind, thingSize);
-      for (ArenaCellIterUnbarriered iter(arena); !iter.done(); iter.next()) {
+      for (ArenaCellIter iter(arena); !iter.done(); iter.next()) {
         (*cellCallback)(cx->runtime(), data, iter.getCell(), traceKind,
                         thingSize);
       }
@@ -85,11 +86,7 @@ static void TraverseInnerLazyScriptsForLazyScript(
     JSContext* cx, void* data, LazyScript* enclosingLazyScript,
     IterateLazyScriptCallback lazyScriptCallback,
     const JS::AutoRequireNoGC& nogc) {
-  GCPtrFunction* innerFunctions = enclosingLazyScript->innerFunctions();
-  for (size_t i = 0, len = enclosingLazyScript->numInnerFunctions(); i < len;
-       i++) {
-    JSFunction* fun = innerFunctions[i];
-
+  for (JSFunction* fun : enclosingLazyScript->innerFunctions()) {
     // LazyScript::CreateForXDR temporarily initializes innerFunctions with
     // its own function, but it should be overwritten with correct
     // inner functions before getting inserted into parent's innerFunctions.
@@ -154,16 +151,17 @@ static void IterateScriptsImpl(JSContext* cx, Realm* realm, void* data,
 
   if (realm) {
     Zone* zone = realm->zone();
-    for (auto script = zone->cellIter<T>(empty); !script.done();
-         script.next()) {
-      if (script->realm() == realm) {
-        DoScriptCallback(cx, data, script, scriptCallback, nogc);
+    for (auto iter = zone->cellIter<T>(empty); !iter.done(); iter.next()) {
+      T* script = iter;
+      if (script->realm() != realm) {
+        continue;
       }
+      DoScriptCallback(cx, data, script, scriptCallback, nogc);
     }
   } else {
     for (ZonesIter zone(cx->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-      for (auto script = zone->cellIter<T>(empty); !script.done();
-           script.next()) {
+      for (auto iter = zone->cellIter<T>(empty); !iter.done(); iter.next()) {
+        T* script = iter;
         DoScriptCallback(cx, data, script, scriptCallback, nogc);
       }
     }
@@ -212,7 +210,23 @@ JS_PUBLIC_API void JS_IterateCompartments(
   AutoTraceSession session(cx->runtime());
 
   for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
-    (*compartmentCallback)(cx, data, c);
+    if ((*compartmentCallback)(cx, data, c) ==
+        JS::CompartmentIterResult::Stop) {
+      break;
+    }
+  }
+}
+
+JS_PUBLIC_API void JS_IterateCompartmentsInZone(
+    JSContext* cx, JS::Zone* zone, void* data,
+    JSIterateCompartmentCallback compartmentCallback) {
+  AutoTraceSession session(cx->runtime());
+
+  for (CompartmentsInZoneIter c(zone); !c.done(); c.next()) {
+    if ((*compartmentCallback)(cx, data, c) ==
+        JS::CompartmentIterResult::Stop) {
+      break;
+    }
   }
 }
 

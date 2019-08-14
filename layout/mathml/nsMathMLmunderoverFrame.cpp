@@ -11,18 +11,22 @@
 #include <algorithm>
 #include "gfxContext.h"
 #include "gfxMathTable.h"
+#include "gfxTextRun.h"
+#include "mozilla/PresShell.h"
 
 using namespace mozilla;
 
 //
-// <munderover> -- attach an underscript-overscript pair to a base -
-// implementation <mover> -- attach an overscript to a base - implementation
+// <munderover> -- attach an underscript-overscript pair to a base
+//                 implementation
+// <mover> -- attach an overscript to a base - implementation
 // <munder> -- attach an underscript to a base - implementation
 //
 
-nsIFrame* NS_NewMathMLmunderoverFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewMathMLmunderoverFrame(PresShell* aPresShell,
                                       ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmunderoverFrame(aStyle);
+  return new (aPresShell)
+      nsMathMLmunderoverFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmunderoverFrame)
@@ -352,8 +356,10 @@ i.e.,:
  }
 */
 
-/* virtual */ nsresult nsMathMLmunderoverFrame::Place(
-    DrawTarget* aDrawTarget, bool aPlaceOrigin, ReflowOutput& aDesiredSize) {
+/* virtual */
+nsresult nsMathMLmunderoverFrame::Place(DrawTarget* aDrawTarget,
+                                        bool aPlaceOrigin,
+                                        ReflowOutput& aDesiredSize) {
   float fontSizeInflation = nsLayoutUtils::FontSizeInflationFor(this);
   if (NS_MATHML_EMBELLISH_IS_MOVABLELIMITS(mEmbellishData.flags) &&
       StyleFont()->mMathDisplay == NS_MATHML_DISPLAYSTYLE_INLINE) {

@@ -10,10 +10,12 @@ extern crate winit;
 #[path = "common/boilerplate.rs"]
 mod boilerplate;
 
-use boilerplate::{Example, HandyDandyRectBuilder};
+use crate::boilerplate::{Example, HandyDandyRectBuilder};
 use gleam::gl;
 use std::mem;
 use webrender::api::*;
+use webrender::api::units::*;
+
 
 struct ImageGenerator {
     patterns: [[u8; 3]; 6],
@@ -90,19 +92,17 @@ impl Example for App {
         api: &RenderApi,
         builder: &mut DisplayListBuilder,
         txn: &mut Transaction,
-        _framebuffer_size: DeviceIntSize,
-        _pipeline_id: PipelineId,
+        _device_size: DeviceIntSize,
+        pipeline_id: PipelineId,
         _document_id: DocumentId,
     ) {
         let bounds = (0, 0).to(512, 512);
-        let info = LayoutPrimitiveInfo::new(bounds);
-        builder.push_stacking_context(
-            &info,
-            None,
-            TransformStyle::Flat,
-            MixBlendMode::Normal,
-            &[],
-            RasterSpace::Screen,
+        let space_and_clip = SpaceAndClipInfo::root_scroll(pipeline_id);
+
+        builder.push_simple_stacking_context(
+            bounds.origin,
+            space_and_clip.spatial_id,
+            true,
         );
 
         let x0 = 50.0;
@@ -136,16 +136,17 @@ impl Example for App {
         for (i, key) in self.stress_keys.iter().enumerate() {
             let x = (i % 128) as f32;
             let y = (i / 128) as f32;
-            let info = LayoutPrimitiveInfo::with_clip_rect(
+            let info = CommonItemProperties::new(
                 LayoutRect::new(
                     LayoutPoint::new(x0 + image_size.width * x, y0 + image_size.height * y),
                     image_size,
                 ),
-                bounds,
+                space_and_clip,
             );
 
             builder.push_image(
                 &info,
+                bounds,
                 image_size,
                 LayoutSize::zero(),
                 ImageRendering::Auto,
@@ -157,12 +158,13 @@ impl Example for App {
 
         if let Some(image_key) = self.image_key {
             let image_size = LayoutSize::new(100.0, 100.0);
-            let info = LayoutPrimitiveInfo::with_clip_rect(
+            let info = CommonItemProperties::new(
                 LayoutRect::new(LayoutPoint::new(100.0, 100.0), image_size),
-                bounds,
+                space_and_clip,
             );
             builder.push_image(
                 &info,
+                bounds,
                 image_size,
                 LayoutSize::zero(),
                 ImageRendering::Auto,
@@ -174,12 +176,13 @@ impl Example for App {
 
         let swap_key = self.swap_keys[self.swap_index];
         let image_size = LayoutSize::new(64.0, 64.0);
-        let info = LayoutPrimitiveInfo::with_clip_rect(
+        let info = CommonItemProperties::new(
             LayoutRect::new(LayoutPoint::new(100.0, 400.0), image_size),
-            bounds,
+            space_and_clip,
         );
         builder.push_image(
             &info,
+            bounds,
             image_size,
             LayoutSize::zero(),
             ImageRendering::Auto,
@@ -301,9 +304,9 @@ impl Example for App {
 
     fn get_image_handlers(
         &mut self,
-        _gl: &gl::Gl,
-    ) -> (Option<Box<webrender::ExternalImageHandler>>,
-          Option<Box<webrender::OutputImageHandler>>) {
+        _gl: &dyn gl::Gl,
+    ) -> (Option<Box<dyn webrender::ExternalImageHandler>>,
+          Option<Box<dyn webrender::OutputImageHandler>>) {
         (Some(Box::new(ImageGenerator::new())), None)
     }
 }

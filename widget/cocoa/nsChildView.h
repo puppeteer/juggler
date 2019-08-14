@@ -9,8 +9,8 @@
 // formal protocols
 #include "mozView.h"
 #ifdef ACCESSIBILITY
-#include "mozilla/a11y/Accessible.h"
-#include "mozAccessibleProtocol.h"
+#  include "mozilla/a11y/Accessible.h"
+#  include "mozAccessibleProtocol.h"
 #endif
 
 #include "nsISupports.h"
@@ -56,6 +56,8 @@ class RectTextureImage;
 class WidgetRenderingContext;
 }  // namespace widget
 }  // namespace mozilla
+
+@class PixelHostingView;
 
 @interface NSEvent (Undocumented)
 
@@ -201,6 +203,15 @@ class WidgetRenderingContext;
   // CGContext painting (i.e. non-accelerated).
   CGImageRef mTopLeftCornerMask;
 
+  // Subviews of self, which act as container views for vibrancy views and
+  // non-draggable views.
+  NSView* mVibrancyViewsContainer;      // [STRONG]
+  NSView* mNonDraggableViewsContainer;  // [STRONG]
+
+  // The view that does our drawing. This is a subview of self so that it can
+  // be ordered on top of mVibrancyViewsContainer.
+  PixelHostingView* mPixelHostingView;
+
   // Last pressure stage by trackpad's force click
   NSInteger mLastPressureStage;
 }
@@ -228,6 +239,10 @@ class WidgetRenderingContext;
 
 - (bool)preRender:(NSOpenGLContext*)aGLContext;
 - (void)postRender:(NSOpenGLContext*)aGLContext;
+
+- (NSView*)vibrancyViewsContainer;
+- (NSView*)nonDraggableViewsContainer;
+- (NSView*)pixelHostingView;
 
 - (BOOL)isCoveringTitlebar;
 
@@ -317,7 +332,7 @@ class nsChildView final : public nsBaseWidget {
 
   virtual void Enable(bool aState) override;
   virtual bool IsEnabled() const override;
-  virtual nsresult SetFocus(bool aRaise) override;
+  virtual void SetFocus(Raise) override;
   virtual LayoutDeviceIntRect GetBounds() override;
   virtual LayoutDeviceIntRect GetClientBounds() override;
   virtual LayoutDeviceIntRect GetScreenBounds() override;
@@ -354,7 +369,7 @@ class nsChildView final : public nsBaseWidget {
   virtual void* GetNativeData(uint32_t aDataType) override;
   virtual nsresult ConfigureChildren(const nsTArray<Configuration>& aConfigurations) override;
   virtual LayoutDeviceIntPoint WidgetToScreenOffset() override;
-  virtual bool ShowsResizeIndicator(LayoutDeviceIntRect* aResizerRect) override;
+  virtual bool ShowsResizeIndicator(LayoutDeviceIntRect* aResizerRect) override { return false; }
 
   static bool ConvertStatus(nsEventStatus aStatus) {
     return aStatus == nsEventStatus_eConsumeNoDefault;
@@ -364,9 +379,8 @@ class nsChildView final : public nsBaseWidget {
   virtual bool WidgetTypeSupportsAcceleration() override;
   virtual bool ShouldUseOffMainThreadCompositing() override;
 
-  virtual void SetCursor(nsCursor aCursor) override;
-  virtual nsresult SetCursor(imgIContainer* aCursor, uint32_t aHotspotX,
-                             uint32_t aHotspotY) override;
+  virtual void SetCursor(nsCursor aDefaultCursor, imgIContainer* aCursor, uint32_t aHotspotX,
+                         uint32_t aHotspotY) override;
 
   virtual nsresult SetTitle(const nsAString& title) override;
 
@@ -426,6 +440,8 @@ class nsChildView final : public nsBaseWidget {
 
   void WillPaintWindow();
   bool PaintWindow(LayoutDeviceIntRegion aRegion);
+  bool PaintWindowInDrawTarget(mozilla::gfx::DrawTarget* aDT, const LayoutDeviceIntRegion& aRegion,
+                               const mozilla::gfx::IntSize& aSurfaceSize);
   bool PaintWindowInContext(CGContextRef aContext, const LayoutDeviceIntRegion& aRegion,
                             mozilla::gfx::IntSize aSurfaceSize);
 
@@ -472,7 +488,6 @@ class nsChildView final : public nsBaseWidget {
 
   mozilla::widget::TextInputHandler* GetTextInputHandler() { return mTextInputHandler; }
 
-  void ClearVibrantAreas();
   NSColor* VibrancyFillColorForThemeGeometryType(nsITheme::ThemeGeometryType aThemeGeometryType);
   NSColor* VibrancyFontSmoothingBackgroundColorForThemeGeometryType(
       nsITheme::ThemeGeometryType aThemeGeometryType);
@@ -527,9 +542,6 @@ class nsChildView final : public nsBaseWidget {
   void ReportMoveEvent();
   void ReportSizeEvent();
 
-  // override to create different kinds of child views. Autoreleases, so
-  // caller must retain.
-  virtual NSView* CreateCocoaView(NSRect inFrame);
   void TearDownView();
 
   virtual already_AddRefed<nsIWidget> AllocateChildPopupWidget() override {
@@ -543,7 +555,6 @@ class nsChildView final : public nsBaseWidget {
 
   // Overlay drawing functions for OpenGL drawing
   void DrawWindowOverlay(mozilla::layers::GLManager* aManager, LayoutDeviceIntRect aRect);
-  void MaybeDrawResizeIndicator(mozilla::layers::GLManager* aManager);
   void MaybeDrawRoundedCorners(mozilla::layers::GLManager* aManager,
                                const LayoutDeviceIntRect& aRect);
   void MaybeDrawTitlebar(mozilla::layers::GLManager* aManager);
@@ -568,11 +579,11 @@ class nsChildView final : public nsBaseWidget {
                                uint32_t aAllowedDirections);
 
  protected:
-  NSView<mozView>* mView;  // my parallel cocoa view (ChildView or NativeScrollbarView), [STRONG]
+  ChildView* mView;  // my parallel cocoa view, [STRONG]
   RefPtr<mozilla::widget::TextInputHandler> mTextInputHandler;
   InputContext mInputContext;
 
-  NSView<mozView>* mParentView;
+  NSView* mParentView;
   nsIWidget* mParentWidget;
 
 #ifdef ACCESSIBILITY
@@ -589,8 +600,6 @@ class nsChildView final : public nsBaseWidget {
 
   // May be accessed from any thread, protected
   // by mEffectsLock.
-  bool mShowsResizeIndicator;
-  LayoutDeviceIntRect mResizeIndicatorRect;
   bool mHasRoundedBottomCorners;
   int mDevPixelCornerRadius;
   bool mIsCoveringTitlebar;
@@ -604,7 +613,6 @@ class nsChildView final : public nsBaseWidget {
   CGContextRef mTitlebarCGContext;
 
   // Compositor thread only
-  mozilla::UniquePtr<mozilla::widget::RectTextureImage> mResizerImage;
   mozilla::UniquePtr<mozilla::widget::RectTextureImage> mCornerMaskImage;
   mozilla::UniquePtr<mozilla::widget::RectTextureImage> mTitlebarImage;
   mozilla::UniquePtr<mozilla::widget::RectTextureImage> mBasicCompositorImage;

@@ -1,7 +1,7 @@
 // Returning {throw:} from onEnterFrame when resuming inside a try block in an
 // async function causes control to jump to the catch block.
 
-let g = newGlobal();
+let g = newGlobal({newCompartment: true});
 g.eval(`
     async function af() {
         try {
@@ -17,9 +17,9 @@ let dbg = new Debugger(g);
 dbg.onEnterFrame = frame => {
     if (!("hits" in frame)) {
         frame.hits = 1;
-    } else if (++frame.hits == 3) {
-        // First two hits happen when g.af() is called;
-        // third hit is resuming at the `await` inside the try block.
+    } else if (++frame.hits === 2) {
+        // First hit happens when g.af() is called;
+        // second hit is resuming at the `await` inside the try block.
         return {throw: "fit"};
     }
 };

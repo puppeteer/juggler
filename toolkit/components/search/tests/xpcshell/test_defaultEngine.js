@@ -1,21 +1,21 @@
 /* Any copyright is dedicated to the Public Domain.
- *    http://creativecommons.org/publicdomain/zero/1.0/ */
+ * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /*
- * Test that currentEngine and defaultEngine properties can be set and yield the
- * proper events and behavior (search results)
+ * Test that defaultEngine property can be set and yields the proper events and\
+ * behavior (search results)
  */
 
 "use strict";
 
-function run_test() {
+add_task(async function setup() {
   useHttpServer();
-
-  run_next_test();
-}
+  await AddonTestUtils.promiseStartupManager();
+});
 
 add_task(async function test_defaultEngine() {
   let search = Services.search;
+  await search.init();
 
   let originalDefault = search.defaultEngine;
 
@@ -38,7 +38,7 @@ add_task(async function test_defaultEngine() {
 
   // ... and then to the first visible engine in the list, so move our second
   // engine to that position.
-  search.moveEngine(engine2, 0);
+  await search.moveEngine(engine2, 0);
   originalDefault.hidden = true;
   Assert.equal(search.defaultEngine, engine2);
 

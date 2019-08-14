@@ -5,7 +5,7 @@
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
-<script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
+<script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js" />
 
 <body xmlns="http://www.w3.org/1999/xhtml">
   <div id="content" style="display: none"/>
@@ -17,13 +17,12 @@ SimpleTest.waitForExplicitFinish();
 // Force off out-of-process mozbrowser because we need to grab its
 // |window| synchronously from here.  Out-of-process docshell creation
 // for mozbrowser haves entirely differently.
-// XXX why doesn't pushPrefEnv() work here?
-var otherWindow = window.open("window_bug757137.xul", "", "chrome");
-ok(otherWindow.isChromeWindow, 'XUL window should be a ChromeWindow');
-
 SpecialPowers.pushPrefEnv({"set":[["dom.ipc.tabs.disabled", true]]}, startTest);
 
 function startTest() {
+  var otherWindow = window.open("window_bug757137.xul", "", "chrome");
+  ok(otherWindow.isChromeWindow, 'XUL window should be a ChromeWindow');
+
   otherWindow.onload = function () {
     var w = otherWindow.document.getElementById('f').contentWindow;
     ok(w !== null, 'got the |window| for a mozbrowser iframe');

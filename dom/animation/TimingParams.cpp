@@ -8,10 +8,10 @@
 
 #include "mozilla/AnimationUtils.h"
 #include "mozilla/dom/AnimatableBinding.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/KeyframeAnimationOptionsBinding.h"
 #include "mozilla/dom/KeyframeEffectBinding.h"
 #include "mozilla/ServoCSSParser.h"
-#include "nsIDocument.h"
 
 namespace mozilla {
 
@@ -20,22 +20,26 @@ static const dom::EffectTiming& GetTimingProperties(
     const OptionsType& aOptions);
 
 template <>
-/* static */ const dom::EffectTiming& GetTimingProperties(
+/* static */
+const dom::EffectTiming& GetTimingProperties(
     const dom::UnrestrictedDoubleOrKeyframeEffectOptions& aOptions) {
   MOZ_ASSERT(aOptions.IsKeyframeEffectOptions());
   return aOptions.GetAsKeyframeEffectOptions();
 }
 
 template <>
-/* static */ const dom::EffectTiming& GetTimingProperties(
+/* static */
+const dom::EffectTiming& GetTimingProperties(
     const dom::UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions) {
   MOZ_ASSERT(aOptions.IsKeyframeAnimationOptions());
   return aOptions.GetAsKeyframeAnimationOptions();
 }
 
 template <class OptionsType>
-/* static */ TimingParams TimingParams::FromOptionsType(
-    const OptionsType& aOptions, nsIDocument* aDocument, ErrorResult& aRv) {
+/* static */
+TimingParams TimingParams::FromOptionsType(const OptionsType& aOptions,
+                                           dom::Document* aDocument,
+                                           ErrorResult& aRv) {
   TimingParams result;
 
   if (aOptions.IsUnrestrictedDouble()) {
@@ -56,20 +60,23 @@ template <class OptionsType>
   return result;
 }
 
-/* static */ TimingParams TimingParams::FromOptionsUnion(
+/* static */
+TimingParams TimingParams::FromOptionsUnion(
     const dom::UnrestrictedDoubleOrKeyframeEffectOptions& aOptions,
-    nsIDocument* aDocument, ErrorResult& aRv) {
+    dom::Document* aDocument, ErrorResult& aRv) {
   return FromOptionsType(aOptions, aDocument, aRv);
 }
 
-/* static */ TimingParams TimingParams::FromOptionsUnion(
+/* static */
+TimingParams TimingParams::FromOptionsUnion(
     const dom::UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
-    nsIDocument* aDocument, ErrorResult& aRv) {
+    dom::Document* aDocument, ErrorResult& aRv) {
   return FromOptionsType(aOptions, aDocument, aRv);
 }
 
-/* static */ TimingParams TimingParams::FromEffectTiming(
-    const dom::EffectTiming& aEffectTiming, nsIDocument* aDocument,
+/* static */
+TimingParams TimingParams::FromEffectTiming(
+    const dom::EffectTiming& aEffectTiming, dom::Document* aDocument,
     ErrorResult& aRv) {
   TimingParams result;
 
@@ -106,9 +113,10 @@ template <class OptionsType>
   return result;
 }
 
-/* static */ TimingParams TimingParams::MergeOptionalEffectTiming(
+/* static */
+TimingParams TimingParams::MergeOptionalEffectTiming(
     const TimingParams& aSource, const dom::OptionalEffectTiming& aEffectTiming,
-    nsIDocument* aDocument, ErrorResult& aRv) {
+    dom::Document* aDocument, ErrorResult& aRv) {
   MOZ_ASSERT(!aRv.Failed(), "Initially return value should be ok");
 
   TimingParams result = aSource;
@@ -182,8 +190,9 @@ template <class OptionsType>
   return result;
 }
 
-/* static */ Maybe<ComputedTimingFunction> TimingParams::ParseEasing(
-    const nsAString& aEasing, nsIDocument* aDocument, ErrorResult& aRv) {
+/* static */
+Maybe<ComputedTimingFunction> TimingParams::ParseEasing(
+    const nsAString& aEasing, dom::Document* aDocument, ErrorResult& aRv) {
   MOZ_ASSERT(aDocument);
 
   nsTimingFunction timingFunction;

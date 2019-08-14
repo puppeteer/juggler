@@ -7,10 +7,10 @@
 //! It is the register allocator's job to make sure that the register constraints on value operands
 //! are satisfied.
 
-use binemit::CodeOffset;
-use ir::{Function, Inst, ValueLoc};
-use isa::{RegClass, RegUnit};
-use regalloc::RegDiversions;
+use crate::binemit::CodeOffset;
+use crate::ir::{Function, Inst, ValueLoc};
+use crate::isa::{RegClass, RegUnit};
+use crate::regalloc::RegDiversions;
 
 /// Register constraint for a single value operand or instruction result.
 #[derive(PartialEq, Debug)]
@@ -105,13 +105,13 @@ pub struct RecipeConstraints {
     /// constraints must be derived from the calling convention ABI.
     pub outs: &'static [OperandConstraint],
 
-    /// Are any of the input constraints `FixedReg`?
+    /// Are any of the input constraints `FixedReg` or `FixedTied`?
     pub fixed_ins: bool,
 
-    /// Are any of the output constraints `FixedReg`?
+    /// Are any of the output constraints `FixedReg` or `FixedTied`?
     pub fixed_outs: bool,
 
-    /// Are there any tied operands?
+    /// Are any of the input/output constraints `Tied` (but not `FixedTied`)?
     pub tied_ops: bool,
 
     /// Does this instruction clobber the CPU flags?

@@ -6,7 +6,7 @@ Bug 943251 - Allow accessing about:config from WebIDE
 <head>
   <meta charset="utf-8">
   <title>Test Preference Actor</title>
-  <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
 </head>
 <body>
@@ -15,7 +15,7 @@ Bug 943251 - Allow accessing about:config from WebIDE
 "use strict";
 
 function runTests() {
-  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+  const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
   const {DebuggerClient} = require("devtools/shared/client/debugger-client");
   const {DebuggerServer} = require("devtools/server/main");
   const Services = require("Services");

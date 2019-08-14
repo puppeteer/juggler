@@ -6,47 +6,9 @@
 
 [OverrideBuiltins]
 interface HTMLDocument : Document {
-           [SetterThrows]
-           attribute DOMString domain;
-           [Throws]
-           attribute DOMString cookie;
   // DOM tree accessors
   [Throws]
   getter object (DOMString name);
-
-  // dynamic markup insertion
-  [CEReactions, Throws]
-  Document open(optional DOMString type, optional DOMString replace = ""); // type is ignored
-  [CEReactions, Throws]
-  WindowProxy? open(DOMString url, DOMString name, DOMString features, optional boolean replace = false);
-  [CEReactions, Throws]
-  void close();
-  [CEReactions, Throws]
-  void write(DOMString... text);
-  [CEReactions, Throws]
-  void writeln(DOMString... text);
-
-  [CEReactions, SetterThrows, SetterNeedsSubjectPrincipal]
-           attribute DOMString designMode;
-  [CEReactions, Throws, NeedsSubjectPrincipal]
-  boolean execCommand(DOMString commandId, optional boolean showUI = false,
-                      optional DOMString value = "");
-  [Throws, NeedsSubjectPrincipal]
-  boolean queryCommandEnabled(DOMString commandId);
-  [Throws]
-  boolean queryCommandIndeterm(DOMString commandId);
-  [Throws]
-  boolean queryCommandState(DOMString commandId);
-  [NeedsCallerType]
-  boolean queryCommandSupported(DOMString commandId);
-  [Throws]
-  DOMString queryCommandValue(DOMString commandId);
-
-  [CEReactions, TreatNullAs=EmptyString] attribute DOMString fgColor;
-  [CEReactions, TreatNullAs=EmptyString] attribute DOMString linkColor;
-  [CEReactions, TreatNullAs=EmptyString] attribute DOMString vlinkColor;
-  [CEReactions, TreatNullAs=EmptyString] attribute DOMString alinkColor;
-  [CEReactions, TreatNullAs=EmptyString] attribute DOMString bgColor;
 
   void clear();
 
@@ -61,18 +23,19 @@ interface HTMLDocument : Document {
 
 partial interface HTMLDocument {
   /*
-   * Number of nodes that have been blocked by
-   * the Safebrowsing API to prevent tracking.
+   * Number of nodes that have been blocked by the Safebrowsing API to prevent
+   * tracking, cryptomining and so on. This method is for testing only.
    */
   [ChromeOnly, Pure]
-  readonly attribute long blockedTrackingNodeCount;
+  readonly attribute long blockedNodeByClassifierCount;
 
   /*
-   * List of nodes that have been blocked by
-   * the Safebrowsing API to prevent tracking.
+   * List of nodes that have been blocked by the Safebrowsing API to prevent
+   * tracking, fingerprinting, cryptomining and so on. This method is for
+   * testing only.
    */
   [ChromeOnly, Pure]
-  readonly attribute NodeList blockedTrackingNodes;
+  readonly attribute NodeList blockedNodesByClassifier;
 
   [ChromeOnly]
   void userInteractionForTesting();

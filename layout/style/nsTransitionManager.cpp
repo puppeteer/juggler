@@ -340,7 +340,8 @@ bool CSSTransition::HasLowerCompositeOrderThan(
          nsCSSProps::GetStringValue(aOther.TransitionProperty());
 }
 
-/* static */ Nullable<TimeDuration> CSSTransition::GetCurrentTimeAt(
+/* static */
+Nullable<TimeDuration> CSSTransition::GetCurrentTimeAt(
     const dom::DocumentTimeline& aTimeline, const TimeStamp& aBaseTime,
     const TimeDuration& aStartTime, double aPlaybackRate) {
   Nullable<TimeDuration> result;
@@ -382,7 +383,7 @@ static inline bool ExtractNonDiscreteComputedValue(
 }
 
 bool nsTransitionManager::UpdateTransitions(dom::Element* aElement,
-                                            CSSPseudoElementType aPseudoType,
+                                            PseudoStyleType aPseudoType,
                                             const ComputedStyle& aOldStyle,
                                             const ComputedStyle& aNewStyle) {
   if (!mPresContext->IsDynamic()) {
@@ -392,15 +393,13 @@ bool nsTransitionManager::UpdateTransitions(dom::Element* aElement,
 
   CSSTransitionCollection* collection =
       CSSTransitionCollection::GetAnimationCollection(aElement, aPseudoType);
-  const nsStyleDisplay* disp = aNewStyle.ComputedData()->GetStyleDisplay();
-  return DoUpdateTransitions(*disp, aElement, aPseudoType, collection,
-                             aOldStyle, aNewStyle);
+  return DoUpdateTransitions(*aNewStyle.StyleDisplay(), aElement, aPseudoType,
+                             collection, aOldStyle, aNewStyle);
 }
 
 bool nsTransitionManager::DoUpdateTransitions(
     const nsStyleDisplay& aDisp, dom::Element* aElement,
-    CSSPseudoElementType aPseudoType,
-    CSSTransitionCollection*& aElementTransitions,
+    PseudoStyleType aPseudoType, CSSTransitionCollection*& aElementTransitions,
     const ComputedStyle& aOldStyle, const ComputedStyle& aNewStyle) {
   MOZ_ASSERT(!aElementTransitions || aElementTransitions->mElement == aElement,
              "Element mismatch");
@@ -434,7 +433,7 @@ bool nsTransitionManager::DoUpdateTransitions(
     if (property == eCSSPropertyExtra_all_properties) {
       for (nsCSSPropertyID p = nsCSSPropertyID(0);
            p < eCSSProperty_COUNT_no_shorthands; p = nsCSSPropertyID(p + 1)) {
-        if (!nsCSSProps::IsEnabled(p, CSSEnabledState::eForAllContent)) {
+        if (!nsCSSProps::IsEnabled(p, CSSEnabledState::ForAllContent)) {
           continue;
         }
         startedAny |= ConsiderInitiatingTransition(
@@ -443,7 +442,7 @@ bool nsTransitionManager::DoUpdateTransitions(
       }
     } else if (nsCSSProps::IsShorthand(property)) {
       CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subprop, property,
-                                           CSSEnabledState::eForAllContent) {
+                                           CSSEnabledState::ForAllContent) {
         startedAny |= ConsiderInitiatingTransition(
             *subprop, aDisp, i, aElement, aPseudoType, aElementTransitions,
             aOldStyle, aNewStyle, propertiesChecked);
@@ -485,8 +484,8 @@ bool nsTransitionManager::DoUpdateTransitions(
                 nsCSSProps::Physicalize(p, aNewStyle));
           }
         } else if (nsCSSProps::IsShorthand(property)) {
-          CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(
-              subprop, property, CSSEnabledState::eForAllContent) {
+          CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subprop, property,
+                                               CSSEnabledState::ForAllContent) {
             auto p = nsCSSProps::Physicalize(*subprop, aNewStyle);
             allTransitionProperties.AddProperty(p);
           }
@@ -522,7 +521,7 @@ bool nsTransitionManager::DoUpdateTransitions(
             effectSet->UpdateAnimationGeneration(mPresContext);
           }
         }
-        anim->CancelFromStyle();
+        anim->CancelFromStyle(PostRestyleMode::IfNeeded);
         animations.RemoveElementAt(i);
       }
     } while (i != 0);
@@ -572,8 +571,7 @@ static bool IsTransitionable(nsCSSPropertyID aProperty) {
 
 bool nsTransitionManager::ConsiderInitiatingTransition(
     nsCSSPropertyID aProperty, const nsStyleDisplay& aStyleDisplay,
-    uint32_t transitionIdx, dom::Element* aElement,
-    CSSPseudoElementType aPseudoType,
+    uint32_t transitionIdx, dom::Element* aElement, PseudoStyleType aPseudoType,
     CSSTransitionCollection*& aElementTransitions,
     const ComputedStyle& aOldStyle, const ComputedStyle& aNewStyle,
     nsCSSPropertyIDSet& aPropertiesChecked) {
@@ -670,7 +668,7 @@ bool nsTransitionManager::ConsiderInitiatingTransition(
       // just got a style change to a value that can't be interpolated.
       OwningCSSTransitionPtrArray& animations =
           aElementTransitions->mAnimations;
-      animations[currentIndex]->CancelFromStyle();
+      animations[currentIndex]->CancelFromStyle(PostRestyleMode::IfNeeded);
       oldPT = nullptr;  // Clear pointer so it doesn't dangle
       animations.RemoveElementAt(currentIndex);
       EffectSet* effectSet = EffectSet::GetEffectSet(aElement, aPseudoType);
@@ -803,7 +801,7 @@ bool nsTransitionManager::ConsiderInitiatingTransition(
                oldPT->GetAnimation()->PlaybackRate(), oldPT->SpecifiedTiming(),
                segment.mTimingFunction, segment.mFromValue, segment.mToValue}));
     }
-    animations[currentIndex]->CancelFromStyle();
+    animations[currentIndex]->CancelFromStyle(PostRestyleMode::IfNeeded);
     oldPT = nullptr;  // Clear pointer so it doesn't dangle
     animations[currentIndex] = animation;
   } else {

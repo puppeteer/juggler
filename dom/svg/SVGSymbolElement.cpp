@@ -7,7 +7,7 @@
 #include "mozilla/dom/SVGSymbolElement.h"
 #include "mozilla/dom/SVGSymbolElementBinding.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Symbol)
+NS_IMPL_NS_NEW_SVG_ELEMENT(Symbol)
 
 namespace mozilla {
 namespace dom {
@@ -29,8 +29,6 @@ NS_IMPL_ISUPPORTS_INHERITED(SVGSymbolElement, SVGSymbolElementBase,
 SVGSymbolElement::SVGSymbolElement(
     already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
     : SVGSymbolElementBase(std::move(aNodeInfo)) {}
-
-SVGSymbolElement::~SVGSymbolElement() {}
 
 //----------------------------------------------------------------------
 // nsINode methods

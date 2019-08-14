@@ -4,13 +4,17 @@
 
 "use strict";
 
+var FormAutofillHandler;
 add_task(async function seutp() {
-  ChromeUtils.import("resource://formautofill/FormAutofillHandler.jsm");
+  ({ FormAutofillHandler } = ChromeUtils.import(
+    "resource://formautofill/FormAutofillHandler.jsm"
+  ));
 });
 
 const TESTCASES = [
   {
-    description: "Don't contain a field whose length of value is greater than 200",
+    description:
+      "Don't contain a field whose length of value is greater than 200",
     document: `<form>
                 <input id="given-name" autocomplete="given-name">
                 <input id="organization" autocomplete="organization">
@@ -21,23 +25,27 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "*".repeat(200),
+      organization: "*".repeat(200),
       "address-level1": "*".repeat(201),
-      "country": "US",
+      country: "US",
       "cc-number": "1111222233334444",
       "cc-name": "*".repeat(201),
     },
     expectedRecord: {
-      address: [{
-        "given-name": "John",
-        "organization": "*".repeat(200),
-        "address-level1": "",
-        "country": "US",
-      }],
-      creditCard: [{
-        "cc-number": "1111222233334444",
-        "cc-name": "",
-      }],
+      address: [
+        {
+          "given-name": "John",
+          organization: "*".repeat(200),
+          "address-level1": "",
+          country: "US",
+        },
+      ],
+      creditCard: [
+        {
+          "cc-number": "1111222233334444",
+          "cc-name": "",
+        },
+      ],
     },
   },
   {
@@ -49,7 +57,7 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "Mozilla",
+      organization: "Mozilla",
     },
     expectedRecord: {
       address: [],
@@ -57,7 +65,8 @@ const TESTCASES = [
     },
   },
   {
-    description: "\"country\" using @autocomplete shouldn't be identified aggressively",
+    description:
+      '"country" using @autocomplete shouldn\'t be identified aggressively',
     document: `<form>
                 <input id="given-name" autocomplete="given-name">
                 <input id="organization" autocomplete="organization">
@@ -65,8 +74,8 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "Mozilla",
-      "country": "United States",
+      organization: "Mozilla",
+      country: "United States",
     },
     expectedRecord: {
       // "United States" is not a valid country, only country-name. See isRecordCreatable.
@@ -75,7 +84,7 @@ const TESTCASES = [
     },
   },
   {
-    description: "\"country\" using heuristics should be identified aggressively",
+    description: '"country" using heuristics should be identified aggressively',
     document: `<form>
                 <input id="given-name" autocomplete="given-name">
                 <input id="organization" autocomplete="organization">
@@ -83,20 +92,22 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "Mozilla",
-      "country": "United States",
+      organization: "Mozilla",
+      country: "United States",
     },
     expectedRecord: {
-      address: [{
-        "given-name": "John",
-        "organization": "Mozilla",
-        "country": "US",
-      }],
+      address: [
+        {
+          "given-name": "John",
+          organization: "Mozilla",
+          country: "US",
+        },
+      ],
       creditCard: [],
     },
   },
   {
-    description: "\"tel\" related fields should be concatenated",
+    description: '"tel" related fields should be concatenated',
     document: `<form>
                 <input id="given-name" autocomplete="given-name">
                 <input id="organization" autocomplete="organization">
@@ -105,21 +116,23 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "Mozilla",
+      organization: "Mozilla",
       "tel-country-code": "+1",
       "tel-national": "1234567890",
     },
     expectedRecord: {
-      address: [{
-        "given-name": "John",
-        "organization": "Mozilla",
-        "tel": "+11234567890",
-      }],
+      address: [
+        {
+          "given-name": "John",
+          organization: "Mozilla",
+          tel: "+11234567890",
+        },
+      ],
       creditCard: [],
     },
   },
   {
-    description: "\"tel\" should be removed if it's too short",
+    description: '"tel" should be removed if it\'s too short',
     document: `<form>
                 <input id="given-name" autocomplete="given-name">
                 <input id="organization" autocomplete="organization">
@@ -128,22 +141,24 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "Mozilla",
-      "country": "US",
-      "tel": "1234",
+      organization: "Mozilla",
+      country: "US",
+      tel: "1234",
     },
     expectedRecord: {
-      address: [{
-        "given-name": "John",
-        "organization": "Mozilla",
-        "country": "US",
-        "tel": "",
-      }],
+      address: [
+        {
+          "given-name": "John",
+          organization: "Mozilla",
+          country: "US",
+          tel: "",
+        },
+      ],
       creditCard: [],
     },
   },
   {
-    description: "\"tel\" should be removed if it's too long",
+    description: '"tel" should be removed if it\'s too long',
     document: `<form>
                 <input id="given-name" autocomplete="given-name">
                 <input id="organization" autocomplete="organization">
@@ -152,22 +167,24 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "Mozilla",
-      "country": "US",
-      "tel": "1234567890123456",
+      organization: "Mozilla",
+      country: "US",
+      tel: "1234567890123456",
     },
     expectedRecord: {
-      address: [{
-        "given-name": "John",
-        "organization": "Mozilla",
-        "country": "US",
-        "tel": "",
-      }],
+      address: [
+        {
+          "given-name": "John",
+          organization: "Mozilla",
+          country: "US",
+          tel: "",
+        },
+      ],
       creditCard: [],
     },
   },
   {
-    description: "\"tel\" should be removed if it contains invalid characters",
+    description: '"tel" should be removed if it contains invalid characters',
     document: `<form>
                 <input id="given-name" autocomplete="given-name">
                 <input id="organization" autocomplete="organization">
@@ -176,17 +193,19 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "John",
-      "organization": "Mozilla",
-      "country": "US",
-      "tel": "12345###!!!",
+      organization: "Mozilla",
+      country: "US",
+      tel: "12345###!!!",
     },
     expectedRecord: {
-      address: [{
-        "given-name": "John",
-        "organization": "Mozilla",
-        "country": "US",
-        "tel": "",
-      }],
+      address: [
+        {
+          "given-name": "John",
+          organization: "Mozilla",
+          country: "US",
+          tel: "",
+        },
+      ],
       creditCard: [],
     },
   },
@@ -200,7 +219,7 @@ const TESTCASES = [
     formValue: {
       "given-name": "John",
       "family-name": "Doe",
-      "organization": "Mozilla",
+      organization: "Mozilla",
     },
     expectedRecord: {
       address: [],
@@ -208,7 +227,8 @@ const TESTCASES = [
     },
   },
   {
-    description: "All telephone related fields should be counted as 1 field only.",
+    description:
+      "All telephone related fields should be counted as 1 field only.",
     document: `<form>
                 <input id="tel-country-code" autocomplete="tel-country-code">
                 <input id="tel-area-code" autocomplete="tel-area-code">
@@ -219,7 +239,7 @@ const TESTCASES = [
       "tel-country-code": "+1",
       "tel-area-code": "123",
       "tel-local": "4567890",
-      "organization": "Mozilla",
+      organization: "Mozilla",
     },
     expectedRecord: {
       address: [],
@@ -227,7 +247,8 @@ const TESTCASES = [
     },
   },
   {
-    description: "A credit card form with the value of cc-number, cc-exp, and cc-name.",
+    description:
+      "A credit card form with the value of cc-number, cc-exp, and cc-name.",
     document: `<form>
                 <input id="cc-number" autocomplete="cc-number">
                 <input id="cc-name" autocomplete="cc-name">
@@ -240,11 +261,13 @@ const TESTCASES = [
     },
     expectedRecord: {
       address: [],
-      creditCard: [{
-        "cc-number": "5105105105105100",
-        "cc-name": "Foo Bar",
-        "cc-exp": "2022-06",
-      }],
+      creditCard: [
+        {
+          "cc-number": "5105105105105100",
+          "cc-name": "Foo Bar",
+          "cc-exp": "2022-06",
+        },
+      ],
     },
   },
   {
@@ -257,9 +280,11 @@ const TESTCASES = [
     },
     expectedRecord: {
       address: [],
-      creditCard: [{
-        "cc-number": "4111111111111111",
-      }],
+      creditCard: [
+        {
+          "cc-number": "4111111111111111",
+        },
+      ],
     },
   },
   {
@@ -319,8 +344,8 @@ const TESTCASES = [
                </form>`,
     formValue: {
       "given-name": "Bar",
-      "organization": "Foo",
-      "country": "US",
+      organization: "Foo",
+      country: "US",
 
       "given-name-shipping": "John",
       "family-name-shipping": "Doe",
@@ -339,38 +364,47 @@ const TESTCASES = [
       "cc-exp-section-two": "2026-26",
     },
     expectedRecord: {
-      address: [{
-        "given-name": "Bar",
-        "organization": "Foo",
-        "country": "US",
-      }, {
-        "given-name": "John",
-        "family-name": "Doe",
-        "organization": "Mozilla",
-        "country": "US",
-      }, {
-        "given-name": "Foo",
-        "organization": "Bar",
-        "country": "US",
-      }],
-      creditCard: [{
-        "cc-number": "4111111111111111",
-        "cc-name": "John",
-      }, {
-        "cc-number": "5105105105105100",
-        "cc-name": "Foo Bar",
-        "cc-exp": "2026-26",
-      }],
+      address: [
+        {
+          "given-name": "Bar",
+          organization: "Foo",
+          country: "US",
+        },
+        {
+          "given-name": "John",
+          "family-name": "Doe",
+          organization: "Mozilla",
+          country: "US",
+        },
+        {
+          "given-name": "Foo",
+          organization: "Bar",
+          country: "US",
+        },
+      ],
+      creditCard: [
+        {
+          "cc-number": "4111111111111111",
+          "cc-name": "John",
+        },
+        {
+          "cc-number": "5105105105105100",
+          "cc-name": "Foo Bar",
+          "cc-exp": "2026-26",
+        },
+      ],
     },
   },
-
 ];
 
 for (let testcase of TESTCASES) {
   add_task(async function() {
     info("Starting testcase: " + testcase.description);
 
-    let doc = MockDocument.createTestDocument("http://localhost:8080/test/", testcase.document);
+    let doc = MockDocument.createTestDocument(
+      "http://localhost:8080/test/",
+      testcase.document
+    );
     let form = doc.querySelector("form");
     let formLike = FormLikeFactory.createFromForm(form);
     let handler = new FormAutofillHandler(formLike);
@@ -385,7 +419,10 @@ for (let testcase of TESTCASES) {
 
     let expectedRecord = testcase.expectedRecord;
     for (let type in record) {
-      Assert.deepEqual(record[type].map(secRecord => secRecord.record), expectedRecord[type]);
+      Assert.deepEqual(
+        record[type].map(secRecord => secRecord.record),
+        expectedRecord[type]
+      );
     }
   });
 }

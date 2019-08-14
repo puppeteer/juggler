@@ -9,12 +9,13 @@
 
 #include "nsISubstitutingProtocolHandler.h"
 
-#include "nsIOService.h"
 #include "nsISubstitutionObserver.h"
 #include "nsDataHashtable.h"
 #include "nsStandardURL.h"
+#include "nsJARURI.h"
 #include "mozilla/chrome/RegistryMessageUtils.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/RWLock.h"
 
 class nsIIOService;
 
@@ -32,13 +33,17 @@ class SubstitutingProtocolHandler {
                               bool aEnforceFileOrJar = true);
   explicit SubstitutingProtocolHandler(const char* aScheme);
 
-  NS_INLINE_DECL_REFCOUNTING(SubstitutingProtocolHandler);
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SubstitutingProtocolHandler);
   NS_DECL_NON_VIRTUAL_NSIPROTOCOLHANDLER;
   NS_DECL_NON_VIRTUAL_NSISUBSTITUTINGPROTOCOLHANDLER;
 
   bool HasSubstitution(const nsACString& aRoot) const {
+    AutoReadLock lock(const_cast<RWLock&>(mSubstitutionsLock));
     return mSubstitutions.Get(aRoot, nullptr);
   }
+
+  nsresult NewURI(const nsACString& aSpec, const char* aCharset,
+                  nsIURI* aBaseURI, nsIURI** aResult);
 
   MOZ_MUST_USE nsresult
   CollectSubstitutions(InfallibleTArray<SubstitutionMapping>& aResources);
@@ -71,6 +76,12 @@ class SubstitutingProtocolHandler {
     return false;
   }
 
+  // This method should only return true if GetSubstitutionInternal would
+  // return the RESOLVE_JAR_URI flag.
+  virtual MOZ_MUST_USE bool MustResolveJAR(const nsACString& aRoot) {
+    return false;
+  }
+
   // Override this in the subclass to check for special case when opening
   // channels.
   virtual MOZ_MUST_USE nsresult SubstituteChannel(nsIURI* uri,
@@ -97,12 +108,18 @@ class SubstitutingProtocolHandler {
 
   nsCString mScheme;
   Maybe<uint32_t> mFlags;
+
+  RWLock mSubstitutionsLock;
   nsDataHashtable<nsCStringHashKey, SubstitutionEntry> mSubstitutions;
   nsCOMPtr<nsIIOService> mIOService;
 
   // The list of observers added with AddObserver that will be
   // notified when substitutions are set or unset.
   nsTArray<nsCOMPtr<nsISubstitutionObserver>> mObservers;
+
+  // Returns a SubstitutingJARURI if |aUrl| maps to a |jar:| URI,
+  // otherwise will return |aURL|
+  nsresult ResolveJARURI(nsIURL* aURL, nsIURI** aResult);
 
   // In general, we expect the principal of a document loaded from a
   // substituting URI to be a codebase principal for that URI (rather than
@@ -115,49 +132,6 @@ class SubstitutingProtocolHandler {
   // Enforcing this for ye olde resource:// URIs could carry compat risks, so
   // we just try to enforce it on new protocols going forward.
   bool mEnforceFileOrJar;
-};
-
-// SubstitutingURL : overrides nsStandardURL::GetFile to provide nsIFile
-// resolution
-class SubstitutingURL : public nsStandardURL {
- public:
-  virtual nsStandardURL* StartClone() override;
-  virtual MOZ_MUST_USE nsresult EnsureFile() override;
-  NS_IMETHOD GetClassIDNoAlloc(nsCID* aCID) override;
-
- private:
-  explicit SubstitutingURL() : nsStandardURL(true) {}
-  explicit SubstitutingURL(bool aSupportsFileURL) : nsStandardURL(true) {
-    MOZ_ASSERT(aSupportsFileURL);
-  }
-  virtual nsresult Clone(nsIURI** aURI) override {
-    return nsStandardURL::Clone(aURI);
-  }
-
- public:
-  class Mutator : public TemplatedMutator<SubstitutingURL> {
-    NS_DECL_ISUPPORTS
-   public:
-    explicit Mutator() = default;
-
-   private:
-    virtual ~Mutator() = default;
-
-    SubstitutingURL* Create() override { return new SubstitutingURL(); }
-  };
-
-  NS_IMETHOD Mutate(nsIURIMutator** aMutator) override {
-    RefPtr<SubstitutingURL::Mutator> mutator = new SubstitutingURL::Mutator();
-    nsresult rv = mutator->InitFromURI(this);
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-    mutator.forget(aMutator);
-    return NS_OK;
-  }
-
-  friend BaseURIMutator<SubstitutingURL>;
-  friend TemplatedMutator<SubstitutingURL>;
 };
 
 }  // namespace net

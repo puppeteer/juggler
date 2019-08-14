@@ -9,10 +9,6 @@ xhtml|link {
   display: none;
 }
 
-#categories {
-  -moz-binding: url("chrome://mozapps/content/extensions/extensions.xml#categories-list");
-}
-
 .category {
   -moz-binding: url("chrome://mozapps/content/extensions/extensions.xml#category");
 }
@@ -111,6 +107,21 @@ row[unsupported="true"] {
   display: none;
 }
 
+.addon .privateBrowsing-notice {
+  display: none;
+}
+.addon[privateBrowsing="true"] .privateBrowsing-notice-container {
+  /* 40px is width and margin of .icon-container */
+  margin-inline-start: 40px;
+}
+.addon[privateBrowsing="true"] .privateBrowsing-notice {
+  margin: 4px 0 0;
+  display: inline-block;
+}
+.addon[active="false"] .privateBrowsing-notice {
+  background-color: var(--purple-70-a40);
+}
+
 #addons-page:not([warning]) #list-view > .global-warning-container {
   display: none;
 }
@@ -135,6 +146,7 @@ row[unsupported="true"] {
 
 /* Plugins aren't yet disabled by safemode (bug 342333),
    so don't show that warning when viewing plugins. */
+#addons-page[warning="safemode"] #html-view[type="list"][param="plugin"] .global-warning-safemode,
 #addons-page[warning="safemode"] .view-pane[type="plugin"] .global-warning-container,
 #addons-page[warning="safemode"] #detail-view[loading="true"] .global-warning {
   display: none;
@@ -152,11 +164,20 @@ row[unsupported="true"] {
   width: 664px;
 }
 
+.html-alert-container > .message-bar {
+  margin-bottom: 8px;
+}
+
+.html-global-warning-button {
+  margin-inline: 0;
+}
+
 .addon .relnotes {
   -moz-user-select: text;
 }
 #detail-name, #detail-desc, #detail-fulldesc {
   -moz-user-select: text;
+  word-wrap: break-word;
 }
 
 #detail-name-container {
@@ -180,14 +201,14 @@ richlistitem:not([selected]) * {
   width: 22em;
 }
 
-#header-utils-btn {
-  -moz-user-focus: normal;
-}
-
 .discover-button[disabled="true"] {
   display: none;
 }
 
 .view-pane:not(#legacy-view) .addon-control.replacement {
   display: none;
+}
+
+#pluginFlashBlockingCheckbox .checkbox-label-box {
+  display: none; /*see bug 1508724*/
 }

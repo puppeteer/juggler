@@ -9,6 +9,7 @@
 
 #include "CompositableHost.h"               // for CompositableHost
 #include "mozilla/layers/ImageComposite.h"  // for ImageComposite
+#include "mozilla/WeakPtr.h"
 
 namespace mozilla {
 namespace layers {
@@ -21,74 +22,66 @@ class WebRenderBridgeParent;
 class WebRenderImageHost : public CompositableHost, public ImageComposite {
  public:
   explicit WebRenderImageHost(const TextureInfo& aTextureInfo);
-  ~WebRenderImageHost();
+  virtual ~WebRenderImageHost();
 
-  virtual CompositableType GetType() override {
-    return mTextureInfo.mCompositableType;
-  }
+  CompositableType GetType() override { return mTextureInfo.mCompositableType; }
 
-  virtual void Composite(
-      Compositor* aCompositor, LayerComposite* aLayer,
-      EffectChain& aEffectChain, float aOpacity,
-      const gfx::Matrix4x4& aTransform,
-      const gfx::SamplingFilter aSamplingFilter, const gfx::IntRect& aClipRect,
-      const nsIntRegion* aVisibleRegion = nullptr,
-      const Maybe<gfx::Polygon>& aGeometry = Nothing()) override;
+  void Composite(Compositor* aCompositor, LayerComposite* aLayer,
+                 EffectChain& aEffectChain, float aOpacity,
+                 const gfx::Matrix4x4& aTransform,
+                 const gfx::SamplingFilter aSamplingFilter,
+                 const gfx::IntRect& aClipRect,
+                 const nsIntRegion* aVisibleRegion = nullptr,
+                 const Maybe<gfx::Polygon>& aGeometry = Nothing()) override;
 
-  virtual void UseTextureHost(const nsTArray<TimedTexture>& aTextures) override;
-  virtual void UseComponentAlphaTextures(TextureHost* aTextureOnBlack,
-                                         TextureHost* aTextureOnWhite) override;
-  virtual void RemoveTextureHost(TextureHost* aTexture) override;
+  void UseTextureHost(const nsTArray<TimedTexture>& aTextures) override;
+  void UseComponentAlphaTextures(TextureHost* aTextureOnBlack,
+                                 TextureHost* aTextureOnWhite) override;
+  void RemoveTextureHost(TextureHost* aTexture) override;
 
-  virtual TextureHost* GetAsTextureHost(
-      gfx::IntRect* aPictureRect = nullptr) override;
+  TextureHost* GetAsTextureHost(gfx::IntRect* aPictureRect = nullptr) override;
 
-  virtual void Attach(Layer* aLayer, TextureSourceProvider* aProvider,
-                      AttachFlags aFlags = NO_FLAGS) override;
+  void Attach(Layer* aLayer, TextureSourceProvider* aProvider,
+              AttachFlags aFlags = NO_FLAGS) override;
 
-  virtual void SetTextureSourceProvider(
-      TextureSourceProvider* aProvider) override;
+  void SetTextureSourceProvider(TextureSourceProvider* aProvider) override;
 
   gfx::IntSize GetImageSize() override;
 
-  virtual void PrintInfo(std::stringstream& aStream,
-                         const char* aPrefix) override;
+  void PrintInfo(std::stringstream& aStream, const char* aPrefix) override;
 
-  virtual void Dump(std::stringstream& aStream, const char* aPrefix = "",
-                    bool aDumpHtml = false) override;
+  void Dump(std::stringstream& aStream, const char* aPrefix = "",
+            bool aDumpHtml = false) override;
 
-  virtual already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override;
+  already_AddRefed<gfx::DataSourceSurface> GetAsSurface() override;
 
-  virtual bool Lock() override;
+  bool Lock() override;
 
-  virtual void Unlock() override;
+  void Unlock() override;
 
-  virtual void CleanupResources() override;
+  void CleanupResources() override;
 
   uint32_t GetDroppedFrames() override { return GetDroppedFramesAndReset(); }
 
-  virtual WebRenderImageHost* AsWebRenderImageHost() override { return this; }
+  WebRenderImageHost* AsWebRenderImageHost() override { return this; }
 
   TextureHost* GetAsTextureHostForComposite();
 
   void SetWrBridge(WebRenderBridgeParent* aWrBridge);
 
-  void ClearWrBridge();
-
-  void EnableUseAsyncImagePipeline() { mUseAsyncImagePipeline = true; }
+  void ClearWrBridge(WebRenderBridgeParent* aWrBridge);
 
   TextureHost* GetCurrentTextureHost() { return mCurrentTextureHost; }
 
  protected:
   // ImageComposite
-  virtual TimeStamp GetCompositionTime() const override;
+  TimeStamp GetCompositionTime() const override;
 
   void SetCurrentTextureHost(TextureHost* aTexture);
 
-  WebRenderBridgeParent* MOZ_NON_OWNING_REF mWrBridge;
+  WeakPtr<WebRenderBridgeParent> mWrBridge;
 
   uint32_t mWrBridgeBindings;
-  bool mUseAsyncImagePipeline;
 
   CompositableTextureHostRef mCurrentTextureHost;
 };

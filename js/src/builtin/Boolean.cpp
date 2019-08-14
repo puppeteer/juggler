@@ -14,10 +14,9 @@
 #include "jstypes.h"
 
 #include "jit/InlinableNatives.h"
+#include "js/PropertySpec.h"
 #include "util/StringBuffer.h"
-#ifdef ENABLE_BIGINT
 #include "vm/BigIntType.h"
-#endif
 #include "vm/GlobalObject.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -43,7 +42,7 @@ MOZ_ALWAYS_INLINE bool bool_toSource_impl(JSContext* cx, const CallArgs& args) {
   bool b = thisv.isBoolean() ? thisv.toBoolean()
                              : thisv.toObject().as<BooleanObject>().unbox();
 
-  StringBuffer sb(cx);
+  JSStringBuilder sb(cx);
   if (!sb.append("(new Boolean(") || !BooleanToStringBuffer(b, sb) ||
       !sb.append("))")) {
     return false;
@@ -104,7 +103,8 @@ static bool Boolean(JSContext* cx, unsigned argc, Value* vp) {
 
   if (args.isConstructing()) {
     RootedObject proto(cx);
-    if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+    if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Boolean,
+                                            &proto)) {
       return false;
     }
 
@@ -160,11 +160,9 @@ JS_PUBLIC_API bool js::ToBooleanSlow(HandleValue v) {
   if (v.isString()) {
     return v.toString()->length() != 0;
   }
-#ifdef ENABLE_BIGINT
   if (v.isBigInt()) {
-    return v.toBigInt()->toBoolean();
+    return !v.toBigInt()->isZero();
   }
-#endif
 
   MOZ_ASSERT(v.isObject());
   return !EmulatesUndefined(&v.toObject());

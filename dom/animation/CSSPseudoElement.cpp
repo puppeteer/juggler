@@ -13,30 +13,31 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CSSPseudoElement, mParentElement)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(CSSPseudoElement, mOriginatingElement)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(CSSPseudoElement, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(CSSPseudoElement, Release)
 
-CSSPseudoElement::CSSPseudoElement(Element* aElement,
-                                   CSSPseudoElementType aType)
-    : mParentElement(aElement), mPseudoType(aType) {
+CSSPseudoElement::CSSPseudoElement(dom::Element* aElement,
+                                   PseudoStyleType aType)
+    : mOriginatingElement(aElement), mPseudoType(aType) {
   MOZ_ASSERT(aElement);
-  MOZ_ASSERT(aType == CSSPseudoElementType::after ||
-                 aType == CSSPseudoElementType::before,
+  MOZ_ASSERT(aType == PseudoStyleType::after ||
+                 aType == PseudoStyleType::before ||
+                 aType == PseudoStyleType::marker,
              "Unexpected Pseudo Type");
 }
 
 CSSPseudoElement::~CSSPseudoElement() {
   // Element might have been unlinked already, so we have to do null check.
-  if (mParentElement) {
-    mParentElement->DeleteProperty(
+  if (mOriginatingElement) {
+    mOriginatingElement->DeleteProperty(
         GetCSSPseudoElementPropertyAtom(mPseudoType));
   }
 }
 
 ParentObject CSSPseudoElement::GetParentObject() const {
-  return mParentElement->GetParentObject();
+  return mOriginatingElement->GetParentObject();
 }
 
 JSObject* CSSPseudoElement::WrapObject(JSContext* aCx,
@@ -44,9 +45,9 @@ JSObject* CSSPseudoElement::WrapObject(JSContext* aCx,
   return CSSPseudoElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-void CSSPseudoElement::GetAnimations(const AnimationFilter& filter,
+void CSSPseudoElement::GetAnimations(const GetAnimationsOptions& aOptions,
                                      nsTArray<RefPtr<Animation>>& aRetVal) {
-  nsIDocument* doc = mParentElement->GetComposedDoc();
+  Document* doc = mOriginatingElement->GetComposedDoc();
   if (doc) {
     // We don't need to explicitly flush throttled animations here, since
     // updating the animation style of (pseudo-)elements will never affect the
@@ -56,7 +57,7 @@ void CSSPseudoElement::GetAnimations(const AnimationFilter& filter,
         ChangesToFlush(FlushType::Style, false /* flush animations */));
   }
 
-  Element::GetAnimationsUnsorted(mParentElement, mPseudoType, aRetVal);
+  Element::GetAnimationsUnsorted(mOriginatingElement, mPseudoType, aRetVal);
   aRetVal.Sort(AnimationPtrComparator<RefPtr<Animation>>());
 }
 
@@ -69,9 +70,9 @@ already_AddRefed<Animation> CSSPseudoElement::Animate(
   return Element::Animate(target, aContext, aKeyframes, aOptions, aError);
 }
 
-/* static */ already_AddRefed<CSSPseudoElement>
-CSSPseudoElement::GetCSSPseudoElement(Element* aElement,
-                                      CSSPseudoElementType aType) {
+/* static */
+already_AddRefed<CSSPseudoElement> CSSPseudoElement::GetCSSPseudoElement(
+    dom::Element* aElement, PseudoStyleType aType) {
   if (!aElement) {
     return nullptr;
   }
@@ -96,19 +97,23 @@ CSSPseudoElement::GetCSSPseudoElement(Element* aElement,
   return pseudo.forget();
 }
 
-/* static */ nsAtom* CSSPseudoElement::GetCSSPseudoElementPropertyAtom(
-    CSSPseudoElementType aType) {
+/* static */
+nsAtom* CSSPseudoElement::GetCSSPseudoElementPropertyAtom(
+    PseudoStyleType aType) {
   switch (aType) {
-    case CSSPseudoElementType::before:
+    case PseudoStyleType::before:
       return nsGkAtoms::cssPseudoElementBeforeProperty;
 
-    case CSSPseudoElementType::after:
+    case PseudoStyleType::after:
       return nsGkAtoms::cssPseudoElementAfterProperty;
+
+    case PseudoStyleType::marker:
+      return nsGkAtoms::cssPseudoElementMarkerProperty;
 
     default:
       MOZ_ASSERT_UNREACHABLE(
           "Should not try to get CSSPseudoElement "
-          "other than ::before or ::after");
+          "other than ::before, ::after or ::marker");
       return nullptr;
   }
 }

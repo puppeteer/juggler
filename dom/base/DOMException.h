@@ -9,8 +9,8 @@
 
 // We intentionally shadow non-virtual methods, but gcc gets confused.
 #ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Woverloaded-virtual"
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Woverloaded-virtual"
 #endif
 
 #include <stdint.h>
@@ -85,6 +85,8 @@ class Exception : public nsIException, public nsWrapperCache {
   }
 
   void GetFilename(JSContext* aCx, nsAString& aFilename);
+
+  uint32_t SourceId(JSContext* aCx) const;
 
   uint32_t LineNumber(JSContext* aCx) const;
 
@@ -177,7 +179,7 @@ class DOMException : public Exception {
 }  // namespace mozilla
 
 #ifdef __GNUC__
-#pragma GCC diagnostic pop
+#  pragma GCC diagnostic pop
 #endif
 
 #endif

@@ -19,13 +19,29 @@ class SVGGraphicsElement : public SVGGraphicsElementBase, public SVGTests {
  protected:
   explicit SVGGraphicsElement(
       already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
-  ~SVGGraphicsElement();
+  ~SVGGraphicsElement() = default;
 
  public:
   // interfaces:
   NS_DECL_ISUPPORTS_INHERITED
 
-  nsSVGElement* AsSVGElement() final { return this; }
+  bool IsFocusableInternal(int32_t* aTabIndex, bool aWithMouse) override;
+  SVGElement* AsSVGElement() final { return this; }
+
+ protected:
+  // returns true if focusability has been definitively determined otherwise
+  // false
+  bool IsSVGFocusable(bool* aIsFocusable, int32_t* aTabIndex);
+
+  template <typename T>
+  bool IsInLengthInfo(const nsAtom* aAttribute, const T& aLengthInfos) const {
+    for (auto const& e : aLengthInfos) {
+      if (e.mName == aAttribute) {
+        return true;
+      }
+    }
+    return false;
+  }
 };
 
 }  // namespace dom

@@ -11,20 +11,28 @@
 #include "mozilla/TelemetryProcessEnums.h"
 #include "nsIScriptError.h"
 #include "nsTHashtable.h"
+#include "nsHashKeys.h"
 #include "nsXULAppAPI.h"
 
 namespace mozilla {
 namespace Telemetry {
 namespace Common {
 
-enum class RecordedProcessType : uint8_t {
+typedef nsTHashtable<nsCStringHashKey> StringHashSet;
+
+enum class RecordedProcessType : uint16_t {
   Main = (1 << GeckoProcessType_Default),  // Also known as "parent process"
   Content = (1 << GeckoProcessType_Content),
   Gpu = (1 << GeckoProcessType_GPU),
-  AllChildren = 0xFF - 1,  // All the child processes (i.e. content, gpu, ...)
-  All = 0xFF               // All the processes
+  Socket = (1 << GeckoProcessType_Socket),
+  AllChildren = 0xFFFF - 1,  // All the child processes (i.e. content, gpu, ...)
+                             // Always `All-Main` to allow easy matching.
+  All = 0xFFFF               // All the processes
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(RecordedProcessType);
+static_assert(static_cast<uint16_t>(RecordedProcessType::Main) == 1,
+              "Main process type must be equal to 1 to allow easy matching in "
+              "CanRecordInProcess");
 
 enum class SupportedProduct : uint8_t {
   Firefox = (1 << 0),

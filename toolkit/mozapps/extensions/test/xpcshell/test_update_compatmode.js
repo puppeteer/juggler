@@ -5,12 +5,10 @@
 // This verifies that add-on update check correctly fills in the
 // %COMPATIBILITY_MODE% token in the update URL.
 
-Cu.importGlobalProperties(["URLSearchParams"]);
-
 // The test extension uses an insecure update url.
 Services.prefs.setBoolPref(PREF_EM_CHECK_UPDATE_SECURITY, false);
 
-let testserver = createHttpServer({hosts: ["example.com"]});
+let testserver = createHttpServer({ hosts: ["example.com"] });
 
 let lastMode;
 testserver.registerPathHandler("/update.json", (request, response) => {
@@ -18,7 +16,7 @@ testserver.registerPathHandler("/update.json", (request, response) => {
   lastMode = params.get("mode");
 
   response.setHeader("content-type", "application/json", true);
-  response.write(JSON.stringify({addons: {}}));
+  response.write(JSON.stringify({ addons: {} }));
 });
 
 const ID_NORMAL = "compatmode@tests.mozilla.org";
@@ -30,11 +28,13 @@ add_task(async function setup() {
   let xpi = await createAddon({
     id: ID_NORMAL,
     updateURL: "http://example.com/update.json?mode=%COMPATIBILITY_MODE%",
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "1",
-    }],
+    targetApplications: [
+      {
+        id: "xpcshell@tests.mozilla.org",
+        minVersion: "1",
+        maxVersion: "1",
+      },
+    ],
   });
   await manuallyInstall(xpi, AddonTestUtils.profileExtensions, ID_NORMAL);
 
@@ -42,11 +42,13 @@ add_task(async function setup() {
     id: ID_STRICT,
     updateURL: "http://example.com/update.json?mode=%COMPATIBILITY_MODE%",
     strictCompatibility: true,
-    targetApplications: [{
-      id: "xpcshell@tests.mozilla.org",
-      minVersion: "1",
-      maxVersion: "1",
-    }],
+    targetApplications: [
+      {
+        id: "xpcshell@tests.mozilla.org",
+        minVersion: "1",
+        maxVersion: "1",
+      },
+    ],
   });
   await manuallyInstall(xpi, AddonTestUtils.profileExtensions, ID_STRICT);
 
@@ -60,7 +62,11 @@ add_task(async function test_strict_disabled() {
   Assert.notEqual(addon, null);
 
   await promiseFindAddonUpdates(addon, AddonManager.UPDATE_WHEN_USER_REQUESTED);
-  Assert.equal(lastMode, "normal", "COMPATIBIILITY_MODE normal was set correctly");
+  Assert.equal(
+    lastMode,
+    "normal",
+    "COMPATIBIILITY_MODE normal was set correctly"
+  );
 });
 
 // Strict compatibility checking enabled.
@@ -70,7 +76,11 @@ add_task(async function test_strict_enabled() {
   Assert.notEqual(addon, null);
 
   await promiseFindAddonUpdates(addon, AddonManager.UPDATE_WHEN_USER_REQUESTED);
-  Assert.equal(lastMode, "strict", "COMPATIBILITY_MODE strict was set correctly");
+  Assert.equal(
+    lastMode,
+    "strict",
+    "COMPATIBILITY_MODE strict was set correctly"
+  );
 });
 
 // Strict compatibility checking opt-in.
@@ -80,7 +90,11 @@ add_task(async function test_strict_optin() {
   Assert.notEqual(addon, null);
 
   await promiseFindAddonUpdates(addon, AddonManager.UPDATE_WHEN_USER_REQUESTED);
-  Assert.equal(lastMode, "normal", "COMPATIBILITY_MODE is normal even for an addon with strictCompatibility");
+  Assert.equal(
+    lastMode,
+    "normal",
+    "COMPATIBILITY_MODE is normal even for an addon with strictCompatibility"
+  );
 });
 
 // Compatibility checking disabled.
@@ -90,5 +104,9 @@ add_task(async function test_compat_disabled() {
   Assert.notEqual(addon, null);
 
   await promiseFindAddonUpdates(addon, AddonManager.UPDATE_WHEN_USER_REQUESTED);
-  Assert.equal(lastMode, "ignore", "COMPATIBILITY_MODE ignore was set correctly");
+  Assert.equal(
+    lastMode,
+    "ignore",
+    "COMPATIBILITY_MODE ignore was set correctly"
+  );
 });

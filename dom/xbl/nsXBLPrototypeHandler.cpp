@@ -16,7 +16,7 @@
 #include "nsIContent.h"
 #include "nsAtom.h"
 #include "nsNameSpaceManager.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIController.h"
 #include "nsIControllers.h"
 #include "nsXULElement.h"
@@ -300,7 +300,7 @@ nsresult nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
     boundGlobal = do_QueryInterface(aTarget);
 
   if (!boundGlobal) {
-    nsCOMPtr<nsIDocument> boundDocument(do_QueryInterface(aTarget));
+    nsCOMPtr<Document> boundDocument(do_QueryInterface(aTarget));
     if (!boundDocument) {
       // We must be an element.
       nsCOMPtr<nsIContent> content(do_QueryInterface(aTarget));
@@ -352,9 +352,9 @@ nsresult nsXBLPrototypeHandler::ExecuteHandler(EventTarget* aTarget,
 
   // Build a scope chain in the XBL scope.
   RefPtr<Element> targetElement = do_QueryObject(scriptTarget);
-  JS::AutoObjectVector scopeChain(cx);
+  JS::RootedVector<JSObject*> scopeChain(cx);
   ok = nsJSUtils::GetScopeChainForXBL(cx, targetElement, *mPrototypeBinding,
-                                      scopeChain);
+                                      &scopeChain);
   NS_ENSURE_TRUE(ok, NS_ERROR_OUT_OF_MEMORY);
 
   // Next, clone the generic handler with our desired scope chain.
@@ -386,8 +386,7 @@ nsresult nsXBLPrototypeHandler::EnsureEventHandler(
 
   // Check to see if we've already compiled this
   JS::Rooted<JSObject*> globalObject(cx, JS::CurrentGlobalOrNull(cx));
-  nsCOMPtr<nsPIDOMWindowInner> pWindow =
-      xpc::WindowOrNull(globalObject)->AsInner();
+  nsCOMPtr<nsPIDOMWindowInner> pWindow = xpc::WindowOrNull(globalObject);
   if (pWindow) {
     JS::Rooted<JSObject*> cachedHandler(
         cx, pWindow->GetCachedXBLPrototypeHandler(this));
@@ -422,7 +421,7 @@ nsresult nsXBLPrototypeHandler::EnsureEventHandler(
   options.setFileAndLine(bindingURI.get(), mLineNumber);
 
   JS::Rooted<JSObject*> handlerFun(cx);
-  JS::AutoObjectVector emptyVector(cx);
+  JS::RootedVector<JSObject*> emptyVector(cx);
   rv = nsJSUtils::CompileFunction(jsapi, emptyVector, options,
                                   nsAtomCString(aName), argCount, argNames,
                                   handlerText, handlerFun.address());
@@ -472,7 +471,7 @@ nsresult nsXBLPrototypeHandler::DispatchXBLCommand(EventTarget* aTarget,
     privateWindow = do_QueryInterface(aTarget);
     if (!privateWindow) {
       nsCOMPtr<nsIContent> elt(do_QueryInterface(aTarget));
-      nsCOMPtr<nsIDocument> doc;
+      nsCOMPtr<Document> doc;
       // XXXbz sXBL/XBL2 issue -- this should be the "scope doc" or
       // something... whatever we use when wrapping DOM nodes
       // normally.  It's not clear that the owner doc is the right
@@ -939,7 +938,7 @@ void nsXBLPrototypeHandler::ReportKeyConflict(const char16_t* aKey,
                                               const char16_t* aModifiers,
                                               Element* aKeyElement,
                                               const char* aMessageName) {
-  nsCOMPtr<nsIDocument> doc;
+  nsCOMPtr<Document> doc;
   if (mPrototypeBinding) {
     nsXBLDocumentInfo* docInfo = mPrototypeBinding->XBLDocumentInfo();
     if (docInfo) {
@@ -951,11 +950,14 @@ void nsXBLPrototypeHandler::ReportKeyConflict(const char16_t* aKey,
 
   nsAutoString id;
   aKeyElement->GetAttr(kNameSpaceID_None, nsGkAtoms::id, id);
-  const char16_t* params[] = {aKey, aModifiers, id.get()};
+  AutoTArray<nsString, 3> params;
+  params.AppendElement(aKey);
+  params.AppendElement(aModifiers);
+  params.AppendElement(id);
   nsContentUtils::ReportToConsole(
       nsIScriptError::warningFlag, NS_LITERAL_CSTRING("XBL Prototype Handler"),
-      doc, nsContentUtils::eXBL_PROPERTIES, aMessageName, params,
-      ArrayLength(params), nullptr, EmptyString(), mLineNumber);
+      doc, nsContentUtils::eXBL_PROPERTIES, aMessageName, params, nullptr,
+      EmptyString(), mLineNumber);
 }
 
 bool nsXBLPrototypeHandler::ModifiersMatchMask(

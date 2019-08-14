@@ -3,12 +3,12 @@
  */
 
 const TEST_DOMAIN = "http://example.net/";
-const TEST_PATH = TEST_DOMAIN + "browser/browser/components/originattributes/test/browser/";
+const TEST_PATH =
+  TEST_DOMAIN + "browser/browser/components/originattributes/test/browser/";
 const TEST_PAGE = TEST_PATH + "file_broadcastChannel.html";
 
 async function doTest(aBrowser) {
   let response = await ContentTask.spawn(aBrowser, null, async function() {
-
     let displayItem = content.document.getElementById("display");
 
     // If there is nothing in the 'display', we will try to send a message to

@@ -1,9 +1,9 @@
 <html class="reftest-wait">
   <head>
-    <script type="text/javascript" src="/tests/SimpleTest/EventUtils.js"></script>
+    <script src="/tests/SimpleTest/EventUtils.js"></script>
   </head>
   <body onload="start()">
-    <div onfocus="done()" contenteditable>foo<div contenteditable="false"><a href="#">bar</a></div>baz</div>
+    <div onfocus="setTimeout(done, 0)" contenteditable>foo<div contenteditable="false"><a href="#">bar</a></div>baz</div>
     <script>
       var div = document.querySelector("div");
       function start() {

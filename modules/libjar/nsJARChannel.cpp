@@ -23,10 +23,11 @@
 
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Preferences.h"
-#include "nsITabChild.h"
+#include "nsIBrowserChild.h"
 #include "private/pprio.h"
 #include "nsInputStreamPump.h"
 #include "nsThreadUtils.h"
+#include "nsJARProtocolHandler.h"
 
 using namespace mozilla;
 using namespace mozilla::net;
@@ -43,7 +44,7 @@ static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
 // Ignore any LOG macro that we inherit from arbitrary headers. (We define our
 // own LOG macro below.)
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 
 //
@@ -67,8 +68,8 @@ class nsJARInputThunk : public nsIInputStream {
   NS_DECL_THREADSAFE_ISUPPORTS_WITH_RECORDING(recordreplay::Behavior::Preserve)
   NS_DECL_NSIINPUTSTREAM
 
-  nsJARInputThunk(nsIZipReader *zipReader, nsIURI *fullJarURI,
-                  const nsACString &jarEntry, bool usingJarCache)
+  nsJARInputThunk(nsIZipReader* zipReader, nsIURI* fullJarURI,
+                  const nsACString& jarEntry, bool usingJarCache)
       : mUsingJarCache(usingJarCache),
         mJarReader(zipReader),
         mJarEntry(jarEntry),
@@ -121,7 +122,7 @@ nsresult nsJARInputThunk::Init() {
 
   // ask the JarStream for the content length
   uint64_t avail;
-  rv = mJarStream->Available((uint64_t *)&avail);
+  rv = mJarStream->Available((uint64_t*)&avail);
   if (NS_FAILED(rv)) return rv;
 
   mContentLength = avail < INT64_MAX ? (int64_t)avail : -1;
@@ -143,24 +144,24 @@ nsJARInputThunk::Close() {
 }
 
 NS_IMETHODIMP
-nsJARInputThunk::Available(uint64_t *avail) {
+nsJARInputThunk::Available(uint64_t* avail) {
   return mJarStream->Available(avail);
 }
 
 NS_IMETHODIMP
-nsJARInputThunk::Read(char *buf, uint32_t count, uint32_t *countRead) {
+nsJARInputThunk::Read(char* buf, uint32_t count, uint32_t* countRead) {
   return mJarStream->Read(buf, count, countRead);
 }
 
 NS_IMETHODIMP
-nsJARInputThunk::ReadSegments(nsWriteSegmentFun writer, void *closure,
-                              uint32_t count, uint32_t *countRead) {
+nsJARInputThunk::ReadSegments(nsWriteSegmentFun writer, void* closure,
+                              uint32_t count, uint32_t* countRead) {
   // stream transport does only calls Read()
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-nsJARInputThunk::IsNonBlocking(bool *nonBlocking) {
+nsJARInputThunk::IsNonBlocking(bool* nonBlocking) {
   *nonBlocking = false;
   return NS_OK;
 }
@@ -199,8 +200,6 @@ nsJARChannel::~nsJARChannel() {
                                     mLoadGroup.forget());
   NS_ReleaseOnMainThreadSystemGroup("nsJARChannel::mListener",
                                     mListener.forget());
-  NS_ReleaseOnMainThreadSystemGroup("nsJARChannel::mListenerContext",
-                                    mListenerContext.forget());
 }
 
 NS_IMPL_ISUPPORTS_INHERITED(nsJARChannel, nsHashPropertyBag, nsIRequest,
@@ -208,7 +207,7 @@ NS_IMPL_ISUPPORTS_INHERITED(nsJARChannel, nsHashPropertyBag, nsIRequest,
                             nsIThreadRetargetableRequest,
                             nsIThreadRetargetableStreamListener, nsIJARChannel)
 
-nsresult nsJARChannel::Init(nsIURI *uri) {
+nsresult nsJARChannel::Init(nsIURI* uri) {
   LOG(("nsJARChannel::Init [this=%p]\n", this));
   nsresult rv;
 
@@ -238,8 +237,8 @@ nsresult nsJARChannel::Init(nsIURI *uri) {
   return rv;
 }
 
-nsresult nsJARChannel::CreateJarInput(nsIZipReaderCache *jarCache,
-                                      nsJARInputThunk **resultInput) {
+nsresult nsJARChannel::CreateJarInput(nsIZipReaderCache* jarCache,
+                                      nsJARInputThunk** resultInput) {
   LOG(("nsJARChannel::CreateJarInput [this=%p]\n", this));
   MOZ_ASSERT(resultInput);
   MOZ_ASSERT(mJarFile);
@@ -342,10 +341,10 @@ nsresult nsJARChannel::LookupFile() {
   return rv;
 }
 
-nsresult CreateLocalJarInput(nsIZipReaderCache *aJarCache, nsIFile *aFile,
-                             const nsACString &aInnerJarEntry,
-                             nsIJARURI *aJarURI, const nsACString &aJarEntry,
-                             nsJARInputThunk **aResultInput) {
+nsresult CreateLocalJarInput(nsIZipReaderCache* aJarCache, nsIFile* aFile,
+                             const nsACString& aInnerJarEntry,
+                             nsIJARURI* aJarURI, const nsACString& aJarEntry,
+                             nsJARInputThunk** aResultInput) {
   LOG(("nsJARChannel::CreateLocalJarInput [aJarCache=%p, %s, %s]\n", aJarCache,
        PromiseFlatCString(aInnerJarEntry).get(),
        PromiseFlatCString(aJarEntry).get()));
@@ -448,7 +447,7 @@ nsresult nsJARChannel::OpenLocalFile() {
       }));
 }
 
-nsresult nsJARChannel::ContinueOpenLocalFile(nsJARInputThunk *aInput,
+nsresult nsJARChannel::ContinueOpenLocalFile(nsJARInputThunk* aInput,
                                              bool aIsSyncCall) {
   LOG(("nsJARChannel::ContinueOpenLocalFile [this=%p %p]\n", this, aInput));
 
@@ -492,7 +491,6 @@ nsresult nsJARChannel::OnOpenLocalFileComplete(nsresult aResult,
 
     mOpened = false;
     mIsPending = false;
-    mListenerContext = nullptr;
     mListener = nullptr;
     mCallbacks = nullptr;
     mProgressSink = nullptr;
@@ -532,8 +530,8 @@ void nsJARChannel::NotifyError(nsresult aError) {
 
   mStatus = aError;
 
-  OnStartRequest(nullptr, nullptr);
-  OnStopRequest(nullptr, nullptr, aError);
+  OnStartRequest(nullptr);
+  OnStopRequest(nullptr, aError);
 }
 
 void nsJARChannel::FireOnProgress(uint64_t aProgress) {
@@ -548,16 +546,16 @@ void nsJARChannel::FireOnProgress(uint64_t aProgress) {
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsJARChannel::GetName(nsACString &result) { return mJarURI->GetSpec(result); }
+nsJARChannel::GetName(nsACString& result) { return mJarURI->GetSpec(result); }
 
 NS_IMETHODIMP
-nsJARChannel::IsPending(bool *result) {
+nsJARChannel::IsPending(bool* result) {
   *result = mIsPending;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetStatus(nsresult *status) {
+nsJARChannel::GetStatus(nsresult* status) {
   if (mPump && NS_SUCCEEDED(mStatus))
     mPump->GetStatus(status);
   else
@@ -605,7 +603,7 @@ nsJARChannel::Resume() {
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetLoadFlags(nsLoadFlags *aLoadFlags) {
+nsJARChannel::GetLoadFlags(nsLoadFlags* aLoadFlags) {
   *aLoadFlags = mLoadFlags;
   return NS_OK;
 }
@@ -617,18 +615,18 @@ nsJARChannel::SetLoadFlags(nsLoadFlags aLoadFlags) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetIsDocument(bool *aIsDocument) {
+nsJARChannel::GetIsDocument(bool* aIsDocument) {
   return NS_GetIsDocumentChannel(this, aIsDocument);
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetLoadGroup(nsILoadGroup **aLoadGroup) {
+nsJARChannel::GetLoadGroup(nsILoadGroup** aLoadGroup) {
   NS_IF_ADDREF(*aLoadGroup = mLoadGroup);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetLoadGroup(nsILoadGroup *aLoadGroup) {
+nsJARChannel::SetLoadGroup(nsILoadGroup* aLoadGroup) {
   mLoadGroup = aLoadGroup;
   return NS_OK;
 }
@@ -638,28 +636,28 @@ nsJARChannel::SetLoadGroup(nsILoadGroup *aLoadGroup) {
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsJARChannel::GetOriginalURI(nsIURI **aURI) {
+nsJARChannel::GetOriginalURI(nsIURI** aURI) {
   *aURI = mOriginalURI;
   NS_ADDREF(*aURI);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetOriginalURI(nsIURI *aURI) {
+nsJARChannel::SetOriginalURI(nsIURI* aURI) {
   NS_ENSURE_ARG_POINTER(aURI);
   mOriginalURI = aURI;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetURI(nsIURI **aURI) {
+nsJARChannel::GetURI(nsIURI** aURI) {
   NS_IF_ADDREF(*aURI = mJarURI);
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetOwner(nsISupports **aOwner) {
+nsJARChannel::GetOwner(nsISupports** aOwner) {
   // JAR signatures are not processed to avoid main-thread network I/O (bug
   // 726125)
   *aOwner = mOwner;
@@ -668,44 +666,45 @@ nsJARChannel::GetOwner(nsISupports **aOwner) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetOwner(nsISupports *aOwner) {
+nsJARChannel::SetOwner(nsISupports* aOwner) {
   mOwner = aOwner;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetLoadInfo(nsILoadInfo **aLoadInfo) {
+nsJARChannel::GetLoadInfo(nsILoadInfo** aLoadInfo) {
   NS_IF_ADDREF(*aLoadInfo = mLoadInfo);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetLoadInfo(nsILoadInfo *aLoadInfo) {
+nsJARChannel::SetLoadInfo(nsILoadInfo* aLoadInfo) {
+  MOZ_RELEASE_ASSERT(aLoadInfo, "loadinfo can't be null");
   mLoadInfo = aLoadInfo;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetNotificationCallbacks(nsIInterfaceRequestor **aCallbacks) {
+nsJARChannel::GetNotificationCallbacks(nsIInterfaceRequestor** aCallbacks) {
   NS_IF_ADDREF(*aCallbacks = mCallbacks);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks) {
+nsJARChannel::SetNotificationCallbacks(nsIInterfaceRequestor* aCallbacks) {
   mCallbacks = aCallbacks;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetSecurityInfo(nsISupports **aSecurityInfo) {
+nsJARChannel::GetSecurityInfo(nsISupports** aSecurityInfo) {
   MOZ_ASSERT(aSecurityInfo, "Null out param");
   NS_IF_ADDREF(*aSecurityInfo = mSecurityInfo);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetContentType(nsACString &result) {
+nsJARChannel::GetContentType(nsACString& result) {
   // If the Jar file has not been open yet,
   // We return application/x-unknown-content-type
   if (!mOpened) {
@@ -734,7 +733,7 @@ nsJARChannel::GetContentType(nsACString &result) {
         }
       }
       if (ext) {
-        nsIMIMEService *mimeServ = gJarHandler->MimeService();
+        nsIMIMEService* mimeServ = gJarHandler->MimeService();
         if (mimeServ)
           mimeServ->GetTypeFromExtension(nsDependentCString(ext), mContentType);
       }
@@ -747,7 +746,7 @@ nsJARChannel::GetContentType(nsACString &result) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetContentType(const nsACString &aContentType) {
+nsJARChannel::SetContentType(const nsACString& aContentType) {
   // If someone gives us a type hint we should just use that type instead of
   // doing our guessing.  So we don't care when this is being called.
 
@@ -757,7 +756,7 @@ nsJARChannel::SetContentType(const nsACString &aContentType) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetContentCharset(nsACString &aContentCharset) {
+nsJARChannel::GetContentCharset(nsACString& aContentCharset) {
   // If someone gives us a charset hint we should just use that charset.
   // So we don't care when this is being called.
   aContentCharset = mContentCharset;
@@ -765,13 +764,13 @@ nsJARChannel::GetContentCharset(nsACString &aContentCharset) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetContentCharset(const nsACString &aContentCharset) {
+nsJARChannel::SetContentCharset(const nsACString& aContentCharset) {
   mContentCharset = aContentCharset;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetContentDisposition(uint32_t *aContentDisposition) {
+nsJARChannel::GetContentDisposition(uint32_t* aContentDisposition) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
@@ -782,24 +781,24 @@ nsJARChannel::SetContentDisposition(uint32_t aContentDisposition) {
 
 NS_IMETHODIMP
 nsJARChannel::GetContentDispositionFilename(
-    nsAString &aContentDispositionFilename) {
+    nsAString& aContentDispositionFilename) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
 nsJARChannel::SetContentDispositionFilename(
-    const nsAString &aContentDispositionFilename) {
+    const nsAString& aContentDispositionFilename) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
 nsJARChannel::GetContentDispositionHeader(
-    nsACString &aContentDispositionHeader) {
+    nsACString& aContentDispositionHeader) {
   return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetContentLength(int64_t *result) {
+nsJARChannel::GetContentLength(int64_t* result) {
   *result = mContentLength;
   return NS_OK;
 }
@@ -812,7 +811,13 @@ nsJARChannel::SetContentLength(int64_t aContentLength) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::Open(nsIInputStream **stream) {
+nsJARChannel::Open(nsIInputStream** aStream) {
+  LOG(("nsJARChannel::Open [this=%p]\n", this));
+  nsCOMPtr<nsIStreamListener> listener;
+  nsresult rv =
+      nsContentSecurityManager::doContentSecurityCheck(this, listener);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   LOG(("nsJARChannel::Open [this=%p]\n", this));
 
   NS_ENSURE_TRUE(!mOpened, NS_ERROR_IN_PROGRESS);
@@ -820,7 +825,7 @@ nsJARChannel::Open(nsIInputStream **stream) {
 
   mJarFile = nullptr;
 
-  nsresult rv = LookupFile();
+  rv = LookupFile();
   if (NS_FAILED(rv)) return rv;
 
   // If mJarFile was not set by LookupFile, we can't open a channel.
@@ -833,23 +838,25 @@ nsJARChannel::Open(nsIInputStream **stream) {
   rv = CreateJarInput(gJarHandler->JarCache(), getter_AddRefs(input));
   if (NS_FAILED(rv)) return rv;
 
-  input.forget(stream);
+  input.forget(aStream);
   mOpened = true;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::Open2(nsIInputStream **aStream) {
-  LOG(("nsJARChannel::Open2 [this=%p]\n", this));
-  nsCOMPtr<nsIStreamListener> listener;
+nsJARChannel::AsyncOpen(nsIStreamListener* aListener) {
+  LOG(("nsJARChannel::AsyncOpen [this=%p]\n", this));
+  nsCOMPtr<nsIStreamListener> listener = aListener;
   nsresult rv =
       nsContentSecurityManager::doContentSecurityCheck(this, listener);
-  NS_ENSURE_SUCCESS(rv, rv);
-  return Open(aStream);
-}
+  if (NS_FAILED(rv)) {
+    mIsPending = false;
+    mListener = nullptr;
+    mCallbacks = nullptr;
+    mProgressSink = nullptr;
+    return rv;
+  }
 
-NS_IMETHODIMP
-nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx) {
   LOG(("nsJARChannel::AsyncOpen [this=%p]\n", this));
   MOZ_ASSERT(
       !mLoadInfo || mLoadInfo->GetSecurityMode() == 0 ||
@@ -857,7 +864,7 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx) {
           (mLoadInfo->GetSecurityMode() ==
                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
            nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
-      "security flags in loadInfo but asyncOpen2() not called");
+      "security flags in loadInfo but doContentSecurityCheck() not called");
 
   NS_ENSURE_ARG_POINTER(listener);
   NS_ENSURE_TRUE(!mOpened, NS_ERROR_IN_PROGRESS);
@@ -869,14 +876,12 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx) {
   NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup, mProgressSink);
 
   mListener = listener;
-  mListenerContext = ctx;
   mIsPending = true;
 
-  nsresult rv = LookupFile();
+  rv = LookupFile();
   if (NS_FAILED(rv) || !mJarFile) {
     // Not a local file...
     mIsPending = false;
-    mListenerContext = nullptr;
     mListener = nullptr;
     mCallbacks = nullptr;
     mProgressSink = nullptr;
@@ -886,7 +891,6 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx) {
   rv = OpenLocalFile();
   if (NS_FAILED(rv)) {
     mIsPending = false;
-    mListenerContext = nullptr;
     mListener = nullptr;
     mCallbacks = nullptr;
     mProgressSink = nullptr;
@@ -894,37 +898,19 @@ nsJARChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *ctx) {
   }
 
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsJARChannel::AsyncOpen2(nsIStreamListener *aListener) {
-  LOG(("nsJARChannel::AsyncOpen2 [this=%p]\n", this));
-  nsCOMPtr<nsIStreamListener> listener = aListener;
-  nsresult rv =
-      nsContentSecurityManager::doContentSecurityCheck(this, listener);
-  if (NS_FAILED(rv)) {
-    mIsPending = false;
-    mListenerContext = nullptr;
-    mListener = nullptr;
-    mCallbacks = nullptr;
-    mProgressSink = nullptr;
-    return rv;
-  }
-
-  return AsyncOpen(listener, nullptr);
 }
 
 //-----------------------------------------------------------------------------
 // nsIJARChannel
 //-----------------------------------------------------------------------------
 NS_IMETHODIMP
-nsJARChannel::GetJarFile(nsIFile **aFile) {
+nsJARChannel::GetJarFile(nsIFile** aFile) {
   NS_IF_ADDREF(*aFile = mJarFile);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsJARChannel::SetJarFile(nsIFile *aFile) {
+nsJARChannel::SetJarFile(nsIFile* aFile) {
   if (mOpened) {
     return NS_ERROR_IN_PROGRESS;
   }
@@ -933,7 +919,7 @@ nsJARChannel::SetJarFile(nsIFile *aFile) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::EnsureCached(bool *aIsCached) {
+nsJARChannel::EnsureCached(bool* aIsCached) {
   nsresult rv;
   *aIsCached = false;
 
@@ -965,12 +951,10 @@ nsJARChannel::EnsureCached(bool *aIsCached) {
   rv = ioService->GetProtocolHandler("jar", getter_AddRefs(handler));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIJARProtocolHandler> jarHandler = do_QueryInterface(handler);
+  auto jarHandler = static_cast<nsJARProtocolHandler*>(handler.get());
   MOZ_ASSERT(jarHandler);
 
-  nsCOMPtr<nsIZipReaderCache> jarCache;
-  rv = jarHandler->GetJARCache(getter_AddRefs(jarCache));
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsIZipReaderCache* jarCache = jarHandler->JarCache();
 
   rv = jarCache->GetZipIfCached(jarFile, getter_AddRefs(mPreCachedJarReader));
   if (rv == NS_ERROR_CACHE_KEY_NOT_FOUND) {
@@ -983,7 +967,7 @@ nsJARChannel::EnsureCached(bool *aIsCached) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetZipEntry(nsIZipEntry **aZipEntry) {
+nsJARChannel::GetZipEntry(nsIZipEntry** aZipEntry) {
   nsresult rv = LookupFile();
   if (NS_FAILED(rv)) return rv;
 
@@ -1001,11 +985,11 @@ nsJARChannel::GetZipEntry(nsIZipEntry **aZipEntry) {
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-nsJARChannel::OnStartRequest(nsIRequest *req, nsISupports *ctx) {
+nsJARChannel::OnStartRequest(nsIRequest* req) {
   LOG(("nsJARChannel::OnStartRequest [this=%p %s]\n", this, mSpec.get()));
 
   mRequest = req;
-  nsresult rv = mListener->OnStartRequest(this, mListenerContext);
+  nsresult rv = mListener->OnStartRequest(this);
   mRequest = nullptr;
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1032,17 +1016,15 @@ nsJARChannel::OnStartRequest(nsIRequest *req, nsISupports *ctx) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::OnStopRequest(nsIRequest *req, nsISupports *ctx,
-                            nsresult status) {
+nsJARChannel::OnStopRequest(nsIRequest* req, nsresult status) {
   LOG(("nsJARChannel::OnStopRequest [this=%p %s status=%" PRIx32 "]\n", this,
        mSpec.get(), static_cast<uint32_t>(status)));
 
   if (NS_SUCCEEDED(mStatus)) mStatus = status;
 
   if (mListener) {
-    mListener->OnStopRequest(this, mListenerContext, status);
+    mListener->OnStopRequest(this, status);
     mListener = nullptr;
-    mListenerContext = nullptr;
   }
 
   if (mLoadGroup) mLoadGroup->RemoveRequest(this, nullptr, status);
@@ -1064,15 +1046,13 @@ nsJARChannel::OnStopRequest(nsIRequest *req, nsISupports *ctx,
 }
 
 NS_IMETHODIMP
-nsJARChannel::OnDataAvailable(nsIRequest *req, nsISupports *ctx,
-                              nsIInputStream *stream, uint64_t offset,
-                              uint32_t count) {
+nsJARChannel::OnDataAvailable(nsIRequest* req, nsIInputStream* stream,
+                              uint64_t offset, uint32_t count) {
   LOG(("nsJARChannel::OnDataAvailable [this=%p %s]\n", this, mSpec.get()));
 
   nsresult rv;
 
-  rv =
-      mListener->OnDataAvailable(this, mListenerContext, stream, offset, count);
+  rv = mListener->OnDataAvailable(this, stream, offset, count);
 
   // simply report progress here instead of hooking ourselves up as a
   // nsITransportEventSink implementation.
@@ -1091,7 +1071,7 @@ nsJARChannel::OnDataAvailable(nsIRequest *req, nsISupports *ctx,
 }
 
 NS_IMETHODIMP
-nsJARChannel::RetargetDeliveryTo(nsIEventTarget *aEventTarget) {
+nsJARChannel::RetargetDeliveryTo(nsIEventTarget* aEventTarget) {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIThreadRetargetableRequest> request = do_QueryInterface(mRequest);
@@ -1103,7 +1083,7 @@ nsJARChannel::RetargetDeliveryTo(nsIEventTarget *aEventTarget) {
 }
 
 NS_IMETHODIMP
-nsJARChannel::GetDeliveryTarget(nsIEventTarget **aEventTarget) {
+nsJARChannel::GetDeliveryTarget(nsIEventTarget** aEventTarget) {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIThreadRetargetableRequest> request = do_QueryInterface(mRequest);

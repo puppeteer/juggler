@@ -26,9 +26,14 @@
   -->
  <div style="height: 500px"></div>
  <div id="anim"></div>
+ <!--
+  Give the page room to scroll, so that the setAsyncScrollOffset() call
+  doesn't take the scroll position out of bounds
+ -->
+ <div style="height: 1000px"></div>
 </body>
 <script>
-'use strict';
+"use strict";
 
 const utils = SpecialPowers.getDOMWindowUtils(window);
 
@@ -37,20 +42,20 @@ async function test_transform() {
   await promiseAllPaintsDone();
 
   let dpr = window.devicePixelRatio;
-  let transform = utils.getOMTCTransform(anim);
-  is(transform, `matrix(1, 0, 0, 1, ${200 * dpr}, 0)`,
+  let transform = parseTransform(utils.getOMTCTransform(anim));
+  isTransformClose(transform, [1, 0, 0, 1, 200 * dpr, 0],
      "The element shouldn't be moved before scrolling");
 
   utils.setAsyncScrollOffset(document.documentElement, 0, 300);
 
   await new Promise(resolve => waitForApzFlushedRepaints(resolve));
 
-  transform = utils.getOMTCTransform(anim);
-  is(transform, `matrix(1, 0, 0, 1, ${200 * dpr}, ${-300 * dpr})`,
+  transform = parseTransform(utils.getOMTCTransform(anim));
+  isTransformClose(transform, [1, 0, 0, 1, 200 * dpr, -300 * dpr],
      "Element should have been moved by the offset");
 }
 
-if (utils.layerManagerType == 'WebRender') {
+if (utils.layerManagerType == "WebRender") {
   ok(true, "This test doesn't need to run on WebRender");
   subtestDone();
 } else {

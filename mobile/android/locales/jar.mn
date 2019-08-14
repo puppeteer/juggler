@@ -38,7 +38,6 @@
 # keep this file list in sync with l10n.toml and filter.py
 relativesrcdir toolkit/locales:
   locale/@AB_CD@/browser/overrides/aboutReader.properties          (%chrome/global/aboutReader.properties)
-  locale/@AB_CD@/browser/overrides/aboutRights.dtd                 (%chrome/global/aboutRights.dtd)
   locale/@AB_CD@/browser/overrides/charsetMenu.properties          (%chrome/global/charsetMenu.properties)
   locale/@AB_CD@/browser/overrides/commonDialogs.properties        (%chrome/global/commonDialogs.properties)
   locale/@AB_CD@/browser/overrides/intl.properties                 (%chrome/global/intl.properties)
@@ -46,14 +45,8 @@ relativesrcdir toolkit/locales:
   locale/@AB_CD@/browser/overrides/search/search.properties        (%chrome/search/search.properties)
 # plugins
   locale/@AB_CD@/browser/overrides/plugins/pluginproblem.dtd       (%chrome/pluginproblem/pluginproblem.dtd)
-# about:support
-  locale/@AB_CD@/browser/overrides/global/aboutSupport.dtd         (%chrome/global/aboutSupport.dtd)
-  locale/@AB_CD@/browser/overrides/global/aboutSupport.properties  (%chrome/global/aboutSupport.properties)
 #about:mozilla
   locale/@AB_CD@/browser/overrides/global/mozilla.dtd                (%chrome/global/mozilla.dtd)
-#about:telemetry
-  locale/@AB_CD@/browser/overrides/global/aboutTelemetry.dtd         (%chrome/global/aboutTelemetry.dtd)
-  locale/@AB_CD@/browser/overrides/global/aboutTelemetry.properties  (%chrome/global/aboutTelemetry.properties)
 #about:webrtc
   locale/@AB_CD@/browser/overrides/global/aboutWebrtc.properties  (%chrome/global/aboutWebrtc.properties)
 
@@ -70,6 +63,9 @@ relativesrcdir dom/locales:
 # Note: All rules must be wildcards, as localized files are optional
 # Only run this if we're not en-US, as en-US is already built
 # by toolkit/locales/jar.mn.
+# If you're including files from a subdirectory, ensure that you're
+# putting them into the corresponding subdirectory in the target.
+# The wildcard ** does that for us in toolkit.
 
 #define EN_US en-US
 #if AB_CD != EN_US
@@ -77,6 +73,14 @@ relativesrcdir dom/locales:
 relativesrcdir toolkit/locales:
 #about:crashes
   crashreporter                                    (%crashreporter/**/*.ftl)
-#endif
 #about:about
-  toolkit                                          (%toolkit/about/*About.ftl)
+  toolkit/about                                    (%toolkit/about/*About.ftl)
+#about:support
+  toolkit/about                                    (%toolkit/about/*Support.ftl)
+#about:rights
+  toolkit/about                                    (%toolkit/about/*Rights.ftl)
+#about:compat
+  toolkit/about                                    (%toolkit/about/*Compat.ftl)
+#endif
+# Do not add files below the endif. Reviewers, expand more context above
+# for comments.

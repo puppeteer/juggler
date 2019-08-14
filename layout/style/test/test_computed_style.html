@@ -2,7 +2,7 @@
 <html>
 <head>
   <title>Test for miscellaneous computed style issues</title>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
   <style id="style"></style>
 </head>
@@ -182,8 +182,7 @@ var noframe_container = document.getElementById("content");
                       "computed 0% calc horizontal"],
     [ "0 calc(3px + 2% - 2%)", "0px calc(0% + 3px)",
                       "computed 0% calc vertical"],
-    [ "calc(3px - 5px) calc(6px - 9px)",
-      "calc(-2px) calc(-3px)", "negative pixel width" ],
+    [ "calc(3px - 5px) calc(6px - 9px)", "0px 0px", "negative pixel width" ],
     [ "", "auto", "initial value" ],
   ];
 
@@ -629,7 +628,7 @@ var noframe_container = document.getElementById("content");
 
     // Radial gradients (should be serialized using modern unprefixed style):
     [ "-webkit-radial-gradient(contain, red, blue)",
-      "radial-gradient(closest-side at 50% 50%, rgb(255, 0, 0), rgb(0, 0, 255))",
+      "-webkit-radial-gradient(50% 50%, closest-side, rgb(255, 0, 0), rgb(0, 0, 255))",
       "-webkit-radial-gradient with legacy 'contain' keyword" ],
   ];
 

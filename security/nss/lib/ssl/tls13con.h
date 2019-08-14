@@ -18,11 +18,6 @@ typedef enum {
     tls13_extension_unknown
 } tls13ExtensionStatus;
 
-typedef enum {
-    update_not_requested = 0,
-    update_requested = 1
-} tls13KeyUpdateRequest;
-
 #define TLS13_MAX_FINISHED_SIZE 64
 
 SECStatus tls13_UnprotectRecord(
@@ -47,11 +42,14 @@ PRBool tls13_InHsState(sslSocket *ss, ...);
 #define TLS13_IN_HS_STATE(ss, ...) \
     tls13_InHsState(ss, __VA_ARGS__, wait_invalid)
 
+PRBool tls13_IsPostHandshake(const sslSocket *ss);
+
 SSLHashType tls13_GetHashForCipherSuite(ssl3CipherSuite suite);
 SSLHashType tls13_GetHash(const sslSocket *ss);
 unsigned int tls13_GetHashSizeForHash(SSLHashType hash);
 unsigned int tls13_GetHashSize(const sslSocket *ss);
 CK_MECHANISM_TYPE tls13_GetHkdfMechanism(sslSocket *ss);
+CK_MECHANISM_TYPE tls13_GetHkdfMechanismForHash(SSLHashType hash);
 SECStatus tls13_ComputeHash(sslSocket *ss, SSL3Hashes *hashes,
                             const PRUint8 *buf, unsigned int len);
 SECStatus tls13_ComputeHandshakeHashes(sslSocket *ss,
@@ -62,7 +60,7 @@ SECStatus tls13_DeriveSecretNullHash(sslSocket *ss, PK11SymKey *key,
                                      PK11SymKey **dest);
 void tls13_FatalError(sslSocket *ss, PRErrorCode prError,
                       SSL3AlertDescription desc);
-SECStatus tls13_SetupClientHello(sslSocket *ss);
+SECStatus tls13_SetupClientHello(sslSocket *ss, sslClientHelloType chType);
 SECStatus tls13_MaybeDo0RTTHandshake(sslSocket *ss);
 PRInt32 tls13_LimitEarlyData(sslSocket *ss, SSLContentType type, PRInt32 toSend);
 PRBool tls13_AllowPskCipher(const sslSocket *ss,
@@ -106,7 +104,7 @@ SECStatus tls13_ProtectRecord(sslSocket *ss,
                               const PRUint8 *pIn,
                               PRUint32 contentLen,
                               sslBuffer *wrBuf);
-PRInt32 tls13_Read0RttData(sslSocket *ss, void *buf, PRInt32 len);
+PRInt32 tls13_Read0RttData(sslSocket *ss, PRUint8 *buf, PRInt32 len);
 SECStatus tls13_HandleEarlyApplicationData(sslSocket *ss, sslBuffer *origBuf);
 PRBool tls13_ClientAllow0Rtt(const sslSocket *ss, const sslSessionID *sid);
 PRUint16 tls13_EncodeDraftVersion(SSL3ProtocolVersion version,
@@ -117,10 +115,16 @@ SECStatus tls13_NegotiateVersion(sslSocket *ss,
 PRBool tls13_ShouldRequestClientAuth(sslSocket *ss);
 
 PRBool tls13_IsReplay(const sslSocket *ss, const sslSessionID *sid);
-void tls13_AntiReplayRollover(PRTime now);
+void tls13_AntiReplayRollover(SSLAntiReplayContext *ctx, PRTime now);
+SSLAntiReplayContext *tls13_RefAntiReplayContext(SSLAntiReplayContext *ctx);
+void tls13_ReleaseAntiReplayContext(SSLAntiReplayContext *ctx);
 
-SECStatus SSLExp_SetupAntiReplay(PRTime window, unsigned int k,
-                                 unsigned int bits);
+SECStatus SSLExp_CreateAntiReplayContext(
+    PRTime now, PRTime window, unsigned int k, unsigned int bits,
+    SSLAntiReplayContext **ctx);
+SECStatus SSLExp_SetAntiReplayContext(PRFileDesc *fd,
+                                      SSLAntiReplayContext *ctx);
+SECStatus SSLExp_ReleaseAntiReplayContext(SSLAntiReplayContext *ctx);
 
 SECStatus SSLExp_HelloRetryRequestCallback(PRFileDesc *fd,
                                            SSLHelloRetryRequestCallback cb,
@@ -130,7 +134,13 @@ SECStatus tls13_SendKeyUpdate(sslSocket *ss, tls13KeyUpdateRequest request,
 SECStatus SSLExp_KeyUpdate(PRFileDesc *fd, PRBool requestUpdate);
 PRBool tls13_MaybeTls13(sslSocket *ss);
 SSLAEADCipher tls13_GetAead(const ssl3BulkCipherDef *cipherDef);
+SECStatus tls13_AEAD(const ssl3KeyMaterial *keys, PRBool doDecrypt,
+                     unsigned char *out, unsigned int *outlen, unsigned int maxout,
+                     const unsigned char *in, unsigned int inlen,
+                     CK_MECHANISM_TYPE mechanism,
+                     unsigned char *aeadParams, unsigned int aeadParamLength);
 void tls13_SetSpecRecordVersion(sslSocket *ss, ssl3CipherSpec *spec);
+SECStatus SSLExp_SendCertificateRequest(PRFileDesc *fd);
 
 /* Use this instead of FATAL_ERROR when no alert shall be sent. */
 #define LOG_ERROR(ss, prError)                                                     \

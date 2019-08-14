@@ -818,6 +818,13 @@ gather_time_entropy(void)
 # include <bsd/stdlib.h>
 #endif
 
+/* BEGIN MOZILLA CHANGE (not all Android NDK versions have the function
+ * declaration, although the function has been available in bionic forever) */
+#if defined(HAVE_ARC4RANDOM_BUF) && defined(__ANDROID__)
+__attribute__((visibility("default"))) void arc4random_buf(void*, size_t);
+#endif
+/* END MOZILLA CHANGE */
+
 static unsigned long
 ENTROPY_DEBUG(const char * label, unsigned long entropy) {
 /* BEGIN MOZILLA CHANGE (don't getenv every time we set up a hash) */
@@ -2452,6 +2459,13 @@ const XML_Char * XMLCALL
 MOZ_XML_GetMismatchedTag(XML_Parser parser)
 {
   return mismatch;
+}
+/* END MOZILLA CHANGE */
+
+/* BEGIN MOZILLA CHANGE (Report whether the parser is currently expanding an entity) */
+XML_Bool XMLCALL
+MOZ_XML_ProcessingEntityValue(XML_Parser parser) {
+  return openInternalEntities != NULL;
 }
 /* END MOZILLA CHANGE */
 

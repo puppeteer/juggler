@@ -8,7 +8,7 @@
 
 #include "nsGkAtoms.h"
 #include "nsCOMPtr.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/DOMStringList.h"
@@ -21,10 +21,12 @@
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/MutationEventBinding.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
+#include "nsUnicodeProperties.h"
 #include "mozilla/EventStates.h"
 #include "nsTextNode.h"
 #include "nsTextFrame.h"
@@ -32,15 +34,16 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-nsIFrame* NS_NewFileControlFrame(nsIPresShell* aPresShell,
-                                 ComputedStyle* aStyle) {
-  return new (aPresShell) nsFileControlFrame(aStyle);
+nsIFrame* NS_NewFileControlFrame(PresShell* aPresShell, ComputedStyle* aStyle) {
+  return new (aPresShell)
+      nsFileControlFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFileControlFrame)
 
-nsFileControlFrame::nsFileControlFrame(ComputedStyle* aStyle)
-    : nsBlockFrame(aStyle, kClassID) {
+nsFileControlFrame::nsFileControlFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+    : nsBlockFrame(aStyle, aPresContext, kClassID) {
   AddStateBits(NS_BLOCK_FLOAT_MGR);
 }
 
@@ -170,10 +173,10 @@ void nsFileControlFrame::Reflow(nsPresContext* aPresContext,
                           availableISizeForLabel - labelBP, filename)) {
         nsBlockFrame::DidReflow(aPresContext, &aReflowInput);
         aStatus.Reset();
-        labelFrame->AddStateBits(NS_FRAME_IS_DIRTY |
-                                 NS_BLOCK_NEEDS_BIDI_RESOLUTION);
-        mMinWidth = NS_INTRINSIC_WIDTH_UNKNOWN;
-        mPrefWidth = NS_INTRINSIC_WIDTH_UNKNOWN;
+        labelFrame->MarkSubtreeDirty();
+        labelFrame->AddStateBits(NS_BLOCK_NEEDS_BIDI_RESOLUTION);
+        mCachedMinISize = NS_INTRINSIC_ISIZE_UNKNOWN;
+        mCachedPrefISize = NS_INTRINSIC_ISIZE_UNKNOWN;
         done = true;
         continue;
       }
@@ -201,7 +204,7 @@ void nsFileControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
   nsBlockFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
 }
 
-static already_AddRefed<Element> MakeAnonButton(nsIDocument* aDoc,
+static already_AddRefed<Element> MakeAnonButton(Document* aDoc,
                                                 const char* labelKey,
                                                 HTMLInputElement* aInputElement,
                                                 const nsAString& aAccessKey) {
@@ -209,8 +212,6 @@ static already_AddRefed<Element> MakeAnonButton(nsIDocument* aDoc,
   // NOTE: SetIsNativeAnonymousRoot() has to be called before setting any
   // attribute.
   button->SetIsNativeAnonymousRoot();
-  button->SetAttr(kNameSpaceID_None, nsGkAtoms::type,
-                  NS_LITERAL_STRING("button"), false);
 
   // Set the file picking button text depending on the current locale.
   nsAutoString buttonTxt;
@@ -238,17 +239,14 @@ static already_AddRefed<Element> MakeAnonButton(nsIDocument* aDoc,
     buttonElement->SetAccessKey(aAccessKey, IgnoreErrors());
   }
 
-  // Both elements are given the same tab index so that the user can tab
-  // to the file control at the correct index, and then between the two
-  // buttons.
-  buttonElement->SetTabIndex(aInputElement->TabIndex(), IgnoreErrors());
-
+  // We allow tabbing over the input itself, not the button.
+  buttonElement->SetTabIndex(-1, IgnoreErrors());
   return button.forget();
 }
 
 nsresult nsFileControlFrame::CreateAnonymousContent(
     nsTArray<ContentInfo>& aElements) {
-  nsCOMPtr<nsIDocument> doc = mContent->GetComposedDoc();
+  nsCOMPtr<Document> doc = mContent->GetComposedDoc();
 
   RefPtr<HTMLInputElement> fileContent =
       HTMLInputElement::FromNodeOrNull(mContent);
@@ -274,7 +272,7 @@ nsresult nsFileControlFrame::CreateAnonymousContent(
 
   // Update the displayed text to reflect the current element's value.
   nsAutoString value;
-  HTMLInputElement::FromNode(mContent)->GetDisplayFileName(value);
+  fileContent->GetDisplayFileName(value);
   UpdateDisplayedValue(value, false);
 
   aElements.AppendElement(mTextContent);
@@ -397,9 +395,8 @@ nsFileControlFrame::DnDListener::HandleEvent(Event* aEvent) {
       inputElement->MozSetDndFilesAndDirectories(array);
     } else {
       bool blinkFileSystemEnabled =
-          Preferences::GetBool("dom.webkitBlink.filesystem.enabled", false);
-      bool dirPickerEnabled =
-          Preferences::GetBool("dom.input.dirpicker", false);
+          StaticPrefs::dom_webkitBlink_filesystem_enabled();
+      bool dirPickerEnabled = StaticPrefs::dom_input_dirpicker();
       if (blinkFileSystemEnabled || dirPickerEnabled) {
         FileList* files = static_cast<FileList*>(fileList.get());
         if (files) {
@@ -527,10 +524,10 @@ nscoord nsFileControlFrame::GetMinISize(gfxContext* aRenderingContext) {
 
 nscoord nsFileControlFrame::GetPrefISize(gfxContext* aRenderingContext) {
   nscoord result;
-  DISPLAY_MIN_INLINE_SIZE(this, result);
+  DISPLAY_PREF_INLINE_SIZE(this, result);
 
   // Make sure we measure with the uncropped filename.
-  if (mPrefWidth == NS_INTRINSIC_WIDTH_UNKNOWN) {
+  if (mCachedPrefISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
     nsAutoString filename;
     HTMLInputElement::FromNode(mContent)->GetDisplayFileName(filename);
     UpdateDisplayedValue(filename, false);

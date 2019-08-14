@@ -5,19 +5,21 @@
 
 const { components } = require("chrome");
 const Services = require("Services");
-const { actorActorSpec, actorRegistrySpec } = require("devtools/shared/specs/actor-registry");
-const protocol = require("devtools/shared/protocol");
-const { custom } = protocol;
+const {
+  actorActorSpec,
+  actorRegistrySpec,
+} = require("devtools/shared/specs/actor-registry");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
 
 loader.lazyImporter(this, "NetUtil", "resource://gre/modules/NetUtil.jsm");
 
-const ActorActorFront = protocol.FrontClassWithSpec(actorActorSpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client, form);
-  },
-});
+class ActorActorFront extends FrontClassWithSpec(actorActorSpec) {}
 
 exports.ActorActorFront = ActorActorFront;
+registerFront(ActorActorFront);
 
 function request(uri) {
   return new Promise((resolve, reject) => {
@@ -27,41 +29,49 @@ function request(uri) {
       reject(e);
     }
 
-    NetUtil.asyncFetch({
-      uri,
-      loadUsingSystemPrincipal: true,
-    }, (stream, status, req) => {
-      if (!components.isSuccessCode(status)) {
-        reject(new Error("Request failed with status code = "
-                         + status
-                         + " after NetUtil.asyncFetch for url = "
-                         + uri));
-        return;
-      }
+    NetUtil.asyncFetch(
+      {
+        uri,
+        loadUsingSystemPrincipal: true,
+      },
+      (stream, status, req) => {
+        if (!components.isSuccessCode(status)) {
+          reject(
+            new Error(
+              "Request failed with status code = " +
+                status +
+                " after NetUtil.asyncFetch for url = " +
+                uri
+            )
+          );
+          return;
+        }
 
-      const source = NetUtil.readInputStreamToString(stream, stream.available());
-      stream.close();
-      resolve(source);
-    });
+        const source = NetUtil.readInputStreamToString(
+          stream,
+          stream.available()
+        );
+        stream.close();
+        resolve(source);
+      }
+    );
   });
 }
 
-const ActorRegistryFront = protocol.FrontClassWithSpec(actorRegistrySpec, {
-  initialize: function(client, form) {
-    protocol.Front.prototype.initialize.call(this, client,
-                                             { actor: form.actorRegistryActor });
+class ActorRegistryFront extends FrontClassWithSpec(actorRegistrySpec) {
+  constructor(client) {
+    super(client);
 
-    this.manage(this);
-  },
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "actorRegistryActor";
+  }
 
-  registerActor: custom(function(uri, options) {
-    return request(uri, options)
-      .then(sourceText => {
-        return this._registerActor(sourceText, uri, options);
-      });
-  }, {
-    impl: "_registerActor",
-  }),
-});
+  registerActor(uri, options) {
+    return request(uri, options).then(sourceText => {
+      return super.registerActor(sourceText, uri, options);
+    });
+  }
+}
 
 exports.ActorRegistryFront = ActorRegistryFront;
+registerFront(ActorRegistryFront);

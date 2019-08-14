@@ -6,6 +6,7 @@ from __future__ import print_function, unicode_literals
 
 import codecs
 import itertools
+import logging
 import os
 import sys
 import textwrap
@@ -13,7 +14,11 @@ import textwrap
 
 base_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(base_dir, 'python', 'mozbuild'))
-from mozbuild.configure import ConfigureSandbox
+sys.path.insert(0, os.path.join(base_dir, 'third_party', 'python', 'six'))
+from mozbuild.configure import (
+    ConfigureSandbox,
+    TRACE,
+)
 from mozbuild.pythonutil import iter_modules_in_path
 from mozbuild.backend.configenvironment import PartialConfigEnvironment
 from mozbuild.util import (
@@ -25,7 +30,12 @@ import mozpack.path as mozpath
 
 def main(argv):
     config = {}
+
     sandbox = ConfigureSandbox(config, os.environ, argv)
+
+    if os.environ.get('MOZ_CONFIGURE_TRACE'):
+        sandbox._logger.setLevel(TRACE)
+
     sandbox.run(os.path.join(os.path.dirname(__file__), 'moz.configure'))
 
     if sandbox._help:
@@ -63,7 +73,7 @@ def config_status(config):
     # Create config.status. Eventually, we'll want to just do the work it does
     # here, when we're able to skip configure tests/use cached results/not rely
     # on autoconf.
-    print("Creating config.status", file=sys.stderr)
+    logging.getLogger('moz.configure').info('Creating config.status')
     encoding = 'mbcs' if sys.platform == 'win32' else 'utf-8'
     with codecs.open('config.status', 'w', encoding) as fh:
         fh.write(textwrap.dedent('''\

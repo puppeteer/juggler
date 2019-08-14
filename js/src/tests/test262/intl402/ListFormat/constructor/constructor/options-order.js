@@ -1,4 +1,4 @@
-// |reftest| skip-if(!Intl.hasOwnProperty('ListFormat')) -- Intl.ListFormat is not enabled unconditionally
+// |reftest| skip -- Intl.ListFormat is not supported
 // Copyright 2018 Igalia, S.L. All rights reserved.
 // This code is governed by the BSD license found in the LICENSE file.
 
@@ -49,12 +49,12 @@ new Intl.ListFormat([], {
 });
 
 assert.compareArray(callOrder, [
+  "localeMatcher",
+  "localeMatcher toString",
   "type",
   "type toString",
   "style",
   "style toString",
-  "localeMatcher",
-  "localeMatcher toString",
 ]);
 
 reportCompare(0, 0);

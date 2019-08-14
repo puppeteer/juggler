@@ -136,6 +136,7 @@ class nsXBLPrototypeHandler {
     mNextHandler = aHandler;
   }
 
+  MOZ_CAN_RUN_SCRIPT
   nsresult ExecuteHandler(mozilla::dom::EventTarget* aTarget,
                           mozilla::dom::Event* aEvent);
 
@@ -198,8 +199,10 @@ class nsXBLPrototypeHandler {
   void GetEventType(nsAString& type);
   bool ModifiersMatchMask(mozilla::dom::UIEvent* aEvent,
                           const IgnoreModifierState& aIgnoreModifierState);
+  MOZ_CAN_RUN_SCRIPT
   nsresult DispatchXBLCommand(mozilla::dom::EventTarget* aTarget,
                               mozilla::dom::Event* aEvent);
+  MOZ_CAN_RUN_SCRIPT
   nsresult DispatchXULKeyCommand(mozilla::dom::Event* aEvent);
   nsresult EnsureEventHandler(mozilla::dom::AutoJSAPI& jsapi, nsAtom* aName,
                               JS::MutableHandle<JSObject*> aHandler);

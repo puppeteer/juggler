@@ -23,7 +23,7 @@
 #include "XREShellData.h"
 
 #if defined(MOZ_WIDGET_ANDROID)
-#include <jni.h>
+#  include <jni.h>
 #endif
 
 /**
@@ -118,8 +118,8 @@
  * directories where native manifests used by the WebExtensions
  * native messaging and managed storage features are found.
  */
-#define XRE_SYS_NATIVE_MANIFESTS "XRESysNativeManifests"
-#define XRE_USER_NATIVE_MANIFESTS "XREUserNativeManifests"
+#  define XRE_SYS_NATIVE_MANIFESTS "XRESysNativeManifests"
+#  define XRE_USER_NATIVE_MANIFESTS "XREUserNativeManifests"
 #endif
 
 /**
@@ -365,25 +365,20 @@ XRE_API(nsresult, XRE_ParseAppData,
         (nsIFile * aINIFile, mozilla::XREAppData& aAppData))
 
 enum GeckoProcessType {
-  GeckoProcessType_Default = 0,
-
-  GeckoProcessType_Plugin,
-  GeckoProcessType_Content,
-
-  GeckoProcessType_IPDLUnitTest,
-
-  GeckoProcessType_GMPlugin,  // Gecko Media Plugin
-
-  GeckoProcessType_GPU,  // GPU and compositor process
-  GeckoProcessType_VR,   // VR process
-  GeckoProcessType_RDD,  // RDD (RemoteDataDecoder process)
+#define GECKO_PROCESS_TYPE(enum_name, string_name, xre_name, bin_type) \
+  GeckoProcessType_##enum_name,
+#include "mozilla/GeckoProcessTypes.h"
+#undef GECKO_PROCESS_TYPE
   GeckoProcessType_End,
   GeckoProcessType_Invalid = GeckoProcessType_End
 };
 
 static const char* const kGeckoProcessTypeString[] = {
-    "default",          "plugin", "tab", "ipdlunittest",
-    "geckomediaplugin", "gpu",    "vr",  "rdd"};
+#define GECKO_PROCESS_TYPE(enum_name, string_name, xre_name, bin_type) \
+  string_name,
+#include "mozilla/GeckoProcessTypes.h"
+#undef GECKO_PROCESS_TYPE
+};
 
 static_assert(MOZ_ARRAY_LENGTH(kGeckoProcessTypeString) == GeckoProcessType_End,
               "Array length mismatch");
@@ -405,10 +400,6 @@ XRE_API(void, XRE_SetAndroidChildFds,
 #endif  // defined(MOZ_WIDGET_ANDROID)
 
 XRE_API(void, XRE_SetProcessType, (const char* aProcessTypeString))
-
-// Used in the "master" parent process hosting the crash server
-XRE_API(bool, XRE_TakeMinidumpForChild,
-        (uint32_t aChildPid, nsIFile** aDump, uint32_t* aSequence))
 
 // Used in child processes.
 #if defined(XP_WIN)
@@ -438,26 +429,32 @@ XRE_API(GeckoProcessType, XRE_GetProcessType, ())
 XRE_API(bool, XRE_IsE10sParentProcess, ())
 
 /**
- * Returns true when called in the e10s parent process or called in the main
- * process when e10s is disabled.
+ * Defines XRE_IsParentProcess, XRE_IsContentProcess, etc.
+ *
+ * XRE_IsParentProcess is unique in that it returns true when called in
+ * the e10s parent process or called in the main process when e10s is
+ * disabled.
  */
-XRE_API(bool, XRE_IsParentProcess, ())
+#define GECKO_PROCESS_TYPE(enum_name, string_name, xre_name, bin_type) \
+  XRE_API(bool, XRE_Is##xre_name##Process, ())
+#include "mozilla/GeckoProcessTypes.h"
+#undef GECKO_PROCESS_TYPE
 
-XRE_API(bool, XRE_IsContentProcess, ())
-
-XRE_API(bool, XRE_IsGPUProcess, ())
-
-XRE_API(bool, XRE_IsRDDProcess, ())
-
-XRE_API(bool, XRE_IsVRProcess, ())
-
-XRE_API(bool, XRE_IsPluginProcess, ())
+XRE_API(bool, XRE_IsSocketProcess, ())
 
 /**
  * Returns true if the appshell should run its own native event loop. Returns
  * false if we should rely solely on the Gecko event loop.
  */
 XRE_API(bool, XRE_UseNativeEventProcessing, ())
+
+#if defined(XP_WIN)
+/**
+ * @returns true if win32k calls are allowed in this process type, false if
+ *          win32k is (or should be) disabled.
+ */
+XRE_API(bool, XRE_Win32kCallsAllowed, ())
+#endif
 
 typedef void (*MainFunction)(void* aData);
 
@@ -494,11 +491,17 @@ XRE_API(void, XRE_StopLateWriteChecks, (void))
 
 XRE_API(void, XRE_EnableSameExecutableForContentProc, ())
 
+namespace mozilla {
+enum class BinPathType { Self, PluginContainer };
+}
+XRE_API(mozilla::BinPathType, XRE_GetChildProcBinPathType,
+        (GeckoProcessType aProcessType));
+
 XRE_API(int, XRE_XPCShellMain,
         (int argc, char** argv, char** envp, const XREShellData* aShellData))
 
 #ifdef LIBFUZZER
-#include "FuzzerRegistry.h"
+#  include "FuzzerRegistry.h"
 
 XRE_API(void, XRE_LibFuzzerSetDriver, (LibFuzzerDriver))
 

@@ -22,13 +22,13 @@ struct LangGroupFontPrefs {
       : mLangGroup(nullptr),
         mMinimumFontSize(0),
         mDefaultVariableFont(),
-        mDefaultFixedFont(mozilla::eFamily_monospace, 0),
-        mDefaultSerifFont(mozilla::eFamily_serif, 0),
-        mDefaultSansSerifFont(mozilla::eFamily_sans_serif, 0),
-        mDefaultMonospaceFont(mozilla::eFamily_monospace, 0),
-        mDefaultCursiveFont(mozilla::eFamily_cursive, 0),
-        mDefaultFantasyFont(mozilla::eFamily_fantasy, 0) {
-    mDefaultVariableFont.fontlist.SetDefaultFontType(mozilla::eFamily_serif);
+        mDefaultSerifFont(StyleGenericFontFamily::Serif, 0),
+        mDefaultSansSerifFont(StyleGenericFontFamily::SansSerif, 0),
+        mDefaultMonospaceFont(StyleGenericFontFamily::Monospace, 0),
+        mDefaultCursiveFont(StyleGenericFontFamily::Cursive, 0),
+        mDefaultFantasyFont(StyleGenericFontFamily::Fantasy, 0) {
+    mDefaultVariableFont.fontlist.SetDefaultFontType(
+        StyleGenericFontFamily::Serif);
     // We create mDefaultVariableFont.fontlist with defaultType as the
     // fallback font, and not as part of the font list proper. This way,
     // it can be overwritten should there be a language change.
@@ -59,12 +59,45 @@ struct LangGroupFontPrefs {
   }
 
   // Initialize this with the data for a given language
-  void Initialize(nsAtom* aLangGroupAtom);
+  void Initialize(nsStaticAtom* aLangGroupAtom);
 
-  RefPtr<nsAtom> mLangGroup;
+  /**
+   * Get the default font for the given language and generic font ID.
+   * aLanguage may not be nullptr.
+   *
+   * This object is read-only, you must copy the font to modify it.
+   *
+   * For aFontID corresponding to a CSS Generic, the nsFont returned has
+   * its name set to that generic font's name, and its size set to
+   * the user's preference for font size for that generic and the
+   * given language.
+   */
+  const nsFont* GetDefaultFont(StyleGenericFontFamily aFamily) const {
+    switch (aFamily) {
+      // Special (our default variable width font and fixed width font)
+      case StyleGenericFontFamily::None:
+        return &mDefaultVariableFont;
+      // CSS
+      case StyleGenericFontFamily::Serif:
+        return &mDefaultSerifFont;
+      case StyleGenericFontFamily::SansSerif:
+        return &mDefaultSansSerifFont;
+      case StyleGenericFontFamily::Monospace:
+        return &mDefaultMonospaceFont;
+      case StyleGenericFontFamily::Cursive:
+        return &mDefaultCursiveFont;
+      case StyleGenericFontFamily::Fantasy:
+        return &mDefaultFantasyFont;
+        break;
+      default:
+        MOZ_ASSERT_UNREACHABLE("invalid font id");
+        return nullptr;
+    }
+  }
+
+  nsStaticAtom* mLangGroup;
   nscoord mMinimumFontSize;
   nsFont mDefaultVariableFont;
-  nsFont mDefaultFixedFont;
   nsFont mDefaultSerifFont;
   nsFont mDefaultSansSerifFont;
   nsFont mDefaultMonospaceFont;
@@ -107,13 +140,13 @@ class StaticPresData {
    * to re-call GetLanguageGroup when it is safe to cache, to avoid
    * recomputing the language group again later.
    */
-  nsAtom* GetLangGroup(nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const;
+  nsStaticAtom* GetLangGroup(nsAtom* aLanguage,
+                             bool* aNeedsToCache = nullptr) const;
 
   /**
    * Same as GetLangGroup, but will not cache the result
-   *
    */
-  already_AddRefed<nsAtom> GetUncachedLangGroup(nsAtom* aLanguage) const;
+  nsStaticAtom* GetUncachedLangGroup(nsAtom* aLanguage) const;
 
   /**
    * Fetch the user's font preferences for the given aLanguage's
@@ -131,55 +164,19 @@ class StaticPresData {
    *
    * See comment on GetLangGroup for the usage of aNeedsToCache.
    */
-  const LangGroupFontPrefs* GetFontPrefsForLangHelper(
-      nsAtom* aLanguage, const LangGroupFontPrefs* aPrefs,
-      bool* aNeedsToCache = nullptr) const;
-  /**
-   * Get the default font for the given language and generic font ID.
-   * aLanguage may not be nullptr.
-   *
-   * This object is read-only, you must copy the font to modify it.
-   *
-   * When aFontID is kPresContext_DefaultVariableFontID or
-   * kPresContext_DefaultFixedFontID (which equals
-   * kGenericFont_moz_fixed, which is used for the -moz-fixed generic),
-   * the nsFont returned has its name as a CSS generic family (serif or
-   * sans-serif for the former, monospace for the latter), and its size
-   * as the default font size for variable or fixed fonts for the
-   * language group.
-   *
-   * For aFontID corresponding to a CSS Generic, the nsFont returned has
-   * its name set to that generic font's name, and its size set to
-   * the user's preference for font size for that generic and the
-   * given language.
-   */
-  const nsFont* GetDefaultFontHelper(uint8_t aFontID, nsAtom* aLanguage,
-                                     const LangGroupFontPrefs* aPrefs) const;
+  const LangGroupFontPrefs* GetFontPrefsForLang(nsAtom* aLanguage,
+                                                bool* aNeedsToCache = nullptr);
+  const nsFont* GetDefaultFont(uint8_t aFontID, nsAtom* aLanguage,
+                               const LangGroupFontPrefs* aPrefs) const;
 
-  /*
-   * These versions operate on the font pref cache on StaticPresData.
-   */
-
-  const nsFont* GetDefaultFont(uint8_t aFontID, nsAtom* aLanguage) const {
-    MOZ_ASSERT(aLanguage);
-    return GetDefaultFontHelper(aFontID, aLanguage,
-                                GetFontPrefsForLang(aLanguage));
-  }
-  const LangGroupFontPrefs* GetFontPrefsForLang(
-      nsAtom* aLanguage, bool* aNeedsToCache = nullptr) const {
-    MOZ_ASSERT(aLanguage);
-    return GetFontPrefsForLangHelper(aLanguage, &mStaticLangGroupFontPrefs,
-                                     aNeedsToCache);
-  }
-
-  void ResetCachedFontPrefs() { mStaticLangGroupFontPrefs.Reset(); }
+  void InvalidateFontPrefs() { mLangGroupFontPrefs.Reset(); }
 
  private:
   StaticPresData();
-  ~StaticPresData() {}
+  ~StaticPresData() = default;
 
   nsLanguageAtomService* mLangService;
-  LangGroupFontPrefs mStaticLangGroupFontPrefs;
+  LangGroupFontPrefs mLangGroupFontPrefs;
 };
 
 }  // namespace mozilla

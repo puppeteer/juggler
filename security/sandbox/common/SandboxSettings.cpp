@@ -6,10 +6,12 @@
 
 #include "mozISandboxSettings.h"
 
-#include "mozilla/ModuleUtils.h"
+#include "mozilla/Components.h"
 #include "mozilla/Preferences.h"
 
 #include "prenv.h"
+
+using namespace mozilla;
 
 namespace mozilla {
 
@@ -67,25 +69,13 @@ class SandboxSettings final : public mozISandboxSettings {
 NS_IMPL_ISUPPORTS(SandboxSettings, mozISandboxSettings)
 
 NS_IMETHODIMP SandboxSettings::GetEffectiveContentSandboxLevel(
-    int32_t *aRetVal) {
+    int32_t* aRetVal) {
   *aRetVal = mozilla::GetEffectiveContentSandboxLevel();
   return NS_OK;
 }
 
-NS_GENERIC_FACTORY_CONSTRUCTOR(SandboxSettings)
-
-NS_DEFINE_NAMED_CID(MOZ_SANDBOX_SETTINGS_CID);
-
-static const mozilla::Module::CIDEntry kSandboxSettingsCIDs[] = {
-    {&kMOZ_SANDBOX_SETTINGS_CID, false, nullptr, SandboxSettingsConstructor},
-    {nullptr}};
-
-static const mozilla::Module::ContractIDEntry kSandboxSettingsContracts[] = {
-    {MOZ_SANDBOX_SETTINGS_CONTRACTID, &kMOZ_SANDBOX_SETTINGS_CID}, {nullptr}};
-
-static const mozilla::Module kSandboxSettingsModule = {
-    mozilla::Module::kVersion, kSandboxSettingsCIDs, kSandboxSettingsContracts};
-
-NSMODULE_DEFN(SandboxSettingsModule) = &kSandboxSettingsModule;
-
 }  // namespace mozilla
+
+NS_IMPL_COMPONENT_FACTORY(mozISandboxSettings) {
+  return MakeAndAddRef<SandboxSettings>().downcast<nsISupports>();
+}

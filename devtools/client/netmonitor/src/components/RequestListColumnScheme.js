@@ -8,8 +8,6 @@ const { Component } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
-const { div } = dom;
-
 class RequestListColumnScheme extends Component {
   static get propTypes() {
     return {
@@ -18,18 +16,19 @@ class RequestListColumnScheme extends Component {
   }
 
   shouldComponentUpdate(nextProps) {
-    return this.props.item.urlDetails.scheme !== nextProps.item.urlDetails.scheme;
+    return (
+      this.props.item.urlDetails.scheme !== nextProps.item.urlDetails.scheme
+    );
   }
 
   render() {
     const { urlDetails } = this.props.item;
-    return (
-      div({
+    return dom.td(
+      {
         className: "requests-list-column requests-list-scheme",
         title: urlDetails.scheme,
       },
-        urlDetails.scheme
-      )
+      urlDetails.scheme
     );
   }
 }

@@ -6,8 +6,8 @@
     <meta charset="utf8">
     <title></title>
 
-    <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-    <script type="application/javascript" src="chrome://mochikit/content/chrome-harness.js"></script>
+    <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+    <script src="chrome://mochikit/content/chrome-harness.js"></script>
     <script type="application/javascript" src="head.js"></script>
     <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
   </head>
@@ -31,13 +31,13 @@
           is(items.length, 2, "Found 2 runtime buttons");
 
           // Connect to local runtime
-          let connectionsChanged = waitForConnectionChange("opened", 2);
+          let connectionsChanged = waitForConnectionChange("opened");
           items[1].click();
 
           await waitForUpdate(win, "runtime-targets");
 
           await connectionsChanged;
-          is(Object.keys(DebuggerServer._connections).length, 2, "Locally connected");
+          is(Object.keys(DebuggerServer._connections).length, 1, "Locally connected");
 
           ok(win.AppManager.isMainProcessDebuggable(), "Main process available");
 
@@ -53,7 +53,7 @@
           const lastProject = Services.prefs.getCharPref("devtools.webide.lastSelectedProject");
           is(lastProject, "mainProcess:", "Last project is main process");
 
-          connectionsChanged = waitForConnectionChange("closed", 2);
+          connectionsChanged = waitForConnectionChange("closed");
 
           await nextTick();
           await closeWebIDE(win);
@@ -61,7 +61,11 @@
           await connectionsChanged;
           is(Object.keys(DebuggerServer._connections).length, 0, "Disconnected");
 
-          connectionsChanged = waitForConnectionChange("opened", 2);
+          // The DebuggerServer is destroyed when closing WebIDE, so re-initialize it.
+          DebuggerServer.init();
+          DebuggerServer.registerAllActors();
+
+          connectionsChanged = waitForConnectionChange("opened");
 
           // Re-open, should reselect main process after connection
           win = await openWebIDE();
@@ -78,7 +82,7 @@
           await waitForUpdate(win, "runtime-targets");
 
           await connectionsChanged;
-          is(Object.keys(DebuggerServer._connections).length, 2, "Locally connected");
+          is(Object.keys(DebuggerServer._connections).length, 1, "Locally connected");
           ok(win.AppManager.isMainProcessDebuggable(), "Main process available");
           is(win.AppManager.selectedProject.type, "mainProcess", "Main process reselected");
 

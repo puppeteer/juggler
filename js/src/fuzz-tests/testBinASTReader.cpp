@@ -35,7 +35,7 @@ static int testBinASTReaderFuzz(const uint8_t* buf, size_t size) {
 
   auto gcGuard = mozilla::MakeScopeExit([&] {
     JS::PrepareForFullGC(gCx);
-    JS::NonIncrementalGC(gCx, GC_NORMAL, JS::gcreason::API);
+    JS::NonIncrementalGC(gCx, GC_NORMAL, JS::GCReason::API);
   });
 
   if (!size) return 0;
@@ -61,7 +61,7 @@ static int testBinASTReaderFuzz(const uint8_t* buf, size_t size) {
     ReportOutOfMemory(gCx);
     return 0;
   }
-  BinASTParser<js::frontend::BinTokenReaderMultipart> reader(
+  BinASTParser<js::frontend::BinASTTokenReaderMultipart> reader(
       gCx, gCx->tempLifoAlloc(), binUsedNames, options, sourceObj);
 
   // Will be deallocated once `reader` goes out of scope.

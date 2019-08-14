@@ -227,11 +227,11 @@ interface nsIAccessibleTraversalRule : nsISupports
   const unsigned short FILTER_IGNORE_SUBTREE = 0x2;
 
   /* Pre-filters */
-  const unsigned long PREFILTER_INVISIBLE     = 0x00000001;
-  const unsigned long PREFILTER_OFFSCREEN     = 0x00000002;
-  const unsigned long PREFILTER_NOT_FOCUSABLE = 0x00000004;
-  const unsigned long PREFILTER_TRANSPARENT   = 0x00000008;
-
+  const unsigned long PREFILTER_INVISIBLE         = 0x00000001;
+  const unsigned long PREFILTER_OFFSCREEN         = 0x00000002;
+  const unsigned long PREFILTER_NOT_FOCUSABLE     = 0x00000004;
+  const unsigned long PREFILTER_TRANSPARENT       = 0x00000008;
+  const unsigned long PREFILTER_PLATFORM_PRUNED   = 0x00000010;
   /**
    * Pre-filter bitfield to filter out obviously ignorable nodes and lighten
    * the load on match().
@@ -245,11 +245,9 @@ interface nsIAccessibleTraversalRule : nsISupports
    * at the start of a traversal, so changing the method's return result after
    * that would have no affect.
    *
-   * @param aRoles [out] an array of the roles to match.
-   * @param aCount [out] the length of the array.
+   * @return an array of the roles to match.
    */
-  void getMatchRoles([array, size_is(aCount)]out unsigned long aRoles,
-                     [retval]out unsigned long aCount);
+  Array<unsigned long> getMatchRoles();
 
   /**
    * Determines if a given accessible is to be accepted in our traversal rule

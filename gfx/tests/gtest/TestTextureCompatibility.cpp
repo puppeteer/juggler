@@ -22,6 +22,7 @@ using mozilla::gfx::gfxConfig;
 using mozilla::layers::BasicCompositor;
 using mozilla::layers::Compositor;
 using mozilla::layers::CompositorOptions;
+using mozilla::layers::ISurfaceAllocator;
 using mozilla::layers::LayersBackend;
 using mozilla::layers::TestSurfaceAllocator;
 using mozilla::layers::TextureClient;
@@ -67,7 +68,7 @@ static void GetPlatformBackends(nsTArray<LayersBackend>& aBackends) {
 /**
  * This function will return a BasicCompositor to caller.
  */
-already_AddRefed<Compositor> CreateBasicCompositor() {
+static already_AddRefed<Compositor> CreateBasicCompositor() {
   RefPtr<Compositor> compositor;
   // Init the platform.
   if (gfxPlatform::GetPlatform()) {
@@ -84,7 +85,7 @@ already_AddRefed<Compositor> CreateBasicCompositor() {
  * This function checks if the textures react correctly when setting them to
  * BasicCompositor.
  */
-void CheckCompatibilityWithBasicCompositor(
+static void CheckCompatibilityWithBasicCompositor(
     LayersBackend aBackends, nsTArray<RefPtr<TextureHost>>& aTextures) {
   RefPtr<Compositor> compositor = CreateBasicCompositor();
   for (uint32_t i = 0; i < aTextures.Length(); i++) {
@@ -107,7 +108,8 @@ void CheckCompatibilityWithBasicCompositor(
   }
 }
 
-TEST(Gfx, TestTextureCompatibility) {
+TEST(Gfx, TestTextureCompatibility)
+{
   nsTArray<LayersBackend> backendHints;
   RefPtr<TestSurfaceAllocator> deallocator = new TestSurfaceAllocator();
 

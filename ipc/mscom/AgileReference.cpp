@@ -12,6 +12,11 @@
 #include "mozilla/Move.h"
 #include "mozilla/mscom/Utils.h"
 
+#if defined(MOZILLA_INTERNAL_API)
+#  include "nsDebug.h"
+#  include "nsPrintfCString.h"
+#endif  // defined(MOZILLA_INTERNAL_API)
+
 #if NTDDI_VERSION < NTDDI_WINBLUE
 
 // Declarations from Windows SDK specific to Windows 8.1
@@ -100,7 +105,17 @@ void AgileReference::Clear() {
   }
 
   DebugOnly<HRESULT> hr = git->RevokeInterfaceFromGlobal(mGitCookie);
+#if defined(MOZILLA_INTERNAL_API)
+  NS_WARNING_ASSERTION(
+      SUCCEEDED(hr),
+      nsPrintfCString("IGlobalInterfaceTable::RevokeInterfaceFromGlobal failed "
+                      "with HRESULT "
+                      "0x%08lX",
+                      ((HRESULT)hr))
+          .get());
+#else
   MOZ_ASSERT(SUCCEEDED(hr));
+#endif  // defined(MOZILLA_INTERNAL_API)
   mGitCookie = 0;
 }
 
@@ -158,7 +173,8 @@ AgileReference::Resolve(REFIID aIid, void** aOutInterface) const {
   return originalInterface->QueryInterface(aIid, aOutInterface);
 }
 
-/* static */ IGlobalInterfaceTable* AgileReference::ObtainGit() {
+/* static */
+IGlobalInterfaceTable* AgileReference::ObtainGit() {
   // Internally to COM, the Global Interface Table is a singleton, therefore we
   // don't worry about holding onto this reference indefinitely.
   static IGlobalInterfaceTable* sGit = []() -> IGlobalInterfaceTable* {

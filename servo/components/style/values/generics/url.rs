@@ -4,11 +4,9 @@
 
 //! Generic types for url properties.
 
-use crate::parser::{Parse, ParserContext};
-use cssparser::Parser;
-use style_traits::ParseError;
-
 /// An image url or none, used for example in list-style-image
+///
+/// cbindgen:derive-tagged-enum-copy-constructor=true
 #[derive(
     Animate,
     Clone,
@@ -16,38 +14,36 @@ use style_traits::ParseError;
     Debug,
     MallocSizeOf,
     PartialEq,
+    Parse,
     SpecifiedValueInfo,
     ToAnimatedValue,
     ToAnimatedZero,
     ToComputedValue,
     ToCss,
+    ToResolvedValue,
+    ToShmem,
 )]
-pub enum UrlOrNone<Url> {
+#[repr(C, u8)]
+pub enum GenericUrlOrNone<U> {
     /// `none`
     None,
-    /// `A URL`
-    Url(Url),
+    /// A URL.
+    Url(U),
 }
+
+pub use self::GenericUrlOrNone as UrlOrNone;
 
 impl<Url> UrlOrNone<Url> {
     /// Initial "none" value for properties such as `list-style-image`
     pub fn none() -> Self {
         UrlOrNone::None
     }
-}
 
-impl<Url> Parse for UrlOrNone<Url>
-where
-    Url: Parse,
-{
-    fn parse<'i, 't>(
-        context: &ParserContext,
-        input: &mut Parser<'i, 't>,
-    ) -> Result<UrlOrNone<Url>, ParseError<'i>> {
-        if let Ok(url) = input.try(|input| Url::parse(context, input)) {
-            return Ok(UrlOrNone::Url(url));
+    /// Returns whether the value is `none`.
+    pub fn is_none(&self) -> bool {
+        match *self {
+            UrlOrNone::None => true,
+            UrlOrNone::Url(..) => false,
         }
-        input.expect_ident_matching("none")?;
-        Ok(UrlOrNone::None)
     }
 }

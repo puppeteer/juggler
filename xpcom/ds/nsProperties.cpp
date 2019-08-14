@@ -8,10 +8,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
-NS_IMPL_AGGREGATED(nsProperties)
-NS_INTERFACE_MAP_BEGIN_AGGREGATED(nsProperties)
-  NS_INTERFACE_MAP_ENTRY(nsIProperties)
-NS_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS(nsProperties, nsIProperties)
 
 NS_IMETHODIMP
 nsProperties::Get(const char* prop, const nsIID& uuid, void** result) {
@@ -55,32 +52,14 @@ nsProperties::Has(const char* prop, bool* result) {
 }
 
 NS_IMETHODIMP
-nsProperties::GetKeys(uint32_t* aCount, char*** aKeys) {
-  if (NS_WARN_IF(!aCount) || NS_WARN_IF(!aKeys)) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
+nsProperties::GetKeys(nsTArray<nsCString>& aKeys) {
   uint32_t count = Count();
-  char** keys = (char**)moz_xmalloc(count * sizeof(char*));
-  uint32_t j = 0;
+  aKeys.SetCapacity(count);
 
   for (auto iter = this->Iter(); !iter.Done(); iter.Next()) {
-    const char* key = iter.Key();
-    keys[j] = strdup(key);
-
-    if (!keys[j]) {
-      // Free 'em all
-      for (uint32_t i = 0; i < j; i++) {
-        free(keys[i]);
-      }
-      free(keys);
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    j++;
+    aKeys.AppendElement(iter.Key());
   }
 
-  *aCount = count;
-  *aKeys = keys;
   return NS_OK;
 }
 

@@ -4,29 +4,38 @@
 
 "use strict";
 
-ChromeUtils.defineModuleGetter(this, "Services",
-  "resource://gre/modules/Services.jsm");
-ChromeUtils.defineModuleGetter(this, "Utils",
-  "resource://gre/modules/accessibility/Utils.jsm");
-ChromeUtils.defineModuleGetter(this, "Logger",
-  "resource://gre/modules/accessibility/Utils.jsm");
-ChromeUtils.defineModuleGetter(this, "Roles",
-  "resource://gre/modules/accessibility/Constants.jsm");
-ChromeUtils.defineModuleGetter(this, "Events",
-  "resource://gre/modules/accessibility/Constants.jsm");
-ChromeUtils.defineModuleGetter(this, "States",
-  "resource://gre/modules/accessibility/Constants.jsm");
+ChromeUtils.defineModuleGetter(
+  this,
+  "Services",
+  "resource://gre/modules/Services.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "Utils",
+  "resource://gre/modules/accessibility/Utils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "Logger",
+  "resource://gre/modules/accessibility/Utils.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "Events",
+  "resource://gre/modules/accessibility/Constants.jsm"
+);
 
 var EXPORTED_SYMBOLS = ["EventManager"];
 
 function EventManager(aContentScope) {
   this.contentScope = aContentScope;
   this.addEventListener = this.contentScope.addEventListener.bind(
-    this.contentScope);
+    this.contentScope
+  );
   this.removeEventListener = this.contentScope.removeEventListener.bind(
-    this.contentScope);
-  this.sendMsgFunc = this.contentScope.sendAsyncMessage.bind(
-    this.contentScope);
+    this.contentScope
+  );
+  this.sendMsgFunc = this.contentScope.sendAsyncMessage.bind(this.contentScope);
 }
 
 this.EventManager.prototype = {
@@ -69,76 +78,72 @@ this.EventManager.prototype = {
 
   handleAccEvent: function handleAccEvent(aEvent) {
     Logger.debug(() => {
-      return ["A11yEvent", Logger.eventToString(aEvent),
-              Logger.accessibleToString(aEvent.accessible)];
+      return [
+        "A11yEvent",
+        Logger.eventToString(aEvent),
+        Logger.accessibleToString(aEvent.accessible),
+      ];
     });
 
     // Don't bother with non-content events in firefox.
-    if (Utils.MozBuildApp == "browser" &&
-        aEvent.eventType != Events.VIRTUALCURSOR_CHANGED &&
-        // XXX Bug 442005 results in DocAccessible::getDocType returning
-        // NS_ERROR_FAILURE. Checking for aEvent.accessibleDocument.docType ==
-        // 'window' does not currently work.
-        (aEvent.accessibleDocument.DOMDocument.doctype &&
-         aEvent.accessibleDocument.DOMDocument.doctype.name === "window")) {
+    if (
+      Utils.MozBuildApp == "browser" &&
+      aEvent.eventType != Events.VIRTUALCURSOR_CHANGED &&
+      // XXX Bug 442005 results in DocAccessible::getDocType returning
+      // NS_ERROR_FAILURE. Checking for aEvent.accessibleDocument.docType ==
+      // 'window' does not currently work.
+      (aEvent.accessibleDocument.DOMDocument.doctype &&
+        aEvent.accessibleDocument.DOMDocument.doctype.name === "window")
+    ) {
       return;
     }
 
     switch (aEvent.eventType) {
-      case Events.VIRTUALCURSOR_CHANGED:
-      {
-        if (!aEvent.isFromUserInput) {
-          break;
-        }
-
-        const event = aEvent.
-          QueryInterface(Ci.nsIAccessibleVirtualCursorChangeEvent);
-        const position = event.newAccessible;
-
-        // We pass control to the vc in the embedded frame.
-        if (position && position.role == Roles.INTERNAL_FRAME) {
-          break;
-        }
-
-        // Blur to document if new position is not explicitly focused.
-        if (!position || !Utils.getState(position).contains(States.FOCUSED)) {
-          aEvent.accessibleDocument.takeFocus();
+      case Events.TEXT_CARET_MOVED: {
+        if (
+          aEvent.accessible != aEvent.accessibleDocument &&
+          !aEvent.isFromUserInput
+        ) {
+          // If caret moves in document without direct user
+          // we are probably stepping through results in find-in-page.
+          let acc = Utils.getTextLeafForOffset(
+            aEvent.accessible,
+            aEvent.QueryInterface(Ci.nsIAccessibleCaretMoveEvent).caretOffset
+          );
+          this.contentControl.autoMove(acc);
         }
         break;
       }
-      case Events.NAME_CHANGE:
-      {
+      case Events.NAME_CHANGE: {
         // XXX: Port to Android
         break;
       }
-      case Events.SCROLLING_START:
-      {
+      case Events.SCROLLING_START: {
         this.contentControl.autoMove(aEvent.accessible);
         break;
       }
-      case Events.SHOW:
-      {
+      case Events.SHOW: {
         // XXX: Port to Android
         break;
       }
-      case Events.HIDE:
-      {
+      case Events.HIDE: {
         // XXX: Port to Android
         break;
       }
-      case Events.VALUE_CHANGE:
-      {
+      case Events.VALUE_CHANGE: {
         // XXX: Port to Android
         break;
       }
     }
   },
 
-  QueryInterface: ChromeUtils.generateQI([Ci.nsISupportsWeakReference, Ci.nsIObserver]),
+  QueryInterface: ChromeUtils.generateQI([
+    Ci.nsISupportsWeakReference,
+    Ci.nsIObserver,
+  ]),
 };
 
 const AccessibilityEventObserver = {
-
   /**
    * A WeakMap containing [content, EventManager] pairs.
    */
@@ -193,8 +198,10 @@ const AccessibilityEventObserver = {
     }
     this.eventManagers.set(content, aEventManager);
     // Since at least one EventManager was registered, start listening.
-    Logger.debug("AccessibilityEventObserver.addListener. Total:",
-      this.listenerCount);
+    Logger.debug(
+      "AccessibilityEventObserver.addListener. Total:",
+      this.listenerCount
+    );
     this.start();
   },
 
@@ -211,8 +218,10 @@ const AccessibilityEventObserver = {
       return;
     }
     this.listenerCount--;
-    Logger.debug("AccessibilityEventObserver.removeListener. Total:",
-      this.listenerCount);
+    Logger.debug(
+      "AccessibilityEventObserver.removeListener. Total:",
+      this.listenerCount
+    );
     if (this.listenerCount === 0) {
       // If there are no EventManagers registered at the moment, stop listening
       // to the 'accessible-event' messages.
@@ -250,8 +259,10 @@ const AccessibilityEventObserver = {
     if (!event.accessibleDocument) {
       Logger.warning(
         "AccessibilityEventObserver.observe: no accessible document:",
-        Logger.eventToString(event), "accessible:",
-        Logger.accessibleToString(event.accessible));
+        Logger.eventToString(event),
+        "accessible:",
+        Logger.accessibleToString(event.accessible)
+      );
       return;
     }
     let content;
@@ -260,8 +271,10 @@ const AccessibilityEventObserver = {
     } catch (e) {
       Logger.warning(
         "AccessibilityEventObserver.observe: no window for accessible document:",
-        Logger.eventToString(event), "accessible:",
-        Logger.accessibleToString(event.accessible));
+        Logger.eventToString(event),
+        "accessible:",
+        Logger.accessibleToString(event.accessible)
+      );
       return;
     }
     // Match the content window to its EventManager.
@@ -270,9 +283,12 @@ const AccessibilityEventObserver = {
       if (Utils.MozBuildApp === "browser" && !content.isChromeWindow) {
         Logger.warning(
           "AccessibilityEventObserver.observe: ignored event:",
-          Logger.eventToString(event), "accessible:",
-          Logger.accessibleToString(event.accessible), "document:",
-          Logger.accessibleToString(event.accessibleDocument));
+          Logger.eventToString(event),
+          "accessible:",
+          Logger.accessibleToString(event.accessible),
+          "document:",
+          Logger.accessibleToString(event.accessibleDocument)
+        );
       }
       return;
     }
@@ -280,8 +296,6 @@ const AccessibilityEventObserver = {
       eventManager.handleAccEvent(event);
     } catch (x) {
       Logger.logException(x, "Error handing accessible event");
-    } finally {
-      return;
     }
   },
 };

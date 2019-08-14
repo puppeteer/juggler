@@ -8,6 +8,7 @@
 #include "DecoderData.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/EndianUtils.h"
+#include "mozilla/Telemetry.h"
 #include "VideoUtils.h"
 
 // OpusDecoder header is really needed only by MP4 in rust
@@ -40,6 +41,168 @@ mozilla::Result<mozilla::Ok, nsresult> CryptoFile::DoUpdate(
   return mozilla::Ok();
 }
 
+static MediaResult UpdateTrackProtectedInfo(mozilla::TrackInfo& aConfig,
+                                            const Mp4parseSinfInfo& aSinf) {
+  if (aSinf.is_encrypted != 0) {
+    if (aSinf.scheme_type == MP4_PARSE_ENCRYPTION_SCHEME_TYPE_CENC) {
+      aConfig.mCrypto.mCryptoScheme = CryptoScheme::Cenc;
+    } else if (aSinf.scheme_type == MP4_PARSE_ENCRYPTION_SCHEME_TYPE_CBCS) {
+      aConfig.mCrypto.mCryptoScheme = CryptoScheme::Cbcs;
+    } else {
+      // Unsupported encryption type;
+      return MediaResult(
+          NS_ERROR_DOM_MEDIA_METADATA_ERR,
+          RESULT_DETAIL(
+              "Unsupported encryption scheme encountered aSinf.scheme_type=%d",
+              static_cast<int>(aSinf.scheme_type)));
+    }
+    aConfig.mCrypto.mIVSize = aSinf.iv_size;
+    aConfig.mCrypto.mKeyId.AppendElements(aSinf.kid.data, aSinf.kid.length);
+    aConfig.mCrypto.mCryptByteBlock = aSinf.crypt_byte_block;
+    aConfig.mCrypto.mSkipByteBlock = aSinf.skip_byte_block;
+    aConfig.mCrypto.mConstantIV.AppendElements(aSinf.constant_iv.data,
+                                               aSinf.constant_iv.length);
+  }
+  return NS_OK;
+}
+
+// Verify various information shared by Mp4ParseTrackAudioInfo and
+// Mp4ParseTrackVideoInfo and record telemetry on that info. Returns an
+// appropriate MediaResult indicating if the info is valid or not.
+// This verifies:
+// - That we have a sample_info_count > 0 (valid tracks should have at least one
+//   sample description entry)
+// - That only a single codec is used across all sample infos, as we don't
+//   handle multiple.
+// - That only a single sample info contains crypto info, as we don't handle
+//  multiple.
+//
+// Telemetry is also recorded on the above. As of writing, the
+// telemetry is recorded to give us early warning if MP4s exist that we're not
+// handling. Note, if adding new checks and telemetry to this function,
+// telemetry should be recorded before returning to ensure it is gathered.
+template <typename Mp4ParseTrackAudioOrVideoInfo>
+static MediaResult VerifyAudioOrVideoInfoAndRecordTelemetry(
+    Mp4ParseTrackAudioOrVideoInfo* audioOrVideoInfo) {
+  Telemetry::Accumulate(
+      Telemetry::MEDIA_MP4_PARSE_NUM_SAMPLE_DESCRIPTION_ENTRIES,
+      audioOrVideoInfo->sample_info_count);
+
+  bool hasCrypto = false;
+  bool hasMultipleCodecs = false;
+  bool hasMultipleCrypto = false;
+  Mp4parseCodec codecType = audioOrVideoInfo->sample_info[0].codec_type;
+  for (uint32_t i = 0; i < audioOrVideoInfo->sample_info_count; i++) {
+    if (audioOrVideoInfo->sample_info[0].codec_type != codecType) {
+      hasMultipleCodecs = true;
+    }
+
+    // Update our encryption info if any is present on the sample info.
+    if (audioOrVideoInfo->sample_info[i].protected_data.is_encrypted) {
+      if (hasCrypto) {
+        hasMultipleCrypto = true;
+      }
+      hasCrypto = true;
+    }
+  }
+
+  Telemetry::Accumulate(
+      Telemetry::
+          MEDIA_MP4_PARSE_SAMPLE_DESCRIPTION_ENTRIES_HAVE_MULTIPLE_CODECS,
+      hasMultipleCodecs);
+
+  Telemetry::Accumulate(
+      Telemetry::
+          MEDIA_MP4_PARSE_SAMPLE_DESCRIPTION_ENTRIES_HAVE_MULTIPLE_CRYPTO,
+      hasMultipleCrypto);
+
+  if (audioOrVideoInfo->sample_info_count == 0) {
+    return MediaResult(
+        NS_ERROR_DOM_MEDIA_METADATA_ERR,
+        RESULT_DETAIL("Got 0 sample info while verifying track."));
+  }
+
+  if (hasMultipleCodecs) {
+    // Different codecs in a single track. We don't handle this.
+    return MediaResult(
+        NS_ERROR_DOM_MEDIA_METADATA_ERR,
+        RESULT_DETAIL("Multiple codecs encountered while verifying track."));
+  }
+
+  if (hasMultipleCrypto) {
+    // Multiple crypto entries found. We don't handle this.
+    return MediaResult(
+        NS_ERROR_DOM_MEDIA_METADATA_ERR,
+        RESULT_DETAIL(
+            "Multiple crypto info encountered while verifying track."));
+  }
+  return NS_OK;
+}
+
+MediaResult MP4AudioInfo::Update(const Mp4parseTrackInfo* track,
+                                 const Mp4parseTrackAudioInfo* audio) {
+  auto rv = VerifyAudioOrVideoInfoAndRecordTelemetry(audio);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  Mp4parseCodec codecType = audio->sample_info[0].codec_type;
+  for (uint32_t i = 0; i < audio->sample_info_count; i++) {
+    if (audio->sample_info[i].protected_data.is_encrypted) {
+      auto rv =
+          UpdateTrackProtectedInfo(*this, audio->sample_info[i].protected_data);
+      NS_ENSURE_SUCCESS(rv, rv);
+      break;
+    }
+  }
+
+  // We assume that the members of the first sample info are representative of
+  // the entire track. This code will need to be updated should this assumption
+  // ever not hold. E.g. if we need to handle different codecs in a single
+  // track, or if we have different numbers or channels in a single track.
+  Mp4parseByteData codecSpecificConfig =
+      audio->sample_info[0].codec_specific_config;
+  if (codecType == MP4PARSE_CODEC_OPUS) {
+    mMimeType = NS_LITERAL_CSTRING("audio/opus");
+    // The Opus decoder expects the container's codec delay or
+    // pre-skip value, in microseconds, as a 64-bit int at the
+    // start of the codec-specific config blob.
+    if (codecSpecificConfig.data && codecSpecificConfig.length >= 12) {
+      uint16_t preskip =
+          mozilla::LittleEndian::readUint16(codecSpecificConfig.data + 10);
+      mozilla::OpusDataDecoder::AppendCodecDelay(
+          mCodecSpecificConfig, mozilla::FramesToUsecs(preskip, 48000).value());
+    } else {
+      // This file will error later as it will be rejected by the opus decoder.
+      mozilla::OpusDataDecoder::AppendCodecDelay(mCodecSpecificConfig, 0);
+    }
+  } else if (codecType == MP4PARSE_CODEC_AAC) {
+    mMimeType = NS_LITERAL_CSTRING("audio/mp4a-latm");
+  } else if (codecType == MP4PARSE_CODEC_FLAC) {
+    mMimeType = NS_LITERAL_CSTRING("audio/flac");
+  } else if (codecType == MP4PARSE_CODEC_MP3) {
+    mMimeType = NS_LITERAL_CSTRING("audio/mpeg");
+  }
+
+  mRate = audio->sample_info[0].sample_rate;
+  mChannels = audio->sample_info[0].channels;
+  mBitDepth = audio->sample_info[0].bit_depth;
+  mExtendedProfile = audio->sample_info[0].extended_profile;
+  mDuration = TimeUnit::FromMicroseconds(track->duration);
+  mMediaTime = TimeUnit::FromMicroseconds(track->media_time);
+  mTrackId = track->track_id;
+
+  // In stagefright, mProfile is kKeyAACProfile, mExtendedProfile is kKeyAACAOT.
+  if (audio->sample_info[0].profile <= 4) {
+    mProfile = audio->sample_info[0].profile;
+  }
+
+  Mp4parseByteData extraData = audio->sample_info[0].extra_data;
+  // If length is 0 we append nothing
+  mExtraData->AppendElements(extraData.data, extraData.length);
+  mCodecSpecificConfig->AppendElements(codecSpecificConfig.data,
+                                       codecSpecificConfig.length);
+  return NS_OK;
+}
+
 bool MP4AudioInfo::IsValid() const {
   return mChannels > 0 && mRate > 0 &&
          // Accept any mime type here, but if it's aac, validate the profile.
@@ -47,77 +210,32 @@ bool MP4AudioInfo::IsValid() const {
           mExtendedProfile > 0);
 }
 
-static void UpdateTrackProtectedInfo(mozilla::TrackInfo& aConfig,
-                                     const Mp4parseSinfInfo& aSinf) {
-  if (aSinf.is_encrypted != 0) {
-    aConfig.mCrypto.mValid = true;
-    aConfig.mCrypto.mMode = aSinf.is_encrypted;
-    aConfig.mCrypto.mIVSize = aSinf.iv_size;
-    aConfig.mCrypto.mKeyId.AppendElements(aSinf.kid.data, aSinf.kid.length);
-  }
-}
+MediaResult MP4VideoInfo::Update(const Mp4parseTrackInfo* track,
+                                 const Mp4parseTrackVideoInfo* video) {
+  auto rv = VerifyAudioOrVideoInfoAndRecordTelemetry(video);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-void MP4AudioInfo::Update(const Mp4parseTrackInfo* track,
-                          const Mp4parseTrackAudioInfo* audio) {
-  UpdateTrackProtectedInfo(*this, audio->protected_data);
-
-  if (track->codec == MP4PARSE_CODEC_OPUS) {
-    mMimeType = NS_LITERAL_CSTRING("audio/opus");
-    // The Opus decoder expects the container's codec delay or
-    // pre-skip value, in microseconds, as a 64-bit int at the
-    // start of the codec-specific config blob.
-    if (audio->codec_specific_config.data &&
-        audio->codec_specific_config.length >= 12) {
-      uint16_t preskip = mozilla::LittleEndian::readUint16(
-          audio->codec_specific_config.data + 10);
-      mozilla::OpusDataDecoder::AppendCodecDelay(
-          mCodecSpecificConfig, mozilla::FramesToUsecs(preskip, 48000).value());
-    } else {
-      // This file will error later as it will be rejected by the opus decoder.
-      mozilla::OpusDataDecoder::AppendCodecDelay(mCodecSpecificConfig, 0);
+  Mp4parseCodec codecType = video->sample_info[0].codec_type;
+  for (uint32_t i = 0; i < video->sample_info_count; i++) {
+    if (video->sample_info[i].protected_data.is_encrypted) {
+      auto rv =
+          UpdateTrackProtectedInfo(*this, video->sample_info[i].protected_data);
+      NS_ENSURE_SUCCESS(rv, rv);
+      break;
     }
-  } else if (track->codec == MP4PARSE_CODEC_AAC) {
-    mMimeType = NS_LITERAL_CSTRING("audio/mp4a-latm");
-  } else if (track->codec == MP4PARSE_CODEC_FLAC) {
-    mMimeType = NS_LITERAL_CSTRING("audio/flac");
-  } else if (track->codec == MP4PARSE_CODEC_MP3) {
-    mMimeType = NS_LITERAL_CSTRING("audio/mpeg");
   }
 
-  mRate = audio->sample_rate;
-  mChannels = audio->channels;
-  mBitDepth = audio->bit_depth;
-  mExtendedProfile = audio->extended_profile;
-  mDuration = TimeUnit::FromMicroseconds(track->duration);
-  mMediaTime = TimeUnit::FromMicroseconds(track->media_time);
-  mTrackId = track->track_id;
-
-  // In stagefright, mProfile is kKeyAACProfile, mExtendedProfile is kKeyAACAOT.
-  if (audio->profile <= 4) {
-    mProfile = audio->profile;
-  }
-
-  if (audio->extra_data.length > 0) {
-    mExtraData->AppendElements(audio->extra_data.data,
-                               audio->extra_data.length);
-  }
-
-  if (audio->codec_specific_config.length > 0) {
-    mCodecSpecificConfig->AppendElements(audio->codec_specific_config.data,
-                                         audio->codec_specific_config.length);
-  }
-}
-
-void MP4VideoInfo::Update(const Mp4parseTrackInfo* track,
-                          const Mp4parseTrackVideoInfo* video) {
-  UpdateTrackProtectedInfo(*this, video->protected_data);
-  if (track->codec == MP4PARSE_CODEC_AVC) {
+  // We assume that the members of the first sample info are representative of
+  // the entire track. This code will need to be updated should this assumption
+  // ever not hold. E.g. if we need to handle different codecs in a single
+  // track, or if we have different numbers or channels in a single track.
+  if (codecType == MP4PARSE_CODEC_AVC) {
     mMimeType = NS_LITERAL_CSTRING("video/avc");
-  } else if (track->codec == MP4PARSE_CODEC_VP9) {
+  } else if (codecType == MP4PARSE_CODEC_VP9) {
     mMimeType = NS_LITERAL_CSTRING("video/vp9");
-  } else if (track->codec == MP4PARSE_CODEC_AV1) {
+  } else if (codecType == MP4PARSE_CODEC_AV1) {
     mMimeType = NS_LITERAL_CSTRING("video/av1");
-  } else if (track->codec == MP4PARSE_CODEC_MP4V) {
+  } else if (codecType == MP4PARSE_CODEC_MP4V) {
     mMimeType = NS_LITERAL_CSTRING("video/mp4v-es");
   }
   mTrackId = track->track_id;
@@ -125,13 +243,13 @@ void MP4VideoInfo::Update(const Mp4parseTrackInfo* track,
   mMediaTime = TimeUnit::FromMicroseconds(track->media_time);
   mDisplay.width = video->display_width;
   mDisplay.height = video->display_height;
-  mImage.width = video->image_width;
-  mImage.height = video->image_height;
+  mImage.width = video->sample_info[0].image_width;
+  mImage.height = video->sample_info[0].image_height;
   mRotation = ToSupportedRotation(video->rotation);
-  if (video->extra_data.data) {
-    mExtraData->AppendElements(video->extra_data.data,
-                               video->extra_data.length);
-  }
+  Mp4parseByteData extraData = video->sample_info[0].extra_data;
+  // If length is 0 we append nothing
+  mExtraData->AppendElements(extraData.data, extraData.length);
+  return NS_OK;
 }
 
 bool MP4VideoInfo::IsValid() const {

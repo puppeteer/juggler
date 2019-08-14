@@ -10,9 +10,9 @@
    closeDebugger, checkConsoleAPICalls, checkRawHeaders, runTests, nextTest, Ci, Cc,
    withActiveServiceWorker, Services, consoleAPICall */
 
-const {require} = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
-const {DebuggerServer} = require("devtools/server/main");
-const {DebuggerClient} = require("devtools/shared/client/debugger-client");
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
+const { DebuggerServer } = require("devtools/server/main");
+const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 const ObjectClient = require("devtools/shared/client/object-client");
 const Services = require("Services");
 
@@ -50,9 +50,7 @@ async function attachConsoleToWorker(listeners, callback) {
   callback(state, response);
 }
 
-var _attachConsole = async function(
-  listeners, attachToTab, attachToWorker
-) {
+var _attachConsole = async function(listeners, attachToTab, attachToWorker) {
   try {
     const client = await connectToDebugger();
 
@@ -64,41 +62,40 @@ var _attachConsole = async function(
 
     // Fetch the console actor out of the expected target
     // ParentProcessTarget / WorkerTarget / FrameTarget
-    let consoleActor, worker;
+    let target, worker;
     if (!attachToTab) {
-      const front = await client.mainRoot.getMainProcess();
-      await front.attach();
-      consoleActor = front.targetForm.consoleActor;
+      target = await client.mainRoot.getMainProcess();
     } else {
-      const form = await client.getTab();
-      const [, targetFront] = await client.attachTarget(form.tab);
+      target = await client.mainRoot.getTab();
       if (attachToWorker) {
         const workerName = "console-test-worker.js#" + new Date().getTime();
         worker = new Worker(workerName);
         await waitForMessage(worker);
 
-        const { workers } = await targetFront.listWorkers();
-        const workerTargetFront = workers.filter(w => w.url == workerName)[0];
-        if (!workerTargetFront) {
-          console.error("listWorkers failed. Unable to find the worker actor\n");
+        // listWorkers only works if the browsing context target actor is attached
+        await target.attach();
+        const { workers } = await target.listWorkers();
+        target = workers.filter(w => w.url == workerName)[0];
+        if (!target) {
+          console.error(
+            "listWorkers failed. Unable to find the worker actor\n"
+          );
           return null;
         }
-        await workerTargetFront.attach();
-        await workerTargetFront.attachThread({});
-        consoleActor = workerTargetFront.targetForm.consoleActor;
-      } else {
-        consoleActor = targetFront.targetForm.consoleActor;
       }
     }
 
-    // Instantiate the WebConsoleClient
-    const [ response, webConsoleClient ] = await client.attachConsole(consoleActor,
-      listeners);
+    // Attach the Target in order to instantiate the console client
+    await target.attach();
+    const webConsoleClient = target.activeConsole;
+    // By default the console isn't listening for anything,
+    // request listeners from here
+    const response = await webConsoleClient.startListeners(listeners);
     return {
       state: {
         dbgClient: client,
         client: webConsoleClient,
-        actor: consoleActor,
+        actor: webConsoleClient.actor,
         // Keep a strong reference to the Worker to avoid it being
         // GCd during the test (bug 1237492).
         // eslint-disable-next-line camelcase
@@ -107,8 +104,9 @@ var _attachConsole = async function(
       response,
     };
   } catch (error) {
-    console.error(`attachConsole failed: ${error.error} ${error.message} - ` +
-                  error.stack);
+    console.error(
+      `attachConsole failed: ${error.error} ${error.message} - ` + error.stack
+    );
   }
   return null;
 };
@@ -126,8 +124,11 @@ function closeDebugger(state, callback) {
 }
 
 function checkConsoleAPICalls(consoleCalls, expectedConsoleCalls) {
-  is(consoleCalls.length, expectedConsoleCalls.length,
-    "received correct number of console calls");
+  is(
+    consoleCalls.length,
+    expectedConsoleCalls.length,
+    "received correct number of console calls"
+  );
   expectedConsoleCalls.forEach(function(message, index) {
     info("checking received console call #" + index);
     checkConsoleAPICall(consoleCalls[index], expectedConsoleCalls[index]);
@@ -136,8 +137,7 @@ function checkConsoleAPICalls(consoleCalls, expectedConsoleCalls) {
 
 function checkConsoleAPICall(call, expected) {
   if (expected.level != "trace" && expected.arguments) {
-    is(call.arguments.length, expected.arguments.length,
-       "number of arguments");
+    is(call.arguments.length, expected.arguments.length, "number of arguments");
   }
 
   checkObject(call, expected);
@@ -158,8 +158,11 @@ function checkValue(name, value, expected) {
     ok(false, "'" + name + "' is undefined");
   } else if (value === null) {
     ok(false, "'" + name + "' is null");
-  } else if (typeof expected == "string" || typeof expected == "number" ||
-             typeof expected == "boolean") {
+  } else if (
+    typeof expected == "string" ||
+    typeof expected == "number" ||
+    typeof expected == "boolean"
+  ) {
     is(value, expected, "property '" + name + "'");
   } else if (expected instanceof RegExp) {
     ok(expected.test(value), name + ": " + expected + " matched " + value);
@@ -258,14 +261,14 @@ function withActiveServiceWorker(win, url, scope) {
 
 /**
  *
- * @param {DebuggerClient} debuggerClient
+ * @param {Front} consoleFront
  * @param {Function} consoleCall: A function which calls the consoleAPI, e.g. :
  *                         `() => top.console.log("test")`.
  * @returns {Promise} A promise that will be resolved with the packet sent by the server
  *                    in response to the consoleAPI call.
  */
-function consoleAPICall(debuggerClient, consoleCall) {
-  const onConsoleAPICall = debuggerClient.addOneTimeListener("consoleAPICall");
+function consoleAPICall(consoleFront, consoleCall) {
+  const onConsoleAPICall = consoleFront.once("consoleAPICall");
   consoleCall();
   return onConsoleAPICall;
 }

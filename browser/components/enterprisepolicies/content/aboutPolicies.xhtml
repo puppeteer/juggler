@@ -8,24 +8,28 @@
 
 <html xmlns="http://www.w3.org/1999/xhtml">
     <head>
+        <meta http-equiv="Content-Security-Policy" content="default-src chrome:" />
         <title data-l10n-id="about-policies-title"/>
         <link rel="stylesheet" href="chrome://browser/content/policies/aboutPolicies.css" type="text/css" />
         <link rel="localization" href="branding/brand.ftl"/>
         <link rel="localization" href="browser/branding/sync-brand.ftl"/>
         <link rel="localization" href="browser/aboutPolicies.ftl"/>
         <link rel="localization" href="browser/policies/policies-descriptions.ftl"/>
-        <script type="application/javascript" src="chrome://browser/content/policies/aboutPolicies.js" />
+        <script src="chrome://browser/content/policies/aboutPolicies.js" />
     </head>
-    <body id="body" onload="init()">
+    <body id="body">
         <div id="categories">
             <div class="category" selected="true" id="category-active">
-                <span class="category-name" data-l10n-id="active-policies-tab"/>
+                <img class="category-icon" src="chrome://browser/content/policies/policies-active.svg"></img>
+                <label class="category-name" data-l10n-id="active-policies-tab"></label>
             </div>
             <div class="category" id="category-documentation">
-                <span class="category-name" data-l10n-id="documentation-tab"/>
+                <img class="category-icon" src="chrome://browser/content/policies/policies-documentation.svg"></img>
+                <label class="category-name" data-l10n-id="documentation-tab"></label>
             </div>
             <div class="category" id="category-errors">
-                <span class="category-name" data-l10n-id="errors-tab"/>
+                <img class="category-icon" src="chrome://browser/content/policies/policies-error.svg"></img>
+                <label class="category-name" data-l10n-id="errors-tab"></label>
             </div>
         </div>
         <div class="main-content">
@@ -34,6 +38,8 @@
             </div>
 
             <div id="active" class="tab active">
+                <h3 class="inactive-service-message" data-l10n-id="inactive-message"></h3>
+                <h3 class="no-specified-policies-message" data-l10n-id="no-specified-policies-message"></h3>
                 <table>
                     <thead>
                         <tr>

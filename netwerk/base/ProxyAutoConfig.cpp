@@ -15,12 +15,21 @@
 #include "nsIURLParser.h"
 #include "nsJSUtils.h"
 #include "jsfriendapi.h"
-#include "js/CompilationAndEvaluation.h"
+#include "js/CompilationAndEvaluation.h"  // JS::Compile{,DontInflate}
+#include "js/PropertySpec.h"
+#include "js/SourceText.h"  // JS::Source{Ownership,Text}
+#include "js/Utility.h"
+#include "js/Warnings.h"  // JS::SetWarningReporter
 #include "prnetdb.h"
 #include "nsITimer.h"
 #include "mozilla/net/DNS.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 #include "nsServiceManagerUtils.h"
 #include "nsNetCID.h"
+
+#if defined(XP_MACOSX)
+#  include "nsMacUtilsImpl.h"
+#endif
 
 namespace mozilla {
 namespace net {
@@ -30,8 +39,10 @@ namespace net {
 // evaluations. Additionally dnsResolve(host) and myIpAddress() are supplied in
 // the same context but are implemented as c++ helpers. alert(msg) is similarly
 // defined.
+//
+// Per ProxyAutoConfig::Init, this data must be ASCII.
 
-static const char *sPacUtils =
+static const char sAsciiPacUtils[] =
     "function dnsDomainIs(host, domain) {\n"
     "    return (host.length >= domain.length &&\n"
     "            host.substring(host.length - domain.length) == domain);\n"
@@ -270,12 +281,12 @@ static const char *sPacUtils =
 // Javascript engine is running and the PAC object cannot be deleted
 // or reset.
 static uint32_t sRunningIndex = 0xdeadbeef;
-static ProxyAutoConfig *GetRunning() {
+static ProxyAutoConfig* GetRunning() {
   MOZ_ASSERT(sRunningIndex != 0xdeadbeef);
-  return static_cast<ProxyAutoConfig *>(PR_GetThreadPrivate(sRunningIndex));
+  return static_cast<ProxyAutoConfig*>(PR_GetThreadPrivate(sRunningIndex));
 }
 
-static void SetRunning(ProxyAutoConfig *arg) {
+static void SetRunning(ProxyAutoConfig* arg) {
   MOZ_ASSERT(sRunningIndex != 0xdeadbeef);
   PR_SetThreadPrivate(sRunningIndex, arg);
 }
@@ -287,11 +298,11 @@ class PACResolver final : public nsIDNSListener,
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
 
-  explicit PACResolver(nsIEventTarget *aTarget)
+  explicit PACResolver(nsIEventTarget* aTarget)
       : mStatus(NS_ERROR_FAILURE), mMainThreadEventTarget(aTarget) {}
 
   // nsIDNSListener
-  NS_IMETHOD OnLookupComplete(nsICancelable *request, nsIDNSRecord *record,
+  NS_IMETHOD OnLookupComplete(nsICancelable* request, nsIDNSRecord* record,
                               nsresult status) override {
     if (mTimer) {
       mTimer->Cancel();
@@ -304,14 +315,14 @@ class PACResolver final : public nsIDNSListener,
     return NS_OK;
   }
 
-  NS_IMETHOD OnLookupByTypeComplete(nsICancelable *request,
-                                    nsIDNSByTypeRecord *res,
+  NS_IMETHOD OnLookupByTypeComplete(nsICancelable* request,
+                                    nsIDNSByTypeRecord* res,
                                     nsresult status) override {
     return NS_OK;
   }
 
   // nsITimerCallback
-  NS_IMETHOD Notify(nsITimer *timer) override {
+  NS_IMETHOD Notify(nsITimer* timer) override {
     nsCOMPtr<nsICancelable> request(mRequest);
     if (request) request->Cancel(NS_ERROR_NET_TIMEOUT);
     mTimer = nullptr;
@@ -319,7 +330,7 @@ class PACResolver final : public nsIDNSListener,
   }
 
   // nsINamed
-  NS_IMETHOD GetName(nsACString &aName) override {
+  NS_IMETHOD GetName(nsACString& aName) override {
     aName.AssignLiteral("PACResolver");
     return NS_OK;
   }
@@ -335,7 +346,7 @@ class PACResolver final : public nsIDNSListener,
 };
 NS_IMPL_ISUPPORTS(PACResolver, nsIDNSListener, nsITimerCallback, nsINamed)
 
-static void PACLogToConsole(nsString &aMessage) {
+static void PACLogToConsole(nsString& aMessage) {
   nsCOMPtr<nsIConsoleService> consoleService =
       do_GetService(NS_CONSOLESERVICE_CONTRACTID);
   if (!consoleService) return;
@@ -344,8 +355,8 @@ static void PACLogToConsole(nsString &aMessage) {
 }
 
 // Javascript errors and warnings are logged to the main error console
-static void PACLogErrorOrWarning(const nsAString &aKind,
-                                 JSErrorReport *aReport) {
+static void PACLogErrorOrWarning(const nsAString& aKind,
+                                 JSErrorReport* aReport) {
   nsString formattedMessage(NS_LITERAL_STRING("PAC Execution "));
   formattedMessage += aKind;
   formattedMessage += NS_LITERAL_STRING(": ");
@@ -357,7 +368,7 @@ static void PACLogErrorOrWarning(const nsAString &aKind,
   PACLogToConsole(formattedMessage);
 }
 
-static void PACWarningReporter(JSContext *aCx, JSErrorReport *aReport) {
+static void PACWarningReporter(JSContext* aCx, JSErrorReport* aReport) {
   MOZ_ASSERT(aReport);
   MOZ_ASSERT(JSREPORT_IS_WARNING(aReport->flags));
 
@@ -365,10 +376,10 @@ static void PACWarningReporter(JSContext *aCx, JSErrorReport *aReport) {
 }
 
 class MOZ_STACK_CLASS AutoPACErrorReporter {
-  JSContext *mCx;
+  JSContext* mCx;
 
  public:
-  explicit AutoPACErrorReporter(JSContext *aCx) : mCx(aCx) {}
+  explicit AutoPACErrorReporter(JSContext* aCx) : mCx(aCx) {}
   ~AutoPACErrorReporter() {
     if (!JS_IsExceptionPending(mCx)) {
       return;
@@ -391,7 +402,7 @@ class MOZ_STACK_CLASS AutoPACErrorReporter {
 
 // timeout of 0 means the normal necko timeout strategy, otherwise the dns
 // request will be canceled after aTimeout milliseconds
-static bool PACResolve(const nsCString &aHostName, NetAddr *aNetAddr,
+static bool PACResolve(const nsCString& aHostName, NetAddr* aNetAddr,
                        unsigned int aTimeout) {
   if (!GetRunning()) {
     NS_WARNING("PACResolve without a running ProxyAutoConfig object");
@@ -410,8 +421,8 @@ ProxyAutoConfig::ProxyAutoConfig()
   MOZ_COUNT_CTOR(ProxyAutoConfig);
 }
 
-bool ProxyAutoConfig::ResolveAddress(const nsCString &aHostName,
-                                     NetAddr *aNetAddr, unsigned int aTimeout) {
+bool ProxyAutoConfig::ResolveAddress(const nsCString& aHostName,
+                                     NetAddr* aNetAddr, unsigned int aTimeout) {
   nsCOMPtr<nsIDNSService> dns = do_GetService(NS_DNSSERVICE_CONTRACTID);
   if (!dns) return false;
 
@@ -454,8 +465,8 @@ bool ProxyAutoConfig::ResolveAddress(const nsCString &aHostName,
   return true;
 }
 
-static bool PACResolveToString(const nsCString &aHostName,
-                               nsCString &aDottedDecimal,
+static bool PACResolveToString(const nsCString& aHostName,
+                               nsCString& aDottedDecimal,
                                unsigned int aTimeout) {
   NetAddr netAddr;
   if (!PACResolve(aHostName, &netAddr, aTimeout)) return false;
@@ -469,7 +480,7 @@ static bool PACResolveToString(const nsCString &aHostName,
 }
 
 // dnsResolve(host) javascript implementation
-static bool PACDnsResolve(JSContext *cx, unsigned int argc, JS::Value *vp) {
+static bool PACDnsResolve(JSContext* cx, unsigned int argc, JS::Value* vp) {
   JS::CallArgs args = CallArgsFromVp(argc, vp);
 
   if (NS_IsMainThread()) {
@@ -479,7 +490,7 @@ static bool PACDnsResolve(JSContext *cx, unsigned int argc, JS::Value *vp) {
 
   if (!args.requireAtLeast(cx, "dnsResolve", 1)) return false;
 
-  JS::Rooted<JSString *> arg1(cx, JS::ToString(cx, args[0]));
+  JS::Rooted<JSString*> arg1(cx, JS::ToString(cx, args[0]));
   if (!arg1) return false;
 
   nsAutoJSString hostName;
@@ -487,7 +498,7 @@ static bool PACDnsResolve(JSContext *cx, unsigned int argc, JS::Value *vp) {
 
   if (!hostName.init(cx, arg1)) return false;
   if (PACResolveToString(NS_ConvertUTF16toUTF8(hostName), dottedDecimal, 0)) {
-    JSString *dottedDecimalString = JS_NewStringCopyZ(cx, dottedDecimal.get());
+    JSString* dottedDecimalString = JS_NewStringCopyZ(cx, dottedDecimal.get());
     if (!dottedDecimalString) {
       return false;
     }
@@ -501,7 +512,7 @@ static bool PACDnsResolve(JSContext *cx, unsigned int argc, JS::Value *vp) {
 }
 
 // myIpAddress() javascript implementation
-static bool PACMyIpAddress(JSContext *cx, unsigned int argc, JS::Value *vp) {
+static bool PACMyIpAddress(JSContext* cx, unsigned int argc, JS::Value* vp) {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
 
   if (NS_IsMainThread()) {
@@ -518,12 +529,12 @@ static bool PACMyIpAddress(JSContext *cx, unsigned int argc, JS::Value *vp) {
 }
 
 // proxyAlert(msg) javascript implementation
-static bool PACProxyAlert(JSContext *cx, unsigned int argc, JS::Value *vp) {
+static bool PACProxyAlert(JSContext* cx, unsigned int argc, JS::Value* vp) {
   JS::CallArgs args = CallArgsFromVp(argc, vp);
 
   if (!args.requireAtLeast(cx, "alert", 1)) return false;
 
-  JS::Rooted<JSString *> arg1(cx, JS::ToString(cx, args[0]));
+  JS::Rooted<JSString*> arg1(cx, JS::ToString(cx, args[0]));
   if (!arg1) return false;
 
   nsAutoJSString message;
@@ -550,11 +561,11 @@ static const JSFunctionSpec PACGlobalFunctions[] = {
 // used on the PAC thread. It is initialized and destroyed on the PAC thread.
 class JSContextWrapper {
  public:
-  static JSContextWrapper *Create(uint32_t aExtraHeapSize) {
-    JSContext *cx = JS_NewContext(sContextHeapSize + aExtraHeapSize);
+  static JSContextWrapper* Create(uint32_t aExtraHeapSize) {
+    JSContext* cx = JS_NewContext(sContextHeapSize + aExtraHeapSize);
     if (NS_WARN_IF(!cx)) return nullptr;
 
-    JSContextWrapper *entry = new JSContextWrapper(cx);
+    JSContextWrapper* entry = new JSContextWrapper(cx);
     if (NS_FAILED(entry->Init())) {
       delete entry;
       return nullptr;
@@ -563,9 +574,9 @@ class JSContextWrapper {
     return entry;
   }
 
-  JSContext *Context() const { return mContext; }
+  JSContext* Context() const { return mContext; }
 
-  JSObject *Global() const { return mGlobal; }
+  JSObject* Global() const { return mGlobal; }
 
   ~JSContextWrapper() {
     mGlobal = nullptr;
@@ -584,13 +595,13 @@ class JSContextWrapper {
  private:
   static const uint32_t sContextHeapSize = 4 << 20;  // 4 MB
 
-  JSContext *mContext;
-  JS::PersistentRooted<JSObject *> mGlobal;
+  JSContext* mContext;
+  JS::PersistentRooted<JSObject*> mGlobal;
   bool mOK;
 
   static const JSClass sGlobalClass;
 
-  explicit JSContextWrapper(JSContext *cx)
+  explicit JSContextWrapper(JSContext* cx)
       : mContext(cx), mGlobal(cx, nullptr), mOK(false) {
     MOZ_COUNT_CTOR(JSContextWrapper);
   }
@@ -616,13 +627,10 @@ class JSContextWrapper {
       JS_ClearPendingException(mContext);
       return NS_ERROR_OUT_OF_MEMORY;
     }
-    JS::Rooted<JSObject *> global(mContext, mGlobal);
+    JS::Rooted<JSObject*> global(mContext, mGlobal);
 
     JSAutoRealm ar(mContext, global);
     AutoPACErrorReporter aper(mContext);
-    if (!JS::InitRealmStandardClasses(mContext)) {
-      return NS_ERROR_FAILURE;
-    }
     if (!JS_DefineFunctions(mContext, global, PACGlobalFunctions)) {
       return NS_ERROR_FAILURE;
     }
@@ -633,36 +641,37 @@ class JSContextWrapper {
   }
 };
 
-static const JSClassOps sJSContextWrapperGlobalClassOps = {
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    nullptr,
-    JS_GlobalObjectTraceHook};
-
-const JSClass JSContextWrapper::sGlobalClass = {
-    "PACResolutionThreadGlobal", JSCLASS_GLOBAL_FLAGS,
-    &sJSContextWrapperGlobalClassOps};
+const JSClass JSContextWrapper::sGlobalClass = {"PACResolutionThreadGlobal",
+                                                JSCLASS_GLOBAL_FLAGS,
+                                                &JS::DefaultGlobalClassOps};
 
 void ProxyAutoConfig::SetThreadLocalIndex(uint32_t index) {
   sRunningIndex = index;
 }
 
-nsresult ProxyAutoConfig::Init(const nsCString &aPACURI,
-                               const nsCString &aPACScript, bool aIncludePath,
-                               uint32_t aExtraHeapSize,
-                               nsIEventTarget *aEventTarget) {
+nsresult ProxyAutoConfig::Init(const nsCString& aPACURI,
+                               const nsCString& aPACScriptData,
+                               bool aIncludePath, uint32_t aExtraHeapSize,
+                               nsIEventTarget* aEventTarget) {
   mShutdown = false;  // Shutdown needs to be called prior to destruction
 
   mPACURI = aPACURI;
-  mPACScript = sPacUtils;
-  mPACScript.Append(aPACScript);
+
+  // The full PAC script data is the concatenation of 1) the various functions
+  // exposed to PAC scripts in |sAsciiPacUtils| and 2) the user-provided PAC
+  // script data.  Historically this was single-byte Latin-1 text (usually just
+  // ASCII, but bug 296163 has a real-world Latin-1 example).  We now support
+  // UTF-8 if the full data validates as UTF-8, before falling back to Latin-1.
+  // (Technically this is a breaking change: intentional Latin-1 scripts that
+  // happen to be valid UTF-8 may have different behavior.  We assume such cases
+  // are vanishingly rare.)
+  //
+  // Supporting both UTF-8 and Latin-1 requires that the functions exposed to
+  // PAC scripts be both UTF-8- and Latin-1-compatible: that is, they must be
+  // ASCII.
+  mConcatenatedPACData = sAsciiPacUtils;
+  mConcatenatedPACData.Append(aPACScriptData);
+
   mIncludePath = aIncludePath;
   mExtraHeapSize = aExtraHeapSize;
   mMainThreadEventTarget = aEventTarget;
@@ -677,17 +686,21 @@ nsresult ProxyAutoConfig::SetupJS() {
   mJSNeedsSetup = false;
   MOZ_ASSERT(!GetRunning(), "JIT is running");
 
+#if defined(XP_MACOSX)
+  nsMacUtilsImpl::EnableTCSMIfAvailable();
+#endif
+
   delete mJSContext;
   mJSContext = nullptr;
 
-  if (mPACScript.IsEmpty()) return NS_ERROR_FAILURE;
+  if (mConcatenatedPACData.IsEmpty()) return NS_ERROR_FAILURE;
 
   NS_GetCurrentThread()->SetCanInvokeJS(true);
 
   mJSContext = JSContextWrapper::Create(mExtraHeapSize);
   if (!mJSContext) return NS_ERROR_FAILURE;
 
-  JSContext *cx = mJSContext->Context();
+  JSContext* cx = mJSContext->Context();
   JSAutoRealm ar(cx, mJSContext->Global());
   AutoPACErrorReporter aper(cx);
 
@@ -699,15 +712,41 @@ nsresult ProxyAutoConfig::SetupJS() {
 
   SetRunning(this);
 
-  JS::Rooted<JSObject *> global(cx, mJSContext->Global());
+  JS::Rooted<JSObject*> global(cx, mJSContext->Global());
 
-  JS::CompileOptions options(cx);
-  options.setFileAndLine(mPACURI.get(), 1);
+  auto CompilePACScript = [this](JSContext* cx) -> JSScript* {
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(this->mPACURI.get(), 1);
 
-  JS::Rooted<JSScript *> script(cx);
-  if (!JS::CompileLatin1(cx, options, mPACScript.get(), mPACScript.Length(),
-                         &script) ||
-      !JS_ExecuteScript(cx, script)) {
+    // Per ProxyAutoConfig::Init, compile as UTF-8 if the full data is UTF-8,
+    // and otherwise inflate Latin-1 to UTF-16 and compile that.
+    const char* scriptData = this->mConcatenatedPACData.get();
+    size_t scriptLength = this->mConcatenatedPACData.Length();
+    if (mozilla::IsValidUtf8(scriptData, scriptLength)) {
+      JS::SourceText<Utf8Unit> srcBuf;
+      if (!srcBuf.init(cx, scriptData, scriptLength,
+                       JS::SourceOwnership::Borrowed)) {
+        return nullptr;
+      }
+
+      return JS::CompileDontInflate(cx, options, srcBuf);
+    }
+
+    // nsReadableUtils.h says that "ASCII" is a misnomer "for legacy reasons",
+    // and this handles not just ASCII but Latin-1 too.
+    NS_ConvertASCIItoUTF16 inflated(this->mConcatenatedPACData);
+
+    JS::SourceText<char16_t> source;
+    if (!source.init(cx, inflated.get(), inflated.Length(),
+                     JS::SourceOwnership::Borrowed)) {
+      return nullptr;
+    }
+
+    return JS::Compile(cx, options, source);
+  };
+
+  JS::Rooted<JSScript*> script(cx, CompilePACScript(cx));
+  if (!script || !JS_ExecuteScript(cx, script)) {
     nsString alertMessage(
         NS_LITERAL_STRING("PAC file failed to install from "));
     if (isDataURI) {
@@ -731,20 +770,20 @@ nsresult ProxyAutoConfig::SetupJS() {
   PACLogToConsole(alertMessage);
 
   // we don't need these now
-  mPACScript.Truncate();
+  mConcatenatedPACData.Truncate();
   mPACURI.Truncate();
 
   return NS_OK;
 }
 
-nsresult ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
-                                         const nsCString &aTestHost,
-                                         nsACString &result) {
+nsresult ProxyAutoConfig::GetProxyForURI(const nsCString& aTestURI,
+                                         const nsCString& aTestHost,
+                                         nsACString& result) {
   if (mJSNeedsSetup) SetupJS();
 
   if (!mJSContext || !mJSContext->IsOK()) return NS_ERROR_NOT_AVAILABLE;
 
-  JSContext *cx = mJSContext->Context();
+  JSContext* cx = mJSContext->Context();
   JSAutoRealm ar(cx, mJSContext->Global());
   AutoPACErrorReporter aper(cx);
 
@@ -788,7 +827,7 @@ nsresult ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
     args[1].setString(hostString);
 
     JS::Rooted<JS::Value> rval(cx);
-    JS::Rooted<JSObject *> global(cx, mJSContext->Global());
+    JS::Rooted<JSObject*> global(cx, mJSContext->Global());
     bool ok = JS_CallFunctionName(cx, global, "FindProxyForURL", args, &rval);
 
     if (ok && rval.isString()) {
@@ -832,9 +871,9 @@ void ProxyAutoConfig::Shutdown() {
   mJSContext = nullptr;
 }
 
-bool ProxyAutoConfig::SrcAddress(const NetAddr *remoteAddress,
-                                 nsCString &localAddress) {
-  PRFileDesc *fd;
+bool ProxyAutoConfig::SrcAddress(const NetAddr* remoteAddress,
+                                 nsCString& localAddress) {
+  PRFileDesc* fd;
   fd = PR_OpenUDPSocket(remoteAddress->raw.family);
   if (!fd) return false;
 
@@ -867,19 +906,19 @@ bool ProxyAutoConfig::SrcAddress(const NetAddr *remoteAddress,
 // to the result. If that all works, the local IP address of the socket is
 // returned to the javascript caller and |*aResult| is set to true. Otherwise
 // |*aResult| is set to false.
-bool ProxyAutoConfig::MyIPAddressTryHost(const nsCString &hostName,
+bool ProxyAutoConfig::MyIPAddressTryHost(const nsCString& hostName,
                                          unsigned int timeout,
-                                         const JS::CallArgs &aArgs,
-                                         bool *aResult) {
+                                         const JS::CallArgs& aArgs,
+                                         bool* aResult) {
   *aResult = false;
 
   NetAddr remoteAddress;
   nsAutoCString localDottedDecimal;
-  JSContext *cx = mJSContext->Context();
+  JSContext* cx = mJSContext->Context();
 
   if (PACResolve(hostName, &remoteAddress, timeout) &&
       SrcAddress(&remoteAddress, localDottedDecimal)) {
-    JSString *dottedDecimalString =
+    JSString* dottedDecimalString =
         JS_NewStringCopyZ(cx, localDottedDecimal.get());
     if (!dottedDecimalString) {
       return false;
@@ -891,12 +930,12 @@ bool ProxyAutoConfig::MyIPAddressTryHost(const nsCString &hostName,
   return true;
 }
 
-bool ProxyAutoConfig::MyIPAddress(const JS::CallArgs &aArgs) {
+bool ProxyAutoConfig::MyIPAddress(const JS::CallArgs& aArgs) {
   nsAutoCString remoteDottedDecimal;
   nsAutoCString localDottedDecimal;
-  JSContext *cx = mJSContext->Context();
+  JSContext* cx = mJSContext->Context();
   JS::RootedValue v(cx);
-  JS::Rooted<JSObject *> global(cx, mJSContext->Global());
+  JS::Rooted<JSObject*> global(cx, mJSContext->Global());
 
   bool useMultihomedDNS =
       JS_GetProperty(cx, global, "pacUseMultihomedDNS", &v) &&
@@ -940,7 +979,7 @@ bool ProxyAutoConfig::MyIPAddress(const JS::CallArgs &aArgs) {
   uint32_t timeout = useMultihomedDNS ? kTimeout : 1;
   if (dns && NS_SUCCEEDED(dns->GetMyHostName(hostName)) &&
       PACResolveToString(hostName, localDottedDecimal, timeout)) {
-    JSString *dottedDecimalString =
+    JSString* dottedDecimalString =
         JS_NewStringCopyZ(cx, localDottedDecimal.get());
     if (!dottedDecimalString) {
       return false;
@@ -967,7 +1006,7 @@ bool ProxyAutoConfig::MyIPAddress(const JS::CallArgs &aArgs) {
 
   // who knows? let's fallback to localhost
   localDottedDecimal.AssignLiteral("127.0.0.1");
-  JSString *dottedDecimalString =
+  JSString* dottedDecimalString =
       JS_NewStringCopyZ(cx, localDottedDecimal.get());
   if (!dottedDecimalString) {
     return false;

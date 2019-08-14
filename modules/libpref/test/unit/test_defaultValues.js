@@ -5,13 +5,11 @@
 /* Tests for providing a default value to get{Bool,Char,Float,Int}Pref */
 
 function run_test() {
-  var ps = Cc["@mozilla.org/preferences-service;1"]
-             .getService(Ci.nsIPrefService)
-             .QueryInterface(Ci.nsIPrefBranch);
-
+  const ps = Services.prefs;
   let prefName = "test.default.values.bool";
-  do_check_throws(function() { ps.getBoolPref(prefName); },
-                  Cr.NS_ERROR_UNEXPECTED);
+  do_check_throws(function() {
+    ps.getBoolPref(prefName);
+  }, Cr.NS_ERROR_UNEXPECTED);
   strictEqual(ps.getBoolPref(prefName, false), false);
   strictEqual(ps.getBoolPref(prefName, true), true);
   ps.setBoolPref(prefName, true);
@@ -20,8 +18,9 @@ function run_test() {
   strictEqual(ps.getBoolPref(prefName, true), true);
 
   prefName = "test.default.values.char";
-  do_check_throws(function() { ps.getCharPref(prefName); },
-                  Cr.NS_ERROR_UNEXPECTED);
+  do_check_throws(function() {
+    ps.getCharPref(prefName);
+  }, Cr.NS_ERROR_UNEXPECTED);
   strictEqual(ps.getCharPref(prefName, ""), "");
   strictEqual(ps.getCharPref(prefName, "string"), "string");
   ps.setCharPref(prefName, "foo");
@@ -29,8 +28,9 @@ function run_test() {
   strictEqual(ps.getCharPref(prefName, "string"), "foo");
 
   prefName = "test.default.values.string";
-  do_check_throws(function() { ps.getCharPref(prefName); },
-                  Cr.NS_ERROR_UNEXPECTED);
+  do_check_throws(function() {
+    ps.getCharPref(prefName);
+  }, Cr.NS_ERROR_UNEXPECTED);
   strictEqual(ps.getStringPref(prefName, ""), "");
   strictEqual(ps.getStringPref(prefName, "éèçàê€"), "éèçàê€");
   ps.setStringPref(prefName, "éèçàê€");
@@ -38,8 +38,9 @@ function run_test() {
   strictEqual(ps.getStringPref(prefName, "string"), "éèçàê€");
 
   prefName = "test.default.values.float";
-  do_check_throws(function() { ps.getFloatPref(prefName); },
-                  Cr.NS_ERROR_UNEXPECTED);
+  do_check_throws(function() {
+    ps.getFloatPref(prefName);
+  }, Cr.NS_ERROR_UNEXPECTED);
   strictEqual(ps.getFloatPref(prefName, 3.5), 3.5);
   strictEqual(ps.getFloatPref(prefName, 0), 0);
   ps.setCharPref(prefName, 1.75);
@@ -47,8 +48,9 @@ function run_test() {
   strictEqual(ps.getFloatPref(prefName, 3.5), 1.75);
 
   prefName = "test.default.values.int";
-  do_check_throws(function() { ps.getIntPref(prefName); },
-                  Cr.NS_ERROR_UNEXPECTED);
+  do_check_throws(function() {
+    ps.getIntPref(prefName);
+  }, Cr.NS_ERROR_UNEXPECTED);
   strictEqual(ps.getIntPref(prefName, 3), 3);
   strictEqual(ps.getIntPref(prefName, 0), 0);
   ps.setIntPref(prefName, 42);

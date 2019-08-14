@@ -6,14 +6,11 @@
 
 const { Component } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
+const { L10N } = require("../utils/l10n");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
-const { propertiesEqual, getFileName } = require("../utils/request-utils");
+const { propertiesEqual } = require("../utils/request-utils");
 
-const { div } = dom;
-
-const UPDATED_FILE_PROPS = [
-  "urlDetails",
-];
+const UPDATED_FILE_PROPS = ["urlDetails"];
 
 class RequestListColumnFile extends Component {
   static get propTypes() {
@@ -23,35 +20,40 @@ class RequestListColumnFile extends Component {
   }
 
   shouldComponentUpdate(nextProps) {
-    return !propertiesEqual(UPDATED_FILE_PROPS, this.props.item, nextProps.item);
+    return !propertiesEqual(
+      UPDATED_FILE_PROPS,
+      this.props.item,
+      nextProps.item
+    );
   }
 
   render() {
     const {
-      item: { urlDetails, cause },
+      item: { urlDetails },
     } = this.props;
-    const iconClassList = ["requests-file-type-icon"];
 
-    if (cause && (
-        cause.type.includes("img") ||
-        cause.type.includes("image") ||
-        cause.type.includes("beacon"))) {
-      iconClassList.push("file-type-image");
-    } else {
-      iconClassList.push("file-type-general");
-    }
+    const originalFileURL = urlDetails.url;
+    const decodedFileURL = urlDetails.unicodeUrl;
+    const ORIGINAL_FILE_URL = L10N.getFormatStr(
+      "netRequest.originalFileURL.tooltip",
+      originalFileURL
+    );
+    const DECODED_FILE_URL = L10N.getFormatStr(
+      "netRequest.decodedFileURL.tooltip",
+      decodedFileURL
+    );
+    const requestedFile = urlDetails.baseNameWithQuery;
+    const fileToolTip =
+      originalFileURL === decodedFileURL
+        ? originalFileURL
+        : ORIGINAL_FILE_URL + "\n\n" + DECODED_FILE_URL;
 
-    return (
-      div({
+    return dom.td(
+      {
         className: "requests-list-column requests-list-file",
-        title: urlDetails.unicodeUrl,
+        title: fileToolTip,
       },
-        div({
-          className: iconClassList.join(" "),
-          title: getFileName(urlDetails.baseNameWithQuery) || urlDetails.unicodeUrl,
-        }),
-        urlDetails.baseNameWithQuery
-      )
+      requestedFile
     );
   }
 }

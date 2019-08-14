@@ -8,16 +8,21 @@ var EXPORTED_SYMBOLS = [
   "TokenAuthenticatedRESTRequest",
 ];
 
-ChromeUtils.import("resource://gre/modules/Preferences.jsm");
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Log.jsm");
-ChromeUtils.import("resource://gre/modules/PromiseUtils.jsm");
-ChromeUtils.import("resource://services-common/utils.js");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { NetUtil } = ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { Log } = ChromeUtils.import("resource://gre/modules/Log.jsm");
+const { PromiseUtils } = ChromeUtils.import(
+  "resource://gre/modules/PromiseUtils.jsm"
+);
+const { CommonUtils } = ChromeUtils.import(
+  "resource://services-common/utils.js"
+);
 
-ChromeUtils.defineModuleGetter(this, "CryptoUtils",
-                               "resource://services-crypto/utils.js");
+ChromeUtils.defineModuleGetter(
+  this,
+  "CryptoUtils",
+  "resource://services-crypto/utils.js"
+);
 
 function decodeString(data, charset) {
   if (!data || !charset) {
@@ -26,15 +31,21 @@ function decodeString(data, charset) {
 
   // This could be simpler if we assumed the charset is only ever UTF-8.
   // It's unclear to me how willing we are to assume this, though...
-  let stringStream = Cc["@mozilla.org/io/string-input-stream;1"]
-                     .createInstance(Ci.nsIStringInputStream);
+  let stringStream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(
+    Ci.nsIStringInputStream
+  );
   stringStream.setData(data, data.length);
 
-  let converterStream = Cc["@mozilla.org/intl/converter-input-stream;1"]
-                        .createInstance(Ci.nsIConverterInputStream);
+  let converterStream = Cc[
+    "@mozilla.org/intl/converter-input-stream;1"
+  ].createInstance(Ci.nsIConverterInputStream);
 
-  converterStream.init(stringStream, charset, 0,
-                       converterStream.DEFAULT_REPLACEMENT_CHARACTER);
+  converterStream.init(
+    stringStream,
+    charset,
+    0,
+    converterStream.DEFAULT_REPLACEMENT_CHARACTER
+  );
 
   let remaining = data.length;
   let body = "";
@@ -91,11 +102,9 @@ function RESTRequest(uri) {
 }
 
 RESTRequest.prototype = {
-
   _logName: "Services.Common.RESTRequest",
 
   QueryInterface: ChromeUtils.generateQI([
-    Ci.nsIBadCertListener2,
     Ci.nsIInterfaceRequestor,
     Ci.nsIChannelEventSink,
   ]),
@@ -121,7 +130,10 @@ RESTRequest.prototype = {
    * nsIRequest load flags. Don't do any caching by default. Don't send user
    * cookies and such over the wire (Bug 644734).
    */
-  loadFlags: Ci.nsIRequest.LOAD_BYPASS_CACHE | Ci.nsIRequest.INHIBIT_CACHING | Ci.nsIRequest.LOAD_ANONYMOUS,
+  loadFlags:
+    Ci.nsIRequest.LOAD_BYPASS_CACHE |
+    Ci.nsIRequest.INHIBIT_CACHING |
+    Ci.nsIRequest.LOAD_ANONYMOUS,
 
   /**
    * nsIHttpChannel
@@ -135,11 +147,11 @@ RESTRequest.prototype = {
    */
   status: null,
 
-  NOT_SENT:    0,
-  SENT:        1,
+  NOT_SENT: 0,
+  SENT: 1,
   IN_PROGRESS: 2,
-  COMPLETED:   4,
-  ABORTED:     8,
+  COMPLETED: 4,
+  ABORTED: 8,
 
   /**
    * HTTP status text of response
@@ -256,9 +268,12 @@ RESTRequest.prototype = {
     this.method = method;
 
     // Create and initialize HTTP channel.
-    let channel = NetUtil.newChannel({uri: this.uri, loadUsingSystemPrincipal: true})
-                         .QueryInterface(Ci.nsIRequest)
-                         .QueryInterface(Ci.nsIHttpChannel);
+    let channel = NetUtil.newChannel({
+      uri: this.uri,
+      loadUsingSystemPrincipal: true,
+    })
+      .QueryInterface(Ci.nsIRequest)
+      .QueryInterface(Ci.nsIHttpChannel);
     this.channel = channel;
     channel.loadFlags |= this.loadFlags;
     channel.notificationCallbacks = this;
@@ -277,7 +292,11 @@ RESTRequest.prototype = {
 
     // REST requests accept JSON by default
     if (!headers.accept) {
-      channel.setRequestHeader("accept", "application/json;q=0.9,*/*;q=0.2", false);
+      channel.setRequestHeader(
+        "accept",
+        "application/json;q=0.9,*/*;q=0.2",
+        false
+      );
     }
 
     // Set HTTP request body.
@@ -297,9 +316,11 @@ RESTRequest.prototype = {
           // If someone handed us an object but also a custom content-type
           // it's probably confused. We could go to even further lengths to
           // respect it, but this shouldn't happen in practice.
-          Cu.reportError("rest.js found an object to JSON.stringify but also a " +
-                         "content-type header with a charset specification. " +
-                         "This probably isn't going to do what you expect");
+          Cu.reportError(
+            "rest.js found an object to JSON.stringify but also a " +
+              "content-type header with a charset specification. " +
+              "This probably isn't going to do what you expect"
+          );
         }
       }
       if (!contentType) {
@@ -311,8 +332,9 @@ RESTRequest.prototype = {
         this._log.trace(method + " Body: " + data);
       }
 
-      let stream = Cc["@mozilla.org/io/string-input-stream;1"]
-                     .createInstance(Ci.nsIStringInputStream);
+      let stream = Cc["@mozilla.org/io/string-input-stream;1"].createInstance(
+        Ci.nsIStringInputStream
+      );
       stream.setData(data, data.length);
 
       channel.QueryInterface(Ci.nsIUploadChannel);
@@ -328,7 +350,7 @@ RESTRequest.prototype = {
 
     // Blast off!
     try {
-      channel.asyncOpen2(this);
+      channel.asyncOpen(this);
     } catch (ex) {
       // asyncOpen can throw in a bunch of cases -- e.g., a forbidden port.
       this._log.warn("Caught an error in asyncOpen", ex);
@@ -344,8 +366,12 @@ RESTRequest.prototype = {
    */
   delayTimeout() {
     if (this.timeout) {
-      CommonUtils.namedTimer(this.abortTimeout, this.timeout * 1000, this,
-                             "timeoutTimer");
+      CommonUtils.namedTimer(
+        this.abortTimeout,
+        this.timeout * 1000,
+        this,
+        "timeoutTimer"
+      );
     }
   },
 
@@ -353,17 +379,25 @@ RESTRequest.prototype = {
    * Abort the request based on a timeout.
    */
   abortTimeout() {
-    this.abort(Components.Exception("Aborting due to channel inactivity.",
-                                    Cr.NS_ERROR_NET_TIMEOUT));
+    this.abort(
+      Components.Exception(
+        "Aborting due to channel inactivity.",
+        Cr.NS_ERROR_NET_TIMEOUT
+      )
+    );
   },
 
   /** nsIStreamListener **/
 
   onStartRequest(channel) {
     if (this.status == this.ABORTED) {
-      this._log.trace("Not proceeding with onStartRequest, request was aborted.");
+      this._log.trace(
+        "Not proceeding with onStartRequest, request was aborted."
+      );
       // We might have already rejected, but just in case.
-      this._deferred.reject(Components.Exception("Request aborted", Cr.NS_BINDING_ABORTED));
+      this._deferred.reject(
+        Components.Exception("Request aborted", Cr.NS_BINDING_ABORTED)
+      );
       return;
     }
 
@@ -379,8 +413,9 @@ RESTRequest.prototype = {
 
     this.status = this.IN_PROGRESS;
 
-    this._log.trace("onStartRequest: " + channel.requestMethod + " " +
-                    channel.URI.spec);
+    this._log.trace(
+      "onStartRequest: " + channel.requestMethod + " " + channel.URI.spec
+    );
 
     // Create a new response object.
     this.response = new RESTResponse(this);
@@ -388,7 +423,7 @@ RESTRequest.prototype = {
     this.delayTimeout();
   },
 
-  onStopRequest(channel, context, statusCode) {
+  onStopRequest(channel, statusCode) {
     if (this.timeoutTimer) {
       // Clear the abort timer now that the channel is done.
       this.timeoutTimer.clear();
@@ -396,11 +431,14 @@ RESTRequest.prototype = {
 
     // We don't want to do anything for a request that's already been aborted.
     if (this.status == this.ABORTED) {
-      this._log.trace("Not proceeding with onStopRequest, request was aborted.");
+      this._log.trace(
+        "Not proceeding with onStopRequest, request was aborted."
+      );
       // We might not have already rejected if the user called reject() manually.
       // If we have already rejected, then this is a no-op
-      this._deferred.reject(Components.Exception("Request aborted",
-                                                 Cr.NS_BINDING_ABORTED));
+      this._deferred.reject(
+        Components.Exception("Request aborted", Cr.NS_BINDING_ABORTED)
+      );
       return;
     }
 
@@ -416,18 +454,30 @@ RESTRequest.prototype = {
     this.status = this.COMPLETED;
 
     try {
-      this.response.body = decodeString(this.response._rawBody, this.response.charset);
+      this.response.body = decodeString(
+        this.response._rawBody,
+        this.response.charset
+      );
       this.response._rawBody = null;
     } catch (ex) {
-      this._log.warn(`Exception decoding response - ${this.method} ${channel.URI.spec}`, ex);
+      this._log.warn(
+        `Exception decoding response - ${this.method} ${channel.URI.spec}`,
+        ex
+      );
       this._deferred.reject(ex);
       return;
     }
 
     let statusSuccess = Components.isSuccessCode(statusCode);
-    let uri = channel && channel.URI && channel.URI.spec || "<unknown>";
-    this._log.trace("Channel for " + channel.requestMethod + " " + uri +
-                    " returned status code " + statusCode);
+    let uri = (channel && channel.URI && channel.URI.spec) || "<unknown>";
+    this._log.trace(
+      "Channel for " +
+        channel.requestMethod +
+        " " +
+        uri +
+        " returned status code " +
+        statusCode
+    );
 
     // Throw the failure code and stop execution.  Use Components.Exception()
     // instead of Error() so the exception is QI-able and can be passed across
@@ -435,7 +485,9 @@ RESTRequest.prototype = {
     if (!statusSuccess) {
       let message = Components.Exception("", statusCode).name;
       let error = Components.Exception(message, statusCode);
-      this._log.debug(this.method + " " + uri + " failed: " + statusCode + " - " + message);
+      this._log.debug(
+        this.method + " " + uri + " failed: " + statusCode + " - " + message
+      );
       // Additionally give the full response body when Trace logging.
       if (this._log.level <= Log.Level.Trace) {
         this._log.trace(this.method + " body", this.response.body);
@@ -453,7 +505,7 @@ RESTRequest.prototype = {
     this._deferred.resolve(this.response);
   },
 
-  onDataAvailable(channel, cb, stream, off, count) {
+  onDataAvailable(channel, stream, off, count) {
     // We get an nsIRequest, which doesn't have contentCharset.
     try {
       channel.QueryInterface(Ci.nsIHttpChannel);
@@ -470,8 +522,9 @@ RESTRequest.prototype = {
     }
 
     if (!this._inputStream) {
-      this._inputStream = Cc["@mozilla.org/scriptableinputstream;1"]
-                            .createInstance(Ci.nsIScriptableInputStream);
+      this._inputStream = Cc[
+        "@mozilla.org/scriptableinputstream;1"
+      ].createInstance(Ci.nsIScriptableInputStream);
     }
     this._inputStream.init(stream);
 
@@ -486,15 +539,6 @@ RESTRequest.prototype = {
     return this.QueryInterface(aIID);
   },
 
-  /** nsIBadCertListener2 **/
-
-  notifyCertProblem(socketInfo, secInfo, targetHost) {
-    this._log.warn("Invalid HTTPS certificate encountered!");
-    // Suppress invalid HTTPS certificate warnings in the UI.
-    // (The request will still fail.)
-    return true;
-  },
-
   /**
    * Returns true if headers from the old channel should be
    * copied to the new channel. Invoked when a channel redirect
@@ -502,18 +546,27 @@ RESTRequest.prototype = {
    */
   shouldCopyOnRedirect(oldChannel, newChannel, flags) {
     let isInternal = !!(flags & Ci.nsIChannelEventSink.REDIRECT_INTERNAL);
-    let isSameURI  = newChannel.URI.equals(oldChannel.URI);
-    this._log.debug("Channel redirect: " + oldChannel.URI.spec + ", " +
-                    newChannel.URI.spec + ", internal = " + isInternal);
+    let isSameURI = newChannel.URI.equals(oldChannel.URI);
+    this._log.debug(
+      "Channel redirect: " +
+        oldChannel.URI.spec +
+        ", " +
+        newChannel.URI.spec +
+        ", internal = " +
+        isInternal
+    );
     return isInternal && isSameURI;
   },
 
   /** nsIChannelEventSink **/
   asyncOnChannelRedirect(oldChannel, newChannel, flags, callback) {
-
-    let oldSpec = (oldChannel && oldChannel.URI) ? oldChannel.URI.spec : "<undefined>";
-    let newSpec = (newChannel && newChannel.URI) ? newChannel.URI.spec : "<undefined>";
-    this._log.debug("Channel redirect: " + oldSpec + ", " + newSpec + ", " + flags);
+    let oldSpec =
+      oldChannel && oldChannel.URI ? oldChannel.URI.spec : "<undefined>";
+    let newSpec =
+      newChannel && newChannel.URI ? newChannel.URI.spec : "<undefined>";
+    this._log.debug(
+      "Channel redirect: " + oldSpec + ", " + newSpec + ", " + flags
+    );
 
     try {
       newChannel.QueryInterface(Ci.nsIHttpChannel);
@@ -554,7 +607,6 @@ function RESTResponse(request = null) {
   this._log.manageLevelFromPref("services.common.log.logger.rest.response");
 }
 RESTResponse.prototype = {
-
   _logName: "Services.Common.RESTResponse",
 
   /**
@@ -573,7 +625,7 @@ RESTResponse.prototype = {
       this._log.debug("Caught exception fetching HTTP status code", ex);
       return null;
     }
-    Object.defineProperty(this, "status", {value: status});
+    Object.defineProperty(this, "status", { value: status });
     return status;
   },
 
@@ -588,7 +640,7 @@ RESTResponse.prototype = {
       this._log.debug("Caught exception fetching HTTP status text", ex);
       return null;
     }
-    Object.defineProperty(this, "statusText", {value: statusText});
+    Object.defineProperty(this, "statusText", { value: statusText });
     return statusText;
   },
 
@@ -603,7 +655,7 @@ RESTResponse.prototype = {
       this._log.debug("Caught exception fetching HTTP success flag", ex);
       return null;
     }
-    Object.defineProperty(this, "success", {value: success});
+    Object.defineProperty(this, "success", { value: success });
     return success;
   },
 
@@ -623,7 +675,7 @@ RESTResponse.prototype = {
       return null;
     }
 
-    Object.defineProperty(this, "headers", {value: headers});
+    Object.defineProperty(this, "headers", { value: headers });
     return headers;
   },
 
@@ -631,7 +683,6 @@ RESTResponse.prototype = {
    * HTTP body (string)
    */
   body: null,
-
 };
 
 /**
@@ -658,8 +709,12 @@ TokenAuthenticatedRESTRequest.prototype = {
   __proto__: RESTRequest.prototype,
 
   async dispatch(method, data) {
-    let sig = CryptoUtils.computeHTTPMACSHA1(
-      this.authToken.id, this.authToken.key, method, this.uri, this.extra
+    let sig = await CryptoUtils.computeHTTPMACSHA1(
+      this.authToken.id,
+      this.authToken.key,
+      method,
+      this.uri,
+      this.extra
     );
 
     this.setHeader("Authorization", sig.getHeader());

@@ -15,7 +15,8 @@ SOURCES += [
     'WindowsNetworkFunctionsWrapper.cpp'
 ]
 
-FINAL_LIBRARY = 'xul'
+XPCOM_MANIFESTS += [
+    'components.conf',
+]
 
-if CONFIG['CC_TYPE'] == 'clang-cl':
-    AllowCompilerWarnings()  # workaround for bug 1090497
+FINAL_LIBRARY = 'xul'

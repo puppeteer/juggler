@@ -57,9 +57,9 @@ class GCHashMap : public js::HashMap<Key, Value, HashPolicy, AllocPolicy> {
   using Base = js::HashMap<Key, Value, HashPolicy, AllocPolicy>;
 
  public:
-  explicit GCHashMap(AllocPolicy a = AllocPolicy()) : Base(a) {}
+  explicit GCHashMap(AllocPolicy a = AllocPolicy()) : Base(std::move(a)) {}
   explicit GCHashMap(size_t length) : Base(length) {}
-  GCHashMap(AllocPolicy a, size_t length) : Base(a, length) {}
+  GCHashMap(AllocPolicy a, size_t length) : Base(std::move(a), length) {}
 
   static void trace(GCHashMap* map, JSTracer* trc) { map->trace(trc); }
   void trace(JSTracer* trc) {
@@ -91,7 +91,7 @@ class GCHashMap : public js::HashMap<Key, Value, HashPolicy, AllocPolicy> {
   // GCHashMap is not copyable or assignable
   GCHashMap(const GCHashMap& hm) = delete;
   GCHashMap& operator=(const GCHashMap& hm) = delete;
-};
+} MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS;
 
 }  // namespace JS
 
@@ -111,9 +111,11 @@ class GCRekeyableHashMap : public JS::GCHashMap<Key, Value, HashPolicy,
   using Base = JS::GCHashMap<Key, Value, HashPolicy, AllocPolicy>;
 
  public:
-  explicit GCRekeyableHashMap(AllocPolicy a = AllocPolicy()) : Base(a) {}
+  explicit GCRekeyableHashMap(AllocPolicy a = AllocPolicy())
+      : Base(std::move(a)) {}
   explicit GCRekeyableHashMap(size_t length) : Base(length) {}
-  GCRekeyableHashMap(AllocPolicy a, size_t length) : Base(a, length) {}
+  GCRekeyableHashMap(AllocPolicy a, size_t length)
+      : Base(std::move(a), length) {}
 
   void sweep() {
     for (typename Base::Enum e(*this); !e.empty(); e.popFront()) {
@@ -132,7 +134,7 @@ class GCRekeyableHashMap : public JS::GCHashMap<Key, Value, HashPolicy,
     MOZ_ASSERT(this != &rhs, "self-move assignment is prohibited");
     Base::operator=(std::move(rhs));
   }
-};
+} MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS;
 
 template <typename Wrapper, typename... Args>
 class WrappedPtrOperations<JS::GCHashMap<Args...>, Wrapper> {
@@ -231,9 +233,9 @@ class GCHashSet : public js::HashSet<T, HashPolicy, AllocPolicy> {
   using Base = js::HashSet<T, HashPolicy, AllocPolicy>;
 
  public:
-  explicit GCHashSet(AllocPolicy a = AllocPolicy()) : Base(a) {}
+  explicit GCHashSet(AllocPolicy a = AllocPolicy()) : Base(std::move(a)) {}
   explicit GCHashSet(size_t length) : Base(length) {}
-  GCHashSet(AllocPolicy a, size_t length) : Base(a, length) {}
+  GCHashSet(AllocPolicy a, size_t length) : Base(std::move(a), length) {}
 
   static void trace(GCHashSet* set, JSTracer* trc) { set->trace(trc); }
   void trace(JSTracer* trc) {
@@ -263,7 +265,7 @@ class GCHashSet : public js::HashSet<T, HashPolicy, AllocPolicy> {
   // GCHashSet is not copyable or assignable
   GCHashSet(const GCHashSet& hs) = delete;
   GCHashSet& operator=(const GCHashSet& hs) = delete;
-};
+} MOZ_INHERIT_TYPE_ANNOTATIONS_FROM_TEMPLATE_ARGS;
 
 }  // namespace JS
 
@@ -533,7 +535,7 @@ class WeakCache<GCHashMap<Key, Value, HashPolicy, AllocPolicy, MapSweepPolicy>>
   bool putNew(KeyInput&& k, ValueInput&& v) {
     return map.putNew(std::forward<KeyInput>(k), std::forward<ValueInput>(v));
   }
-};
+} JS_HAZ_NON_GC_POINTER;
 
 // Specialize WeakCache for GCHashSet to provide a barriered set that does not
 // need to be swept immediately.
@@ -718,7 +720,7 @@ class WeakCache<GCHashSet<T, HashPolicy, AllocPolicy>>
   bool putNew(const Lookup& l, TInput&& t) {
     return set.putNew(l, std::forward<TInput>(t));
   }
-};
+} JS_HAZ_NON_GC_POINTER;
 
 }  // namespace JS
 

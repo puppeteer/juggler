@@ -28,7 +28,7 @@
 #include "crashreporter_gtk_common.h"
 
 #ifndef GDK_KEY_Escape
-#define GDK_KEY_Escape GDK_Escape
+#  define GDK_KEY_Escape GDK_Escape
 #endif
 
 using std::string;
@@ -107,7 +107,6 @@ static gboolean ReportCompleted(gpointer success) {
   return FALSE;
 }
 
-#ifdef MOZ_ENABLE_GCONF
 #define HTTP_PROXY_DIR "/system/http_proxy"
 
 void LoadProxyinfo() {
@@ -179,7 +178,6 @@ void LoadProxyinfo() {
 
   // Don't dlclose gconfLib as libORBit-2 uses atexit().
 }
-#endif
 
 gpointer SendThread(gpointer args) {
   string response, error;

@@ -10,7 +10,7 @@
 // narrow-character strings.
 
 #ifndef XP_WIN
-#error This file only makes sense on Windows.
+#  error This file only makes sense on Windows.
 #endif
 
 #include "mozilla/Char16.h"
@@ -24,14 +24,14 @@
    startup routines.  Workaround is to implement something like
    it ourselves.  See bug 411826 */
 
-#include <shellapi.h>
+#  include <shellapi.h>
 
-int wmain(int argc, WCHAR **argv);
+int wmain(int argc, WCHAR** argv);
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   LPWSTR commandLine = GetCommandLineW();
   int argcw = 0;
-  LPWSTR *argvw = CommandLineToArgvW(commandLine, &argcw);
+  LPWSTR* argvw = CommandLineToArgvW(commandLine, &argcw);
   if (!argvw) return 127;
 
   int result = wmain(argcw, argvw);
@@ -43,20 +43,20 @@ int main(int argc, char **argv) {
 #define main NS_internal_main
 
 #ifndef XRE_WANT_ENVIRON
-int main(int argc, char **argv);
+int main(int argc, char** argv);
 #else
-int main(int argc, char **argv, char **envp);
+int main(int argc, char** argv, char** envp);
 #endif
 
 static void SanitizeEnvironmentVariables() {
   DWORD bufferSize = GetEnvironmentVariableW(L"PATH", nullptr, 0);
   if (bufferSize) {
-    wchar_t *originalPath = new wchar_t[bufferSize];
+    wchar_t* originalPath = new wchar_t[bufferSize];
     if (bufferSize - 1 ==
         GetEnvironmentVariableW(L"PATH", originalPath, bufferSize)) {
       bufferSize = ExpandEnvironmentStringsW(originalPath, nullptr, 0);
       if (bufferSize) {
-        wchar_t *newPath = new wchar_t[bufferSize];
+        wchar_t* newPath = new wchar_t[bufferSize];
         if (ExpandEnvironmentStringsW(originalPath, newPath, bufferSize)) {
           SetEnvironmentVariableW(L"PATH", newPath);
         }
@@ -67,13 +67,13 @@ static void SanitizeEnvironmentVariables() {
   }
 }
 
-static char *AllocConvertUTF16toUTF8(char16ptr_t arg) {
+static char* AllocConvertUTF16toUTF8(char16ptr_t arg) {
   // be generous... UTF16 units can expand up to 3 UTF8 units
   size_t len = wcslen(arg);
   // ConvertUTF16toUTF8 requires +1. Let's do that here, too, lacking
   // knowledge of Windows internals.
   size_t dstLen = len * 3 + 1;
-  char *s = new char[dstLen + 1];  // Another +1 for zero terminator
+  char* s = new char[dstLen + 1];  // Another +1 for zero terminator
   if (!s) return nullptr;
 
   int written =
@@ -82,7 +82,7 @@ static char *AllocConvertUTF16toUTF8(char16ptr_t arg) {
   return s;
 }
 
-static void FreeAllocStrings(int argc, char **argv) {
+static void FreeAllocStrings(int argc, char** argv) {
   while (argc) {
     --argc;
     delete[] argv[argc];
@@ -91,19 +91,21 @@ static void FreeAllocStrings(int argc, char **argv) {
   delete[] argv;
 }
 
-int wmain(int argc, WCHAR **argv) {
+int wmain(int argc, WCHAR** argv) {
   SanitizeEnvironmentVariables();
   SetDllDirectoryW(L"");
 
   // Only run this code if LauncherProcessWin.h was included beforehand, thus
   // signalling that the hosting process should support launcher mode.
 #if defined(mozilla_LauncherProcessWin_h)
-  if (mozilla::RunAsLauncherProcess(argc, argv)) {
-    return mozilla::LauncherMain(argc, argv);
+  mozilla::Maybe<int> launcherResult =
+      mozilla::LauncherMain(argc, argv, sAppData);
+  if (launcherResult) {
+    return launcherResult.value();
   }
 #endif  // defined(mozilla_LauncherProcessWin_h)
 
-  char **argvConverted = new char *[argc + 1];
+  char** argvConverted = new char*[argc + 1];
   if (!argvConverted) return 127;
 
   for (int i = 0; i < argc; ++i) {
@@ -115,7 +117,7 @@ int wmain(int argc, WCHAR **argv) {
   argvConverted[argc] = nullptr;
 
   // need to save argvConverted copy for later deletion.
-  char **deleteUs = new char *[argc + 1];
+  char** deleteUs = new char*[argc + 1];
   if (!deleteUs) {
     FreeAllocStrings(argc, argvConverted);
     return 127;

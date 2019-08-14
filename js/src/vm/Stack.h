@@ -18,7 +18,7 @@
 
 #include "gc/Rooting.h"
 #ifdef CHECK_OSIPOINT_REGISTERS
-#include "jit/Registers.h"  // for RegisterDump
+#  include "jit/Registers.h"  // for RegisterDump
 #endif
 #include "jit/JSJitFrameIter.h"
 #include "js/RootingAPI.h"
@@ -33,14 +33,14 @@
 namespace JS {
 namespace dbg {
 #ifdef JS_BROKEN_GCC_ATTRIBUTE_WARNING
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wattributes"
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wattributes"
 #endif  // JS_BROKEN_GCC_ATTRIBUTE_WARNING
 
 class JS_PUBLIC_API AutoEntryMonitor;
 
 #ifdef JS_BROKEN_GCC_ATTRIBUTE_WARNING
-#pragma GCC diagnostic pop
+#  pragma GCC diagnostic pop
 #endif  // JS_BROKEN_GCC_ATTRIBUTE_WARNING
 }  // namespace dbg
 }  // namespace JS
@@ -232,6 +232,7 @@ class AbstractFramePtr {
   inline JSScript* script() const;
   inline wasm::Instance* wasmInstance() const;
   inline GlobalObject* global() const;
+  inline bool hasGlobal(const GlobalObject* global) const;
   inline JSFunction* callee() const;
   inline Value calleev() const;
   inline Value& thisArgument() const;
@@ -917,7 +918,7 @@ template <MaybeConstruct Construct>
 class GenericArgsBase : public mozilla::Conditional<Construct, AnyConstructArgs,
                                                     AnyInvokeArgs>::Type {
  protected:
-  AutoValueVector v_;
+  RootedValueVector v_;
 
   explicit GenericArgsBase(JSContext* cx) : v_(cx) {}
 
@@ -1050,7 +1051,7 @@ namespace js {
 
 /*****************************************************************************/
 
-// SavedFrame caching to minimize stack walking.
+// [SMDOC] LiveSavedFrameCache: SavedFrame caching to minimize stack walking
 //
 // Since each SavedFrame object includes a 'parent' pointer to the SavedFrame
 // for its caller, if we could easily find the right SavedFrame for a given
@@ -1138,7 +1139,7 @@ namespace js {
 //
 //     P  > Q  > T  > U
 //
-// Some details:
+// Details:
 //
 // - When we find a cache entry whose frame address matches our frame F, we know
 //   that F has never left the stack, but it may certainly be the case that
@@ -1220,6 +1221,17 @@ namespace js {
 //   select the appropriate parent at that point: rather than the next-older
 //   frame, we find the SavedFrame for the eval's target frame. The skip appears
 //   in the SavedFrame chains, even as the traversal covers all the frames.
+//
+// - Rematerialized frames (see ../jit/RematerializedFrame.h) are always created
+//   with their hasCachedSavedFrame bits clear: although there may be extant
+//   SavedFrames built from the original IonMonkey frame, the Rematerialized
+//   frames will not have cache entries for them until they are traversed in a
+//   capture themselves.
+//
+//   This means that, oddly, it is not always true that, once we reach a frame
+//   with its hasCachedSavedFrame bit set, all its parents will have the bit set
+//   as well. However, clear bits under younger set bits will only occur on
+//   Rematerialized frames.
 class LiveSavedFrameCache {
  public:
   // The address of a live frame for which we can cache SavedFrames: it has a
@@ -1260,6 +1272,11 @@ class LiveSavedFrameCache {
     // If this FramePtr is an interpreter frame, return a pointer to it.
     inline InterpreterFrame& asInterpreterFrame() const {
       return *ptr.as<InterpreterFrame*>();
+    }
+
+    // Return true if this FramePtr refers to a rematerialized frame.
+    inline bool isRematerializedFrame() const {
+      return ptr.is<jit::RematerializedFrame*>();
     }
 
     bool operator==(const FramePtr& rhs) const { return rhs.ptr == this->ptr; }
@@ -1584,7 +1601,7 @@ class JitActivation : public Activation {
   // all inline frames associated with that frame.
   //
   // This table is lazily initialized by calling getRematerializedFrame.
-  typedef GCVector<RematerializedFrame*> RematerializedFrameVector;
+  typedef GCVector<UniquePtr<RematerializedFrame>> RematerializedFrameVector;
   typedef HashMap<uint8_t*, RematerializedFrameVector> RematerializedFrameTable;
   js::UniquePtr<RematerializedFrameTable> rematerializedFrames_;
 
@@ -1889,6 +1906,10 @@ class JitFrameIter {
   void operator++();
 
   JS::Realm* realm() const;
+
+  // Returns the address of the next instruction that will execute in this
+  // frame, once control returns to this frame.
+  uint8_t* resumePCinCurrentFrame() const;
 
   // Operations which have an effect only on JIT frames.
   void skipNonScriptedJSFrames();

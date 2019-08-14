@@ -7,18 +7,18 @@
 #include "gc/Marking.h"
 #include "jit/JitRealm.h"
 #if defined(JS_CODEGEN_X86)
-#include "jit/x86/MacroAssembler-x86.h"
+#  include "jit/x86/MacroAssembler-x86.h"
 #elif defined(JS_CODEGEN_X64)
-#include "jit/x64/MacroAssembler-x64.h"
+#  include "jit/x64/MacroAssembler-x64.h"
 #else
-#error "Wrong architecture. Only x86 and x64 should build this file!"
+#  error "Wrong architecture. Only x86 and x64 should build this file!"
 #endif
 
 #ifdef _MSC_VER
-#include <intrin.h>  // for __cpuid
-#if defined(_M_X64) && (_MSC_FULL_VER >= 160040219)
-#include <immintrin.h>  // for _xgetbv
-#endif
+#  include <intrin.h>  // for __cpuid
+#  if defined(_M_X64) && (_MSC_FULL_VER >= 160040219)
+#    include <immintrin.h>  // for _xgetbv
+#  endif
 #endif
 
 using namespace js;
@@ -36,8 +36,9 @@ void AssemblerX86Shared::copyDataRelocationTable(uint8_t* dest) {
   }
 }
 
-/* static */ void AssemblerX86Shared::TraceDataRelocations(
-    JSTracer* trc, JitCode* code, CompactBufferReader& reader) {
+/* static */
+void AssemblerX86Shared::TraceDataRelocations(JSTracer* trc, JitCode* code,
+                                              CompactBufferReader& reader) {
   while (reader.more()) {
     size_t offset = reader.readUnsigned();
     MOZ_ASSERT(offset >= sizeof(void*) && offset <= code->instructionsSize());
@@ -46,10 +47,14 @@ void AssemblerX86Shared::copyDataRelocationTable(uint8_t* dest) {
     void* data = X86Encoding::GetPointer(src);
 
 #ifdef JS_PUNBOX64
-    // All pointers on x64 will have the top bits cleared. If those bits
-    // are not cleared, this must be a Value.
+    // Data relocations can be for Values or for raw pointers. If a Value is
+    // zero-tagged, we can trace it as if it were a raw pointer. If a Value
+    // is not zero-tagged, we have to interpret it as a Value to ensure that the
+    // tag bits are masked off to recover the actual pointer.
+
     uintptr_t word = reinterpret_cast<uintptr_t>(data);
     if (word >> JSVAL_TAG_SHIFT) {
+      // This relocation is a Value with a non-zero tag.
       Value value = Value::fromRawBits(word);
       MOZ_ASSERT_IF(value.isGCThing(),
                     gc::IsCellPointerValid(value.toGCThing()));
@@ -63,6 +68,7 @@ void AssemblerX86Shared::copyDataRelocationTable(uint8_t* dest) {
     }
 #endif
 
+    // This relocation is a raw pointer or a Value with a zero tag.
     gc::Cell* cell = static_cast<gc::Cell*>(data);
     MOZ_ASSERT(gc::IsCellPointerValid(cell));
     TraceManuallyBarrieredGenericPointerEdge(trc, &cell, "jit-masm-ptr");
@@ -267,18 +273,18 @@ static void ReadCPUInfo(int* flagsEax, int* flagsEbx, int* flagsEcx,
   // random bits indicating SSE3/SSE4 are present. Also make sure that it's
   // set to 0 as an input for BMI detection on all platforms.
   *flagsEcx = 0;
-#ifdef JS_CODEGEN_X64
+#  ifdef JS_CODEGEN_X64
   asm("cpuid;"
       : "+a"(*flagsEax), "=b"(*flagsEbx), "+c"(*flagsEcx), "=d"(*flagsEdx));
-#else
+#  else
   // On x86, preserve ebx. The compiler needs it for PIC mode.
   asm("mov %%ebx, %%edi;"
       "cpuid;"
       "xchg %%edi, %%ebx;"
       : "+a"(*flagsEax), "=D"(*flagsEbx), "+c"(*flagsEcx), "=d"(*flagsEdx));
-#endif
+#  endif
 #else
-#error "Unsupported compiler"
+#  error "Unsupported compiler"
 #endif
 }
 

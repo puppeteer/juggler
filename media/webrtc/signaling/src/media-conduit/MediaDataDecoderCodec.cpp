@@ -8,22 +8,24 @@
 
 namespace mozilla {
 
-/* static */ WebrtcVideoEncoder* MediaDataDecoderCodec::CreateEncoder(
+/* static */
+WebrtcVideoEncoder* MediaDataDecoderCodec::CreateEncoder(
     webrtc::VideoCodecType aCodecType) {
   return nullptr;
 }
 
-/* static */ WebrtcVideoDecoder* MediaDataDecoderCodec::CreateDecoder(
+/* static */
+WebrtcVideoDecoder* MediaDataDecoderCodec::CreateDecoder(
     webrtc::VideoCodecType aCodecType) {
   switch (aCodecType) {
     case webrtc::VideoCodecType::kVideoCodecVP8:
     case webrtc::VideoCodecType::kVideoCodecVP9:
-      if (!StaticPrefs::MediaNavigatorMediadatadecoderVPXEnabled()) {
+      if (!StaticPrefs::media_navigator_mediadatadecoder_vpx_enabled()) {
         return nullptr;
       }
       break;
     case webrtc::VideoCodecType::kVideoCodecH264:
-      if (!StaticPrefs::MediaNavigatorMediadatadecoderH264Enabled()) {
+      if (!StaticPrefs::media_navigator_mediadatadecoder_h264_enabled()) {
         return nullptr;
       }
       break;

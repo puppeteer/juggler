@@ -38,7 +38,8 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ReportingObserver)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
 NS_INTERFACE_MAP_END
 
-/* static */ already_AddRefed<ReportingObserver> ReportingObserver::Constructor(
+/* static */
+already_AddRefed<ReportingObserver> ReportingObserver::Constructor(
     const GlobalObject& aGlobal, ReportingObserverCallback& aCallback,
     const ReportingObserverOptions& aOptions, ErrorResult& aRv) {
   nsCOMPtr<nsPIDOMWindowInner> window =
@@ -137,7 +138,11 @@ void ReportingObserver::MaybeReport(Report* aReport) {
 
   nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
       "ReportingObserver::MaybeReport",
-      [window]() { window->NotifyReportingObservers(); });
+      // MOZ_CAN_RUN_SCRIPT_BOUNDARY until at least we're able to have
+      // Runnable::Run be MOZ_CAN_RUN_SCRIPT.  But even then, having a boundary
+      // here might make the most sense.
+      [window]()
+          MOZ_CAN_RUN_SCRIPT_BOUNDARY { window->NotifyReportingObservers(); });
 
   NS_DispatchToCurrentThread(r);
 }
@@ -159,7 +164,8 @@ void ReportingObserver::MaybeNotify() {
   }
 
   // We should report if this throws exception. But where?
-  mCallback->Call(reports, *this);
+  RefPtr<ReportingObserverCallback> callback(mCallback);
+  callback->Call(reports, *this);
 }
 
 NS_IMETHODIMP

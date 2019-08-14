@@ -29,7 +29,7 @@
 #include "mozilla/dom/WorkerRunnable.h"
 
 #ifdef MOZ_GECKO_PROFILER
-#include "ProfilerMarkerPayload.h"
+#  include "ProfilerMarkerPayload.h"
 #endif
 
 #define PERFLOG(msg, ...) printf_stderr(msg, ##__VA_ARGS__)
@@ -41,12 +41,14 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Performance)
 NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(Performance, DOMEventTargetHelper,
-                                   mUserEntries, mResourceEntries);
+                                   mUserEntries, mResourceEntries,
+                                   mSecondaryResourceEntries);
 
 NS_IMPL_ADDREF_INHERITED(Performance, DOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(Performance, DOMEventTargetHelper)
 
-/* static */ already_AddRefed<Performance> Performance::CreateForMainThread(
+/* static */
+already_AddRefed<Performance> Performance::CreateForMainThread(
     nsPIDOMWindowInner* aWindow, nsIPrincipal* aPrincipal,
     nsDOMNavigationTiming* aDOMTiming, nsITimedChannel* aChannel) {
   MOZ_ASSERT(NS_IsMainThread());
@@ -57,7 +59,8 @@ NS_IMPL_RELEASE_INHERITED(Performance, DOMEventTargetHelper)
   return performance.forget();
 }
 
-/* static */ already_AddRefed<Performance> Performance::CreateForWorker(
+/* static */
+already_AddRefed<Performance> Performance::CreateForWorker(
     WorkerPrivate* aWorkerPrivate) {
   MOZ_ASSERT(aWorkerPrivate);
   aWorkerPrivate->AssertIsOnWorkerThread();
@@ -69,6 +72,7 @@ NS_IMPL_RELEASE_INHERITED(Performance, DOMEventTargetHelper)
 Performance::Performance(bool aSystemPrincipal)
     : mResourceTimingBufferSize(kDefaultResourceTimingBufferSize),
       mPendingNotificationObserversTask(false),
+      mPendingResourceTimingBufferFullEvent(false),
       mSystemPrincipal(aSystemPrincipal) {
   MOZ_ASSERT(!NS_IsMainThread());
 }
@@ -77,6 +81,7 @@ Performance::Performance(nsPIDOMWindowInner* aWindow, bool aSystemPrincipal)
     : DOMEventTargetHelper(aWindow),
       mResourceTimingBufferSize(kDefaultResourceTimingBufferSize),
       mPendingNotificationObserversTask(false),
+      mPendingResourceTimingBufferFullEvent(false),
       mSystemPrincipal(aSystemPrincipal) {
   MOZ_ASSERT(NS_IsMainThread());
 }
@@ -224,9 +229,10 @@ void Performance::Mark(const nsAString& aName, ErrorResult& aRv) {
     nsCOMPtr<nsIDocShell> docShell =
         nsContentUtils::GetDocShellForEventTarget(et);
     DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
-    profiler_add_marker("UserTiming", MakeUnique<UserTimingMarkerPayload>(
-                                          aName, TimeStamp::Now(), docShellId,
-                                          docShellHistoryId));
+    profiler_add_marker(
+        "UserTiming", JS::ProfilingCategoryPair::DOM,
+        MakeUnique<UserTimingMarkerPayload>(aName, TimeStamp::Now(), docShellId,
+                                            docShellHistoryId));
   }
 #endif
 }
@@ -320,7 +326,7 @@ void Performance::Measure(const nsAString& aName,
     nsCOMPtr<nsIDocShell> docShell =
         nsContentUtils::GetDocShellForEventTarget(et);
     DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
-    profiler_add_marker("UserTiming",
+    profiler_add_marker("UserTiming", JS::ProfilingCategoryPair::DOM,
                         MakeUnique<UserTimingMarkerPayload>(
                             aName, startMark, endMark, startTimeStamp,
                             endTimeStamp, docShellId, docShellHistoryId));
@@ -370,29 +376,158 @@ void Performance::InsertUserEntry(PerformanceEntry* aEntry) {
   QueueEntry(aEntry);
 }
 
+/*
+ * Steps are labeled according to the description found at
+ * https://w3c.github.io/resource-timing/#sec-extensions-performance-interface.
+ *
+ * Buffer Full Event
+ */
+void Performance::BufferEvent() {
+  /*
+   * While resource timing secondary buffer is not empty,
+   * run the following substeps:
+   */
+  while (!mSecondaryResourceEntries.IsEmpty()) {
+    uint32_t secondaryResourceEntriesBeforeCount = 0;
+    uint32_t secondaryResourceEntriesAfterCount = 0;
+
+    /*
+     * Let number of excess entries before be resource
+     * timing secondary buffer current size.
+     */
+    secondaryResourceEntriesBeforeCount = mSecondaryResourceEntries.Length();
+
+    /*
+     * If can add resource timing entry returns false,
+     * then fire an event named resourcetimingbufferfull
+     * at the Performance object.
+     */
+    if (!CanAddResourceTimingEntry()) {
+      DispatchBufferFullEvent();
+    }
+
+    /*
+     * Run copy secondary buffer.
+     *
+     * While resource timing secondary buffer is not
+     * empty and can add resource timing entry returns
+     * true ...
+     */
+    while (!mSecondaryResourceEntries.IsEmpty() &&
+           CanAddResourceTimingEntry()) {
+      /*
+       * Let entry be the oldest PerformanceResourceTiming
+       * in resource timing secondary buffer. Add entry to
+       * the end of performance entry buffer. Increment
+       * resource timing buffer current size by 1.
+       */
+      mResourceEntries.InsertElementSorted(
+          mSecondaryResourceEntries.ElementAt(0), PerformanceEntryComparator());
+      /*
+       * Remove entry from resource timing secondary buffer.
+       * Decrement resource timing secondary buffer current
+       * size by 1.
+       */
+      mSecondaryResourceEntries.RemoveElementAt(0);
+    }
+
+    /*
+     * Let number of excess entries after be resource
+     * timing secondary buffer current size.
+     */
+    secondaryResourceEntriesAfterCount = mSecondaryResourceEntries.Length();
+
+    /*
+     * If number of excess entries before is lower than
+     * or equals number of excess entries after, then
+     * remove all entries from resource timing secondary
+     * buffer, set resource timing secondary buffer current
+     * size to 0, and abort these steps.
+     */
+    if (secondaryResourceEntriesBeforeCount <=
+        secondaryResourceEntriesAfterCount) {
+      mSecondaryResourceEntries.Clear();
+      break;
+    }
+  }
+  /*
+   * Set resource timing buffer full event pending flag
+   * to false.
+   */
+  mPendingResourceTimingBufferFullEvent = false;
+}
+
 void Performance::SetResourceTimingBufferSize(uint64_t aMaxSize) {
   mResourceTimingBufferSize = aMaxSize;
 }
 
+/*
+ * Steps are labeled according to the description found at
+ * https://w3c.github.io/resource-timing/#sec-extensions-performance-interface.
+ *
+ * Can Add Resource Timing Entry
+ */
+MOZ_ALWAYS_INLINE bool Performance::CanAddResourceTimingEntry() {
+  /*
+   * If resource timing buffer current size is smaller than resource timing
+   * buffer size limit, return true. [Otherwise,] [r]eturn false.
+   */
+  return mResourceEntries.Length() < mResourceTimingBufferSize;
+}
+
+/*
+ * Steps are labeled according to the description found at
+ * https://w3c.github.io/resource-timing/#sec-extensions-performance-interface.
+ *
+ * Add a PerformanceResourceTiming Entry
+ */
 void Performance::InsertResourceEntry(PerformanceEntry* aEntry) {
   MOZ_ASSERT(aEntry);
 
-  // We won't add an entry when 'privacy.resistFingerprint' is true.
   if (nsContentUtils::ShouldResistFingerprinting()) {
     return;
   }
 
-  // Don't add the entry if the buffer is full
-  if (mResourceEntries.Length() >= mResourceTimingBufferSize) {
+  /*
+   * Let new entry be the input PerformanceEntry to be added.
+   *
+   * If can add resource timing entry returns true and resource
+   * timing buffer full event pending flag is false ...
+   */
+  if (CanAddResourceTimingEntry() && !mPendingResourceTimingBufferFullEvent) {
+    /*
+     * Add new entry to the performance entry buffer.
+     * Increase resource timing buffer current size by 1.
+     */
+    mResourceEntries.InsertElementSorted(aEntry, PerformanceEntryComparator());
+    QueueEntry(aEntry);
     return;
   }
 
-  mResourceEntries.InsertElementSorted(aEntry, PerformanceEntryComparator());
-  if (mResourceEntries.Length() == mResourceTimingBufferSize) {
-    // call onresourcetimingbufferfull
-    DispatchBufferFullEvent();
+  /*
+   * If resource timing buffer full event pending flag is
+   * false ...
+   */
+  if (!mPendingResourceTimingBufferFullEvent) {
+    /*
+     * Set resource timing buffer full event pending flag
+     * to true.
+     */
+    mPendingResourceTimingBufferFullEvent = true;
+
+    /*
+     * Queue a task to run fire a buffer full event.
+     */
+    NS_DispatchToCurrentThread(NewCancelableRunnableMethod(
+        "Performance::BufferEvent", this, &Performance::BufferEvent));
   }
-  QueueEntry(aEntry);
+  /*
+   * Add new entry to the resource timing secondary buffer.
+   * Increase resource timing secondary buffer current size
+   * by 1.
+   */
+  mSecondaryResourceEntries.InsertElementSorted(aEntry,
+                                                PerformanceEntryComparator());
 }
 
 void Performance::AddObserver(PerformanceObserver* aObserver) {
@@ -421,9 +556,13 @@ class NotifyObserversTask final : public CancelableRunnable {
     MOZ_ASSERT(mPerformance);
   }
 
+  // MOZ_CAN_RUN_SCRIPT_BOUNDARY for now until Runnable::Run is
+  // MOZ_CAN_RUN_SCRIPT.
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   NS_IMETHOD Run() override {
     MOZ_ASSERT(mPerformance);
-    mPerformance->NotifyObservers();
+    RefPtr<Performance> performance(mPerformance);
+    performance->NotifyObservers();
     return NS_OK;
   }
 
@@ -457,8 +596,23 @@ void Performance::QueueEntry(PerformanceEntry* aEntry) {
   if (mObservers.IsEmpty()) {
     return;
   }
-  NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(mObservers, PerformanceObserver,
-                                           QueueEntry, (aEntry));
+
+  nsTObserverArray<PerformanceObserver*> interestedObservers;
+  nsTObserverArray<PerformanceObserver*>::ForwardIterator observerIt(
+      mObservers);
+  while (observerIt.HasMore()) {
+    PerformanceObserver* observer = observerIt.GetNext();
+    if (observer->ObservesTypeOfEntry(aEntry)) {
+      interestedObservers.AppendElement(observer);
+    }
+  }
+
+  if (interestedObservers.IsEmpty()) {
+    return;
+  }
+
+  NS_OBSERVER_ARRAY_NOTIFY_XPCOM_OBSERVERS(
+      interestedObservers, PerformanceObserver, QueueEntry, (aEntry));
 
   if (!mPendingNotificationObserversTask) {
     RunNotificationObserversTask();

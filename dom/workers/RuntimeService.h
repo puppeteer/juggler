@@ -11,6 +11,7 @@
 
 #include "nsIObserver.h"
 
+#include "js/ContextOptions.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/workerinternals/JSSettings.h"
 #include "mozilla/Mutex.h"
@@ -156,6 +157,8 @@ class RuntimeService final : public nsIObserver {
 
   void UpdateAllWorkerGCZeal();
 #endif
+
+  void SetLowMemoryStateAllWorkers(bool aState);
 
   void GarbageCollectAllWorkers(bool aShrinking);
 

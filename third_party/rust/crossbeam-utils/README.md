@@ -1,11 +1,45 @@
-# Utilities for concurrent programming
+# Crossbeam Utils
 
-[![Build Status](https://travis-ci.org/crossbeam-rs/crossbeam-utils.svg?branch=master)](https://travis-ci.org/crossbeam-rs/crossbeam-utils)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](https://github.com/crossbeam-rs/crossbeam-utils)
-[![Cargo](https://img.shields.io/crates/v/crossbeam-utils.svg)](https://crates.io/crates/crossbeam-utils)
-[![Documentation](https://docs.rs/crossbeam-utils/badge.svg)](https://docs.rs/crossbeam-utils)
+[![Build Status](https://travis-ci.org/crossbeam-rs/crossbeam.svg?branch=master)](
+https://travis-ci.org/crossbeam-rs/crossbeam)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](
+https://github.com/crossbeam-rs/crossbeam-utils/tree/master/src)
+[![Cargo](https://img.shields.io/crates/v/crossbeam-utils.svg)](
+https://crates.io/crates/crossbeam-utils)
+[![Documentation](https://docs.rs/crossbeam-utils/badge.svg)](
+https://docs.rs/crossbeam-utils)
+[![Rust 1.26+](https://img.shields.io/badge/rust-1.26+-lightgray.svg)](
+https://www.rust-lang.org)
 
-This crate provides utilities for concurrent programming.
+This crate provides miscellaneous tools for concurrent programming:
+
+#### Atomics
+
+* [`AtomicCell`], a thread-safe mutable memory location.<sup>(\*)</sup>
+* [`AtomicConsume`], for reading from primitive atomic types with "consume" ordering.<sup>(\*)</sup>
+
+#### Thread synchronization
+
+* [`Parker`], a thread parking primitive.
+* [`ShardedLock`], a sharded reader-writer lock with fast concurrent reads.
+* [`WaitGroup`], for synchronizing the beginning or end of some computation.
+
+#### Utilities
+
+* [`Backoff`], for exponential backoff in spin loops.<sup>(\*)</sup>
+* [`CachePadded`], for padding and aligning a value to the length of a cache line.<sup>(\*)</sup>
+* [`scope`], for spawning threads that borrow local variables from the stack.
+
+*Features marked with <sup>(\*)</sup> can be used in `no_std` environments.*
+
+[`AtomicCell`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/atomic/struct.AtomicCell.html
+[`AtomicConsume`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/atomic/trait.AtomicConsume.html
+[`Parker`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/sync/struct.Parker.html
+[`ShardedLock`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/sync/struct.ShardedLock.html
+[`WaitGroup`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/sync/struct.WaitGroup.html
+[`Backoff`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/struct.Backoff.html
+[`CachePadded`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/struct.CachePadded.html
+[`scope`]: https://docs.rs/crossbeam-utils/*/crossbeam_utils/thread/fn.scope.html
 
 ## Usage
 
@@ -13,7 +47,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-crossbeam-utils = "0.2"
+crossbeam-utils = "0.6"
 ```
 
 Next, add this to your crate:
@@ -24,6 +58,15 @@ extern crate crossbeam_utils;
 
 ## License
 
-Licensed under the terms of MIT license and the Apache License (Version 2.0).
+Licensed under either of
 
-See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE) for details.
+ * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+#### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.

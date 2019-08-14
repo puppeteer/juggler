@@ -5,8 +5,18 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 
+@depends(mozbuild_state_path, '--help')
+@imports('os')
+@imports(_from='mozboot.android', _import='NDK_VERSION')
+def default_android_ndk_root(mozbuild_state_path, _):
+    path = os.path.join(mozbuild_state_path, 'android-ndk-%s' % NDK_VERSION)
+    if os.path.isdir(path):
+        return path
+
+
 js_option('--with-android-ndk', nargs=1,
-          help='location where the Android NDK can be found')
+          default=default_android_ndk_root,
+          help='location where the Android NDK can be found{|}')
 
 js_option('--with-android-toolchain', nargs=1,
           help='location of the Android toolchain')
@@ -29,9 +39,9 @@ js_option('--with-android-version',
           default=min_android_version)
 
 
-@depends('--with-android-version', min_android_version, '--help')
+@depends('--with-android-version', min_android_version)
 @imports(_from='__builtin__', _import='ValueError')
-def android_version(value, min_version, _):
+def android_version(value, min_version):
     if not value:
         # Someone has passed --without-android-version.
         die('--with-android-version cannot be disabled.')
@@ -51,15 +61,17 @@ def android_version(value, min_version, _):
 add_old_configure_assignment('android_version', android_version)
 
 
-@depends('--with-android-ndk', build_project, '--help')
-def ndk(value, build_project, help):
-    if help:
-        return
-    if build_project == 'mobile/android' and not value:
-        die('You must specify --with-android-ndk=/path/to/ndk when '
-            'building mobile/android')
+@depends('--with-android-ndk')
+@imports(_from='os.path', _import='isdir')
+def ndk(value):
     if value:
+        if not isdir(value[0]):
+            die("The path you specified with --with-android-ndk (%s) is not "
+                "a directory" % value[0])
         return value[0]
+
+    die('You must specify --with-android-ndk=/path/to/ndk when targeting Android, '
+        'or try |mach bootstrap|.')
 
 
 set_config('ANDROID_NDK', ndk)
@@ -112,10 +124,10 @@ def ndk_minor_version(ndk_version):
 set_config('ANDROID_NDK_MINOR_VERSION', ndk_minor_version)
 
 
-@depends(target, android_version, ndk, '--help')
+@depends(target, android_version, ndk)
 @checking('for android platform directory')
 @imports(_from='os.path', _import='isdir')
-def android_platform(target, android_version, ndk, _):
+def android_platform(target, android_version, ndk):
     if target.os != 'Android':
         return
 
@@ -148,10 +160,10 @@ def android_platform(target, android_version, ndk, _):
 add_old_configure_assignment('android_platform', android_platform)
 
 
-@depends(android_platform, ndk, target, '--help')
+@depends(android_platform, ndk, target)
 @checking('for android sysroot directory')
 @imports(_from='os.path', _import='isdir')
-def android_sysroot(android_platform, ndk, target, _):
+def android_sysroot(android_platform, ndk, target):
     if target.os != 'Android':
         return
 
@@ -174,10 +186,10 @@ def android_sysroot(android_platform, ndk, target, _):
 add_old_configure_assignment('android_sysroot', android_sysroot)
 
 
-@depends(android_platform, ndk, target, '--help')
+@depends(android_platform, ndk, target)
 @checking('for android system directory')
 @imports(_from='os.path', _import='isdir')
-def android_system(android_platform, ndk, target, _):
+def android_system(android_platform, ndk, target):
     if target.os != 'Android':
         return
 
@@ -198,11 +210,11 @@ def android_system(android_platform, ndk, target, _):
 add_old_configure_assignment('android_system', android_system)
 
 
-@depends(target, host, ndk, '--with-android-toolchain', '--help')
+@depends(target, host, ndk, '--with-android-toolchain')
 @checking('for the Android toolchain directory', lambda x: x or 'not found')
 @imports(_from='os.path', _import='isdir')
 @imports(_from='mozbuild.shellutil', _import='quote')
-def android_toolchain(target, host, ndk, toolchain, _):
+def android_toolchain(target, host, ndk, toolchain):
     if not ndk:
         return
     if toolchain:
@@ -225,7 +237,7 @@ def android_toolchain(target, host, ndk, toolchain, _):
                                         host.kernel.lower(), host.cpu)
         log.debug('Trying %s' % quote(toolchain))
         if not isdir(toolchain) and host.cpu == 'x86_64':
-            toolchain = toolchain_format % (ndk, target_base, version,
+            toolchain = toolchain_format % (ndk, target_base,
                                             host.kernel.lower(), 'x86')
             log.debug('Trying %s' % quote(toolchain))
         if isdir(toolchain):
@@ -246,14 +258,14 @@ def android_toolchain_prefix_base(target):
     return target.toolchain
 
 
-option(env='STLPORT_CPPFLAGS',
-       nargs=1,
-       help='Options compiler should pass for standard C++ library')
+js_option(env='STLPORT_CPPFLAGS',
+          nargs=1,
+          help='Options compiler should pass for standard C++ library')
 
 
-@depends('STLPORT_CPPFLAGS', ndk, '--help')
+@depends('STLPORT_CPPFLAGS', ndk)
 @imports(_from='os.path', _import='isdir')
-def stlport_cppflags(value, ndk, _):
+def stlport_cppflags(value, ndk):
     if value and len(value):
         return value.split()
     if not ndk:
@@ -281,6 +293,12 @@ def stlport_cppflags(value, ndk, _):
     # functions, locale-specific C library functions, multibyte support,
     # etc.
     return [
+        # You'd think we'd want to use -stdlib=libc++, but this doesn't work
+        # (cf. https://bugzilla.mozilla.org/show_bug.cgi?id=1510897#c2)
+        # Using -stdlib=libc++ and removing some of the -I below also doesn't
+        # work because not everything that is in cxx_include comes in the C++
+        # header directory that comes with clang.
+        '-stdlib=libstdc++',
         '-I%s' % cxx_include,
         '-I%s' % os.path.join(ndk, 'sources', 'android', 'support', 'include'),
         '-I%s' % cxxabi_include]
@@ -289,10 +307,9 @@ def stlport_cppflags(value, ndk, _):
 add_old_configure_assignment('stlport_cppflags', stlport_cppflags)
 
 
-@depends(android_system, android_sysroot, android_toolchain, android_version,
-         stlport_cppflags)
+@depends(android_system, android_sysroot, android_toolchain, android_version)
 def extra_toolchain_flags(android_system, android_sysroot, toolchain_dir,
-                          android_version, stlport_cppflags):
+                          android_version):
     if not android_sysroot:
         return []
     flags = ['-isystem',
@@ -302,7 +319,6 @@ def extra_toolchain_flags(android_system, android_sysroot, toolchain_dir,
              '-gcc-toolchain',
              toolchain_dir,
              '-D__ANDROID_API__=%d' % android_version]
-    flags.extend(stlport_cppflags if stlport_cppflags else [])
     return flags
 
 
@@ -316,10 +332,11 @@ imply_option('--with-toolchain-prefix', android_toolchain_prefix,
              reason='--with-android-ndk')
 
 
-@depends(extra_toolchain_flags, android_toolchain,
-         android_toolchain_prefix_base, '--help')
+@depends(extra_toolchain_flags, stlport_cppflags, android_toolchain,
+         android_toolchain_prefix_base)
 @imports(_from='os.path', _import='isdir')
-def bindgen_cflags_android(toolchain_flags, toolchain, toolchain_prefix, _):
+def bindgen_cflags_android(toolchain_flags, stlport_flags, toolchain,
+                           toolchain_prefix):
     if not toolchain_flags:
         return
 
@@ -329,33 +346,10 @@ def bindgen_cflags_android(toolchain_flags, toolchain, toolchain_prefix, _):
         gcc_include = os.path.join(
             toolchain, 'lib', 'gcc', toolchain_prefix, '4.9')
 
-    return toolchain_flags + [
+    return toolchain_flags + stlport_flags + [
         '-I%s' % os.path.join(gcc_include, 'include'),
         '-I%s' % os.path.join(gcc_include, 'include-fixed'),
     ]
-
-
-@depends(host, ndk)
-@imports(_from='os.path', _import='exists')
-@imports(_from='os.path', _import='isdir')
-def android_clang_compiler(host, ndk):
-    if not ndk:
-        return
-
-    llvm_path = '%s/toolchains/llvm/prebuilt/%s-%s/bin' % (ndk,
-                                                           host.kernel.lower(),
-                                                           host.cpu)
-    if not isdir(llvm_path) and host.cpu == 'x86_64':
-        llvm_path = toolchain_format % (ndk, host.kernel.lower(), 'x86')
-
-    if not isdir(llvm_path):
-        die("Couldn't find path to LLVM toolchain at %s" % llvm_path)
-
-    clang = '%s/clang' % llvm_path
-    if not exists(clang):
-        die("Couln't find clang in LLVM toolchain at %s" % clang)
-
-    return clang
 
 
 @depends('--with-android-googlevr-sdk', target)

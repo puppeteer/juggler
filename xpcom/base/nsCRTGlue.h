@@ -93,18 +93,6 @@ inline char NS_ToLower(char aChar) {
 bool NS_IsUpper(char aChar);
 bool NS_IsLower(char aChar);
 
-constexpr bool NS_IsAscii(char16_t aChar) { return (0x0080 > aChar); }
-
-constexpr bool NS_IsAscii(const char16_t* aString) {
-  while (*aString) {
-    if (0x0080 <= *aString) {
-      return false;
-    }
-    aString++;
-  }
-  return true;
-}
-
 constexpr bool NS_IsAscii(const char* aString) {
   while (*aString) {
     if (0x80 & *aString) {
@@ -150,13 +138,13 @@ void NS_MakeRandomString(char* aBuf, int32_t aBufLen);
 #define KNOWN_PATH_SEPARATORS "\\/"
 
 #if defined(XP_MACOSX)
-#define FILE_PATH_SEPARATOR "/"
+#  define FILE_PATH_SEPARATOR "/"
 #elif defined(XP_WIN)
-#define FILE_PATH_SEPARATOR "\\"
+#  define FILE_PATH_SEPARATOR "\\"
 #elif defined(XP_UNIX)
-#define FILE_PATH_SEPARATOR "/"
+#  define FILE_PATH_SEPARATOR "/"
 #else
-#error need_to_define_your_file_path_separator_and_maybe_illegal_characters
+#  error need_to_define_your_file_path_separator_and_maybe_illegal_characters
 #endif
 
 // Not all these control characters are illegal in all OSs, but we don't really

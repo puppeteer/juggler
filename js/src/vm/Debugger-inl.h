@@ -9,6 +9,9 @@
 
 #include "vm/Debugger.h"
 
+#include "builtin/Promise.h"
+#include "vm/GeneratorObject.h"
+
 #include "gc/WeakMap-inl.h"
 #include "vm/Stack-inl.h"
 
@@ -31,7 +34,8 @@
 }
 
 /* static */ inline bool js::Debugger::onNewGenerator(
-    JSContext* cx, AbstractFramePtr frame, Handle<GeneratorObject*> genObj) {
+    JSContext* cx, AbstractFramePtr frame,
+    Handle<AbstractGeneratorObject*> genObj) {
   if (frame.isDebuggee()) {
     return slowPathOnNewGenerator(cx, frame, genObj);
   }
@@ -52,8 +56,8 @@
   return slowPathCheckNoExecute(cx, script);
 }
 
-/* static */ js::ResumeMode js::Debugger::onEnterFrame(JSContext* cx,
-                                                       AbstractFramePtr frame) {
+/* static */ inline js::ResumeMode js::Debugger::onEnterFrame(
+    JSContext* cx, AbstractFramePtr frame) {
   MOZ_ASSERT_IF(frame.hasScript() && frame.script()->isDebuggee(),
                 frame.isDebuggee());
   if (!frame.isDebuggee()) {
@@ -62,7 +66,7 @@
   return slowPathOnEnterFrame(cx, frame);
 }
 
-/* static */ js::ResumeMode js::Debugger::onResumeFrame(
+/* static */ inline js::ResumeMode js::Debugger::onResumeFrame(
     JSContext* cx, AbstractFramePtr frame) {
   MOZ_ASSERT_IF(frame.hasScript() && frame.script()->isDebuggee(),
                 frame.isDebuggee());
@@ -72,7 +76,7 @@
   return slowPathOnResumeFrame(cx, frame);
 }
 
-/* static */ js::ResumeMode js::Debugger::onDebuggerStatement(
+/* static */ inline js::ResumeMode js::Debugger::onDebuggerStatement(
     JSContext* cx, AbstractFramePtr frame) {
   if (!cx->realm()->isDebuggee()) {
     return ResumeMode::Continue;
@@ -80,7 +84,7 @@
   return slowPathOnDebuggerStatement(cx, frame);
 }
 
-/* static */ js::ResumeMode js::Debugger::onExceptionUnwind(
+/* static */ inline js::ResumeMode js::Debugger::onExceptionUnwind(
     JSContext* cx, AbstractFramePtr frame) {
   if (!cx->realm()->isDebuggee()) {
     return ResumeMode::Continue;
@@ -88,23 +92,23 @@
   return slowPathOnExceptionUnwind(cx, frame);
 }
 
-/* static */ void js::Debugger::onNewWasmInstance(
+/* static */ inline void js::Debugger::onNewWasmInstance(
     JSContext* cx, Handle<WasmInstanceObject*> wasmInstance) {
   if (cx->realm()->isDebuggee()) {
     slowPathOnNewWasmInstance(cx, wasmInstance);
   }
 }
 
-/* static */ void js::Debugger::onNewPromise(JSContext* cx,
-                                             Handle<PromiseObject*> promise) {
+/* static */ inline void js::Debugger::onNewPromise(
+    JSContext* cx, Handle<PromiseObject*> promise) {
   if (MOZ_UNLIKELY(cx->realm()->isDebuggee())) {
     slowPathPromiseHook(cx, Debugger::OnNewPromise, promise);
   }
 }
 
-/* static */ void js::Debugger::onPromiseSettled(
+/* static */ inline void js::Debugger::onPromiseSettled(
     JSContext* cx, Handle<PromiseObject*> promise) {
-  if (MOZ_UNLIKELY(cx->realm()->isDebuggee())) {
+  if (MOZ_UNLIKELY(promise->realm()->isDebuggee())) {
     slowPathPromiseHook(cx, Debugger::OnPromiseSettled, promise);
   }
 }
@@ -124,11 +128,23 @@ inline js::PromiseObject* js::DebuggerObject::promise() const {
 
   JSObject* referent = this->referent();
   if (IsCrossCompartmentWrapper(referent)) {
-    referent = CheckedUnwrap(referent);
+    // We know we have a Promise here, so CheckedUnwrapStatic is fine.
+    referent = CheckedUnwrapStatic(referent);
     MOZ_ASSERT(referent);
   }
 
   return &referent->as<PromiseObject>();
+}
+
+inline bool js::DebuggerFrame::hasGenerator() const {
+  return !getReservedSlot(GENERATOR_INFO_SLOT).isUndefined();
+}
+
+inline js::DebuggerFrame::GeneratorInfo* js::DebuggerFrame::generatorInfo()
+    const {
+  MOZ_ASSERT(hasGenerator());
+  return static_cast<GeneratorInfo*>(
+      getReservedSlot(GENERATOR_INFO_SLOT).toPrivate());
 }
 
 #endif /* vm_Debugger_inl_h */

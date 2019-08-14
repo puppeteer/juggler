@@ -356,10 +356,13 @@ void HLSTrackDemuxer::UpdateMediaInfo(int index) {
           NS_ConvertUTF16toUTF8(audioInfoObj->MimeType()->ToString());
       audioInfo->mDuration =
           TimeUnit::FromMicroseconds(audioInfoObj->Duration());
-      auto&& csd = audioInfoObj->CodecSpecificData()->GetElements();
-      audioInfo->mCodecSpecificConfig->Clear();
-      audioInfo->mCodecSpecificConfig->AppendElements(
-          reinterpret_cast<uint8_t*>(&csd[0]), csd.Length());
+      jni::ByteArray::LocalRef csdBytes = audioInfoObj->CodecSpecificData();
+      if (csdBytes) {
+        auto&& csd = csdBytes->GetElements();
+        audioInfo->mCodecSpecificConfig->Clear();
+        audioInfo->mCodecSpecificConfig->AppendElements(
+            reinterpret_cast<uint8_t*>(&csd[0]), csd.Length());
+      }
     }
   } else {
     infoObj = mParent->mHLSDemuxerWrapper->GetVideoInfo(index);
@@ -394,13 +397,20 @@ CryptoSample HLSTrackDemuxer::ExtractCryptoSample(
   char const* msg = "";
   do {
     HLS_DEBUG("HLSTrackDemuxer", "Sample has Crypto Info");
-    crypto.mValid = true;
+
     int32_t mode = 0;
     if (NS_FAILED(aCryptoInfo->Mode(&mode))) {
       msg = "Error when extracting encryption mode.";
       break;
     }
-    crypto.mMode = mode;
+    // We currently only handle ctr mode.
+    if (mode != java::sdk::MediaCodec::CRYPTO_MODE_AES_CTR) {
+      msg = "Error: unexpected encryption mode.";
+      break;
+    }
+
+    crypto.mCryptoScheme = CryptoScheme::Cenc;
+
     mozilla::jni::ByteArray::LocalRef ivData;
     if (NS_FAILED(aCryptoInfo->Iv(&ivData))) {
       msg = "Error when extracting encryption IV.";

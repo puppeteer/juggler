@@ -4,7 +4,7 @@
   <!-- Any copyright is dedicated to the Public Domain.
     - http://creativecommons.org/publicdomain/zero/1.0/ -->
 <head>
-  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
 </head>
 <body>
   <iframe id="f" src="about:blank"></iframe>
@@ -12,7 +12,7 @@
 SimpleTest.waitForExplicitFinish();
 
 var script = SpecialPowers.loadChromeScript(() => {
-  ChromeUtils.import('resource://gre/modules/Services.jsm');
+  const {Services} = ChromeUtils.import('resource://gre/modules/Services.jsm');
 
   Services.obs.addObserver(function onExamResp(subject, topic, data) {
     let channel = subject.QueryInterface(Ci.nsIHttpChannel);

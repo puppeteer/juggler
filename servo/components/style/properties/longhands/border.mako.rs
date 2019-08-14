@@ -3,7 +3,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 <%namespace name="helpers" file="/helpers.mako.rs" />
-<% from data import Keyword, Method, PHYSICAL_SIDES, ALL_SIDES, maybe_moz_logical_alias %>
+<% from data import Keyword, Method, ALL_CORNERS, PHYSICAL_SIDES, ALL_SIDES, maybe_moz_logical_alias %>
 
 <% data.new_style_struct("Border", inherited=False,
                    additional_methods=[Method("border_" + side + "_has_nonzero_width",
@@ -28,7 +28,7 @@
         animation_value_type="AnimatedColor",
         logical=is_logical,
         logical_group="border-color",
-        allow_quirks=not is_logical,
+        allow_quirks="No" if is_logical else "Yes",
         flags="APPLIES_TO_FIRST_LETTER",
         ignored_when_colors_disabled=True,
     )}
@@ -56,31 +56,32 @@
         logical=is_logical,
         logical_group="border-width",
         flags="APPLIES_TO_FIRST_LETTER GETCS_NEEDS_LAYOUT_FLUSH",
-        allow_quirks=not is_logical,
+        allow_quirks="No" if is_logical else "Yes",
         servo_restyle_damage="reflow rebuild_and_reflow_inline"
     )}
 % endfor
 
-${helpers.gecko_keyword_conversion(
-    Keyword('border-style',
-    "none solid double dotted dashed hidden groove ridge inset outset",
-    gecko_enum_prefix="StyleBorderStyle",
-    gecko_inexhaustive=True),
-    type="crate::values::specified::BorderStyle",
-)}
-
-// FIXME(#4126): when gfx supports painting it, make this Size2D<LengthOrPercentage>
-% for corner in ["top-left", "top-right", "bottom-right", "bottom-left"]:
+% for corner in ALL_CORNERS:
+    <%
+        corner_name = corner[0]
+        is_logical = corner[1]
+        if is_logical:
+            prefixes = None
+        else:
+            prefixes = "webkit"
+    %>
     ${helpers.predefined_type(
-        "border-" + corner + "-radius",
+        "border-%s-radius" % corner_name,
         "BorderCornerRadius",
         "computed::BorderCornerRadius::zero()",
         "parse",
-        extra_prefixes="webkit",
-        spec="https://drafts.csswg.org/css-backgrounds/#border-%s-radius" % corner,
+        extra_prefixes=prefixes,
+        spec=maybe_logical_spec(corner, "radius"),
         boxed=True,
         flags="APPLIES_TO_FIRST_LETTER",
         animation_value_type="BorderCornerRadius",
+        logical_group="border-radius",
+        logical=is_logical,
     )}
 % endfor
 
@@ -88,7 +89,6 @@ ${helpers.single_keyword(
     "box-decoration-break",
     "slice clone",
     gecko_enum_prefix="StyleBoxDecorationBreak",
-    gecko_pref="layout.css.box-decoration-break.enabled",
     spec="https://drafts.csswg.org/css-break/#propdef-box-decoration-break",
     products="gecko",
     animation_value_type="discrete",
@@ -107,8 +107,8 @@ ${helpers.single_keyword(
 ${helpers.predefined_type(
     "border-image-source",
     "ImageLayer",
-    initial_value="Either::First(None_)",
-    initial_specified_value="Either::First(None_)",
+    initial_value="computed::ImageLayer::none()",
+    initial_specified_value="specified::ImageLayer::none()",
     spec="https://drafts.csswg.org/css-backgrounds/#the-background-image",
     vector=False,
     animation_value_type="discrete",
@@ -119,10 +119,9 @@ ${helpers.predefined_type(
 
 ${helpers.predefined_type(
     "border-image-outset",
-    "LengthOrNumberRect",
-    parse_method="parse_non_negative",
-    initial_value="computed::LengthOrNumberRect::all(computed::LengthOrNumber::zero())",
-    initial_specified_value="specified::LengthOrNumberRect::all(specified::LengthOrNumber::zero())",
+    "NonNegativeLengthOrNumberRect",
+    initial_value="generics::rect::Rect::all(computed::NonNegativeLengthOrNumber::zero())",
+    initial_specified_value="generics::rect::Rect::all(specified::NonNegativeLengthOrNumber::zero())",
     spec="https://drafts.csswg.org/css-backgrounds/#border-image-outset",
     animation_value_type="discrete",
     flags="APPLIES_TO_FIRST_LETTER",
@@ -153,65 +152,10 @@ ${helpers.predefined_type(
 ${helpers.predefined_type(
     "border-image-slice",
     "BorderImageSlice",
-    initial_value="computed::NumberOrPercentage::Percentage(computed::Percentage(1.)).into()",
-    initial_specified_value="specified::NumberOrPercentage::Percentage(specified::Percentage::new(1.)).into()",
+    initial_value="computed::BorderImageSlice::hundred_percent()",
+    initial_specified_value="specified::BorderImageSlice::hundred_percent()",
     spec="https://drafts.csswg.org/css-backgrounds/#border-image-slice",
     animation_value_type="discrete",
     flags="APPLIES_TO_FIRST_LETTER",
     boxed=True,
 )}
-
-#[cfg(feature = "gecko")]
-impl crate::values::computed::BorderImageWidth {
-    pub fn to_gecko_rect(&self, sides: &mut crate::gecko_bindings::structs::nsStyleSides) {
-        use crate::gecko_bindings::sugar::ns_style_coord::{CoordDataMut, CoordDataValue};
-        use crate::gecko::values::GeckoStyleCoordConvertible;
-        use crate::values::generics::border::BorderImageSideWidth;
-
-        % for i in range(0, 4):
-        match self.${i} {
-            BorderImageSideWidth::Auto => {
-                sides.data_at_mut(${i}).set_value(CoordDataValue::Auto)
-            },
-            BorderImageSideWidth::Length(l) => {
-                l.to_gecko_style_coord(&mut sides.data_at_mut(${i}))
-            },
-            BorderImageSideWidth::Number(n) => {
-                sides.data_at_mut(${i}).set_value(CoordDataValue::Factor(n))
-            },
-        }
-        % endfor
-    }
-
-    pub fn from_gecko_rect(
-        sides: &crate::gecko_bindings::structs::nsStyleSides,
-    ) -> Option<crate::values::computed::BorderImageWidth> {
-        use crate::gecko_bindings::structs::nsStyleUnit::{eStyleUnit_Factor, eStyleUnit_Auto};
-        use crate::gecko_bindings::sugar::ns_style_coord::CoordData;
-        use crate::gecko::values::GeckoStyleCoordConvertible;
-        use crate::values::computed::{LengthOrPercentage, Number};
-        use crate::values::generics::border::BorderImageSideWidth;
-
-        Some(
-            crate::values::computed::BorderImageWidth::new(
-                % for i in range(0, 4):
-                match sides.data_at(${i}).unit() {
-                    eStyleUnit_Auto => {
-                        BorderImageSideWidth::Auto
-                    },
-                    eStyleUnit_Factor => {
-                        BorderImageSideWidth::Number(
-                            Number::from_gecko_style_coord(&sides.data_at(${i}))
-                                .expect("sides[${i}] could not convert to Number"))
-                    },
-                    _ => {
-                        BorderImageSideWidth::Length(
-                            LengthOrPercentage::from_gecko_style_coord(&sides.data_at(${i}))
-                                .expect("sides[${i}] could not convert to LengthOrPercentager"))
-                    },
-                },
-                % endfor
-            )
-        )
-    }
-}

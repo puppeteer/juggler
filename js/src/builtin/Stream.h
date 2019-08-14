@@ -105,10 +105,12 @@ class ReadableStream : public NativeObject {
 
   bool locked() const;
 
-  static MOZ_MUST_USE ReadableStream* create(JSContext* cx,
-                                             HandleObject proto = nullptr);
+  static MOZ_MUST_USE ReadableStream* create(
+      JSContext* cx, void* nsISupportsObject_alreadyAddreffed = nullptr,
+      HandleObject proto = nullptr);
   static ReadableStream* createExternalSourceStream(
       JSContext* cx, JS::ReadableStreamUnderlyingSource* source,
+      void* nsISupportsObject_alreadyAddreffed = nullptr,
       HandleObject proto = nullptr);
 
   static bool constructor(JSContext* cx, unsigned argc, Value* vp);
@@ -313,9 +315,19 @@ class ReadableStreamController : public StreamController {
         underlyingSource().toPrivate());
   }
   void setExternalSource(JS::ReadableStreamUnderlyingSource* underlyingSource) {
-    MOZ_ASSERT(getFixedSlot(Slot_Flags).isUndefined());
     setUnderlyingSource(JS::PrivateValue(underlyingSource));
-    setFlags(Flag_ExternalSource);
+    addFlags(Flag_ExternalSource);
+  }
+  static void clearUnderlyingSource(
+      JS::Handle<ReadableStreamController*> controller,
+      bool finalizeSource = true) {
+    if (controller->hasExternalSource()) {
+      if (finalizeSource) {
+        controller->externalSource()->finalize();
+      }
+      controller->setFlags(controller->flags() & ~Flag_ExternalSource);
+    }
+    controller->setUnderlyingSource(JS::UndefinedHandleValue);
   }
   double strategyHWM() const {
     return getFixedSlot(Slot_StrategyHWM).toNumber();

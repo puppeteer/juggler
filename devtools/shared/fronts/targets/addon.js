@@ -3,19 +3,26 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const {addonTargetSpec} = require("devtools/shared/specs/targets/addon");
-const protocol = require("devtools/shared/protocol");
-const {custom} = protocol;
-loader.lazyRequireGetter(this, "BrowsingContextTargetFront", "devtools/shared/fronts/targets/browsing-context", true);
+const { addonTargetSpec } = require("devtools/shared/specs/targets/addon");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
+loader.lazyRequireGetter(
+  this,
+  "BrowsingContextTargetFront",
+  "devtools/shared/fronts/targets/browsing-context",
+  true
+);
 
-const AddonTargetFront = protocol.FrontClassWithSpec(addonTargetSpec, {
-  initialize: function(client) {
-    protocol.Front.prototype.initialize.call(this, client);
+class AddonTargetFront extends FrontClassWithSpec(addonTargetSpec) {
+  constructor(client) {
+    super(client);
 
     this.client = client;
 
     this.traits = {};
-  },
+  }
 
   form(json) {
     this.actorID = json.actor;
@@ -32,7 +39,7 @@ const AddonTargetFront = protocol.FrontClassWithSpec(addonTargetSpec, {
       }
       this[name] = json[name];
     }
-  },
+  }
 
   isLegacyTemporaryExtension() {
     if (!this.type) {
@@ -41,11 +48,13 @@ const AddonTargetFront = protocol.FrontClassWithSpec(addonTargetSpec, {
       // irrelevant warning messages.
       return false;
     }
-    return this.type == "extension" &&
-           this.temporarilyInstalled &&
-           !this.isWebExtension &&
-           !this.isAPIExtension;
-  },
+    return (
+      this.type == "extension" &&
+      this.temporarilyInstalled &&
+      !this.isWebExtension &&
+      !this.isAPIExtension
+    );
+  }
 
   /**
    * Returns the actual target front for web extensions.
@@ -56,34 +65,49 @@ const AddonTargetFront = protocol.FrontClassWithSpec(addonTargetSpec, {
    * inherits from BrowsingContextTargetActor. This connect method is used to retrive
    * the final target actor to use.
    */
-  connect: custom(async function() {
-    const { form } = await this._connect();
-    const front = new BrowsingContextTargetFront(this.client, form);
-    this.manage(front);
-    return front;
-  }, {
-    impl: "_connect",
-  }),
+  async connect() {
+    if (
+      this.isWebExtension &&
+      this.client.mainRoot.traits.webExtensionAddonConnect
+    ) {
+      // The AddonTargetFront form is related to a WebExtensionActor instance,
+      // which isn't a target actor on its own, it is an actor living in the parent
+      // process with access to the addon metadata, it can control the addon (e.g.
+      // reloading it) and listen to the AddonManager events related to the lifecycle of
+      // the addon (e.g. when the addon is disabled or uninstalled).
+      // To retrieve the target actor instance, we call its "connect" method, (which
+      // fetches the target actor targetForm from a WebExtensionTargetActor instance).
+      const { form } = await super.connect();
+      const front = new BrowsingContextTargetFront(this.client, {
+        actor: form.actor,
+      });
+      front.form(form);
+      this.manage(front);
+      return front;
+    }
+    return this;
+  }
 
-  attach: custom(async function() {
-    const response = await this._attach();
+  async attach() {
+    if (this._attach) {
+      return this._attach;
+    }
+    this._attach = (async () => {
+      const response = await super.attach();
 
-    this.threadActor = response.threadActor;
+      this._threadActor = response.threadActor;
 
-    return response;
-  }, {
-    impl: "_attach",
-  }),
+      return this.attachConsole();
+    })();
+    return this._attach;
+  }
 
-  reconfigure: function() {
+  reconfigure() {
     // Toolbox and options panel are calling this method but Addon Target can't be
     // reconfigured. So we ignore this call here.
     return Promise.resolve();
-  },
-
-  attachThread: function() {
-    return this.client.attachThread(this.threadActor);
-  },
-});
+  }
+}
 
 exports.AddonTargetFront = AddonTargetFront;
+registerFront(AddonTargetFront);

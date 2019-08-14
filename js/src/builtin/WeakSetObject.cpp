@@ -9,6 +9,7 @@
 #include "jsapi.h"
 
 #include "builtin/MapObject.h"
+#include "js/PropertySpec.h"
 #include "vm/GlobalObject.h"
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
@@ -33,7 +34,7 @@ using namespace js;
 
   // Step 4.
   if (!args.get(0).isObject()) {
-    ReportNotObjectWithName(cx, "WeakSet value", args.get(0));
+    ReportNotObject(cx, JSMSG_OBJECT_REQUIRED_WEAKSET_VAL, args.get(0));
     return false;
   }
 
@@ -49,7 +50,8 @@ using namespace js;
   return true;
 }
 
-/* static */ bool WeakSetObject::add(JSContext* cx, unsigned argc, Value* vp) {
+/* static */
+bool WeakSetObject::add(JSContext* cx, unsigned argc, Value* vp) {
   // Steps 1-3.
   CallArgs args = CallArgsFromVp(argc, vp);
   return CallNonGenericMethod<WeakSetObject::is, WeakSetObject::add_impl>(cx,
@@ -84,8 +86,8 @@ using namespace js;
   return true;
 }
 
-/* static */ bool WeakSetObject::delete_(JSContext* cx, unsigned argc,
-                                         Value* vp) {
+/* static */
+bool WeakSetObject::delete_(JSContext* cx, unsigned argc, Value* vp) {
   // Steps 1-3.
   CallArgs args = CallArgsFromVp(argc, vp);
   return CallNonGenericMethod<WeakSetObject::is, WeakSetObject::delete_impl>(
@@ -119,7 +121,8 @@ using namespace js;
   return true;
 }
 
-/* static */ bool WeakSetObject::has(JSContext* cx, unsigned argc, Value* vp) {
+/* static */
+bool WeakSetObject::has(JSContext* cx, unsigned argc, Value* vp) {
   // Steps 1-3.
   CallArgs args = CallArgsFromVp(argc, vp);
   return CallNonGenericMethod<WeakSetObject::is, WeakSetObject::has_impl>(cx,
@@ -171,7 +174,7 @@ bool WeakSetObject::construct(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_WeakSet, &proto)) {
     return false;
   }
 
@@ -198,7 +201,7 @@ bool WeakSetObject::construct(JSContext* cx, unsigned argc, Value* vp) {
         MOZ_ASSERT(!keyVal.isMagic(JS_ELEMENTS_HOLE));
 
         if (keyVal.isPrimitive()) {
-          ReportNotObjectWithName(cx, "WeakSet value", keyVal);
+          ReportNotObject(cx, JSMSG_OBJECT_REQUIRED_WEAKSET_VAL, keyVal);
           return false;
         }
 

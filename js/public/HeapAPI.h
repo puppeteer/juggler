@@ -130,7 +130,14 @@ const uint32_t DefaultHeapMaxBytes = 32 * 1024 * 1024;
 namespace shadow {
 
 struct Zone {
-  enum GCState : uint8_t { NoGC, Mark, MarkGray, Sweep, Finished, Compact };
+  enum GCState : uint8_t {
+    NoGC,
+    MarkBlackOnly,
+    MarkBlackAndGray,
+    Sweep,
+    Finished,
+    Compact
+  };
 
  protected:
   JSRuntime* const runtime_;
@@ -164,12 +171,14 @@ struct Zone {
 
   GCState gcState() const { return gcState_; }
   bool wasGCStarted() const { return gcState_ != NoGC; }
-  bool isGCMarkingBlack() const { return gcState_ == Mark; }
-  bool isGCMarkingGray() const { return gcState_ == MarkGray; }
+  bool isGCMarkingBlackOnly() const { return gcState_ == MarkBlackOnly; }
+  bool isGCMarkingBlackAndGray() const { return gcState_ == MarkBlackAndGray; }
   bool isGCSweeping() const { return gcState_ == Sweep; }
   bool isGCFinished() const { return gcState_ == Finished; }
   bool isGCCompacting() const { return gcState_ == Compact; }
-  bool isGCMarking() const { return gcState_ == Mark || gcState_ == MarkGray; }
+  bool isGCMarking() const {
+    return isGCMarkingBlackOnly() || isGCMarkingBlackAndGray();
+  }
   bool isGCSweepingOrCompacting() const {
     return gcState_ == Sweep || gcState_ == Compact;
   }
@@ -238,6 +247,8 @@ struct Symbol {
  */
 class JS_FRIEND_API GCCellPtr {
  public:
+  GCCellPtr() : GCCellPtr(nullptr) {}
+
   // Construction from a void* and trace kind.
   GCCellPtr(void* gcthing, JS::TraceKind traceKind)
       : ptr(checkedCast(gcthing, traceKind)) {}
@@ -335,21 +346,29 @@ class JS_FRIEND_API GCCellPtr {
   uintptr_t ptr;
 };
 
-// Unwraps the given GCCellPtr and calls the given functor with a template
-// argument of the actual type of the pointer.
-template <typename F, typename... Args>
-auto DispatchTyped(F f, GCCellPtr thing, Args&&... args)
-    -> decltype(f(static_cast<JSObject*>(nullptr),
-                  std::forward<Args>(args)...)) {
+// Unwraps the given GCCellPtr, calls the functor |f| with a template argument
+// of the actual type of the pointer, and returns the result.
+template <typename F>
+auto MapGCThingTyped(GCCellPtr thing, F&& f) {
   switch (thing.kind()) {
-#define JS_EXPAND_DEF(name, type, _) \
-  case JS::TraceKind::name:          \
-    return f(&thing.as<type>(), std::forward<Args>(args)...);
+#define JS_EXPAND_DEF(name, type, _, _1) \
+  case JS::TraceKind::name:              \
+    return f(&thing.as<type>());
     JS_FOR_EACH_TRACEKIND(JS_EXPAND_DEF);
 #undef JS_EXPAND_DEF
     default:
-      MOZ_CRASH("Invalid trace kind in DispatchTyped for GCCellPtr.");
+      MOZ_CRASH("Invalid trace kind in MapGCThingTyped for GCCellPtr.");
   }
+}
+
+// Unwraps the given GCCellPtr and calls the functor |f| with a template
+// argument of the actual type of the pointer. Doesn't return anything.
+template <typename F>
+void ApplyGCThingTyped(GCCellPtr thing, F&& f) {
+  // This function doesn't do anything but is supplied for symmetry with other
+  // MapGCThingTyped/ApplyGCThingTyped implementations that have to wrap the
+  // functor to return a dummy value that is ignored.
+  MapGCThingTyped(thing, f);
 }
 
 } /* namespace JS */
@@ -428,7 +447,7 @@ static MOZ_ALWAYS_INLINE bool CellIsMarkedGray(const Cell* cell) {
 extern JS_PUBLIC_API bool CellIsMarkedGrayIfKnown(const Cell* cell);
 
 #ifdef DEBUG
-extern JS_PUBLIC_API bool CellIsNotGray(const Cell* cell);
+extern JS_PUBLIC_API void AssertCellIsNotGray(const Cell* cell);
 
 extern JS_PUBLIC_API bool ObjectIsMarkedBlack(const JSObject* obj);
 #endif
@@ -530,10 +549,10 @@ extern JS_PUBLIC_API bool IsIncrementalBarrierNeeded(JSContext* cx);
 extern JS_PUBLIC_API void IncrementalPreWriteBarrier(JSObject* obj);
 
 /*
- * Notify the GC that a weak reference to a GC thing has been read.
- * This method must be called if IsIncrementalBarrierNeeded.
+ * Notify the GC that a reference to a tenured GC cell is about to be
+ * overwritten. This method must be called if IsIncrementalBarrierNeeded.
  */
-extern JS_PUBLIC_API void IncrementalReadBarrier(GCCellPtr thing);
+extern JS_PUBLIC_API void IncrementalPreWriteBarrier(GCCellPtr thing);
 
 /**
  * Unsets the gray bit for anything reachable from |thing|. |kind| should not be
@@ -546,6 +565,8 @@ extern JS_FRIEND_API bool UnmarkGrayGCThingRecursively(GCCellPtr thing);
 
 namespace js {
 namespace gc {
+
+extern JS_PUBLIC_API void PerformIncrementalReadBarrier(JS::GCCellPtr thing);
 
 static MOZ_ALWAYS_INLINE bool IsIncrementalBarrierNeededOnTenuredGCThing(
     const JS::GCCellPtr thing) {
@@ -576,12 +597,12 @@ static MOZ_ALWAYS_INLINE void ExposeGCThingToActiveJS(JS::GCCellPtr thing) {
   }
 
   if (IsIncrementalBarrierNeededOnTenuredGCThing(thing)) {
-    JS::IncrementalReadBarrier(thing);
-  } else if (js::gc::detail::TenuredCellIsMarkedGray(thing.asCell())) {
+    PerformIncrementalReadBarrier(thing);
+  } else if (detail::TenuredCellIsMarkedGray(thing.asCell())) {
     JS::UnmarkGrayGCThingRecursively(thing);
   }
 
-  MOZ_ASSERT(!js::gc::detail::TenuredCellIsMarkedGray(thing.asCell()));
+  MOZ_ASSERT(!detail::TenuredCellIsMarkedGray(thing.asCell()));
 }
 
 template <typename T>
@@ -623,6 +644,7 @@ static MOZ_ALWAYS_INLINE void ExposeObjectToActiveJS(JSObject* obj) {
 }
 
 static MOZ_ALWAYS_INLINE void ExposeScriptToActiveJS(JSScript* script) {
+  MOZ_ASSERT(script);
   MOZ_ASSERT(!js::gc::EdgeNeedsSweepUnbarrieredSlow(&script));
   js::gc::ExposeGCThingToActiveJS(GCCellPtr(script));
 }

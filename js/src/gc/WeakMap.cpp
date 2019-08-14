@@ -23,7 +23,7 @@ using namespace js;
 using namespace js::gc;
 
 WeakMapBase::WeakMapBase(JSObject* memOf, Zone* zone)
-    : memberOf(memOf), zone_(zone), marked(false) {
+    : memberOf(memOf), zone_(zone), marked(false), markColor(MarkColor::Black) {
   MOZ_ASSERT_IF(memberOf, memberOf->compartment()->zone() == zone);
 }
 
@@ -45,17 +45,33 @@ void WeakMapBase::traceZone(JS::Zone* zone, JSTracer* tracer) {
   }
 }
 
+#if defined(JS_GC_ZEAL) || defined(DEBUG)
+bool WeakMapBase::checkMarkingForZone(JS::Zone* zone) {
+  // This is called at the end of marking.
+  MOZ_ASSERT(zone->isGCMarking());
+
+  bool ok = true;
+  for (WeakMapBase* m : zone->gcWeakMapList()) {
+    if (m->marked && !m->checkMarking()) {
+      ok = false;
+    }
+  }
+
+  return ok;
+}
+#endif
+
 bool WeakMapBase::markZoneIteratively(JS::Zone* zone, GCMarker* marker) {
   bool markedAny = false;
   for (WeakMapBase* m : zone->gcWeakMapList()) {
-    if (m->marked && m->markIteratively(marker)) {
+    if (m->marked && m->markEntries(marker)) {
       markedAny = true;
     }
   }
   return markedAny;
 }
 
-bool WeakMapBase::findInterZoneEdges(JS::Zone* zone) {
+bool WeakMapBase::findSweepGroupEdges(JS::Zone* zone) {
   for (WeakMapBase* m : zone->gcWeakMapList()) {
     if (!m->findZoneEdges()) {
       return false;
@@ -113,6 +129,10 @@ void WeakMapBase::restoreMarkedWeakMaps(WeakMapSet& markedWeakMaps) {
   }
 }
 
+size_t ObjectValueMap::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) {
+  return mallocSizeOf(this) + shallowSizeOfExcludingThis(mallocSizeOf);
+}
+
 bool ObjectValueMap::findZoneEdges() {
   /*
    * For unmarked weakmap keys with delegates in a different zone, add a zone
@@ -133,7 +153,7 @@ bool ObjectValueMap::findZoneEdges() {
     if (delegateZone == zone() || !delegateZone->isGCMarking()) {
       continue;
     }
-    if (!delegateZone->gcSweepGroupEdges().put(key->zone())) {
+    if (!delegateZone->addSweepGroupEdgeTo(key->zone())) {
       return false;
     }
   }
@@ -152,8 +172,8 @@ JSObject* ObjectWeakMap::lookup(const JSObject* obj) {
 bool ObjectWeakMap::add(JSContext* cx, JSObject* obj, JSObject* target) {
   MOZ_ASSERT(obj && target);
 
-  MOZ_ASSERT(!map.has(obj));
-  if (!map.put(obj, ObjectValue(*target))) {
+  Value targetVal(ObjectValue(*target));
+  if (!map.putNew(obj, targetVal)) {
     ReportOutOfMemory(cx);
     return false;
   }

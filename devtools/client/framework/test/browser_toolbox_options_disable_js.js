@@ -45,7 +45,11 @@ async function testJSEnabled() {
     const doc = content.document;
     const output = doc.getElementById("output");
     doc.querySelector("#logJSEnabled").click();
-    is(output.textContent, "JavaScript Enabled", 'Output is "JavaScript Enabled"');
+    is(
+      output.textContent,
+      "JavaScript Enabled",
+      'Output is "JavaScript Enabled"'
+    );
   });
 }
 
@@ -58,8 +62,11 @@ async function testJSEnabledIframe() {
     const iframeDoc = iframe.contentDocument;
     const output = iframeDoc.getElementById("output");
     iframeDoc.querySelector("#logJSEnabled").click();
-    is(output.textContent, "JavaScript Enabled",
-                            'Output is "JavaScript Enabled" in iframe');
+    is(
+      output.textContent,
+      "JavaScript Enabled",
+      'Output is "JavaScript Enabled" in iframe'
+    );
   });
 }
 
@@ -73,17 +80,25 @@ async function toggleJS(toolbox) {
     info("Checking checkbox to disable JS");
   }
 
-  let { javascriptEnabled } = toolbox.target.activeTab.configureOptions;
-  is(javascriptEnabled, !cbx.checked,
-    "BrowsingContextTargetFront's configureOptions is correct before the toggle");
+  let { javascriptEnabled } = toolbox.target.configureOptions;
+  is(
+    javascriptEnabled,
+    !cbx.checked,
+    "BrowsingContextTargetFront's configureOptions is correct before the toggle"
+  );
 
-  const browserLoaded = BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
+  const browserLoaded = BrowserTestUtils.browserLoaded(
+    gBrowser.selectedBrowser
+  );
   cbx.click();
   await browserLoaded;
 
-  ({ javascriptEnabled } = toolbox.target.activeTab.configureOptions);
-  is(javascriptEnabled, !cbx.checked,
-    "BrowsingContextTargetFront's configureOptions is correctly updated");
+  ({ javascriptEnabled } = toolbox.target.configureOptions);
+  is(
+    javascriptEnabled,
+    !cbx.checked,
+    "BrowsingContextTargetFront's configureOptions is correctly updated"
+  );
 }
 
 async function testJSDisabled() {
@@ -94,8 +109,10 @@ async function testJSDisabled() {
     const output = doc.getElementById("output");
     doc.querySelector("#logJSDisabled").click();
 
-    ok(output.textContent !== "JavaScript Disabled",
-       'output is not "JavaScript Disabled"');
+    ok(
+      output.textContent !== "JavaScript Disabled",
+      'output is not "JavaScript Disabled"'
+    );
   });
 }
 
@@ -108,7 +125,9 @@ async function testJSDisabledIframe() {
     const iframeDoc = iframe.contentDocument;
     const output = iframeDoc.getElementById("output");
     iframeDoc.querySelector("#logJSDisabled").click();
-    ok(output.textContent !== "JavaScript Disabled",
-       'output is not "JavaScript Disabled" in iframe');
+    ok(
+      output.textContent !== "JavaScript Disabled",
+      'output is not "JavaScript Disabled" in iframe'
+    );
   });
 }

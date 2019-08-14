@@ -22,13 +22,14 @@
 #include "nsIClassInfoImpl.h"
 #include "nsAlgorithm.h"
 #include "nsMemory.h"
+#include "nsPipe.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 
 using namespace mozilla;
 
 #ifdef LOG
-#undef LOG
+#  undef LOG
 #endif
 //
 // set MOZ_LOG=nsPipe:5

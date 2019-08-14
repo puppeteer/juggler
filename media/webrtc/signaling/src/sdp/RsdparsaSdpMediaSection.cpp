@@ -14,7 +14,7 @@
 #include "signaling/src/sdp/SdpErrorHolder.h"
 
 #ifdef CRLF
-#undef CRLF
+#  undef CRLF
 #endif
 #define CRLF "\r\n"
 
@@ -61,18 +61,29 @@ SdpMediaSection::Protocol RsdparsaSdpMediaSection::GetProtocol() const {
   switch (sdp_get_media_protocol(mSection)) {
     case RustSdpProtocolValue::kRustRtpSavpf:
       return kRtpSavpf;
+    case RustSdpProtocolValue::kRustUdpTlsRtpSavp:
+      return kUdpTlsRtpSavp;
+    case RustSdpProtocolValue::kRustTcpDtlsRtpSavp:
+      return kTcpDtlsRtpSavp;
     case RustSdpProtocolValue::kRustUdpTlsRtpSavpf:
       return kUdpTlsRtpSavpf;
     case RustSdpProtocolValue::kRustTcpTlsRtpSavpf:
       return kTcpTlsRtpSavpf;
+    case RustSdpProtocolValue::kRustTcpDtlsRtpSavpf:
+      return kTcpDtlsRtpSavpf;
     case RustSdpProtocolValue::kRustDtlsSctp:
       return kDtlsSctp;
     case RustSdpProtocolValue::kRustUdpDtlsSctp:
       return kUdpDtlsSctp;
     case RustSdpProtocolValue::kRustTcpDtlsSctp:
       return kTcpDtlsSctp;
+    case RustSdpProtocolValue::kRustRtpAvp:
+      return kRtpAvp;
+    case RustSdpProtocolValue::kRustRtpAvpf:
+      return kRtpAvpf;
+    case RustSdpProtocolValue::kRustRtpSavp:
+      return kRtpSavp;
   }
-
   MOZ_CRASH("invalid media protocol");
 }
 

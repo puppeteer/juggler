@@ -37,12 +37,12 @@
 #include <algorithm>
 
 #ifndef WINABLEAPI
-#include <winable.h>
+#  include <winable.h>
 #endif
 
 // In WinUser.h, MAPVK_VK_TO_VSC_EX is defined only when WINVER >= 0x0600
 #ifndef MAPVK_VK_TO_VSC_EX
-#define MAPVK_VK_TO_VSC_EX (4)
+#  define MAPVK_VK_TO_VSC_EX (4)
 #endif
 
 namespace mozilla {
@@ -916,21 +916,21 @@ void ModifierKeyState::InitMouseEvent(WidgetInputEvent& aMouseEvent) const {
                "called with non-mouse event");
 
   WidgetMouseEventBase& mouseEvent = *aMouseEvent.AsMouseEventBase();
-  mouseEvent.buttons = 0;
+  mouseEvent.mButtons = 0;
   if (::GetKeyState(VK_LBUTTON) < 0) {
-    mouseEvent.buttons |= WidgetMouseEvent::eLeftButtonFlag;
+    mouseEvent.mButtons |= MouseButtonsFlag::eLeftFlag;
   }
   if (::GetKeyState(VK_RBUTTON) < 0) {
-    mouseEvent.buttons |= WidgetMouseEvent::eRightButtonFlag;
+    mouseEvent.mButtons |= MouseButtonsFlag::eRightFlag;
   }
   if (::GetKeyState(VK_MBUTTON) < 0) {
-    mouseEvent.buttons |= WidgetMouseEvent::eMiddleButtonFlag;
+    mouseEvent.mButtons |= MouseButtonsFlag::eMiddleFlag;
   }
   if (::GetKeyState(VK_XBUTTON1) < 0) {
-    mouseEvent.buttons |= WidgetMouseEvent::e4thButtonFlag;
+    mouseEvent.mButtons |= MouseButtonsFlag::e4thFlag;
   }
   if (::GetKeyState(VK_XBUTTON2) < 0) {
-    mouseEvent.buttons |= WidgetMouseEvent::e5thButtonFlag;
+    mouseEvent.mButtons |= MouseButtonsFlag::e5thFlag;
   }
 }
 
@@ -1360,7 +1360,7 @@ void NativeKey::InitIsSkippableForKeyOrChar(const MSG& aLastKeyMSG) {
   if (mCodeNameIndex == CODE_NAME_INDEX_UNKNOWN) {
     // If current event is not caused by physical key operation, it may be
     // caused by a keyboard utility.  If so, the event shouldn't be ignored by
-    // TabChild since it want to insert the character, delete a character or
+    // BrowserChild since it want to insert the character, delete a character or
     // move caret.
     return;
   }
@@ -1381,7 +1381,7 @@ void NativeKey::InitIsSkippableForKeyOrChar(const MSG& aLastKeyMSG) {
     case WM_SYSDEADCHAR:
       // However, some keyboard layouts may send some keyboard messages with
       // activating the bit.  If we dispatch repeated keyboard events, they
-      // may be ignored by TabChild due to performance reason.  So, we need
+      // may be ignored by BrowserChild due to performance reason.  So, we need
       // to check if actually a physical key is repeated by the auto-repeat
       // feature.
       switch (aLastKeyMSG.message) {
@@ -1432,14 +1432,11 @@ void NativeKey::InitWithKeyOrChar() {
       // cause sending another key message if odd tool hooks GetMessage(),
       // PeekMessage().
       sLastKeyMSG = mMsg;
-      // First, resolve the IME converted virtual keycode to its original
-      // keycode.
-      if (mMsg.wParam == VK_PROCESSKEY) {
-        mOriginalVirtualKeyCode =
-            static_cast<uint8_t>(::ImmGetVirtualKey(mMsg.hwnd));
-      } else {
-        mOriginalVirtualKeyCode = static_cast<uint8_t>(mMsg.wParam);
-      }
+
+      // Note that we don't need to compute raw virtual keycode here even when
+      // it's VK_PROCESS (i.e., already handled by IME) because we need to
+      // export it as DOM_VK_PROCESS and KEY_NAME_INDEX_Process.
+      mOriginalVirtualKeyCode = static_cast<uint8_t>(mMsg.wParam);
 
       // If the key message is sent from other application like a11y tools, the
       // scancode value might not be set proper value.  Then, probably the value

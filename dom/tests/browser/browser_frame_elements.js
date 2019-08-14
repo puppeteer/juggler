@@ -4,16 +4,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const TEST_URI = "http://example.com/browser/dom/tests/browser/browser_frame_elements.html";
+const TEST_URI =
+  "http://example.com/browser/dom/tests/browser/browser_frame_elements.html";
 
 add_task(async function test() {
-  await BrowserTestUtils.withNewTab({ gBrowser, url: TEST_URI }, async function(browser) {
+  await BrowserTestUtils.withNewTab({ gBrowser, url: TEST_URI }, async function(
+    browser
+  ) {
     if (!browser.isRemoteBrowser) {
       // Non-e10s, access contentWindow and confirm its container is the browser:
       let windowUtils = browser.contentWindow.windowUtils;
-      is (windowUtils.containerElement, browser,
-          "Container element for main window is xul:browser");
-
+      is(
+        windowUtils.containerElement,
+        browser,
+        "Container element for main window is xul:browser"
+      );
     }
 
     await ContentTask.spawn(browser, null, startTests);
@@ -33,7 +38,11 @@ function startTests() {
   let iframeBlank = gWindow.document.querySelector("#iframe-blank");
   Assert.ok(iframeBlank, "Iframe exists on page");
   let iframeBlankUtils = iframeBlank.contentWindow.windowUtils;
-  Assert.equal(iframeBlankUtils.containerElement, iframeBlank, "Container element for iframe window is iframe");
+  Assert.equal(
+    iframeBlankUtils.containerElement,
+    iframeBlank,
+    "Container element for iframe window is iframe"
+  );
   Assert.equal(iframeBlank.contentWindow.top, gWindow, "gWindow is top");
   Assert.equal(iframeBlank.contentWindow.parent, gWindow, "gWindow is parent");
 
@@ -41,38 +50,60 @@ function startTests() {
   let iframeDataUrl = gWindow.document.querySelector("#iframe-data-url");
   Assert.ok(iframeDataUrl, "Iframe exists on page");
   let iframeDataUrlUtils = iframeDataUrl.contentWindow.windowUtils;
-  Assert.equal(iframeDataUrlUtils.containerElement, iframeDataUrl, "Container element for iframe window is iframe");
+  Assert.equal(
+    iframeDataUrlUtils.containerElement,
+    iframeDataUrl,
+    "Container element for iframe window is iframe"
+  );
   Assert.equal(iframeDataUrl.contentWindow.top, gWindow, "gWindow is top");
-  Assert.equal(iframeDataUrl.contentWindow.parent, gWindow, "gWindow is parent");
+  Assert.equal(
+    iframeDataUrl.contentWindow.parent,
+    gWindow,
+    "gWindow is parent"
+  );
 
   info("Checking object with data url data attribute");
   let objectDataUrl = gWindow.document.querySelector("#object-data-url");
   Assert.ok(objectDataUrl, "Object exists on page");
   let objectDataUrlUtils = objectDataUrl.contentWindow.windowUtils;
-  Assert.equal(objectDataUrlUtils.containerElement, objectDataUrl, "Container element for object window is the object");
+  Assert.equal(
+    objectDataUrlUtils.containerElement,
+    objectDataUrl,
+    "Container element for object window is the object"
+  );
   Assert.equal(objectDataUrl.contentWindow.top, gWindow, "gWindow is top");
-  Assert.equal(objectDataUrl.contentWindow.parent, gWindow, "gWindow is parent");
+  Assert.equal(
+    objectDataUrl.contentWindow.parent,
+    gWindow,
+    "gWindow is parent"
+  );
 }
 
 async function mozBrowserTests(browser) {
   info("Granting special powers for mozbrowser");
   SpecialPowers.addPermission("browser", true, TEST_URI);
-  SpecialPowers.setBoolPref('dom.mozBrowserFramesEnabled', true);
-  SpecialPowers.setBoolPref('network.disable.ipc.security', true);
+  SpecialPowers.setBoolPref("dom.mozBrowserFramesEnabled", true);
+  SpecialPowers.setBoolPref("network.disable.ipc.security", true);
 
   await ContentTask.spawn(browser, null, function() {
     info("Checking mozbrowser iframe");
     let mozBrowserFrame = content.document.createElement("iframe");
     mozBrowserFrame.setAttribute("mozbrowser", "");
     content.document.body.appendChild(mozBrowserFrame);
-    Assert.equal(mozBrowserFrame.contentWindow.top, mozBrowserFrame.contentWindow,
-        "Mozbrowser top == iframe window");
-    Assert.equal(mozBrowserFrame.contentWindow.parent, mozBrowserFrame.contentWindow,
-        "Mozbrowser parent == iframe window");
+    Assert.equal(
+      mozBrowserFrame.contentWindow.top,
+      mozBrowserFrame.contentWindow,
+      "Mozbrowser top == iframe window"
+    );
+    Assert.equal(
+      mozBrowserFrame.contentWindow.parent,
+      mozBrowserFrame.contentWindow,
+      "Mozbrowser parent == iframe window"
+    );
   });
 
   info("Revoking special powers for mozbrowser");
-  SpecialPowers.clearUserPref('dom.mozBrowserFramesEnabled');
-  SpecialPowers.clearUserPref('network.disable.ipc.security');
+  SpecialPowers.clearUserPref("dom.mozBrowserFramesEnabled");
+  SpecialPowers.clearUserPref("network.disable.ipc.security");
   SpecialPowers.removePermission("browser", TEST_URI);
 }

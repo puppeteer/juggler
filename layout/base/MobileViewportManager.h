@@ -8,17 +8,18 @@
 #define MobileViewportManager_h_
 
 #include "mozilla/Maybe.h"
+#include "mozilla/MVMContext.h"
 #include "nsCOMPtr.h"
 #include "nsIDOMEventListener.h"
 #include "nsIObserver.h"
 #include "Units.h"
 
-class nsIDocument;
-class nsIPresShell;
 class nsViewportInfo;
 
 namespace mozilla {
+class MVMContext;
 namespace dom {
+class Document;
 class EventTarget;
 }  // namespace dom
 }  // namespace mozilla
@@ -30,7 +31,7 @@ class MobileViewportManager final : public nsIDOMEventListener,
   NS_DECL_NSIDOMEVENTLISTENER
   NS_DECL_NSIOBSERVER
 
-  MobileViewportManager(nsIPresShell* aPresShell, nsIDocument* aDocument);
+  explicit MobileViewportManager(mozilla::MVMContext* aContext);
   void Destroy();
 
   /* Provide a resolution to use during the first paint instead of the default
@@ -48,7 +49,7 @@ class MobileViewportManager final : public nsIDOMEventListener,
    * resolution at which they are the same size.)
    *
    * The returned resolution is suitable for passing to
-   * nsIPresShell::SetResolutionAndScaleTo(). It's not in typed units for
+   * PresShell::SetResolutionAndScaleTo(). It's not in typed units for
    * reasons explained at the declaration of FrameMetrics::mPresShellResolution.
    */
   float ComputeIntrinsicResolution() const;
@@ -59,7 +60,7 @@ class MobileViewportManager final : public nsIDOMEventListener,
  public:
   /* Notify the MobileViewportManager that a reflow was requested in the
    * presShell.*/
-  void RequestReflow();
+  void RequestReflow(bool aForceAdjustResolution);
 
   /* Notify the MobileViewportManager that the resolution on the presShell was
    * updated, and the visual viewport size needs to be updated. */
@@ -69,6 +70,17 @@ class MobileViewportManager final : public nsIDOMEventListener,
    * whichever happens first. Also called directly if we are created after the
    * presShell is initialized. */
   void SetInitialViewport();
+
+  const mozilla::LayoutDeviceIntSize& DisplaySize() const {
+    return mDisplaySize;
+  };
+
+  /*
+   * Shrink the content to fit it to the display width if no initial-scale is
+   * specified and if the content is still wider than the display width.
+   */
+  void ShrinkToDisplaySizeIfNeeded(nsViewportInfo& aViewportInfo,
+                                   const mozilla::ScreenIntSize& aDisplaySize);
 
  private:
   ~MobileViewportManager();
@@ -120,7 +132,7 @@ class MobileViewportManager final : public nsIDOMEventListener,
   mozilla::CSSToScreenScale ComputeIntrinsicScale(
       const nsViewportInfo& aViewportInfo,
       const mozilla::ScreenIntSize& aDisplaySize,
-      const mozilla::CSSSize& aViewportSize) const;
+      const mozilla::CSSSize& aViewportOrContentSize) const;
 
   /*
    * Returns the screen size subtracted the scrollbar sizes from |aDisplaySize|.
@@ -128,17 +140,7 @@ class MobileViewportManager final : public nsIDOMEventListener,
   mozilla::ScreenIntSize GetCompositionSize(
       const mozilla::ScreenIntSize& aDisplaySize) const;
 
-  /*
-   * Shrink the content to fit it to the display width if no initial-scale is
-   * specified and if the content is still wider than the display width.
-   */
-  void ShrinkToDisplaySizeIfNeeded(nsViewportInfo& aViewportInfo,
-                                   const mozilla::ScreenIntSize& aDisplaySize);
-
-  nsCOMPtr<nsIDocument> mDocument;
-  // raw ref since the presShell owns this
-  nsIPresShell* MOZ_NON_OWNING_REF mPresShell;
-  nsCOMPtr<mozilla::dom::EventTarget> mEventTarget;
+  RefPtr<mozilla::MVMContext> mContext;
   bool mIsFirstPaint;
   bool mPainted;
   mozilla::LayoutDeviceIntSize mDisplaySize;

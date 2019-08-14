@@ -7,7 +7,7 @@
 #include "mozilla/layers/APZCTreeManagerChild.h"
 
 #include "InputData.h"                               // for InputData
-#include "mozilla/dom/TabParent.h"                   // for TabParent
+#include "mozilla/dom/BrowserParent.h"               // for BrowserParent
 #include "mozilla/layers/APZCCallbackHelper.h"       // for APZCCallbackHelper
 #include "mozilla/layers/APZInputBridgeChild.h"      // for APZInputBridgeChild
 #include "mozilla/layers/RemoteCompositorSession.h"  // for RemoteCompositorSession
@@ -15,7 +15,8 @@
 namespace mozilla {
 namespace layers {
 
-APZCTreeManagerChild::APZCTreeManagerChild() : mCompositorSession(nullptr) {}
+APZCTreeManagerChild::APZCTreeManagerChild()
+    : mCompositorSession(nullptr), mIPCOpen(false) {}
 
 APZCTreeManagerChild::~APZCTreeManagerChild() {}
 
@@ -47,7 +48,7 @@ void APZCTreeManagerChild::SetKeyboardMap(const KeyboardMap& aKeyboardMap) {
   SendSetKeyboardMap(aKeyboardMap);
 }
 
-void APZCTreeManagerChild::ZoomToRect(const ScrollableLayerGuid& aGuid,
+void APZCTreeManagerChild::ZoomToRect(const SLGuidAndRenderRoot& aGuid,
                                       const CSSRect& aRect,
                                       const uint32_t aFlags) {
   SendZoomToRect(aGuid, aRect, aFlags);
@@ -59,14 +60,16 @@ void APZCTreeManagerChild::ContentReceivedInputBlock(uint64_t aInputBlockId,
 }
 
 void APZCTreeManagerChild::SetTargetAPZC(
-    uint64_t aInputBlockId, const nsTArray<ScrollableLayerGuid>& aTargets) {
+    uint64_t aInputBlockId, const nsTArray<SLGuidAndRenderRoot>& aTargets) {
   SendSetTargetAPZC(aInputBlockId, aTargets);
 }
 
 void APZCTreeManagerChild::UpdateZoomConstraints(
-    const ScrollableLayerGuid& aGuid,
+    const SLGuidAndRenderRoot& aGuid,
     const Maybe<ZoomConstraints>& aConstraints) {
-  SendUpdateZoomConstraints(aGuid, aConstraints);
+  if (mIPCOpen) {
+    SendUpdateZoomConstraints(aGuid, aConstraints);
+  }
 }
 
 void APZCTreeManagerChild::SetDPI(float aDpiValue) { SendSetDPI(aDpiValue); }
@@ -77,16 +80,16 @@ void APZCTreeManagerChild::SetAllowedTouchBehavior(
 }
 
 void APZCTreeManagerChild::StartScrollbarDrag(
-    const ScrollableLayerGuid& aGuid, const AsyncDragMetrics& aDragMetrics) {
+    const SLGuidAndRenderRoot& aGuid, const AsyncDragMetrics& aDragMetrics) {
   SendStartScrollbarDrag(aGuid, aDragMetrics);
 }
 
-bool APZCTreeManagerChild::StartAutoscroll(const ScrollableLayerGuid& aGuid,
+bool APZCTreeManagerChild::StartAutoscroll(const SLGuidAndRenderRoot& aGuid,
                                            const ScreenPoint& aAnchorLocation) {
   return SendStartAutoscroll(aGuid, aAnchorLocation);
 }
 
-void APZCTreeManagerChild::StopAutoscroll(const ScrollableLayerGuid& aGuid) {
+void APZCTreeManagerChild::StopAutoscroll(const SLGuidAndRenderRoot& aGuid) {
   SendStopAutoscroll(aGuid);
 }
 
@@ -101,6 +104,21 @@ APZInputBridge* APZCTreeManagerChild::InputBridge() {
   return mInputBridge.get();
 }
 
+void APZCTreeManagerChild::AddIPDLReference() {
+  MOZ_ASSERT(mIPCOpen == false);
+  mIPCOpen = true;
+  AddRef();
+}
+
+void APZCTreeManagerChild::ReleaseIPDLReference() {
+  mIPCOpen = false;
+  Release();
+}
+
+void APZCTreeManagerChild::ActorDestroy(ActorDestroyReason aWhy) {
+  mIPCOpen = false;
+}
+
 mozilla::ipc::IPCResult APZCTreeManagerChild::RecvHandleTap(
     const TapType& aType, const LayoutDevicePoint& aPoint,
     const Modifiers& aModifiers, const ScrollableLayerGuid& aGuid,
@@ -109,12 +127,13 @@ mozilla::ipc::IPCResult APZCTreeManagerChild::RecvHandleTap(
   if (mCompositorSession &&
       mCompositorSession->RootLayerTreeId() == aGuid.mLayersId &&
       mCompositorSession->GetContentController()) {
-    mCompositorSession->GetContentController()->HandleTap(
-        aType, aPoint, aModifiers, aGuid, aInputBlockId);
+    RefPtr<GeckoContentController> controller =
+        mCompositorSession->GetContentController();
+    controller->HandleTap(aType, aPoint, aModifiers, aGuid, aInputBlockId);
     return IPC_OK();
   }
-  dom::TabParent* tab =
-      dom::TabParent::GetTabParentFromLayersId(aGuid.mLayersId);
+  dom::BrowserParent* tab =
+      dom::BrowserParent::GetBrowserParentFromLayersId(aGuid.mLayersId);
   if (tab) {
     tab->SendHandleTap(aType, aPoint, aModifiers, aGuid, aInputBlockId);
   }

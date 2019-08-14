@@ -7,12 +7,13 @@
 // Test that the highlighter's picker is stopped when a different tool is
 // selected
 
-const TEST_URI = "data:text/html;charset=UTF-8," +
+const TEST_URI =
+  "data:text/html;charset=UTF-8," +
   "testing the highlighter goes away on tool selection";
 
 add_task(async function() {
   const { toolbox } = await openInspectorForURL(TEST_URI);
-  const pickerStopped = toolbox.once("picker-stopped");
+  const pickerStopped = toolbox.inspector.nodePicker.once("picker-stopped");
 
   info("Starting the inspector picker");
   await startPicker(toolbox);

@@ -1,6 +1,13 @@
 /* eslint-env es6:false */
 /* globals exports */
 /*
+ * DO NOT MODIFY THIS FILE DIRECTLY!
+ *
+ * This is a shared library that is maintained in an external repo:
+ * https://github.com/mozilla/readability
+ */
+
+/*
  * Copyright (c) 2010 Arc90 Inc
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,12 +31,16 @@
 var REGEXPS = {
   // NOTE: These two regular expressions are duplicated in
   // Readability.js. Please keep both copies in sync.
-  unlikelyCandidates: /-ad-|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|foot|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
+  unlikelyCandidates: /-ad-|ai2html|banner|breadcrumbs|combx|comment|community|cover-wrap|disqus|extra|foot|gdpr|header|legends|menu|related|remark|replies|rss|shoutbox|sidebar|skyscraper|social|sponsor|supplemental|ad-break|agegate|pagination|pager|popup|yom-remote/i,
   okMaybeItsACandidate: /and|article|body|column|main|shadow/i,
 };
 
 function isNodeVisible(node) {
-  return node.style.display != "none" && !node.hasAttribute("hidden");
+  // Have to null-check node.style to deal with SVG and MathML nodes.
+  return (
+    (!node.style || node.style.display != "none") &&
+    !node.hasAttribute("hidden")
+  );
 }
 
 /**
@@ -64,12 +75,15 @@ function isProbablyReaderable(doc, isVisible) {
   // This is a little cheeky, we use the accumulator 'score' to decide what to return from
   // this callback:
   return [].some.call(nodes, function(node) {
-    if (!isVisible(node))
+    if (!isVisible(node)) {
       return false;
+    }
 
     var matchString = node.className + " " + node.id;
-    if (REGEXPS.unlikelyCandidates.test(matchString) &&
-        !REGEXPS.okMaybeItsACandidate.test(matchString)) {
+    if (
+      REGEXPS.unlikelyCandidates.test(matchString) &&
+      !REGEXPS.okMaybeItsACandidate.test(matchString)
+    ) {
       return false;
     }
 

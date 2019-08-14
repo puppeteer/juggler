@@ -57,14 +57,14 @@ already_AddRefed<BlobImpl> Deserialize(const IPCBlob& aIPCBlob) {
 
   RefPtr<StreamBlobImpl> blobImpl;
 
-  if (aIPCBlob.file().type() == IPCFileUnion::Tvoid_t) {
+  if (aIPCBlob.file().isNothing()) {
     blobImpl = StreamBlobImpl::Create(inputStream.forget(), aIPCBlob.type(),
-                                      aIPCBlob.size());
+                                      aIPCBlob.size(), aIPCBlob.blobImplType());
   } else {
-    const IPCFile& file = aIPCBlob.file().get_IPCFile();
+    const IPCFile& file = aIPCBlob.file().ref();
     blobImpl = StreamBlobImpl::Create(inputStream.forget(), file.name(),
                                       aIPCBlob.type(), file.lastModified(),
-                                      aIPCBlob.size());
+                                      aIPCBlob.size(), aIPCBlob.blobImplType());
     blobImpl->SetDOMPath(file.DOMPath());
     blobImpl->SetFullPath(file.fullPath());
     blobImpl->SetIsDirectory(file.isDirectory());
@@ -87,7 +87,7 @@ nsresult SerializeInputStreamParent(nsIInputStream* aInputStream,
   // In case this is a IPCBlobInputStream, we don't want to create a loop:
   // IPCBlobInputStreamParent -> IPCBlobInputStream ->
   // IPCBlobInputStreamParent. Let's use the underlying inputStream instead.
-  nsCOMPtr<nsIIPCBlobInputStream> ipcBlobInputStream =
+  nsCOMPtr<mozIIPCBlobInputStream> ipcBlobInputStream =
       do_QueryInterface(aInputStream);
   if (ipcBlobInputStream) {
     stream = ipcBlobInputStream->GetInternalStream();
@@ -134,7 +134,7 @@ nsresult SerializeInputStreamChild(nsIInputStream* aInputStream,
 
 nsresult SerializeInputStream(nsIInputStream* aInputStream, uint64_t aSize,
                               uint64_t aChildID, IPCBlob& aIPCBlob,
-                              nsIContentParent* aManager) {
+                              ContentParent* aManager) {
   return SerializeInputStreamParent(aInputStream, aSize, aChildID, aIPCBlob,
                                     aManager);
 }
@@ -148,7 +148,7 @@ nsresult SerializeInputStream(nsIInputStream* aInputStream, uint64_t aSize,
 
 nsresult SerializeInputStream(nsIInputStream* aInputStream, uint64_t aSize,
                               uint64_t aChildID, IPCBlob& aIPCBlob,
-                              nsIContentChild* aManager) {
+                              ContentChild* aManager) {
   return SerializeInputStreamChild(aInputStream, aIPCBlob, aManager);
 }
 
@@ -158,7 +158,7 @@ nsresult SerializeInputStream(nsIInputStream* aInputStream, uint64_t aSize,
   return SerializeInputStreamChild(aInputStream, aIPCBlob, aManager);
 }
 
-uint64_t ChildIDFromManager(nsIContentParent* aManager) {
+uint64_t ChildIDFromManager(ContentParent* aManager) {
   return aManager->ChildID();
 }
 
@@ -166,7 +166,7 @@ uint64_t ChildIDFromManager(PBackgroundParent* aManager) {
   return BackgroundParent::GetChildID(aManager);
 }
 
-uint64_t ChildIDFromManager(nsIContentChild* aManager) { return 0; }
+uint64_t ChildIDFromManager(ContentChild* aManager) { return 0; }
 
 uint64_t ChildIDFromManager(PBackgroundChild* aManager) { return 0; }
 
@@ -179,6 +179,9 @@ nsresult SerializeInternal(BlobImpl* aBlobImpl, M* aManager,
   aBlobImpl->GetType(value);
   aIPCBlob.type() = value;
 
+  aBlobImpl->GetBlobImplType(value);
+  aIPCBlob.blobImplType() = value;
+
   ErrorResult rv;
   aIPCBlob.size() = aBlobImpl->GetSize(rv);
   if (NS_WARN_IF(rv.Failed())) {
@@ -186,7 +189,7 @@ nsresult SerializeInternal(BlobImpl* aBlobImpl, M* aManager,
   }
 
   if (!aBlobImpl->IsFile()) {
-    aIPCBlob.file() = void_t();
+    aIPCBlob.file() = Nothing();
   } else {
     IPCFile file;
 
@@ -209,7 +212,7 @@ nsresult SerializeInternal(BlobImpl* aBlobImpl, M* aManager,
 
     file.isDirectory() = aBlobImpl->IsDirectory();
 
-    aIPCBlob.file() = file;
+    aIPCBlob.file() = Some(file);
   }
 
   aIPCBlob.fileId() = aBlobImpl->GetFileId();
@@ -229,7 +232,7 @@ nsresult SerializeInternal(BlobImpl* aBlobImpl, M* aManager,
   return NS_OK;
 }
 
-nsresult Serialize(BlobImpl* aBlobImpl, nsIContentChild* aManager,
+nsresult Serialize(BlobImpl* aBlobImpl, ContentChild* aManager,
                    IPCBlob& aIPCBlob) {
   return SerializeInternal(aBlobImpl, aManager, aIPCBlob);
 }
@@ -239,7 +242,7 @@ nsresult Serialize(BlobImpl* aBlobImpl, PBackgroundChild* aManager,
   return SerializeInternal(aBlobImpl, aManager, aIPCBlob);
 }
 
-nsresult Serialize(BlobImpl* aBlobImpl, nsIContentParent* aManager,
+nsresult Serialize(BlobImpl* aBlobImpl, ContentParent* aManager,
                    IPCBlob& aIPCBlob) {
   return SerializeInternal(aBlobImpl, aManager, aIPCBlob);
 }
@@ -258,7 +261,7 @@ nsresult SerializeUntyped(BlobImpl* aBlobImpl, IProtocol* aActor,
   }
 
   // We always need the toplevel protocol
-  switch (manager->GetProtocolTypeId()) {
+  switch (manager->GetProtocolId()) {
     case PBackgroundMsgStart:
       if (manager->GetSide() == mozilla::ipc::ParentSide) {
         return SerializeInternal(
@@ -284,7 +287,7 @@ nsresult SerializeUntyped(BlobImpl* aBlobImpl, IProtocol* aActor,
 }  // namespace dom
 
 namespace ipc {
-void IPDLParamTraits<mozilla::dom::BlobImpl>::Write(
+void IPDLParamTraits<mozilla::dom::BlobImpl*>::Write(
     IPC::Message* aMsg, IProtocol* aActor, mozilla::dom::BlobImpl* aParam) {
   nsresult rv;
   mozilla::dom::IPCBlob ipcblob;
@@ -299,7 +302,7 @@ void IPDLParamTraits<mozilla::dom::BlobImpl>::Write(
   }
 }
 
-bool IPDLParamTraits<mozilla::dom::BlobImpl>::Read(
+bool IPDLParamTraits<mozilla::dom::BlobImpl*>::Read(
     const IPC::Message* aMsg, PickleIterator* aIter, IProtocol* aActor,
     RefPtr<mozilla::dom::BlobImpl>* aResult) {
   *aResult = nullptr;

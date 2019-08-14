@@ -4,17 +4,17 @@
 
 "use strict";
 
-var EXPORTED_SYMBOLS = [
-  "Sqlite",
-];
+var EXPORTED_SYMBOLS = ["Sqlite"];
 
 // The maximum time to wait before considering a transaction stuck and rejecting
 // it. (Note that the minimum amount of time we wait is 20% less than this, see
 // the `_getTimeoutPromise` method on `ConnectionData` for details).
 const TRANSACTIONS_QUEUE_TIMEOUT_MS = 300000; // 5 minutes
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
-ChromeUtils.import("resource://gre/modules/Timer.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+const { setTimeout } = ChromeUtils.import("resource://gre/modules/Timer.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
@@ -22,13 +22,15 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   OS: "resource://gre/modules/osfile.jsm",
   Log: "resource://gre/modules/Log.jsm",
   FileUtils: "resource://gre/modules/FileUtils.jsm",
-  Task: "resource://gre/modules/Task.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
 });
 
-XPCOMUtils.defineLazyServiceGetter(this, "FinalizationWitnessService",
-                                   "@mozilla.org/toolkit/finalizationwitness;1",
-                                   "nsIFinalizationWitnessService");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "FinalizationWitnessService",
+  "@mozilla.org/toolkit/finalizationwitness;1",
+  "nsIFinalizationWitnessService"
+);
 
 // Regular expression used by isInvalidBoundLikeQuery
 var likeSqlRegex = /\bLIKE\b\s(?![@:?])/i;
@@ -61,18 +63,26 @@ var Debugging = {
  * @param sql
  *        (string) The SQL query to be verified.
  * @return boolean value telling us whether query was correct or not
-*/
+ */
 function isInvalidBoundLikeQuery(sql) {
   return likeSqlRegex.test(sql);
 }
 
 // Displays a script error message
 function logScriptError(message) {
-  let consoleMessage = Cc["@mozilla.org/scripterror;1"].
-                       createInstance(Ci.nsIScriptError);
+  let consoleMessage = Cc["@mozilla.org/scripterror;1"].createInstance(
+    Ci.nsIScriptError
+  );
   let stack = new Error();
-  consoleMessage.init(message, stack.fileName, null, stack.lineNumber, 0,
-                      Ci.nsIScriptError.errorFlag, "component javascript");
+  consoleMessage.init(
+    message,
+    stack.fileName,
+    null,
+    stack.lineNumber,
+    0,
+    Ci.nsIScriptError.errorFlag,
+    "component javascript"
+  );
   Services.console.logMessage(consoleMessage);
 
   // This `Promise.reject` will cause tests to fail.  The debugging
@@ -108,14 +118,18 @@ XPCOMUtils.defineLazyGetter(this, "Barriers", () => {
      * Once all blockers of this barrier are lifted, we close the
      * ability to open new connections.
      */
-    shutdown: new AsyncShutdown.Barrier("Sqlite.jsm: wait until all clients have completed their task"),
+    shutdown: new AsyncShutdown.Barrier(
+      "Sqlite.jsm: wait until all clients have completed their task"
+    ),
 
     /**
      * Private barrier blocked by connections that are still open.
      * Triggered after Barriers.shutdown is lifted and `isClosed` is
      * set to `true`.
      */
-    connections: new AsyncShutdown.Barrier("Sqlite.jsm: wait until all connections are closed"),
+    connections: new AsyncShutdown.Barrier(
+      "Sqlite.jsm: wait until all connections are closed"
+    ),
   };
 
   /**
@@ -129,14 +143,20 @@ XPCOMUtils.defineLazyGetter(this, "Barriers", () => {
     let connectionData = ConnectionData.byId.get(identifier);
 
     if (connectionData === undefined) {
-      logScriptError("Error: Attempt to finalize unknown Sqlite connection: " +
-                     identifier + "\n");
+      logScriptError(
+        "Error: Attempt to finalize unknown Sqlite connection: " +
+          identifier +
+          "\n"
+      );
       return;
     }
 
     ConnectionData.byId.delete(identifier);
-    logScriptError("Warning: Sqlite connection '" + identifier +
-                   "' was not properly closed. Auto-close triggered by garbage collection.\n");
+    logScriptError(
+      "Warning: Sqlite connection '" +
+        identifier +
+        "' was not properly closed. Auto-close triggered by garbage collection.\n"
+    );
     connectionData.close();
   };
   Services.obs.addObserver(finalizationObserver, "sqlite-finalization-witness");
@@ -147,7 +167,8 @@ XPCOMUtils.defineLazyGetter(this, "Barriers", () => {
    * - lets clients open connections during shutdown, if necessary;
    * - waits for all connections to be closed before shutdown.
    */
-  AsyncShutdown.profileBeforeChange.addBlocker("Sqlite.jsm shutdown blocker",
+  AsyncShutdown.profileBeforeChange.addBlocker(
+    "Sqlite.jsm shutdown blocker",
     async function() {
       await Barriers.shutdown.wait();
       // At this stage, all clients have had a chance to open (and close)
@@ -161,23 +182,31 @@ XPCOMUtils.defineLazyGetter(this, "Barriers", () => {
       await Barriers.connections.wait();
 
       // Everything closed, no finalization events to catch
-      Services.obs.removeObserver(finalizationObserver, "sqlite-finalization-witness");
+      Services.obs.removeObserver(
+        finalizationObserver,
+        "sqlite-finalization-witness"
+      );
     },
 
     function status() {
       if (isClosed) {
         // We are waiting for the connections to close. The interesting
         // status is therefore the list of connections still pending.
-        return { description: "Waiting for connections to close",
-                 state: Barriers.connections.state };
+        return {
+          description: "Waiting for connections to close",
+          state: Barriers.connections.state,
+        };
       }
 
       // We are still in the first stage: waiting for the barrier
       // to be lifted. The interesting status is therefore that of
       // the barrier.
-      return { description: "Waiting for the barrier to be lifted",
-               state: Barriers.shutdown.state };
-  });
+      return {
+        description: "Waiting for the barrier to be lifted",
+        state: Barriers.shutdown.state,
+      };
+    }
+  );
 
   return Barriers;
 });
@@ -201,8 +230,10 @@ XPCOMUtils.defineLazyGetter(this, "Barriers", () => {
  * dispatch its method calls here.
  */
 function ConnectionData(connection, identifier, options = {}) {
-  this._log = Log.repository.getLoggerWithMessagePrefix("Sqlite.Connection",
-                                                        identifier + ": ");
+  this._log = Log.repository.getLoggerWithMessagePrefix(
+    "Sqlite.Connection",
+    identifier + ": "
+  );
   this._log.info("Opened");
 
   this._dbConn = connection;
@@ -231,7 +262,8 @@ function ConnectionData(connection, identifier, options = {}) {
     this.defaultTransactionType = options.defaultTransactionType;
   } else {
     this.defaultTransactionType = convertStorageTransactionType(
-      this._dbConn.defaultTransactionType);
+      this._dbConn.defaultTransactionType
+    );
   }
   this._hasInProgressTransaction = false;
   // Manages a chain of transactions promises, so that new transactions
@@ -240,8 +272,9 @@ function ConnectionData(connection, identifier, options = {}) {
 
   this._idleShrinkMS = options.shrinkMemoryOnConnectionIdleMS;
   if (this._idleShrinkMS) {
-    this._idleShrinkTimer = Cc["@mozilla.org/timer;1"]
-                              .createInstance(Ci.nsITimer);
+    this._idleShrinkTimer = Cc["@mozilla.org/timer;1"].createInstance(
+      Ci.nsITimer
+    );
     // We wait for the first statement execute to start the timer because
     // shrinking now would not do anything.
   }
@@ -253,7 +286,9 @@ function ConnectionData(connection, identifier, options = {}) {
 
   // An AsyncShutdown barrier used to make sure that we wait until clients
   // are done before shutting down the connection.
-  this._barrier = new AsyncShutdown.Barrier(`${this._identifier}: waiting for clients`);
+  this._barrier = new AsyncShutdown.Barrier(
+    `${this._identifier}: waiting for clients`
+  );
 
   Barriers.connections.client.addBlocker(
     this._identifier + ": waiting for shutdown",
@@ -302,14 +337,14 @@ ConnectionData.prototype = Object.freeze({
    * any write operation, as follows:
    *
    * myConnection.executeBeforeShutdown("Bookmarks: Removing a bookmark",
-   *   Task.async(function*(db) {
+   *   async function(db) {
    *     // The connection will not be closed and shutdown will not proceed
    *     // until this task has completed.
    *
    *     // `db` exposes the same API as `myConnection` but provides additional
    *     // logging support to help debug hard-to-catch shutdown timeouts.
    *
-   *     yield db.execute(...);
+   *     await db.execute(...);
    * }));
    *
    * @param {string} name A human-readable name for the ongoing operation, used
@@ -325,7 +360,11 @@ ConnectionData.prototype = Object.freeze({
       throw new TypeError("Expected a function as second argument");
     }
     if (this._closeRequested) {
-      throw new Error(`${this._identifier}: cannot execute operation ${name}, the connection is already closing`);
+      throw new Error(
+        `${
+          this._identifier
+        }: cannot execute operation ${name}, the connection is already closing`
+      );
     }
 
     // Status, used for AsyncShutdown crash reports.
@@ -348,7 +387,7 @@ ConnectionData.prototype = Object.freeze({
           status.isPending = true;
           status.command = sql;
           try {
-            return (await this.execute(sql, ...rest));
+            return await this.execute(sql, ...rest);
           } finally {
             status.isPending = false;
           }
@@ -359,7 +398,7 @@ ConnectionData.prototype = Object.freeze({
           status.isPending = false;
           status.command = "<close>";
           try {
-            return (await this.close());
+            return await this.close();
           } finally {
             status.isPending = false;
           }
@@ -370,7 +409,7 @@ ConnectionData.prototype = Object.freeze({
           status.isPending = false;
           status.command = sql;
           try {
-            return (await this.executeCached(sql, ...rest));
+            return await this.executeCached(sql, ...rest);
           } finally {
             status.isPending = false;
           }
@@ -379,7 +418,11 @@ ConnectionData.prototype = Object.freeze({
     });
 
     let promiseResult = task(loggedDb);
-    if (!promiseResult || typeof promiseResult != "object" || !("then" in promiseResult)) {
+    if (
+      !promiseResult ||
+      typeof promiseResult != "object" ||
+      !("then" in promiseResult)
+    ) {
       throw new TypeError("Expected a Promise");
     }
     let key = `${this._identifier}: ${name} (${this._getOperationId()})`;
@@ -390,7 +433,7 @@ ConnectionData.prototype = Object.freeze({
 
     return (async () => {
       try {
-        return (await promiseResult);
+        return await promiseResult;
       } finally {
         this._barrier.client.removeBlocker(key, promiseComplete);
       }
@@ -423,8 +466,9 @@ ConnectionData.prototype = Object.freeze({
       connection: this._dbConn,
       readOnly,
     };
-    if (this._idleShrinkMS)
+    if (this._idleShrinkMS) {
       options.shrinkMemoryOnConnectionIdleMS = this._idleShrinkMS;
+    }
 
     return cloneStorageConnection(options);
   },
@@ -434,7 +478,7 @@ ConnectionData.prototype = Object.freeze({
   _finalize() {
     this._log.debug("Finalizing connection.");
     // Cancel any pending statements.
-    for (let [/* k */, statement] of this._pendingStatements) {
+    for (let [, /* k */ statement] of this._pendingStatements) {
       statement.cancel();
     }
     this._pendingStatements.clear();
@@ -443,12 +487,12 @@ ConnectionData.prototype = Object.freeze({
     this._statementCounter = 0;
 
     // Next we finalize all active statements.
-    for (let [/* k */, statement] of this._anonymousStatements) {
+    for (let [, /* k */ statement] of this._anonymousStatements) {
       statement.finalize();
     }
     this._anonymousStatements.clear();
 
-    for (let [/* k */, statement] of this._cachedStatements) {
+    for (let [, /* k */ statement] of this._cachedStatements) {
       statement.finalize();
     }
     this._cachedStatements.clear();
@@ -513,7 +557,7 @@ ConnectionData.prototype = Object.freeze({
   },
 
   execute(sql, params = null, onRow = null) {
-    if (typeof(sql) != "string") {
+    if (typeof sql != "string") {
       throw new Error("Must define SQL to execute as a string: " + sql);
     }
 
@@ -573,7 +617,9 @@ ConnectionData.prototype = Object.freeze({
         // At this point we should never have an in progress transaction, since
         // they are enqueued.
         if (this._hasInProgressTransaction) {
-          console.error("Unexpected transaction in progress when trying to start a new one.");
+          console.error(
+            "Unexpected transaction in progress when trying to start a new one."
+          );
         }
         this._hasInProgressTransaction = true;
         try {
@@ -587,30 +633,33 @@ ConnectionData.prototype = Object.freeze({
             // The best we can do is proceed without a transaction and hope
             // things won't break.
             if (wrappedConnections.has(this._identifier)) {
-              this._log.warn("A new transaction could not be started cause the wrapped connection had one in progress", ex);
+              this._log.warn(
+                "A new transaction could not be started cause the wrapped connection had one in progress",
+                ex
+              );
               // Unmark the in progress transaction, since it's managed by
               // some other non-Sqlite.jsm client.  See the comment above.
               this._hasInProgressTransaction = false;
             } else {
-              this._log.warn("A transaction was already in progress, likely a nested transaction", ex);
+              this._log.warn(
+                "A transaction was already in progress, likely a nested transaction",
+                ex
+              );
               throw ex;
             }
           }
 
           let result;
           try {
-            // Keep Task.spawn here to preserve API compat; unfortunately
-            // func was a generator rather than a task here.
-            result = func();
-            if (Object.prototype.toString.call(result) == "[object Generator]")
-              result = await Task.spawn(func); // eslint-disable-line mozilla/no-task
-            else
-              result = await result;
+            result = await func();
           } catch (ex) {
             // It's possible that the exception has been caused by trying to
             // close the connection in the middle of a transaction.
             if (this._closeRequested) {
-              this._log.warn("Connection closed while performing a transaction", ex);
+              this._log.warn(
+                "Connection closed while performing a transaction",
+                ex
+              );
             } else {
               this._log.warn("Error during transaction. Rolling back", ex);
               // If we began a transaction, we must rollback it.
@@ -628,8 +677,12 @@ ConnectionData.prototype = Object.freeze({
 
           // See comment above about connection being closed during transaction.
           if (this._closeRequested) {
-            this._log.warn("Connection closed before committing the transaction.");
-            throw new Error("Connection closed before committing the transaction.");
+            this._log.warn(
+              "Connection closed before committing the transaction."
+            );
+            throw new Error(
+              "Connection closed before committing the transaction."
+            );
           }
 
           // If we began a transaction, we must commit it.
@@ -657,11 +710,15 @@ ConnectionData.prototype = Object.freeze({
     });
     // Atomically update the queue before anyone else has a chance to enqueue
     // further transactions.
-    this._transactionQueue = promise.catch(ex => { console.error(ex); });
+    this._transactionQueue = promise.catch(ex => {
+      console.error(ex);
+    });
 
     // Make sure that we do not shutdown the connection during a transaction.
-    this._barrier.client.addBlocker(`Transaction (${this._getOperationId()})`,
-      this._transactionQueue);
+    this._barrier.client.addBlocker(
+      `Transaction (${this._getOperationId()})`,
+      this._transactionQueue
+    );
     return promise;
   },
 
@@ -673,7 +730,7 @@ ConnectionData.prototype = Object.freeze({
 
   discardCachedStatements() {
     let count = 0;
-    for (let [/* k */, statement] of this._cachedStatements) {
+    for (let [, /* k */ statement] of this._cachedStatements) {
       ++count;
       statement.finalize();
     }
@@ -698,19 +755,21 @@ ConnectionData.prototype = Object.freeze({
     }
 
     function bindParam(obj, key, val) {
-      let isBlob = val && typeof val == "object" &&
-                   val.constructor.name == "Uint8Array";
+      let isBlob =
+        val && typeof val == "object" && val.constructor.name == "Uint8Array";
       let args = [key, val];
-      if (isBlob)
+      if (isBlob) {
         args.push(val.length);
-      let methodName =
-        `bind${isBlob ? "Blob" : ""}By${typeof key == "number" ? "Index" : "Name"}`;
+      }
+      let methodName = `bind${isBlob ? "Blob" : ""}By${
+        typeof key == "number" ? "Index" : "Name"
+      }`;
       obj[methodName](...args);
     }
 
     if (Array.isArray(params)) {
       // It's an array of separate params.
-      if (params.length && (typeof(params[0]) == "object")) {
+      if (params.length && typeof params[0] == "object") {
         let paramsArray = statement.newBindingParamsArray();
         for (let p of params) {
           let bindings = paramsArray.newBindingParams();
@@ -732,15 +791,18 @@ ConnectionData.prototype = Object.freeze({
     }
 
     // Named params.
-    if (params && typeof(params) == "object") {
+    if (params && typeof params == "object") {
       for (let k in params) {
         bindParam(statement, k, params[k]);
       }
       return;
     }
 
-    throw new Error("Invalid type for bound parameters. Expected Array or " +
-                    "object. Got: " + params);
+    throw new Error(
+      "Invalid type for bound parameters. Expected Array or " +
+        "object. Got: " +
+        params
+    );
   },
 
   _executeStatement(sql, statement, params, onRow) {
@@ -748,7 +810,7 @@ ConnectionData.prototype = Object.freeze({
       throw new Error("Statement is not ready for execution.");
     }
 
-    if (onRow && typeof(onRow) != "function") {
+    if (onRow && typeof onRow != "function") {
       throw new Error("onRow must be a function. Got: " + onRow);
     }
 
@@ -780,7 +842,11 @@ ConnectionData.prototype = Object.freeze({
       handleResult(resultSet) {
         // .cancel() may not be immediate and handleResult() could be called
         // after a .cancel().
-        for (let row = resultSet.getNextRow(); row && !userCancelled; row = resultSet.getNextRow()) {
+        for (
+          let row = resultSet.getNextRow();
+          row && !userCancelled;
+          row = resultSet.getNextRow()
+        ) {
           if (!onRow) {
             rows.push(row);
             continue;
@@ -800,8 +866,9 @@ ConnectionData.prototype = Object.freeze({
       },
 
       handleError(error) {
-        self._log.info("Error when executing SQL (" +
-                       error.result + "): " + error.message);
+        self._log.info(
+          "Error when executing SQL (" + error.result + "): " + error.message
+        );
         errors.push(error);
       },
 
@@ -819,14 +886,18 @@ ConnectionData.prototype = Object.freeze({
             break;
 
           case Ci.mozIStorageStatementCallback.REASON_ERROR:
-            let error = new Error("Error(s) encountered during statement execution: " + errors.map(e => e.message).join(", "));
+            let error = new Error(
+              "Error(s) encountered during statement execution: " +
+                errors.map(e => e.message).join(", ")
+            );
             error.errors = errors;
             deferred.reject(error);
             break;
 
           default:
-            deferred.reject(new Error("Unknown completion reason code: " +
-                                      reason));
+            deferred.reject(
+              new Error("Unknown completion reason code: " + reason)
+            );
             break;
         }
       },
@@ -855,9 +926,11 @@ ConnectionData.prototype = Object.freeze({
       return;
     }
 
-    this._idleShrinkTimer.initWithCallback(this.shrinkMemory.bind(this),
-                                           this._idleShrinkMS,
-                                           this._idleShrinkTimer.TYPE_ONE_SHOT);
+    this._idleShrinkTimer.initWithCallback(
+      this.shrinkMemory.bind(this),
+      this._idleShrinkMS,
+      this._idleShrinkTimer.TYPE_ONE_SHOT
+    );
   },
 
   // Returns a promise that will resolve after a time comprised between 80% of
@@ -874,11 +947,16 @@ ConnectionData.prototype = Object.freeze({
         if (this._timeoutPromise == timeoutPromise) {
           this._timeoutPromise = null;
         }
-        reject(new Error("Transaction timeout, most likely caused by unresolved pending work."));
+        reject(
+          new Error(
+            "Transaction timeout, most likely caused by unresolved pending work."
+          )
+        );
       }, TRANSACTIONS_QUEUE_TIMEOUT_MS);
     });
     this._timeoutPromise = timeoutPromise;
-    this._timeoutPromiseExpires = Cu.now() + TRANSACTIONS_QUEUE_TIMEOUT_MS * 0.2;
+    this._timeoutPromiseExpires =
+      Cu.now() + TRANSACTIONS_QUEUE_TIMEOUT_MS * 0.2;
     return this._timeoutPromise;
   },
 });
@@ -934,21 +1012,26 @@ function openConnection(options) {
   }
 
   if (isClosed) {
-    throw new Error("Sqlite.jsm has been shutdown. Cannot open connection to: " + options.path);
+    throw new Error(
+      "Sqlite.jsm has been shutdown. Cannot open connection to: " + options.path
+    );
   }
 
   // Retains absolute paths and normalizes relative as relative to profile.
   let path = OS.Path.join(OS.Constants.Path.profileDir, options.path);
 
-  let sharedMemoryCache = "sharedMemoryCache" in options ?
-                            options.sharedMemoryCache : true;
+  let sharedMemoryCache =
+    "sharedMemoryCache" in options ? options.sharedMemoryCache : true;
 
   let openedOptions = {};
 
   if ("shrinkMemoryOnConnectionIdleMS" in options) {
     if (!Number.isInteger(options.shrinkMemoryOnConnectionIdleMS)) {
-      throw new Error("shrinkMemoryOnConnectionIdleMS must be an integer. " +
-                      "Got: " + options.shrinkMemoryOnConnectionIdleMS);
+      throw new Error(
+        "shrinkMemoryOnConnectionIdleMS must be an integer. " +
+          "Got: " +
+          options.shrinkMemoryOnConnectionIdleMS
+      );
     }
 
     openedOptions.shrinkMemoryOnConnectionIdleMS =
@@ -958,8 +1041,9 @@ function openConnection(options) {
   if ("defaultTransactionType" in options) {
     let defaultTransactionType = options.defaultTransactionType;
     if (!OpenedConnection.TRANSACTION_TYPES.includes(defaultTransactionType)) {
-      throw new Error("Unknown default transaction type: " +
-                      defaultTransactionType);
+      throw new Error(
+        "Unknown default transaction type: " + defaultTransactionType
+      );
     }
 
     openedOptions.defaultTransactionType = defaultTransactionType;
@@ -971,8 +1055,9 @@ function openConnection(options) {
   log.info("Opening database: " + path + " (" + identifier + ")");
 
   return new Promise((resolve, reject) => {
-    let dbOptions = Cc["@mozilla.org/hash-property-bag;1"].
-                    createInstance(Ci.nsIWritablePropertyBag);
+    let dbOptions = Cc["@mozilla.org/hash-property-bag;1"].createInstance(
+      Ci.nsIWritablePropertyBag
+    );
     if (!sharedMemoryCache) {
       dbOptions.setProperty("shared", false);
     }
@@ -986,25 +1071,35 @@ function openConnection(options) {
 
     dbOptions = dbOptions.enumerator.hasMoreElements() ? dbOptions : null;
 
-    Services.storage.openAsyncDatabase(file, dbOptions, (status, connection) => {
-      if (!connection) {
-        log.warn(`Could not open connection to ${path}: ${status}`);
-        let error = new Components.Exception(`Could not open connection to ${path}: ${status}`,
-                                              status);
-        reject(error);
-        return;
+    Services.storage.openAsyncDatabase(
+      file,
+      dbOptions,
+      (status, connection) => {
+        if (!connection) {
+          log.warn(`Could not open connection to ${path}: ${status}`);
+          let error = new Components.Exception(
+            `Could not open connection to ${path}: ${status}`,
+            status
+          );
+          reject(error);
+          return;
+        }
+        log.info("Connection opened");
+        try {
+          resolve(
+            new OpenedConnection(
+              connection.QueryInterface(Ci.mozIStorageAsyncConnection),
+              identifier,
+              openedOptions
+            )
+          );
+        } catch (ex) {
+          log.warn("Could not open database", ex);
+          connection.asyncClose();
+          reject(ex);
+        }
       }
-      log.info("Connection opened");
-      try {
-        resolve(
-          new OpenedConnection(connection.QueryInterface(Ci.mozIStorageAsyncConnection),
-                               identifier, openedOptions));
-      } catch (ex) {
-        log.warn("Could not open database", ex);
-        connection.asyncClose();
-        reject(ex);
-      }
-    });
+    );
   });
 }
 
@@ -1049,15 +1144,21 @@ function cloneStorageConnection(options) {
   }
 
   if (isClosed) {
-    throw new Error("Sqlite.jsm has been shutdown. Cannot clone connection to: " + source.database.path);
+    throw new Error(
+      "Sqlite.jsm has been shutdown. Cannot clone connection to: " +
+        source.databaseFile.path
+    );
   }
 
   let openedOptions = {};
 
   if ("shrinkMemoryOnConnectionIdleMS" in options) {
     if (!Number.isInteger(options.shrinkMemoryOnConnectionIdleMS)) {
-      throw new TypeError("shrinkMemoryOnConnectionIdleMS must be an integer. " +
-                          "Got: " + options.shrinkMemoryOnConnectionIdleMS);
+      throw new TypeError(
+        "shrinkMemoryOnConnectionIdleMS must be an integer. " +
+          "Got: " +
+          options.shrinkMemoryOnConnectionIdleMS
+      );
     }
     openedOptions.shrinkMemoryOnConnectionIdleMS =
       options.shrinkMemoryOnConnectionIdleMS;
@@ -1114,7 +1215,10 @@ function wrapStorageConnection(options) {
   }
 
   if (isClosed) {
-    throw new Error("Sqlite.jsm has been shutdown. Cannot wrap connection to: " + connection.database.path);
+    throw new Error(
+      "Sqlite.jsm has been shutdown. Cannot wrap connection to: " +
+        connection.databaseFile.path
+    );
   }
 
   let identifier = getIdentifierByFileName(connection.databaseFile.leafName);
@@ -1191,8 +1295,10 @@ function OpenedConnection(connection, identifier, options = {}) {
 
   // Store the extra reference in a map with connection identifier as
   // key.
-  ConnectionData.byId.set(this._connectionData._identifier,
-                          this._connectionData);
+  ConnectionData.byId.set(
+    this._connectionData._identifier,
+    this._connectionData
+  );
 
   // Make a finalization witness. If this object is garbage collected
   // before its `forget` method has been called, an event with topic
@@ -1200,7 +1306,8 @@ function OpenedConnection(connection, identifier, options = {}) {
   // connection identifier string of the database.
   this._witness = FinalizationWitnessService.make(
     "sqlite-finalization-witness",
-    this._connectionData._identifier);
+    this._connectionData._identifier
+  );
 }
 
 OpenedConnection.TRANSACTION_TYPES = ["DEFERRED", "IMMEDIATE", "EXCLUSIVE"];
@@ -1219,6 +1326,28 @@ OpenedConnection.prototype = Object.freeze({
   TRANSACTION_DEFERRED: "DEFERRED",
   TRANSACTION_IMMEDIATE: "IMMEDIATE",
   TRANSACTION_EXCLUSIVE: "EXCLUSIVE",
+
+  /**
+   * Returns a handle to the underlying `mozIStorageAsyncConnection`. This is
+   * ⚠️ **extremely unsafe** ⚠️ because `Sqlite.jsm` continues to manage the
+   * connection's lifecycle, including transactions and shutdown blockers.
+   * Misusing the raw connection can easily lead to data loss, memory leaks,
+   * and errors.
+   *
+   * Consumers of the raw connection **must not** close or re-wrap it,
+   * and should not run statements concurrently with `Sqlite.jsm`.
+   *
+   * It's _much_ safer to open a `mozIStorage{Async}Connection` yourself,
+   * and access it from JavaScript via `Sqlite.wrapStorageConnection`.
+   * `unsafeRawConnection` is an escape hatch for cases where you can't
+   * do that.
+   *
+   * Please do _not_ add new uses of `unsafeRawConnection` without review
+   * from a storage peer.
+   */
+  get unsafeRawConnection() {
+    return this._connectionData._dbConn;
+  },
 
   /**
    * The integer schema version of the database.
@@ -1406,22 +1535,21 @@ OpenedConnection.prototype = Object.freeze({
    * YOU SHOULD _NEVER_ NEST executeTransaction CALLS FOR ANY REASON, NOR
    * DIRECTLY, NOR THROUGH OTHER PROMISES.
    * FOR EXAMPLE, NEVER DO SOMETHING LIKE:
-   *   yield executeTransaction(function* () {
+   *   await executeTransaction(async function () {
    *     ...some_code...
-   *     yield executeTransaction(function* () { // WRONG!
+   *     await executeTransaction(async function () { // WRONG!
    *       ...some_code...
    *     })
-   *     yield someCodeThatExecuteTransaction(); // WRONG!
-   *     yield neverResolvedPromise; // WRONG!
+   *     await someCodeThatExecuteTransaction(); // WRONG!
+   *     await neverResolvedPromise; // WRONG!
    *   });
    * NESTING CALLS WILL BLOCK ANY FUTURE TRANSACTION UNTIL A TIMEOUT KICKS IN.
    * *****************************************************************************
    *
-   * A transaction is specified by a user-supplied function that is a
-   * generator function which can be used by Task.jsm's Task.spawn(). The
-   * function receives this connection instance as its argument.
+   * A transaction is specified by a user-supplied function that is an
+   * async function. The function receives this connection instance as its argument.
    *
-   * The supplied function is expected to yield promises. These are often
+   * The supplied function is expected to return promises. These are often
    * promises created by calling `execute` and `executeCached`. If the
    * generator is exhausted without any errors being thrown, the
    * transaction is committed. If an error occurs, the transaction is
@@ -1452,13 +1580,12 @@ OpenedConnection.prototype = Object.freeze({
   tableExists(name) {
     return this.execute(
       "SELECT name FROM (SELECT * FROM sqlite_master UNION ALL " +
-                        "SELECT * FROM sqlite_temp_master) " +
-      "WHERE type = 'table' AND name=?",
-      [name])
-      .then(function onResult(rows) {
-        return Promise.resolve(rows.length > 0);
-      }
-    );
+        "SELECT * FROM sqlite_temp_master) " +
+        "WHERE type = 'table' AND name=?",
+      [name]
+    ).then(function onResult(rows) {
+      return Promise.resolve(rows.length > 0);
+    });
   },
 
   /**
@@ -1472,13 +1599,12 @@ OpenedConnection.prototype = Object.freeze({
   indexExists(name) {
     return this.execute(
       "SELECT name FROM (SELECT * FROM sqlite_master UNION ALL " +
-                        "SELECT * FROM sqlite_temp_master) " +
-      "WHERE type = 'index' AND name=?",
-      [name])
-      .then(function onResult(rows) {
-        return Promise.resolve(rows.length > 0);
-      }
-    );
+        "SELECT * FROM sqlite_temp_master) " +
+        "WHERE type = 'index' AND name=?",
+      [name]
+    ).then(function onResult(rows) {
+      return Promise.resolve(rows.length > 0);
+    });
   },
 
   /**

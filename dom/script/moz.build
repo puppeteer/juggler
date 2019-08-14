@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 XPIDL_SOURCES += [
     'nsIScriptLoaderObserver.idl',
@@ -18,6 +18,8 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla.dom += [
+    'LoadedScript.h',
+    'ScriptDecoding.h',
     'ScriptElement.h',
     'ScriptLoader.h',
     'ScriptLoadRequest.h',
@@ -25,8 +27,8 @@ EXPORTS.mozilla.dom += [
 ]
 
 UNIFIED_SOURCES += [
+    'LoadedScript.cpp',
     'ModuleLoadRequest.cpp',
-    'ModuleScript.cpp',
     'ScriptElement.cpp',
     'ScriptLoader.cpp',
     'ScriptLoadHandler.cpp',

@@ -19,6 +19,8 @@
 #ifndef wasmast_h
 #define wasmast_h
 
+#include "mozilla/Variant.h"
+
 #include "ds/LifoAlloc.h"
 #include "js/HashTable.h"
 #include "js/Vector.h"
@@ -40,6 +42,8 @@ using AstVector = mozilla::Vector<T, 0, LifoAllocPolicy<Fallible>>;
 
 template <class K, class V, class HP>
 using AstHashMap = HashMap<K, V, HP, LifoAllocPolicy<Fallible>>;
+
+using mozilla::Variant;
 
 typedef AstVector<bool> AstBoolVector;
 
@@ -123,9 +127,11 @@ class AstValType {
     }
   }
 
-  bool isRefType() const {
+#ifdef ENABLE_WASM_GC
+  bool isNarrowType() const {
     return code() == ValType::AnyRef || code() == ValType::Ref;
   }
+#endif
 
   bool isValid() const { return !(which_ == IsValType && !type_.isValid()); }
 
@@ -396,39 +402,38 @@ enum class AstExprKind {
   ComparisonOperator,
   Const,
   ConversionOperator,
-  CurrentMemory,
+  DataOrElemDrop,
   Drop,
   ExtraConversionOperator,
   First,
   GetGlobal,
   GetLocal,
-  GrowMemory,
   If,
   Load,
-#ifdef ENABLE_WASM_BULKMEM_OPS
-  MemOrTableCopy,
-  MemOrTableDrop,
   MemFill,
+  MemOrTableCopy,
   MemOrTableInit,
-#endif
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
-  TableGet,
-  TableGrow,
-  TableSet,
-  TableSize,
-#endif
-#ifdef ENABLE_WASM_GC
-  StructNew,
-  StructGet,
-  StructSet,
-  StructNarrow,
-#endif
+  MemoryGrow,
+  MemorySize,
   Nop,
   Pop,
   RefNull,
   Return,
   SetGlobal,
   SetLocal,
+#ifdef ENABLE_WASM_GC
+  StructNew,
+  StructGet,
+  StructSet,
+  StructNarrow,
+#endif
+#ifdef ENABLE_WASM_REFTYPES
+  TableFill,
+  TableGet,
+  TableGrow,
+  TableSet,
+  TableSize,
+#endif
   TeeLocal,
   Store,
   TernaryOperator,
@@ -812,7 +817,6 @@ class AstWake : public AstExpr {
   AstExpr& count() const { return *count_; }
 };
 
-#ifdef ENABLE_WASM_BULKMEM_OPS
 class AstMemOrTableCopy : public AstExpr {
   bool isMem_;
   AstRef destTable_;
@@ -834,23 +838,29 @@ class AstMemOrTableCopy : public AstExpr {
         len_(len) {}
 
   bool isMem() const { return isMem_; }
-  AstRef& destTable() { return destTable_; }
+  AstRef& destTable() {
+    MOZ_ASSERT(!isMem());
+    return destTable_;
+  }
   AstExpr& dest() const { return *dest_; }
-  AstRef& srcTable() { return srcTable_; }
+  AstRef& srcTable() {
+    MOZ_ASSERT(!isMem());
+    return srcTable_;
+  }
   AstExpr& src() const { return *src_; }
   AstExpr& len() const { return *len_; }
 };
 
-class AstMemOrTableDrop : public AstExpr {
-  bool isMem_;
+class AstDataOrElemDrop : public AstExpr {
+  bool isData_;
   uint32_t segIndex_;
 
  public:
-  static const AstExprKind Kind = AstExprKind::MemOrTableDrop;
-  explicit AstMemOrTableDrop(bool isMem, uint32_t segIndex)
-      : AstExpr(Kind, ExprType::Void), isMem_(isMem), segIndex_(segIndex) {}
+  static const AstExprKind Kind = AstExprKind::DataOrElemDrop;
+  explicit AstDataOrElemDrop(bool isData, uint32_t segIndex)
+      : AstExpr(Kind, ExprType::Void), isData_(isData), segIndex_(segIndex) {}
 
-  bool isMem() const { return isMem_; }
+  bool isData() const { return isData_; }
   uint32_t segIndex() const { return segIndex_; }
 };
 
@@ -872,33 +882,62 @@ class AstMemFill : public AstExpr {
 class AstMemOrTableInit : public AstExpr {
   bool isMem_;
   uint32_t segIndex_;
-  AstRef targetTable_;
+  AstRef target_;
   AstExpr* dst_;
   AstExpr* src_;
   AstExpr* len_;
 
  public:
   static const AstExprKind Kind = AstExprKind::MemOrTableInit;
-  explicit AstMemOrTableInit(bool isMem, uint32_t segIndex, AstRef targetTable,
+  explicit AstMemOrTableInit(bool isMem, uint32_t segIndex, AstRef target,
                              AstExpr* dst, AstExpr* src, AstExpr* len)
       : AstExpr(Kind, ExprType::Void),
         isMem_(isMem),
         segIndex_(segIndex),
-        targetTable_(targetTable),
+        target_(target),
         dst_(dst),
         src_(src),
         len_(len) {}
 
   bool isMem() const { return isMem_; }
   uint32_t segIndex() const { return segIndex_; }
-  AstRef& targetTable() { return targetTable_; }
+  AstRef& target() { return target_; }
+  AstRef& targetTable() {
+    MOZ_ASSERT(!isMem());
+    return target_;
+  }
+  AstRef& targetMemory() {
+    MOZ_ASSERT(isMem());
+    return target_;
+  }
   AstExpr& dst() const { return *dst_; }
   AstExpr& src() const { return *src_; }
   AstExpr& len() const { return *len_; }
 };
-#endif
 
-#ifdef ENABLE_WASM_GENERALIZED_TABLES
+#ifdef ENABLE_WASM_REFTYPES
+class AstTableFill : public AstExpr {
+  AstRef targetTable_;
+  AstExpr* start_;
+  AstExpr* val_;
+  AstExpr* len_;
+
+ public:
+  static const AstExprKind Kind = AstExprKind::TableFill;
+  explicit AstTableFill(AstRef targetTable, AstExpr* start, AstExpr* val,
+                        AstExpr* len)
+      : AstExpr(Kind, ExprType::Void),
+        targetTable_(targetTable),
+        start_(start),
+        val_(val),
+        len_(len) {}
+
+  AstRef& targetTable() { return targetTable_; }
+  AstExpr& start() const { return *start_; }
+  AstExpr& val() const { return *val_; }
+  AstExpr& len() const { return *len_; }
+};
+
 class AstTableGet : public AstExpr {
   AstRef targetTable_;
   AstExpr* index_;
@@ -916,20 +955,20 @@ class AstTableGet : public AstExpr {
 
 class AstTableGrow : public AstExpr {
   AstRef targetTable_;
-  AstExpr* delta_;
   AstExpr* initValue_;
+  AstExpr* delta_;
 
  public:
   static const AstExprKind Kind = AstExprKind::TableGrow;
-  AstTableGrow(AstRef targetTable, AstExpr* delta, AstExpr* initValue)
+  AstTableGrow(AstRef targetTable, AstExpr* initValue, AstExpr* delta)
       : AstExpr(Kind, ExprType::I32),
         targetTable_(targetTable),
-        delta_(delta),
-        initValue_(initValue) {}
+        initValue_(initValue),
+        delta_(delta) {}
 
   AstRef& targetTable() { return targetTable_; }
-  AstExpr& delta() const { return *delta_; }
   AstExpr& initValue() const { return *initValue_; }
+  AstExpr& delta() const { return *delta_; }
 };
 
 class AstTableSet : public AstExpr {
@@ -960,7 +999,7 @@ class AstTableSize : public AstExpr {
 
   AstRef& targetTable() { return targetTable_; }
 };
-#endif  // ENABLE_WASM_GENERALIZED_TABLES
+#endif  // ENABLE_WASM_REFTYPES
 
 #ifdef ENABLE_WASM_GC
 class AstStructNew : public AstExpr {
@@ -1034,18 +1073,18 @@ class AstStructNarrow : public AstExpr {
 };
 #endif
 
-class AstCurrentMemory final : public AstExpr {
+class AstMemorySize final : public AstExpr {
  public:
-  static const AstExprKind Kind = AstExprKind::CurrentMemory;
-  explicit AstCurrentMemory() : AstExpr(Kind, ExprType::I32) {}
+  static const AstExprKind Kind = AstExprKind::MemorySize;
+  explicit AstMemorySize() : AstExpr(Kind, ExprType::I32) {}
 };
 
-class AstGrowMemory final : public AstExpr {
+class AstMemoryGrow final : public AstExpr {
   AstExpr* operand_;
 
  public:
-  static const AstExprKind Kind = AstExprKind::GrowMemory;
-  explicit AstGrowMemory(AstExpr* operand)
+  static const AstExprKind Kind = AstExprKind::MemoryGrow;
+  explicit AstMemoryGrow(AstExpr* operand)
       : AstExpr(Kind, ExprType::I32), operand_(operand) {}
 
   AstExpr* operand() const { return operand_; }
@@ -1222,23 +1261,28 @@ class AstDataSegment : public AstNode {
 
 typedef AstVector<AstDataSegment*> AstDataSegmentVector;
 
+struct AstNullValue {};
+typedef Variant<AstRef, AstNullValue> AstElem;
+typedef AstVector<AstElem> AstElemVector;
+
 class AstElemSegment : public AstNode {
   AstRef targetTable_;
   AstExpr* offsetIfActive_;
-  AstRefVector elems_;
+  AstElemVector elems_;
 
  public:
   AstElemSegment(AstRef targetTable, AstExpr* offsetIfActive,
-                 AstRefVector&& elems)
+                 AstElemVector&& elems)
       : targetTable_(targetTable),
         offsetIfActive_(offsetIfActive),
         elems_(std::move(elems)) {}
 
   AstRef targetTable() const { return targetTable_; }
   AstRef& targetTableRef() { return targetTable_; }
+  bool isPassive() const { return offsetIfActive_ == nullptr; }
   AstExpr* offsetIfActive() const { return offsetIfActive_; }
-  AstRefVector& elems() { return elems_; }
-  const AstRefVector& elems() const { return elems_; }
+  AstElemVector& elems() { return elems_; }
+  const AstElemVector& elems() const { return elems_; }
 };
 
 typedef AstVector<AstElemSegment*> AstElemSegmentVector;
@@ -1295,6 +1339,7 @@ class AstModule : public AstNode {
 #ifdef ENABLE_WASM_GC
   uint32_t gcFeatureOptIn_;
 #endif
+  Maybe<uint32_t> dataCount_;
   ExportVector exports_;
   Maybe<AstStartFunc> startFunc_;
   FuncVector funcs_;
@@ -1335,6 +1380,12 @@ class AstModule : public AstNode {
   }
   uint32_t gcFeatureOptIn() const { return gcFeatureOptIn_; }
 #endif
+  bool initDataCount(uint32_t dataCount) {
+    MOZ_ASSERT(dataCount_.isNothing());
+    dataCount_.emplace(dataCount);
+    return true;
+  }
+  Maybe<uint32_t> dataCount() const { return dataCount_; }
   bool addTable(AstName name, const Limits& table, TableKind tableKind) {
     return tables_.append(AstTable(table, tableKind, false, name));
   }

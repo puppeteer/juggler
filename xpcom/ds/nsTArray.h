@@ -14,6 +14,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/DbgMacro.h"
 #include "mozilla/fallible.h"
 #include "mozilla/FunctionTypeTraits.h"
 #include "mozilla/MathAlgorithms.h"
@@ -36,17 +37,19 @@
 #include <functional>
 #include <initializer_list>
 #include <new>
+#include <ostream>
 
 namespace JS {
 template <class T>
 class Heap;
-class ObjectPtr;
 } /* namespace JS */
 
 class nsRegion;
 namespace mozilla {
 namespace layers {
 struct TileClient;
+struct RenderRootDisplayListData;
+struct RenderRootUpdates;
 }  // namespace layers
 }  // namespace mozilla
 
@@ -684,6 +687,8 @@ DECLARE_USE_COPY_CONSTRUCTORS_FOR_TEMPLATE(std::function)
 DECLARE_USE_COPY_CONSTRUCTORS(nsRegion)
 DECLARE_USE_COPY_CONSTRUCTORS(nsIntRegion)
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::layers::TileClient)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::layers::RenderRootDisplayListData)
+DECLARE_USE_COPY_CONSTRUCTORS(mozilla::layers::RenderRootUpdates)
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::SerializedStructuredCloneBuffer)
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::ipc::StructuredCloneData)
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::ClonedMessageData)
@@ -695,7 +700,6 @@ DECLARE_USE_COPY_CONSTRUCTORS(
 DECLARE_USE_COPY_CONSTRUCTORS(JSStructuredCloneData)
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::dom::MessagePortMessage)
 DECLARE_USE_COPY_CONSTRUCTORS(mozilla::SourceBufferTask)
-DECLARE_USE_COPY_CONSTRUCTORS(JS::ObjectPtr)
 
 //
 // Base class for nsTArray_Impl that is templated on element type and derived
@@ -768,9 +772,9 @@ struct IsCompareMethod<T, U,
 template <typename T, typename U, bool IsCompare = IsCompareMethod<T, U>::value>
 struct CompareWrapper {
 #ifdef _MSC_VER
-#pragma warning(push)
-#pragma warning(disable : 4180) /* Silence "qualifier applied to function type \
-                                   has no meaning" warning */
+#  pragma warning(push)
+#  pragma warning(disable : 4180) /* Silence "qualifier applied to function \
+                                     type has no meaning" warning */
 #endif
   MOZ_IMPLICIT CompareWrapper(const T& aComparator)
       : mComparator(aComparator) {}
@@ -792,7 +796,7 @@ struct CompareWrapper {
 
   const T& mComparator;
 #ifdef _MSC_VER
-#pragma warning(pop)
+#  pragma warning(pop)
 #endif
 };
 
@@ -1127,8 +1131,8 @@ class nsTArray_Impl
   // @return       true if the element was found.
   template <class Item, class Comparator>
   bool Contains(const Item& aItem, const Comparator& aComp) const {
-    return ApplyIf(aItem, 0, aComp, []() { return true; },
-                   []() { return false; });
+    return ApplyIf(
+        aItem, 0, aComp, []() { return true; }, []() { return false; });
   }
 
   // Like Contains(), but assumes a sorted array.
@@ -1234,7 +1238,7 @@ class nsTArray_Impl
 
     size_t index;
     bool found = BinarySearchIf(
-        *this, 0, Length(),
+        Elements(), 0, Length(),
         // Note: We pass the Compare() args here in reverse order and negate the
         // results for compatibility reasons. Some existing callers use Equals()
         // functions with first arguments which match aElement but not aItem, or
@@ -1509,11 +1513,12 @@ class nsTArray_Impl
     ::detail::CompareWrapper<Comparator, Item> comp(aComp);
 
     size_t index;
-    BinarySearchIf(*this, 0, Length(),
-                   [&](const elem_type& aElement) {
-                     return comp.Compare(aElement, aItem) <= 0 ? 1 : -1;
-                   },
-                   &index);
+    BinarySearchIf(
+        Elements(), 0, Length(),
+        [&](const elem_type& aElement) {
+          return comp.Compare(aElement, aItem) <= 0 ? 1 : -1;
+        },
+        &index);
     return index;
   }
 
@@ -2644,6 +2649,14 @@ Span<const ElementType> MakeSpan(
 }
 
 }  // namespace mozilla
+
+// MOZ_DBG support
+
+template <class E, class Alloc>
+std::ostream& operator<<(std::ostream& aOut,
+                         const nsTArray_Impl<E, Alloc>& aTArray) {
+  return aOut << mozilla::MakeSpan(aTArray);
+}
 
 // Assert that AutoTArray doesn't have any extra padding inside.
 //

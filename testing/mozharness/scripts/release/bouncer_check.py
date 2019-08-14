@@ -15,13 +15,13 @@ import sys
 
 sys.path.insert(1, os.path.dirname(os.path.dirname(sys.path[0])))
 
-from mozharness.base.python import VirtualenvMixin, virtualenv_config_options
 from mozharness.base.script import BaseScript
+from mozharness.mozilla.automation import EXIT_STATUS_DICT, TBPL_FAILURE
 
 BOUNCER_URL_PATTERN = "{bouncer_prefix}?product={product}&os={os}&lang={lang}"
 
 
-class BouncerCheck(BaseScript, VirtualenvMixin):
+class BouncerCheck(BaseScript):
     config_options = [
         [["--version"], {
             "dest": "version",
@@ -60,28 +60,24 @@ class BouncerCheck(BaseScript, VirtualenvMixin):
             "type": int,
             "help": "Number of HTTP sessions running in parallel",
         }],
-    ] + virtualenv_config_options
+    ]
 
     def __init__(self, require_config_file=True):
         super(BouncerCheck, self).__init__(
             config_options=self.config_options,
             require_config_file=require_config_file,
             config={
-                "virtualenv_modules": [
-                    "redo",
-                    "requests",
-                    "futures==3.1.1",
+                "cdn_urls": [
+                    'download-installer.cdn.mozilla.net',
+                    'download.cdn.mozilla.net',
+                    'download.mozilla.org',
+                    'archive.mozilla.org',
                 ],
-                "virtualenv_path": "venv",
             },
             all_actions=[
-                "create-virtualenv",
-                "activate-virtualenv",
                 "check-bouncer",
             ],
             default_actions=[
-                "create-virtualenv",
-                "activate-virtualenv",
                 "check-bouncer",
             ],
         )
@@ -101,44 +97,44 @@ class BouncerCheck(BaseScript, VirtualenvMixin):
 
     def check_url(self, session, url):
         from redo import retry
+        from requests.exceptions import HTTPError
         try:
             from urllib.parse import urlparse
         except ImportError:
             # Python 2
             from urlparse import urlparse
 
-        mozilla_locations = [
-            'download-installer.cdn.mozilla.net',
-            'download.cdn.mozilla.net',
-            'download.mozilla.org',
-            'archive.mozilla.org',
-        ]
-
         def do_check_url():
             self.log("Checking {}".format(url))
             r = session.head(url, verify=True, timeout=10, allow_redirects=True)
             try:
                 r.raise_for_status()
-            except Exception:
+            except HTTPError:
                 self.error("FAIL: {}, status: {}".format(url, r.status_code))
                 raise
 
             final_url = urlparse(r.url)
             if final_url.scheme != 'https':
                 self.error('FAIL: URL scheme is not https: {}'.format(r.url))
+                self.return_code = EXIT_STATUS_DICT[TBPL_FAILURE]
 
-            if final_url.netloc not in mozilla_locations:
+            if final_url.netloc not in self.config['cdn_urls']:
                 self.error('FAIL: host not in allowed locations: {}'.format(r.url))
+                self.return_code = EXIT_STATUS_DICT[TBPL_FAILURE]
 
-        retry(do_check_url, sleeptime=3, max_sleeptime=10, attempts=3)
+        try:
+            retry(do_check_url, sleeptime=3, max_sleeptime=10, attempts=3)
+        except HTTPError:
+            # The error was already logged above.
+            self.return_code = EXIT_STATUS_DICT[TBPL_FAILURE]
+            return
 
     def get_urls(self):
         for product in self.config["products"].values():
             if not product["check_uptake"]:
                 continue
             product_name = product["product-name"] % {"version": self.config["version"]}
-            for path in product["paths"].values():
-                bouncer_platform = path["bouncer-platform"]
+            for bouncer_platform in product["platforms"]:
                 for locale in self.config["locales"]:
                     url = BOUNCER_URL_PATTERN.format(
                         bouncer_prefix=self.config["bouncer_prefix"],
@@ -154,8 +150,7 @@ class BouncerCheck(BaseScript, VirtualenvMixin):
             for prev_version in self.config.get("prev_versions", []):
                 product_name = product["product-name"] % {"version": self.config["version"],
                                                           "prev_version": prev_version}
-                for path in product["paths"].values():
-                    bouncer_platform = path["bouncer-platform"]
+                for bouner_platform in product["platforms"]:
                     for locale in self.config["locales"]:
                         url = BOUNCER_URL_PATTERN.format(
                             bouncer_prefix=self.config["bouncer_prefix"],

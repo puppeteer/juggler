@@ -11,6 +11,10 @@
 #include "nsIReflowCallback.h"
 #include "nsMathMLContainerFrame.h"
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 //
 // <munderover> -- attach an underscript-overscript pair to a base
 //
@@ -20,7 +24,7 @@ class nsMathMLmunderoverFrame final : public nsMathMLContainerFrame,
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsMathMLmunderoverFrame)
 
-  friend nsIFrame* NS_NewMathMLmunderoverFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewMathMLmunderoverFrame(mozilla::PresShell* aPresShell,
                                                ComputedStyle* aStyle);
 
   nsresult Place(DrawTarget* aDrawTarget, bool aPlaceOrigin,
@@ -45,8 +49,9 @@ class nsMathMLmunderoverFrame final : public nsMathMLContainerFrame,
   void ReflowCallbackCanceled() override;
 
  protected:
-  explicit nsMathMLmunderoverFrame(ComputedStyle* aStyle)
-      : nsMathMLContainerFrame(aStyle, kClassID),
+  explicit nsMathMLmunderoverFrame(ComputedStyle* aStyle,
+                                   nsPresContext* aPresContext)
+      : nsMathMLContainerFrame(aStyle, aPresContext, kClassID),
         mIncrementUnder(false),
         mIncrementOver(false) {}
 

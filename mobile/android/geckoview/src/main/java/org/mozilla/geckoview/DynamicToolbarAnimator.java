@@ -8,14 +8,20 @@ package org.mozilla.geckoview;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.graphics.Bitmap;
+import android.support.annotation.AnyThread;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.annotation.UiThread;
 import android.util.Log;
 
 import java.util.EnumSet;
 import java.util.Set;
 
+@UiThread
 public final class DynamicToolbarAnimator {
     private static final String LOGTAG = "GeckoDynamicToolbarAnimator";
 
+    @AnyThread
     public static enum PinReason {
         DISABLED(0),
         RELAYOUT(1),
@@ -33,9 +39,16 @@ public final class DynamicToolbarAnimator {
     }
 
     public interface ToolbarChromeProxy {
-        public Bitmap getBitmapOfToolbarChrome();
-        public boolean isToolbarChromeVisible();
-        public void toggleToolbarChrome(boolean aShow);
+        @UiThread
+        @Nullable default Bitmap getBitmapOfToolbarChrome() {
+            return null;
+        }
+        @UiThread
+        default boolean isToolbarChromeVisible() {
+            return false;
+        }
+        @UiThread
+        default void toggleToolbarChrome(boolean aShow) {}
     }
 
     private final Set<PinReason> mPinFlags = EnumSet.noneOf(PinReason.class);
@@ -50,17 +63,17 @@ public final class DynamicToolbarAnimator {
         mCompositor = aTarget.mCompositor;
     }
 
-    public ToolbarChromeProxy getToolbarChromeProxy() {
+    public @Nullable ToolbarChromeProxy getToolbarChromeProxy() {
         ThreadUtils.assertOnUiThread();
         return mToolbarChromeProxy;
     }
 
-    public void setToolbarChromeProxy(ToolbarChromeProxy aToolbarChromeProxy) {
+    public void setToolbarChromeProxy(@Nullable final ToolbarChromeProxy aToolbarChromeProxy) {
         ThreadUtils.assertOnUiThread();
         mToolbarChromeProxy = aToolbarChromeProxy;
     }
 
-    public void setMaxToolbarHeight(int maxToolbarHeight) {
+    public void setMaxToolbarHeight(final int maxToolbarHeight) {
         ThreadUtils.assertOnUiThread();
 
         mMaxToolbarHeight = maxToolbarHeight;
@@ -91,13 +104,13 @@ public final class DynamicToolbarAnimator {
         return !mPinFlags.isEmpty();
     }
 
-    public boolean isPinnedBy(PinReason reason) {
+    public boolean isPinnedBy(@NonNull final PinReason reason) {
         ThreadUtils.assertOnUiThread();
 
         return mPinFlags.contains(reason);
     }
 
-    public void setPinned(final boolean pinned, final PinReason reason) {
+    public void setPinned(final boolean pinned, final @NonNull PinReason reason) {
         ThreadUtils.assertOnUiThread();
 
         if (pinned != mPinFlags.contains(reason) && mCompositor.isReady()) {
@@ -111,7 +124,7 @@ public final class DynamicToolbarAnimator {
         }
     }
 
-    public void showToolbar(boolean immediately) {
+    public void showToolbar(final boolean immediately) {
         ThreadUtils.assertOnUiThread();
 
         if (mCompositor.isReady()) {
@@ -121,7 +134,7 @@ public final class DynamicToolbarAnimator {
         }
     }
 
-    public void hideToolbar(boolean immediately) {
+    public void hideToolbar(final boolean immediately) {
         ThreadUtils.assertOnUiThread();
 
         if (mCompositor.isReady()) {

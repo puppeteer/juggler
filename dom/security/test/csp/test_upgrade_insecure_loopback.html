@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Bug 1447784 - Implement CSP upgrade-insecure-requests directive</title>
   <!-- Including SimpleTest.js so we can use waitForExplicitFinish !-->
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
 </head>
 <body>
@@ -57,7 +57,7 @@ SimpleTest.waitForExplicitFinish();
 // By default, proxies don't apply to 127.0.0.1.
 // We need them to for this test (at least on android), though:
 SpecialPowers.pushPrefEnv({set: [
-  ["network.proxy.no_proxies_on", ""]
+  ["network.proxy.allow_hijacking_localhost", true]
 ]}).then(loadTest);
 
 </script>

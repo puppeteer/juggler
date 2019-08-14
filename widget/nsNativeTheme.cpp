@@ -5,10 +5,9 @@
 
 #include "nsNativeTheme.h"
 #include "nsIWidget.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "nsIContent.h"
 #include "nsIFrame.h"
-#include "nsIPresShell.h"
 #include "nsNumberControlFrame.h"
 #include "nsPresContext.h"
 #include "nsString.h"
@@ -28,8 +27,9 @@
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/HTMLProgressElement.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs.h"
-#include "nsIDocumentInlines.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -38,13 +38,6 @@ using namespace mozilla::dom;
 nsNativeTheme::nsNativeTheme() : mAnimatedContentTimeout(UINT32_MAX) {}
 
 NS_IMPL_ISUPPORTS(nsNativeTheme, nsITimerCallback, nsINamed)
-
-nsIPresShell* nsNativeTheme::GetPresShell(nsIFrame* aFrame) {
-  if (!aFrame) return nullptr;
-
-  nsPresContext* context = aFrame->PresContext();
-  return context ? context->GetPresShell() : nullptr;
-}
 
 EventStates nsNativeTheme::GetContentState(nsIFrame* aFrame,
                                            StyleAppearance aAppearance) {
@@ -56,9 +49,6 @@ EventStates nsNativeTheme::GetContentState(nsIFrame* aFrame,
   if (isXULCheckboxRadio) aFrame = aFrame->GetParent();
 
   if (!aFrame->GetContent()) return EventStates();
-
-  nsIPresShell* shell = GetPresShell(aFrame);
-  if (!shell) return EventStates();
 
   nsIContent* frameContent = aFrame->GetContent();
   EventStates flags;
@@ -107,7 +97,7 @@ EventStates nsNativeTheme::GetContentState(nsIFrame* aFrame,
   if (aAppearance == StyleAppearance::Button) return flags;
 #endif
 #if defined(XP_MACOSX) || defined(XP_WIN)
-  nsIDocument* doc = aFrame->GetContent()->OwnerDoc();
+  Document* doc = aFrame->GetContent()->OwnerDoc();
   nsPIDOMWindowOuter* window = doc->GetWindow();
   if (window && !window->ShouldShowFocusRing()) flags &= ~NS_EVENT_STATE_FOCUS;
 #endif
@@ -341,7 +331,8 @@ bool nsNativeTheme::IsDisabled(nsIFrame* aFrame, EventStates aEventStates) {
       eCaseMatters);
 }
 
-/* static */ bool nsNativeTheme::IsFrameRTL(nsIFrame* aFrame) {
+/* static */
+bool nsNativeTheme::IsFrameRTL(nsIFrame* aFrame) {
   if (!aFrame) {
     return false;
   }
@@ -654,8 +645,7 @@ static nsIFrame* GetBodyFrame(nsIFrame* aCanvasFrame) {
   if (!content) {
     return nullptr;
   }
-  nsIDocument* document = content->OwnerDoc();
-  nsIContent* body = document->GetBodyElement();
+  nsIContent* body = content->OwnerDoc()->GetBodyElement();
   if (!body) {
     return nullptr;
   }

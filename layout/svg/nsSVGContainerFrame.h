@@ -19,9 +19,12 @@
 class gfxContext;
 class nsFrameList;
 class nsIContent;
-class nsIPresShell;
 
 struct nsRect;
+
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
 
 /**
  * Base class for SVG container frames. Frame sub-classes that do not
@@ -36,12 +39,13 @@ struct nsRect;
  * warning comment for nsSVGDisplayContainerFrame below).
  */
 class nsSVGContainerFrame : public nsContainerFrame {
-  friend nsIFrame* NS_NewSVGContainerFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewSVGContainerFrame(mozilla::PresShell* aPresShell,
                                            ComputedStyle* aStyle);
 
  protected:
-  nsSVGContainerFrame(ComputedStyle* aStyle, ClassID aID)
-      : nsContainerFrame(aStyle, aID) {
+  nsSVGContainerFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                      ClassID aID)
+      : nsContainerFrame(aStyle, aPresContext, aID) {
     AddStateBits(NS_FRAME_SVG_LAYOUT);
   }
 
@@ -106,8 +110,9 @@ class nsSVGContainerFrame : public nsContainerFrame {
 class nsSVGDisplayContainerFrame : public nsSVGContainerFrame,
                                    public nsSVGDisplayableFrame {
  protected:
-  nsSVGDisplayContainerFrame(ComputedStyle* aStyle, nsIFrame::ClassID aID)
-      : nsSVGContainerFrame(aStyle, aID) {
+  nsSVGDisplayContainerFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                             nsIFrame::ClassID aID)
+      : nsSVGContainerFrame(aStyle, aPresContext, aID) {
     AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
   }
 

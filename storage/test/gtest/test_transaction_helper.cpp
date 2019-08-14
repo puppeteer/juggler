@@ -13,7 +13,7 @@ using namespace mozilla;
 using namespace mozilla::storage;
 
 bool has_transaction(mozIStorageConnection* aDB) {
-  return !(static_cast<Connection *>(aDB)->getAutocommit());
+  return !(static_cast<Connection*>(aDB)->getAutocommit());
 }
 
 /**
@@ -29,9 +29,8 @@ TEST(storage_transaction_helper, Commit)
   {
     mozStorageTransaction transaction(db, false);
     do_check_true(has_transaction(db));
-    (void)db->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-      "CREATE TABLE test (id INTEGER PRIMARY KEY)"
-    ));
+    (void)db->ExecuteSimpleSQL(
+        NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"));
     (void)transaction.Commit();
   }
   do_check_false(has_transaction(db));
@@ -50,9 +49,8 @@ TEST(storage_transaction_helper, Rollback)
   {
     mozStorageTransaction transaction(db, true);
     do_check_true(has_transaction(db));
-    (void)db->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-      "CREATE TABLE test (id INTEGER PRIMARY KEY)"
-    ));
+    (void)db->ExecuteSimpleSQL(
+        NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"));
     (void)transaction.Rollback();
   }
   do_check_false(has_transaction(db));
@@ -71,9 +69,8 @@ TEST(storage_transaction_helper, AutoCommit)
   {
     mozStorageTransaction transaction(db, true);
     do_check_true(has_transaction(db));
-    (void)db->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-      "CREATE TABLE test (id INTEGER PRIMARY KEY)"
-    ));
+    (void)db->ExecuteSimpleSQL(
+        NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"));
   }
   do_check_false(has_transaction(db));
 
@@ -92,9 +89,8 @@ TEST(storage_transaction_helper, AutoRollback)
   {
     mozStorageTransaction transaction(db, false);
     do_check_true(has_transaction(db));
-    (void)db->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-      "CREATE TABLE test (id INTEGER PRIMARY KEY)"
-    ));
+    (void)db->ExecuteSimpleSQL(
+        NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"));
   }
   do_check_false(has_transaction(db));
 
@@ -121,16 +117,14 @@ TEST(storage_transaction_helper, async_Commit)
   // -- wedge the thread
   nsCOMPtr<nsIThread> target(get_conn_async_thread(db));
   do_check_true(target);
-  RefPtr<ThreadWedger> wedger (new ThreadWedger(target));
+  RefPtr<ThreadWedger> wedger(new ThreadWedger(target));
 
   {
-    mozStorageTransaction transaction(db, false,
-                                      mozIStorageConnection::TRANSACTION_DEFERRED,
-                                      true);
+    mozStorageTransaction transaction(
+        db, false, mozIStorageConnection::TRANSACTION_DEFERRED, true);
     do_check_true(has_transaction(db));
-    (void)db->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-      "CREATE TABLE test (id INTEGER PRIMARY KEY)"
-    ));
+    (void)db->ExecuteSimpleSQL(
+        NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"));
     (void)transaction.Commit();
   }
   do_check_true(has_transaction(db));
@@ -140,9 +134,8 @@ TEST(storage_transaction_helper, async_Commit)
 
   // Ensure the transaction has done its job by enqueueing an async execution.
   nsCOMPtr<mozIStorageAsyncStatement> stmt;
-  (void)db->CreateAsyncStatement(NS_LITERAL_CSTRING(
-    "SELECT NULL"
-  ), getter_AddRefs(stmt));
+  (void)db->CreateAsyncStatement(NS_LITERAL_CSTRING("SELECT NULL"),
+                                 getter_AddRefs(stmt));
   blocking_async_execute(stmt);
   stmt->Finalize();
   do_check_false(has_transaction(db));

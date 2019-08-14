@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "frontend/ParseNode.h"
+#include "frontend/TokenStream.h"
 #include "js/GCAnnotations.h"
 #include "vm/JSContext.h"
 
@@ -207,9 +208,7 @@ class SyntaxParseHandler {
     return NodeGeneric;
   }
 
-#ifdef ENABLE_BIGINT
   BigIntLiteralType newBigInt() { return NodeGeneric; }
-#endif
 
   BooleanLiteralType newBooleanLiteral(bool cond, const TokenPos& pos) {
     return NodeGeneric;
@@ -288,10 +287,16 @@ class SyntaxParseHandler {
   void addArrayElement(ListNodeType literal, Node element) {}
 
   ListNodeType newArguments(const TokenPos& pos) { return NodeGeneric; }
-  BinaryNodeType newCall(Node callee, Node args) { return NodeFunctionCall; }
+  CallNodeType newCall(Node callee, Node args, JSOp callOp) {
+    return NodeFunctionCall;
+  }
 
-  BinaryNodeType newSuperCall(Node callee, Node args) { return NodeGeneric; }
-  BinaryNodeType newTaggedTemplate(Node tag, Node args) { return NodeGeneric; }
+  CallNodeType newSuperCall(Node callee, Node args, bool isSpread) {
+    return NodeGeneric;
+  }
+  CallNodeType newTaggedTemplate(Node tag, Node args, JSOp callOp) {
+    return NodeGeneric;
+  }
 
   ListNodeType newObjectLiteral(uint32_t begin) {
     return NodeUnparenthesizedObject;
@@ -339,20 +344,24 @@ class SyntaxParseHandler {
     return true;
   }
   MOZ_MUST_USE bool addObjectMethodDefinition(ListNodeType literal, Node key,
-                                              CodeNodeType funNode,
+                                              FunctionNodeType funNode,
                                               AccessorType atype) {
     return true;
   }
-  MOZ_MUST_USE bool addClassMethodDefinition(ListNodeType memberList, Node key,
-                                             CodeNodeType funNode,
+  MOZ_MUST_USE Node newClassMethodDefinition(Node key, FunctionNodeType funNode,
                                              AccessorType atype,
                                              bool isStatic) {
+    return NodeGeneric;
+  }
+  MOZ_MUST_USE Node newClassFieldDefinition(Node name,
+                                            FunctionNodeType initializer) {
+    return NodeGeneric;
+  }
+  MOZ_MUST_USE bool addClassMemberDefinition(ListNodeType memberList,
+                                             Node member) {
     return true;
   }
-  MOZ_MUST_USE bool addClassFieldDefinition(ListNodeType memberList, Node name,
-                                            Node initializer) {
-    return true;
-  }
+  void deleteConstructorScope(JSContext* cx, ListNodeType memberList) {}
   UnaryNodeType newYieldExpression(uint32_t begin, Node value) {
     return NodeGeneric;
   }
@@ -478,31 +487,33 @@ class SyntaxParseHandler {
     return true;
   }
 
-  MOZ_MUST_USE bool setLastFunctionFormalParameterDefault(CodeNodeType funNode,
-                                                          Node defaultValue) {
+  MOZ_MUST_USE bool setLastFunctionFormalParameterDefault(
+      FunctionNodeType funNode, Node defaultValue) {
     return true;
   }
 
-  CodeNodeType newFunctionStatement(const TokenPos& pos) {
-    return NodeFunctionStatement;
+  void checkAndSetIsDirectRHSAnonFunction(Node pn) {}
+
+  FunctionNodeType newFunction(FunctionSyntaxKind syntaxKind,
+                               const TokenPos& pos) {
+    switch (syntaxKind) {
+      case FunctionSyntaxKind::Statement:
+        return NodeFunctionStatement;
+      case FunctionSyntaxKind::Arrow:
+        return NodeFunctionArrow;
+      default:
+        // All non-arrow function expressions are initially presumed to have
+        // block body.  This will be overridden later *if* the function
+        // expression permissibly has an AssignmentExpression body.
+        return NodeFunctionExpression;
+    }
   }
 
-  CodeNodeType newFunctionExpression(const TokenPos& pos) {
-    // All non-arrow function expressions are initially presumed to have
-    // block body.  This will be overridden later *if* the function
-    // expression permissibly has an AssignmentExpression body.
-    return NodeFunctionExpression;
-  }
-
-  CodeNodeType newArrowFunction(const TokenPos& pos) {
-    return NodeFunctionArrow;
-  }
-
-  void setFunctionFormalParametersAndBody(CodeNodeType funNode,
+  void setFunctionFormalParametersAndBody(FunctionNodeType funNode,
                                           ListNodeType paramsBody) {}
-  void setFunctionBody(CodeNodeType funNode, LexicalScopeNodeType body) {}
-  void setFunctionBox(CodeNodeType funNode, FunctionBox* funbox) {}
-  void addFunctionFormalParameter(CodeNodeType funNode, Node argpn) {}
+  void setFunctionBody(FunctionNodeType funNode, LexicalScopeNodeType body) {}
+  void setFunctionBox(FunctionNodeType funNode, FunctionBox* funbox) {}
+  void addFunctionFormalParameter(FunctionNodeType funNode, Node argpn) {}
 
   ForNodeType newForStatement(uint32_t begin, TernaryNodeType forHead,
                               Node body, unsigned iflags) {
@@ -519,9 +530,9 @@ class SyntaxParseHandler {
     return NodeGeneric;
   }
 
-  MOZ_MUST_USE bool finishInitializerAssignment(NameNodeType nameNode,
-                                                Node init) {
-    return true;
+  AssignmentNodeType finishInitializerAssignment(NameNodeType nameNode,
+                                                 Node init) {
+    return NodeUnparenthesizedAssignment;
   }
 
   void setBeginPosition(Node pn, Node oth) {}
@@ -540,9 +551,9 @@ class SyntaxParseHandler {
   }
 
   ListNodeType newList(ParseNodeKind kind, const TokenPos& pos) {
-    MOZ_ASSERT(kind != ParseNodeKind::Var);
-    MOZ_ASSERT(kind != ParseNodeKind::Let);
-    MOZ_ASSERT(kind != ParseNodeKind::Const);
+    MOZ_ASSERT(kind != ParseNodeKind::VarStmt);
+    MOZ_ASSERT(kind != ParseNodeKind::LetDecl);
+    MOZ_ASSERT(kind != ParseNodeKind::ConstDecl);
     return NodeGeneric;
   }
 
@@ -551,10 +562,11 @@ class SyntaxParseHandler {
   }
 
   ListNodeType newDeclarationList(ParseNodeKind kind, const TokenPos& pos) {
-    if (kind == ParseNodeKind::Var) {
+    if (kind == ParseNodeKind::VarStmt) {
       return NodeVarDeclaration;
     }
-    MOZ_ASSERT(kind == ParseNodeKind::Let || kind == ParseNodeKind::Const);
+    MOZ_ASSERT(kind == ParseNodeKind::LetDecl ||
+               kind == ParseNodeKind::ConstDecl);
     return NodeLexicalDeclaration;
   }
 
@@ -574,13 +586,14 @@ class SyntaxParseHandler {
                list == NodeFunctionCall);
   }
 
-  BinaryNodeType newNewExpression(uint32_t begin, Node ctor, Node args) {
+  CallNodeType newNewExpression(uint32_t begin, Node ctor, Node args,
+                                bool isSpread) {
     return NodeGeneric;
   }
 
   AssignmentNodeType newAssignment(ParseNodeKind kind, Node lhs, Node rhs) {
-    return kind == ParseNodeKind::Assign ? NodeUnparenthesizedAssignment
-                                         : NodeGeneric;
+    return kind == ParseNodeKind::AssignExpr ? NodeUnparenthesizedAssignment
+                                             : NodeGeneric;
   }
 
   bool isUnparenthesizedAssignment(Node node) {
@@ -601,7 +614,6 @@ class SyntaxParseHandler {
 
   bool isSuperBase(Node pn) { return pn == NodeSuperBase; }
 
-  void setOp(Node pn, JSOp op) {}
   void setListHasNonConstInitializer(ListNodeType literal) {}
   MOZ_MUST_USE Node parenthesize(Node node) {
     // A number of nodes have different behavior upon parenthesization, but
@@ -678,8 +690,6 @@ class SyntaxParseHandler {
     MOZ_CRASH(
         "SyntaxParseHandler::canSkipLazyClosedOverBindings must return false");
   }
-
-  void adjustGetToSet(Node node) {}
 } JS_HAZ_ROOTED;  // See the top of SyntaxParseHandler for why this is safe.
 
 }  // namespace frontend

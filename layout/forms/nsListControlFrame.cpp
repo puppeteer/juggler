@@ -11,7 +11,6 @@
 #include "nsCheckboxRadioFrame.h"  // for COMPARE macro
 #include "nsGkAtoms.h"
 #include "nsComboboxControlFrame.h"
-#include "nsIPresShell.h"
 #include "nsIXULRuntime.h"
 #include "nsFontMetrics.h"
 #include "nsIScrollableFrame.h"
@@ -32,6 +31,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextEvents.h"
 #include <algorithm>
 
@@ -80,9 +80,10 @@ class nsListEventListener final : public nsIDOMEventListener {
 };
 
 //---------------------------------------------------------
-nsContainerFrame* NS_NewListControlFrame(nsIPresShell* aPresShell,
+nsContainerFrame* NS_NewListControlFrame(PresShell* aPresShell,
                                          ComputedStyle* aStyle) {
-  nsListControlFrame* it = new (aPresShell) nsListControlFrame(aStyle);
+  nsListControlFrame* it =
+      new (aPresShell) nsListControlFrame(aStyle, aPresShell->GetPresContext());
 
   it->AddStateBits(NS_FRAME_INDEPENDENT_SELECTION);
 
@@ -92,8 +93,9 @@ nsContainerFrame* NS_NewListControlFrame(nsIPresShell* aPresShell,
 NS_IMPL_FRAMEARENA_HELPERS(nsListControlFrame)
 
 //---------------------------------------------------------
-nsListControlFrame::nsListControlFrame(ComputedStyle* aStyle)
-    : nsHTMLScrollFrame(aStyle, kClassID, false),
+nsListControlFrame::nsListControlFrame(ComputedStyle* aStyle,
+                                       nsPresContext* aPresContext)
+    : nsHTMLScrollFrame(aStyle, aPresContext, kClassID, false),
       mView(nullptr),
       mMightNeedSecondPass(false),
       mHasPendingInterruptAtStartOfReflow(false),
@@ -117,12 +119,6 @@ nsListControlFrame::nsListControlFrame(ComputedStyle* aStyle)
 nsListControlFrame::~nsListControlFrame() { mComboboxFrame = nullptr; }
 
 static bool ShouldFireDropDownEvent() {
-  // We don't need to fire the event to SelectContentHelper when content-select
-  // is enabled.
-  if (nsLayoutUtils::IsContentSelectEnabled()) {
-    return false;
-  }
-
   return (XRE_IsContentProcess() &&
           Preferences::GetBool("browser.tabs.remote.desktopbehavior", false)) ||
          Preferences::GetBool("dom.select_popup_in_parent.enabled", false);
@@ -177,10 +173,9 @@ void nsListControlFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // XXX Because we have an opaque widget and we get called to paint with
     // this frame as the root of a stacking context we need make sure to draw
     // some opaque color over the whole widget. (Bug 511323)
-    aLists.BorderBackground()->AppendToBottom(
-        MakeDisplayItem<nsDisplaySolidColor>(
-            aBuilder, this, nsRect(aBuilder->ToReferenceFrame(this), GetSize()),
-            mLastDropdownBackstopColor));
+    aLists.BorderBackground()->AppendNewToBottom<nsDisplaySolidColor>(
+        aBuilder, this, nsRect(aBuilder->ToReferenceFrame(this), GetSize()),
+        mLastDropdownBackstopColor);
   }
 
   nsHTMLScrollFrame::BuildDisplayList(aBuilder, aLists);
@@ -235,8 +230,8 @@ void nsListControlFrame::PaintFocus(DrawTarget* aDrawTarget, nsPoint aPt) {
 
   // set up back stop colors and then ask L&F service for the real colors
   nscolor color = LookAndFeel::GetColor(
-      lastItemIsSelected ? LookAndFeel::eColorID_WidgetSelectForeground
-                         : LookAndFeel::eColorID_WidgetSelectBackground);
+      lastItemIsSelected ? LookAndFeel::ColorID::WidgetSelectForeground
+                         : LookAndFeel::ColorID::WidgetSelectBackground);
 
   nsCSSRendering::PaintFocus(presContext, aDrawTarget, fRect, color);
 }
@@ -302,8 +297,10 @@ nscoord nsListControlFrame::CalcBSizeOfARow() {
   // either of which may be visible or invisible, may use different
   // fonts, etc.
   nscoord rowBSize(0);
-  if (!GetMaxRowBSize(GetOptionsContainer(), GetWritingMode(), &rowBSize)) {
+  if (StyleDisplay()->IsContainSize() ||
+      !GetMaxRowBSize(GetOptionsContainer(), GetWritingMode(), &rowBSize)) {
     // We don't have any <option>s or <optgroup> labels with a frame.
+    // (Or we're size-contained, which has the same outcome for our sizing.)
     float inflation = nsLayoutUtils::FontSizeInflationFor(this);
     rowBSize = CalcFallbackRowBSize(inflation);
   }
@@ -319,7 +316,9 @@ nscoord nsListControlFrame::GetPrefISize(gfxContext* aRenderingContext) {
   // dropdown, and standalone listboxes are overflow:scroll so they need
   // it too.
   WritingMode wm = GetWritingMode();
-  result = GetScrolledFrame()->GetPrefISize(aRenderingContext);
+  result = StyleDisplay()->IsContainSize()
+               ? 0
+               : GetScrolledFrame()->GetPrefISize(aRenderingContext);
   LogicalMargin scrollbarSize(
       wm, GetDesiredScrollbarSizes(PresContext(), aRenderingContext));
   result = NSCoordSaturatingAdd(result, scrollbarSize.IStartEnd(wm));
@@ -335,7 +334,9 @@ nscoord nsListControlFrame::GetMinISize(gfxContext* aRenderingContext) {
   // dropdown, and standalone listboxes are overflow:scroll so they need
   // it too.
   WritingMode wm = GetWritingMode();
-  result = GetScrolledFrame()->GetMinISize(aRenderingContext);
+  result = StyleDisplay()->IsContainSize()
+               ? 0
+               : GetScrolledFrame()->GetMinISize(aRenderingContext);
   LogicalMargin scrollbarSize(
       wm, GetDesiredScrollbarSizes(PresContext(), aRenderingContext));
   result += scrollbarSize.IStartEnd(wm);
@@ -602,12 +603,11 @@ void nsListControlFrame::ReflowAsDropdown(nsPresContext* aPresContext,
 ScrollStyles nsListControlFrame::GetScrollStyles() const {
   // We can't express this in the style system yet; when we can, this can go
   // away and GetScrollStyles can be devirtualized
-  int32_t style =
-      IsInDropDownMode() ? NS_STYLE_OVERFLOW_AUTO : NS_STYLE_OVERFLOW_SCROLL;
+  auto style = IsInDropDownMode() ? StyleOverflow::Auto : StyleOverflow::Scroll;
   if (GetWritingMode().IsVertical()) {
-    return ScrollStyles(style, NS_STYLE_OVERFLOW_HIDDEN);
+    return ScrollStyles(style, StyleOverflow::Hidden);
   } else {
-    return ScrollStyles(NS_STYLE_OVERFLOW_HIDDEN, style);
+    return ScrollStyles(StyleOverflow::Hidden, style);
   }
 }
 
@@ -828,9 +828,9 @@ void nsListControlFrame::CaptureMouseEvents(bool aGrabMouseEvents) {
     return;
 
   if (aGrabMouseEvents) {
-    nsIPresShell::SetCapturingContent(mContent, CAPTURE_IGNOREALLOWED);
+    PresShell::SetCapturingContent(mContent, CaptureFlags::IgnoreAllowedState);
   } else {
-    nsIContent* capturingContent = nsIPresShell::GetCapturingContent();
+    nsIContent* capturingContent = PresShell::GetCapturingContent();
 
     bool dropDownIsHidden = false;
     if (IsInDropDownMode()) {
@@ -843,7 +843,7 @@ void nsListControlFrame::CaptureMouseEvents(bool aGrabMouseEvents) {
       // which is actually grabbing
       // This shouldn't be necessary. We should simply ensure that events
       // targeting scrollbars are never visible to DOM consumers.
-      nsIPresShell::SetCapturingContent(nullptr, 0);
+      PresShell::ReleaseCapturingContent();
     }
   }
 }
@@ -919,8 +919,7 @@ void nsListControlFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                               nsIFrame* aPrevInFlow) {
   nsHTMLScrollFrame::Init(aContent, aParent, aPrevInFlow);
 
-  if (!nsLayoutUtils::IsContentSelectEnabled() && IsInDropDownMode()) {
-    // TODO(kuoe0) Remove the following code when content-select is enabled.
+  if (IsInDropDownMode()) {
     AddStateBits(NS_FRAME_IN_POPUP);
     CreateView();
   }
@@ -1297,7 +1296,7 @@ void nsListControlFrame::FireOnInputAndOnChange() {
                                        CanBubble::eYes, Cancelable::eNo);
 }
 
-NS_IMETHODIMP
+NS_IMETHODIMP_(void)
 nsListControlFrame::OnSetSelectedIndex(int32_t aOldIndex, int32_t aNewIndex) {
   if (mComboboxFrame) {
     // UpdateRecentIndex with NS_SKIP_NOTIFY_INDEX, so that we won't fire an
@@ -1308,7 +1307,7 @@ nsListControlFrame::OnSetSelectedIndex(int32_t aOldIndex, int32_t aNewIndex) {
   AutoWeakFrame weakFrame(this);
   ScrollToIndex(aNewIndex);
   if (!weakFrame.IsAlive()) {
-    return NS_OK;
+    return;
   }
   mStartSelectionIndex = aNewIndex;
   mEndSelectionIndex = aNewIndex;
@@ -1317,8 +1316,6 @@ nsListControlFrame::OnSetSelectedIndex(int32_t aOldIndex, int32_t aNewIndex) {
 #ifdef ACCESSIBILITY
   FireMenuItemActiveEvent();
 #endif
-
-  return NS_OK;
 }
 
 //----------------------------------------------------------------------
@@ -1615,7 +1612,7 @@ nsresult nsListControlFrame::GetIndexFromDOMEvent(dom::Event* aMouseEvent,
                                                   int32_t& aCurIndex) {
   if (IgnoreMouseEventForSelection(aMouseEvent)) return NS_ERROR_FAILURE;
 
-  if (nsIPresShell::GetCapturingContent() != mContent) {
+  if (PresShell::GetCapturingContent() != mContent) {
     // If we're not capturing, then ignore movement in the border
     nsPoint pt =
         nsLayoutUtils::GetDOMEventCoordinatesRelativeTo(aMouseEvent, this);
@@ -1807,7 +1804,7 @@ void nsListControlFrame::ScrollToIndex(int32_t aIndex) {
   if (aIndex < 0) {
     // XXX shouldn't we just do nothing if we're asked to scroll to
     // kNothingSelected?
-    ScrollTo(nsPoint(0, 0), nsIScrollableFrame::INSTANT);
+    ScrollTo(nsPoint(0, 0), ScrollMode::Instant);
   } else {
     RefPtr<dom::HTMLOptionElement> option =
         GetOption(AssertedCast<uint32_t>(aIndex));
@@ -1821,11 +1818,13 @@ void nsListControlFrame::ScrollToFrame(dom::HTMLOptionElement& aOptElement) {
   // otherwise we find the content's frame and scroll to it
   nsIFrame* childFrame = aOptElement.GetPrimaryFrame();
   if (childFrame) {
-    PresShell()->ScrollFrameRectIntoView(
-        childFrame, nsRect(nsPoint(0, 0), childFrame->GetSize()),
-        nsIPresShell::ScrollAxis(), nsIPresShell::ScrollAxis(),
-        nsIPresShell::SCROLL_OVERFLOW_HIDDEN |
-            nsIPresShell::SCROLL_FIRST_ANCESTOR_ONLY);
+    RefPtr<mozilla::PresShell> presShell = PresShell();
+    presShell->ScrollFrameRectIntoView(
+        childFrame, nsRect(nsPoint(0, 0), childFrame->GetSize()), ScrollAxis(),
+        ScrollAxis(),
+        ScrollFlags::ScrollOverflowHidden |
+            ScrollFlags::ScrollFirstAncestorOnly |
+            ScrollFlags::IgnoreMarginAndPadding);
   }
 }
 

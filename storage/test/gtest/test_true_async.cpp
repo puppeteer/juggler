@@ -21,18 +21,16 @@ TEST(storage_true_async, TrueAsyncStatement)
   // - statement with nothing to bind
   nsCOMPtr<mozIStorageAsyncStatement> stmt;
   db->CreateAsyncStatement(
-    NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"),
-    getter_AddRefs(stmt)
-  );
+      NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"),
+      getter_AddRefs(stmt));
   blocking_async_execute(stmt);
   stmt->Finalize();
   do_check_false(mutex_used_on_watched_thread);
 
   // - statement with something to bind ordinally
   db->CreateAsyncStatement(
-    NS_LITERAL_CSTRING("INSERT INTO test (id) VALUES (?)"),
-    getter_AddRefs(stmt)
-  );
+      NS_LITERAL_CSTRING("INSERT INTO test (id) VALUES (?)"),
+      getter_AddRefs(stmt));
   stmt->BindInt32ByIndex(0, 1);
   blocking_async_execute(stmt);
   stmt->Finalize();
@@ -40,9 +38,8 @@ TEST(storage_true_async, TrueAsyncStatement)
 
   // - statement with something to bind by name
   db->CreateAsyncStatement(
-    NS_LITERAL_CSTRING("INSERT INTO test (id) VALUES (:id)"),
-    getter_AddRefs(stmt)
-  );
+      NS_LITERAL_CSTRING("INSERT INTO test (id) VALUES (:id)"),
+      getter_AddRefs(stmt));
   nsCOMPtr<mozIStorageBindingParamsArray> paramsArray;
   stmt->NewBindingParamsArray(getter_AddRefs(paramsArray));
   nsCOMPtr<mozIStorageBindingParams> params;
@@ -80,15 +77,14 @@ TEST(storage_true_async, AsyncCancellation)
   // -- wedge the thread
   nsCOMPtr<nsIThread> target(get_conn_async_thread(db));
   do_check_true(target);
-  RefPtr<ThreadWedger> wedger (new ThreadWedger(target));
+  RefPtr<ThreadWedger> wedger(new ThreadWedger(target));
 
   // -- create statements and cancel them
   // - async
   nsCOMPtr<mozIStorageAsyncStatement> asyncStmt;
   db->CreateAsyncStatement(
-    NS_LITERAL_CSTRING("CREATE TABLE asyncTable (id INTEGER PRIMARY KEY)"),
-    getter_AddRefs(asyncStmt)
-  );
+      NS_LITERAL_CSTRING("CREATE TABLE asyncTable (id INTEGER PRIMARY KEY)"),
+      getter_AddRefs(asyncStmt));
 
   RefPtr<AsyncStatementSpinner> asyncSpin(new AsyncStatementSpinner());
   nsCOMPtr<mozIStoragePendingStatement> asyncPend;
@@ -99,9 +95,8 @@ TEST(storage_true_async, AsyncCancellation)
   // - sync
   nsCOMPtr<mozIStorageStatement> syncStmt;
   db->CreateStatement(
-    NS_LITERAL_CSTRING("CREATE TABLE syncTable (id INTEGER PRIMARY KEY)"),
-    getter_AddRefs(syncStmt)
-  );
+      NS_LITERAL_CSTRING("CREATE TABLE syncTable (id INTEGER PRIMARY KEY)"),
+      getter_AddRefs(syncStmt));
 
   RefPtr<AsyncStatementSpinner> syncSpin(new AsyncStatementSpinner());
   nsCOMPtr<mozIStoragePendingStatement> syncPend;
@@ -153,9 +148,8 @@ TEST(storage_true_async, AsyncDestructorFinalizesOnAsyncThread)
   // -- create an async statement
   nsCOMPtr<mozIStorageAsyncStatement> stmt;
   db->CreateAsyncStatement(
-    NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"),
-    getter_AddRefs(stmt)
-  );
+      NS_LITERAL_CSTRING("CREATE TABLE test (id INTEGER PRIMARY KEY)"),
+      getter_AddRefs(stmt));
 
   // -- execute it so it gets a sqlite3_stmt that needs to be finalized
   blocking_async_execute(stmt);
@@ -171,4 +165,3 @@ TEST(storage_true_async, AsyncDestructorFinalizesOnAsyncThread)
   // the close will assert if we failed to finalize!
   blocking_async_close(db);
 }
-

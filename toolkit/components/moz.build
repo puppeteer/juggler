@@ -8,7 +8,7 @@ with Files('**'):
     BUG_COMPONENT = ('Toolkit', 'General')
 
 # These component dirs are built for all apps (including suite)
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+if CONFIG['MOZ_HAS_REMOTE']:
     DIRS += ['remote']
 
 DIRS += [
@@ -21,7 +21,9 @@ DIRS += [
     'apppicker',
     'asyncshutdown',
     'backgroundhangmonitor',
+    'bitsdownload',
     'browser',
+    'certviewer',
     'cleardata',
     'clearsitedata',
     'cloudstorage',
@@ -33,21 +35,22 @@ DIRS += [
     'downloads',
     'enterprisepolicies',
     'extensions',
+    'featuregates',
     'filewatcher',
     'finalizationwitness',
     'find',
     'fuzzyfox',
     'jsoncpp/src/lib_json',
+    'kvstore',
     'lz4',
     'mediasniffer',
-    'microformats',
     'mozintl',
     'mozprotocol',
     'osfile',
     'parentalcontrols',
     'passwordmgr',
-    'perf',
     'perfmonitoring',
+    'pictureinpicture',
     'places',
     'processsingleton',
     'promiseworker',
@@ -59,8 +62,10 @@ DIRS += [
     'reflect',
     'reputationservice',
     'resistfingerprinting',
+    'search',
     'securityreporter',
     'sessionstore',
+    'shell',
     'startup',
     'statusfilter',
     'telemetry',
@@ -76,7 +81,7 @@ DIRS += [
     'windowcreator',
     'windowwatcher',
     'workerloader',
-    'xulstore'
+    'xulstore',
 ]
 
 if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
@@ -88,14 +93,8 @@ if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
 if CONFIG['BUILD_CTYPES']:
     DIRS += ['ctypes']
 
-if CONFIG['MOZ_FEEDS']:
-    DIRS += ['feeds']
-
 if CONFIG['MOZ_XUL']:
     DIRS += ['autocomplete', 'printingui', 'satchel']
-
-if CONFIG['MOZ_TOOLKIT_SEARCH']:
-    DIRS += ['search']
 
 DIRS += ['captivedetect']
 
@@ -108,10 +107,17 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     DIRS += ['gfx']
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
-    EXTRA_COMPONENTS += [
-        'nsDefaultCLH.js',
-        'nsDefaultCLH.manifest',
+    EXTRA_JS_MODULES += [
+        'DefaultCLH.jsm',
+    ]
+
+    XPCOM_MANIFESTS += [
+        'components.conf',
     ]
 
 if CONFIG['MOZ_BUILD_APP'] == 'browser':
     DIRS += ['normandy']
+
+# This is only packaged for browser since corrupt JAR and XPI files tend to be a desktop-OS problem.
+if CONFIG['MOZ_BUILD_APP'] == 'browser':
+    DIRS += ['corroborator']

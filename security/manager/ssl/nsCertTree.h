@@ -9,7 +9,6 @@
 #include "nsIServiceManager.h"
 #include "nsICertTree.h"
 #include "nsITreeView.h"
-#include "nsITreeBoxObject.h"
 #include "nsITreeSelection.h"
 #include "nsIMutableArray.h"
 #include "nsNSSComponent.h"
@@ -19,13 +18,31 @@
 #include "nsCertOverrideService.h"
 #include "mozilla/Attributes.h"
 
+/* Disable the "base class XXX should be explicitly initialized
+   in the copy constructor" warning. */
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wextra"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wextra"
+#endif  // __clang__ || __GNUC__
+
+#include "mozilla/dom/XULTreeElement.h"
+
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
+#endif  // __clang__ || __GNUC__
+
 typedef struct treeArrayElStr treeArrayEl;
 
 struct CompareCacheHashEntry {
   enum { max_criterions = 3 };
   CompareCacheHashEntry();
 
-  void *key;  // no ownership
+  void* key;  // no ownership
   bool mCritInit[max_criterions];
   nsString mCrit[max_criterions];
 };
@@ -33,7 +50,7 @@ struct CompareCacheHashEntry {
 struct CompareCacheHashEntryPtr : PLDHashEntryHdr {
   CompareCacheHashEntryPtr();
   ~CompareCacheHashEntryPtr();
-  CompareCacheHashEntry *entry;
+  CompareCacheHashEntry* entry;
 };
 
 class nsCertAddonInfo final : public nsISupports {
@@ -60,7 +77,7 @@ class nsCertTreeDispInfo : public nsICertTreeItem {
   NS_DECL_NSICERTTREEITEM
 
   nsCertTreeDispInfo();
-  nsCertTreeDispInfo(nsCertTreeDispInfo &other);
+  nsCertTreeDispInfo(nsCertTreeDispInfo& other);
 
   RefPtr<nsCertAddonInfo> mAddonInfo;
   enum { direct_db, host_port_override } mTypeOfEntry;
@@ -93,22 +110,22 @@ class nsCertTree : public nsICertTree {
   virtual ~nsCertTree();
 
   void ClearCompareHash();
-  void RemoveCacheEntry(void *key);
+  void RemoveCacheEntry(void* key);
 
-  typedef int (*nsCertCompareFunc)(void *, nsIX509Cert *a, nsIX509Cert *b);
+  typedef int (*nsCertCompareFunc)(void*, nsIX509Cert* a, nsIX509Cert* b);
 
-  static CompareCacheHashEntry *getCacheEntry(void *cache, void *aCert);
-  static void CmpInitCriterion(nsIX509Cert *cert, CompareCacheHashEntry *entry,
+  static CompareCacheHashEntry* getCacheEntry(void* cache, void* aCert);
+  static void CmpInitCriterion(nsIX509Cert* cert, CompareCacheHashEntry* entry,
                                sortCriterion crit, int32_t level);
-  static int32_t CmpByCrit(nsIX509Cert *a, CompareCacheHashEntry *ace,
-                           nsIX509Cert *b, CompareCacheHashEntry *bce,
+  static int32_t CmpByCrit(nsIX509Cert* a, CompareCacheHashEntry* ace,
+                           nsIX509Cert* b, CompareCacheHashEntry* bce,
                            sortCriterion crit, int32_t level);
-  static int32_t CmpBy(void *cache, nsIX509Cert *a, nsIX509Cert *b,
+  static int32_t CmpBy(void* cache, nsIX509Cert* a, nsIX509Cert* b,
                        sortCriterion c0, sortCriterion c1, sortCriterion c2);
-  static int32_t CmpCACert(void *cache, nsIX509Cert *a, nsIX509Cert *b);
-  static int32_t CmpWebSiteCert(void *cache, nsIX509Cert *a, nsIX509Cert *b);
-  static int32_t CmpUserCert(void *cache, nsIX509Cert *a, nsIX509Cert *b);
-  static int32_t CmpEmailCert(void *cache, nsIX509Cert *a, nsIX509Cert *b);
+  static int32_t CmpCACert(void* cache, nsIX509Cert* a, nsIX509Cert* b);
+  static int32_t CmpWebSiteCert(void* cache, nsIX509Cert* a, nsIX509Cert* b);
+  static int32_t CmpUserCert(void* cache, nsIX509Cert* a, nsIX509Cert* b);
+  static int32_t CmpEmailCert(void* cache, nsIX509Cert* a, nsIX509Cert* b);
   nsCertCompareFunc GetCompareFuncFromCertType(uint32_t aType);
   int32_t CountOrganizations();
 
@@ -116,27 +133,27 @@ class nsCertTree : public nsICertTree {
   static const uint32_t kInitialCacheLength = 64;
 
   nsTArray<RefPtr<nsCertTreeDispInfo> > mDispInfo;
-  nsCOMPtr<nsITreeBoxObject> mTree;
+  RefPtr<mozilla::dom::XULTreeElement> mTree;
   nsCOMPtr<nsITreeSelection> mSelection;
-  treeArrayEl *mTreeArray;
+  treeArrayEl* mTreeArray;
   int32_t mNumOrgs;
   int32_t mNumRows;
   PLDHashTable mCompareCache;
   nsCOMPtr<nsICertOverrideService> mOverrideService;
   RefPtr<nsCertOverrideService> mOriginalOverrideService;
 
-  treeArrayEl *GetThreadDescAtIndex(int32_t _index);
+  treeArrayEl* GetThreadDescAtIndex(int32_t _index);
   already_AddRefed<nsIX509Cert> GetCertAtIndex(
-      int32_t _index, int32_t *outAbsoluteCertOffset = nullptr);
+      int32_t _index, int32_t* outAbsoluteCertOffset = nullptr);
   already_AddRefed<nsCertTreeDispInfo> GetDispInfoAtIndex(
-      int32_t index, int32_t *outAbsoluteCertOffset = nullptr);
+      int32_t index, int32_t* outAbsoluteCertOffset = nullptr);
   void FreeCertArray();
   nsresult UpdateUIContents();
 
-  nsresult GetCertsByTypeFromCertList(nsIX509CertList *aCertList,
+  nsresult GetCertsByTypeFromCertList(nsIX509CertList* aCertList,
                                       uint32_t aType,
                                       nsCertCompareFunc aCertCmpFn,
-                                      void *aCertCmpFnArg);
+                                      void* aCertCmpFnArg);
 
   nsCOMPtr<nsIMutableArray> mCellText;
 

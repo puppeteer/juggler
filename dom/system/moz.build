@@ -6,28 +6,28 @@
 
 # This picks up *hapticfeedback* which is graveyard
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 with Files("*OSFile*"):
     BUG_COMPONENT = ("Toolkit", "OS.File")
 
 with Files("*ocationProvider*"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("windows/*LocationProvider*"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("mac/*LocationProvider*"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("mac/*OSPermissionRequest*"):
     BUG_COMPONENT = ("Firefox", "Device Permissions")
 
 with Files("linux/*LocationProvider*"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("android/*LocationProvider*"):
-    BUG_COMPONENT = ("Core", "Geolocation")
+    BUG_COMPONENT = ("Core", "DOM: Geolocation")
 
 with Files("tests/chrome.ini"):
     BUG_COMPONENT = ("Toolkit", "OS.File")
@@ -79,9 +79,12 @@ UNIFIED_SOURCES += [
     'OSFileConstants.cpp',
 ]
 
-EXTRA_COMPONENTS += [
-    'NetworkGeolocationProvider.js',
-    'NetworkGeolocationProvider.manifest',
+EXTRA_JS_MODULES += [
+    'NetworkGeolocationProvider.jsm',
+]
+
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

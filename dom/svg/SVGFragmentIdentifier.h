@@ -9,11 +9,10 @@
 
 #include "nsString.h"
 
-class nsIDocument;
-
 namespace mozilla {
 
 namespace dom {
+class Document;
 class SVGSVGElement;
 }  // namespace dom
 
@@ -32,16 +31,16 @@ class SVGFragmentIdentifier {
    * in which case further processing by the caller can stop. Otherwise return
    * false as we may have an ordinary anchor which needs to be :target matched.
    */
-  static bool ProcessFragmentIdentifier(nsIDocument *aDocument,
-                                        const nsAString &aAnchorName);
+  static bool ProcessFragmentIdentifier(dom::Document* aDocument,
+                                        const nsAString& aAnchorName);
 
  private:
   /**
    * Parse an SVG ViewSpec and set applicable attributes on the root element.
    * @return true if there is a valid ViewSpec
    */
-  static bool ProcessSVGViewSpec(const nsAString &aViewSpec,
-                                 dom::SVGSVGElement *root);
+  static bool ProcessSVGViewSpec(const nsAString& aViewSpec,
+                                 dom::SVGSVGElement* root);
 };
 
 }  // namespace mozilla

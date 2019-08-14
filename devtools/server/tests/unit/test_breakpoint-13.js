@@ -9,13 +9,18 @@
  * either a breakpoint or a debugger statement.
  */
 
-add_task(threadClientTest(({ threadClient, debuggee }) => {
-  return new Promise(resolve => {
-    threadClient.addOneTimeListener("paused", function(event, packet) {
-      const source = threadClient.source(packet.frame.where.source);
-      const location = { line: debuggee.line0 + 2 };
+add_task(
+  threadClientTest(({ threadClient, debuggee }) => {
+    return new Promise(resolve => {
+      threadClient.once("paused", async function(packet) {
+        const source = await getSourceById(
+          threadClient,
+          packet.frame.where.actor
+        );
+        const location = { sourceUrl: source.url, line: debuggee.line0 + 2 };
 
-      source.setBreakpoint(location).then(async function([response, bpClient]) {
+        threadClient.setBreakpoint(location, {});
+
         const testCallbacks = [
           function(packet) {
             // Check that the stepping worked.
@@ -25,12 +30,6 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
           function(packet) {
             // Entered the foo function call frame.
             Assert.equal(packet.frame.where.line, location.line);
-            Assert.notEqual(packet.why.type, "breakpoint");
-            Assert.equal(packet.why.type, "resumeLimit");
-          },
-          function(packet) {
-            // At the end of the foo function call frame.
-            Assert.equal(packet.frame.where.line, debuggee.line0 + 3);
             Assert.notEqual(packet.why.type, "breakpoint");
             Assert.equal(packet.why.type, "resumeLimit");
           },
@@ -70,11 +69,12 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
         const waiter = waitForPause(threadClient);
         threadClient.stepIn();
         await waiter;
-        bpClient.remove(() => threadClient.resume(resolve));
-      });
-    });
+        threadClient.removeBreakpoint(location);
 
-    /* eslint-disable */
+        threadClient.resume().then(resolve);
+      });
+
+      /* eslint-disable */
     Cu.evalInSandbox("var line0 = Error().lineNumber;\n" +
                      "function foo() {\n" + // line0 + 1
                      "  this.a = 1;\n" +    // line0 + 2 <-- Breakpoint is set here.
@@ -85,5 +85,6 @@ add_task(threadClientTest(({ threadClient, debuggee }) => {
                      "var b = 2;\n",        // line0 + 7
                      debuggee);
     /* eslint-enable */
-  });
-}));
+    });
+  })
+);

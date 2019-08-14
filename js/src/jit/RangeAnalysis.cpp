@@ -7,6 +7,7 @@
 #include "jit/RangeAnalysis.h"
 
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/TemplateLib.h"
 
 #include "jit/Ion.h"
 #include "jit/IonAnalysis.h"
@@ -1302,7 +1303,7 @@ void MClampToUint8::computeRange(TempAllocator& alloc) {
 }
 
 void MBitAnd::computeRange(TempAllocator& alloc) {
-  if (specialization_ == MIRType::Int64) {
+  if (specialization_ != MIRType::Int32) {
     return;
   }
 
@@ -1315,7 +1316,7 @@ void MBitAnd::computeRange(TempAllocator& alloc) {
 }
 
 void MBitOr::computeRange(TempAllocator& alloc) {
-  if (specialization_ == MIRType::Int64) {
+  if (specialization_ != MIRType::Int32) {
     return;
   }
 
@@ -1328,7 +1329,7 @@ void MBitOr::computeRange(TempAllocator& alloc) {
 }
 
 void MBitXor::computeRange(TempAllocator& alloc) {
-  if (specialization_ == MIRType::Int64) {
+  if (specialization_ != MIRType::Int32) {
     return;
   }
 
@@ -1341,6 +1342,10 @@ void MBitXor::computeRange(TempAllocator& alloc) {
 }
 
 void MBitNot::computeRange(TempAllocator& alloc) {
+  if (specialization_ != MIRType::Int32) {
+    return;
+  }
+
   Range op(getOperand(0));
   op.wrapAroundToInt32();
 
@@ -1348,7 +1353,7 @@ void MBitNot::computeRange(TempAllocator& alloc) {
 }
 
 void MLsh::computeRange(TempAllocator& alloc) {
-  if (specialization_ == MIRType::Int64) {
+  if (specialization_ != MIRType::Int32) {
     return;
   }
 
@@ -1368,7 +1373,7 @@ void MLsh::computeRange(TempAllocator& alloc) {
 }
 
 void MRsh::computeRange(TempAllocator& alloc) {
-  if (specialization_ == MIRType::Int64) {
+  if (specialization_ != MIRType::Int32) {
     return;
   }
 
@@ -1388,7 +1393,7 @@ void MRsh::computeRange(TempAllocator& alloc) {
 }
 
 void MUrsh::computeRange(TempAllocator& alloc) {
-  if (specialization_ == MIRType::Int64) {
+  if (specialization_ != MIRType::Int32) {
     return;
   }
 
@@ -1693,6 +1698,10 @@ void MTruncateToInt32::computeRange(TempAllocator& alloc) {
   setRange(output);
 }
 
+void MToNumeric::computeRange(TempAllocator& alloc) {
+  setRange(new (alloc) Range(getOperand(0)));
+}
+
 void MToNumberInt32::computeRange(TempAllocator& alloc) {
   // No clamping since this computes the range *before* bailouts.
   setRange(new (alloc) Range(getOperand(0)));
@@ -1724,6 +1733,8 @@ static Range* GetTypedArrayRange(TempAllocator& alloc, Scalar::Type type) {
     case Scalar::Int32:
       return Range::NewInt32Range(alloc, INT32_MIN, INT32_MAX);
 
+    case Scalar::BigInt64:
+    case Scalar::BigUint64:
     case Scalar::Int64:
     case Scalar::Float32:
     case Scalar::Float64:
@@ -1753,6 +1764,24 @@ void MInitializedLength::computeRange(TempAllocator& alloc) {
 
 void MTypedArrayLength::computeRange(TempAllocator& alloc) {
   setRange(Range::NewUInt32Range(alloc, 0, INT32_MAX));
+}
+
+void MTypedArrayByteOffset::computeRange(TempAllocator& alloc) {
+  setRange(Range::NewUInt32Range(alloc, 0, INT32_MAX));
+}
+
+void MTypedArrayElementShift::computeRange(TempAllocator& alloc) {
+  using mozilla::tl::FloorLog2;
+
+  constexpr auto MaxTypedArrayShift = FloorLog2<sizeof(double)>::value;
+
+#define ASSERT_MAX_SHIFT(T, N)                                     \
+  static_assert(FloorLog2<sizeof(T)>::value <= MaxTypedArrayShift, \
+                "unexpected typed array type exceeding 64-bits storage");
+  JS_FOR_EACH_TYPED_ARRAY(ASSERT_MAX_SHIFT)
+#undef ASSERT_MAX_SHIFT
+
+  setRange(Range::NewUInt32Range(alloc, 0, MaxTypedArrayShift));
 }
 
 void MStringLength::computeRange(TempAllocator& alloc) {
@@ -2198,9 +2227,9 @@ static inline bool SymbolicBoundIsValid(MBasicBlock* header, MBoundsCheck* ins,
 
 bool RangeAnalysis::tryHoistBoundsCheck(MBasicBlock* header,
                                         MBoundsCheck* ins) {
-  // The bounds check's length must be loop invariant.
+  // The bounds check's length must be loop invariant or a constant.
   MDefinition* length = DefinitionOrBetaInputDefinition(ins->length());
-  if (length->block()->isMarked()) {
+  if (length->block()->isMarked() && !length->isConstant()) {
     return false;
   }
 
@@ -2272,6 +2301,13 @@ bool RangeAnalysis::tryHoistBoundsCheck(MBasicBlock* header,
 
   // Hoist the loop invariant upper bounds checks.
   if (upperTerm != length || upperConstant >= 0) {
+    // Hoist the bound check's length if it isn't already loop invariant.
+    if (length->block()->isMarked()) {
+      MOZ_ASSERT(length->isConstant());
+      MInstruction* lengthIns = length->toInstruction();
+      lengthIns->block()->moveBefore(preLoop->lastIns(), lengthIns);
+    }
+
     MBoundsCheck* upperCheck = MBoundsCheck::New(alloc(), upperTerm, length);
     upperCheck->setMinimum(upperConstant);
     upperCheck->setMaximum(upperConstant);

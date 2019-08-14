@@ -16,7 +16,7 @@
 #include "nsDOMCSSDeclaration.h"
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsServiceManagerUtils.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/DeclarationBlock.h"
 #include "mozilla/css/Loader.h"
 #include "nsXULElement.h"
@@ -97,7 +97,7 @@ void nsStyledElement::InlineStyleDeclarationWillChange(
       modification ? static_cast<uint8_t>(MutationEvent_Binding::MODIFICATION)
                    : static_cast<uint8_t>(MutationEvent_Binding::ADDITION);
   nsNodeUtils::AttributeWillChange(this, kNameSpaceID_None, nsGkAtoms::style,
-                                   aData.mModType, nullptr);
+                                   aData.mModType);
 
   // XXXsmaug In order to make attribute handling more consistent, consider to
   //         call BeforeSetAttr and pass kCallAfterSetAttr to
@@ -117,7 +117,7 @@ nsresult nsStyledElement::SetInlineStyleDeclaration(
   nsAttrValue attrValue(do_AddRef(&aDeclaration), nullptr);
   SetMayHaveStyle();
 
-  nsIDocument* document = GetComposedDoc();
+  Document* document = GetComposedDoc();
   mozAutoDocUpdate updateBatch(document, true);
   return SetAttrAndNotify(kNameSpaceID_None, nsGkAtoms::style, nullptr,
                           aData.mOldValue.ptrOr(nullptr), attrValue, nullptr,
@@ -165,7 +165,7 @@ nsresult nsStyledElement::ReparseStyleAttribute(bool aForceInDataDoc,
   return NS_OK;
 }
 
-void nsStyledElement::NodeInfoChanged(nsIDocument* aOldDoc) {
+void nsStyledElement::NodeInfoChanged(Document* aOldDoc) {
   nsStyledElementBase::NodeInfoChanged(aOldDoc);
 }
 
@@ -182,12 +182,12 @@ void nsStyledElement::ParseStyleAttribute(const nsAString& aValue,
                                           nsIPrincipal* aMaybeScriptedPrincipal,
                                           nsAttrValue& aResult,
                                           bool aForceInDataDoc) {
-  nsIDocument* doc = OwnerDoc();
+  Document* doc = OwnerDoc();
   bool isNativeAnon = IsInNativeAnonymousSubtree();
 
-  if (!isNativeAnon && !nsStyleUtil::CSPAllowsInlineStyle(
-                           this, NodePrincipal(), aMaybeScriptedPrincipal,
-                           doc->GetDocumentURI(), 0, 0, aValue, nullptr))
+  if (!isNativeAnon &&
+      !nsStyleUtil::CSPAllowsInlineStyle(this, doc, aMaybeScriptedPrincipal, 0,
+                                         0, aValue, nullptr))
     return;
 
   if (aForceInDataDoc || !doc->IsLoadedAsData() || GetExistingStyle() ||

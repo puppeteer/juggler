@@ -50,16 +50,8 @@ pref("devtools.inspector.showUserAgentStyles", false);
 pref("devtools.inspector.showAllAnonymousContent", false);
 // Show user agent shadow roots
 pref("devtools.inspector.showUserAgentShadowRoots", false);
-// Enable the CSS shapes highlighter
-pref("devtools.inspector.shapesHighlighter.enabled", true);
-// Enable the font highlight-on-hover feature
-pref("devtools.inspector.fonthighlighter.enabled", true);
-// Enable tracking of style changes and the Changes panel in the Inspector
-pref("devtools.inspector.changes.enabled", true);
-
-// Flexbox preferences
-pref("devtools.inspector.flexboxHighlighter.enabled", true);
-pref("devtools.flexboxinspector.enabled", true);
+// Enable the new Rules View
+pref("devtools.inspector.new-rulesview.enabled", false);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -77,14 +69,24 @@ pref("devtools.layout.flexbox.opened", true);
 // Whether or not the grid inspector panel is opened in the layout view
 pref("devtools.layout.grid.opened", true);
 
+// Enable hovering Box Model values and jumping to their source CSS rule in the rule-view
+#if defined(NIGHTLY_BUILD)
+pref("devtools.layout.boxmodel.highlightProperty", true);
+#else
+pref("devtools.layout.boxmodel.highlightProperty", false);
+#endif
+
 // By how many times eyedropper will magnify pixels
 pref("devtools.eyedropper.zoom", 6);
 
 // Enable to collapse attributes that are too long.
 pref("devtools.markup.collapseAttributes", true);
-
 // Length to collapse attributes
 pref("devtools.markup.collapseAttributeLength", 120);
+// Whether to auto-beautify the HTML on copy.
+pref("devtools.markup.beautifyOnCopy", false);
+// Whether or not the DOM mutation breakpoints context menu are enabled in the markup view
+pref("devtools.markup.mutationBreakpoints.enabled", false);
 
 // DevTools default color unit
 pref("devtools.defaultColorUnit", "authored");
@@ -135,11 +137,16 @@ pref("devtools.performance.ui.experimental", false);
 #endif
 
 // Preferences for the new performance panel
-// This pref configures the base URL for the perf.html instance to use. This is
-// useful so that a developer can change it while working on perf.html, or in
+// This pref configures the base URL for the profiler.firefox.com instance to use. This is
+// useful so that a developer can change it while working on profiler.firefox.com, or in
 // tests.
 // This isn't exposed directly to the user.
-pref("devtools.performance.recording.ui-base-url", "https://perf-html.io");
+pref("devtools.performance.recording.ui-base-url", "https://profiler.firefox.com");
+
+// A JSON array of strings, where each string is a file path to an objdir on
+// the host machine. This is used in order to look up symbol information from
+// build artifacts of local builds.
+pref("devtools.performance.recording.objdirs", "[]");
 
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
@@ -160,13 +167,22 @@ pref("devtools.netmonitor.filters", "[\"all\"]");
 pref("devtools.netmonitor.visibleColumns",
   "[\"status\",\"method\",\"domain\",\"file\",\"cause\",\"type\",\"transferred\",\"contentSize\",\"waterfall\"]"
 );
+pref("devtools.netmonitor.columnsData",
+  '[{"name":"status","minWidth":30,"width":5}, {"name":"method","minWidth":30,"width":5}, {"name":"domain","minWidth":30,"width":10}, {"name":"file","minWidth":30,"width":25}, {"name":"url","minWidth":30,"width":25}, {"name":"cause","minWidth":30,"width":10},{"name":"type","minWidth":30,"width":5},{"name":"transferred","minWidth":30,"width":10},{"name":"contentSize","minWidth":30,"width":5},{"name":"waterfall","minWidth":150,"width":25}]');
+pref("devtools.netmonitor.ws.payload-preview-width", 550);
+pref("devtools.netmonitor.ws.payload-preview-height", 450);
+
+// Support for columns resizing pref is now enabled (after merge date 03/18/19).
+pref("devtools.netmonitor.features.resizeColumns", true);
+
+pref("devtools.netmonitor.response.ui.limit", 10240);
 
 // Save request/response bodies yes/no.
 pref("devtools.netmonitor.saveRequestAndResponseBodies", true);
 
 // The default Network monitor HAR export setting
 pref("devtools.netmonitor.har.defaultLogDir", "");
-pref("devtools.netmonitor.har.defaultFileName", "Archive %date");
+pref("devtools.netmonitor.har.defaultFileName", "%hostname_Archive [%date]");
 pref("devtools.netmonitor.har.jsonp", false);
 pref("devtools.netmonitor.har.jsonpCallback", "");
 pref("devtools.netmonitor.har.includeResponseBodies", true);
@@ -174,6 +190,9 @@ pref("devtools.netmonitor.har.compress", false);
 pref("devtools.netmonitor.har.forceExport", false);
 pref("devtools.netmonitor.har.pageLoadedTimeout", 1500);
 pref("devtools.netmonitor.har.enableAutoExportToFile", false);
+
+// Support for WebSocket monitoring pref (pending complete implementation)
+pref("devtools.netmonitor.features.webSockets", false);
 
 // Scratchpad settings
 // - recentFileMax: The maximum number of recently-opened files
@@ -207,15 +226,6 @@ pref("devtools.styleeditor.transitions", true);
 pref("devtools.screenshot.clipboard.enabled", false);
 pref("devtools.screenshot.audio.enabled", true);
 
-// Enable the Shader Editor.
-pref("devtools.shadereditor.enabled", false);
-
-// Enable the Canvas Debugger.
-pref("devtools.canvasdebugger.enabled", false);
-
-// Enable the Web Audio Editor
-pref("devtools.webaudioeditor.enabled", false);
-
 // Enable Scratchpad
 pref("devtools.scratchpad.enabled", false);
 
@@ -224,9 +234,6 @@ pref("devtools.dom.enabled", false);
 
 // Enable the Accessibility panel.
 pref("devtools.accessibility.enabled", true);
-
-// Web Audio Editor Inspector Width should be a preference
-pref("devtools.webaudioeditor.inspectorWidth", 300);
 
 // Web console filters
 pref("devtools.webconsole.filter.error", true);
@@ -238,6 +245,9 @@ pref("devtools.webconsole.filter.css", false);
 pref("devtools.webconsole.filter.net", false);
 pref("devtools.webconsole.filter.netxhr", false);
 
+// Webconsole autocomplete preference
+pref("devtools.webconsole.input.autocomplete",true);
+
 // Browser console filters
 pref("devtools.browserconsole.filter.error", true);
 pref("devtools.browserconsole.filter.warn", true);
@@ -247,11 +257,6 @@ pref("devtools.browserconsole.filter.debug", true);
 pref("devtools.browserconsole.filter.css", false);
 pref("devtools.browserconsole.filter.net", false);
 pref("devtools.browserconsole.filter.netxhr", false);
-
-// Web console filter bar settings
-pref("devtools.webconsole.ui.filterbar", false);
-// Browser console filter bar settings
-pref("devtools.browserconsole.ui.filterbar", false);
 
 // Max number of inputs to store in web console history.
 pref("devtools.webconsole.inputHistoryCount", 300);
@@ -277,11 +282,24 @@ pref("devtools.webconsole.sidebarToggle", false);
 // Enable CodeMirror in the JsTerm
 pref("devtools.webconsole.jsterm.codeMirror", true);
 
-// Enable console input reverse-search everywhere
-pref("devtools.webconsole.jsterm.reverse-search", true);
+// Enable editor mode in the console in Nightly builds.
+#if defined(NIGHTLY_BUILD)
+pref("devtools.webconsole.features.editor", true);
+#else
+pref("devtools.webconsole.features.editor", false);
+#endif
+
+// Saved editor mode state in the console.
+pref("devtools.webconsole.input.editor", false);
 
 // Disable the new performance recording panel by default
 pref("devtools.performance.new-panel-enabled", false);
+
+// Enable message grouping in the console, true by default
+pref("devtools.webconsole.groupWarningMessages", true);
+
+// Saved state of the Display content messages checkbox in the browser console.
+pref("devtools.browserconsole.contentMessages", false);
 
 // Enable client-side mapping service for source maps
 pref("devtools.source-map.client-service.enabled", true);
@@ -304,6 +322,8 @@ pref("devtools.editor.detectindentation", true);
 pref("devtools.editor.enableCodeFolding", true);
 pref("devtools.editor.autocomplete", true);
 
+// The angle of the viewport.
+pref("devtools.responsive.viewport.angle", 0);
 // The width of the viewport.
 pref("devtools.responsive.viewport.width", 320);
 // The height of the viewport.
@@ -320,6 +340,9 @@ pref("devtools.responsive.reloadConditions.userAgent", false);
 pref("devtools.responsive.reloadNotification.enabled", true);
 // Whether or not touch simulation is enabled.
 pref("devtools.responsive.touchSimulation.enabled", false);
+// Whether or not meta viewport is enabled, if and only if touchSimulation
+// is also enabled.
+pref("devtools.responsive.metaViewport.enabled", false);
 // The user agent of the viewport.
 pref("devtools.responsive.userAgent", "");
 
@@ -337,11 +360,17 @@ pref("devtools.responsive.showUserAgentInput", false);
 #endif
 
 // Enable new about:debugging.
-pref("devtools.aboutdebugging.new-enabled", false);
-// Enable the network location feature.
-pref("devtools.aboutdebugging.network", false);
-// Enable the wifi feature.
-pref("devtools.aboutdebugging.wifi", false);
+pref("devtools.aboutdebugging.new-enabled", true);
+
+// Show tab debug targets for This Firefox (on by default for local builds).
+#ifdef MOZILLA_OFFICIAL
+  pref("devtools.aboutdebugging.local-tab-debugging", false);
+#else
+  pref("devtools.aboutdebugging.local-tab-debugging", true);
+#endif
+
+// Show process debug targets.
+pref("devtools.aboutdebugging.process-debugging", true);
 // Stringified array of network locations that users can connect to.
 pref("devtools.aboutdebugging.network-locations", "[]");
 // Debug target pane collapse/expand settings.
@@ -352,11 +381,11 @@ pref("devtools.aboutdebugging.collapsibilities.sharedWorker", false);
 pref("devtools.aboutdebugging.collapsibilities.tab", false);
 pref("devtools.aboutdebugging.collapsibilities.temporaryExtension", false);
 
-// about:debugging: only show system add-ons in local builds by default.
+// about:debugging: only show system and hidden extensions in local builds by default.
 #ifdef MOZILLA_OFFICIAL
-  pref("devtools.aboutdebugging.showSystemAddons", false);
+  pref("devtools.aboutdebugging.showHiddenAddons", false);
 #else
-  pref("devtools.aboutdebugging.showSystemAddons", true);
+  pref("devtools.aboutdebugging.showHiddenAddons", true);
 #endif
 
 // Map top-level await expressions in the console

@@ -47,15 +47,15 @@ if CONFIG['ENABLE_INTL_API']:
         'icu',
     ]
 
-if CONFIG['ENABLE_BIGINT']:
-    OS_LIBS += [
-        'gmp',
-    ]
-
 USE_LIBS += [
     'nspr',
     'zlib',
 ]
+
+if CONFIG['JS_BUILD_BINAST']:
+    USE_LIBS += [
+        'brotli',
+    ]
 
 if CONFIG['OS_ARCH'] not in ('WINNT', 'HP-UX'):
     OS_LIBS += [

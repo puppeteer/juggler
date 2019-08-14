@@ -6,8 +6,8 @@
     <meta charset="utf8">
     <title></title>
 
-    <script type="application/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-    <script type="application/javascript" src="chrome://mochikit/content/chrome-harness.js"></script>
+    <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+    <script src="chrome://mochikit/content/chrome-harness.js"></script>
     <script type="application/javascript" src="head.js"></script>
     <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
   </head>
@@ -96,7 +96,9 @@
           const items = panelNode.querySelectorAll(".runtime-panel-item-usb");
           is(items.length, 3, "Found 3 runtime buttons");
 
-          let connectionsChanged = waitForConnectionChange("opened", 2);
+          let onGlobalActors = waitForUpdate(win, "runtime-global-actors");
+
+          let connectionsChanged = waitForConnectionChange("opened");
           items[0].click();
 
           ok(win.document.querySelector("window").classList.contains("busy"),
@@ -104,9 +106,9 @@
           await win.UI._busyPromise;
 
           await connectionsChanged;
-          is(Object.keys(DebuggerServer._connections).length, 2, "Connected");
+          is(Object.keys(DebuggerServer._connections).length, 1, "Connected");
 
-          await waitForUpdate(win, "runtime-global-actors");
+          await onGlobalActors;
 
           // Play button always disabled now, webapps actor removed
           ok(!isPlayActive(), "play button is disabled");
@@ -126,7 +128,7 @@
           ok(!isPlayActive(), "play button is enabled");
           ok(!isStopActive(), "stop button is disabled");
 
-          connectionsChanged = waitForConnectionChange("closed", 2);
+          connectionsChanged = waitForConnectionChange("closed");
           await win.Cmds.disconnectRuntime();
 
           await connectionsChanged;
@@ -136,15 +138,15 @@
           ok(!isPlayActive(), "play button is disabled");
           ok(!isStopActive(), "stop button is disabled");
 
-          connectionsChanged = waitForConnectionChange("opened", 2);
-          const onGlobalActors = waitForUpdate(win, "runtime-global-actors");
+          connectionsChanged = waitForConnectionChange("opened");
+          onGlobalActors = waitForUpdate(win, "runtime-global-actors");
           const onRuntimeTargets = waitForUpdate(win, "runtime-targets");
           docRuntime.querySelectorAll(".runtime-panel-item-other")[1].click();
           await connectionsChanged;
           await onGlobalActors;
           await onRuntimeTargets;
 
-          is(Object.keys(DebuggerServer._connections).length, 2, "Locally connected");
+          is(Object.keys(DebuggerServer._connections).length, 1, "Locally connected");
 
           ok(win.AppManager.isMainProcessDebuggable(), "Main process available");
 

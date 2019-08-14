@@ -3,7 +3,7 @@
 "use strict";
 /* exported Cc, Ci, Cu, Cr, Services, console, PLATFORM_DATA_PREF, getFrameNodePath,
    synthesizeProfileForTest */
-var { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm", {});
+var { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
 var Services = require("Services");
 const RecordingUtils = require("devtools/shared/performance/recording-utils");
 const PLATFORM_DATA_PREF = "devtools.performance.ui.show-platform-data";
@@ -15,7 +15,7 @@ function getFrameNodePath(root, path) {
   let calls = root.calls;
   let foundNode;
   for (const key of path.split(" > ")) {
-    foundNode = calls.find((node) => node.key == key);
+    foundNode = calls.find(node => node.key == key);
     if (!foundNode) {
       break;
     }
@@ -30,14 +30,15 @@ function getFrameNodePath(root, path) {
 function synthesizeProfileForTest(samples) {
   samples.unshift({
     time: 0,
-    frames: [
-      { location: "(root)" },
-    ],
+    frames: [{ location: "(root)" }],
   });
 
   const uniqueStacks = new RecordingUtils.UniqueStacks();
-  return RecordingUtils.deflateThread({
-    samples: samples,
-    markers: [],
-  }, uniqueStacks);
+  return RecordingUtils.deflateThread(
+    {
+      samples: samples,
+      markers: [],
+    },
+    uniqueStacks
+  );
 }

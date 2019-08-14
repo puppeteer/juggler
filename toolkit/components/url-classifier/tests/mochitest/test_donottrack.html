@@ -2,7 +2,7 @@
 <html>
 <head>
   <title>Bug 1258033 - Fix the DNT loophole for tracking protection</title>
-  <script type="text/javascript" src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <link rel="stylesheet" type="text/css" href="chrome://mochikit/content/tests/SimpleTest/test.css">
 </head>
 
@@ -65,8 +65,8 @@ const TP_PB_PREF = "privacy.trackingprotection.pbmode.enabled";
 const contentPage =
   "http://mochi.test:8888/tests/toolkit/components/url-classifier/tests/mochitest/dnt.html";
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://testing-common/TestUtils.jsm");
+const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const {TestUtils} = ChromeUtils.import("resource://testing-common/TestUtils.jsm");
 
 function executeTest(test) {
   SpecialPowers.pushPrefEnv({"set": [

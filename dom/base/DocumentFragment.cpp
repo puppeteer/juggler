@@ -18,7 +18,7 @@
 #include "nsContentUtils.h"  // for NS_INTERFACE_MAP_ENTRY_TEAROFF
 #include "mozilla/dom/DocumentFragmentBinding.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/IntegerPrintfMacros.h"
 
 namespace mozilla {
@@ -88,7 +88,8 @@ void DocumentFragment::DumpContent(FILE* out, int32_t aIndent,
 }
 #endif
 
-/* static */ already_AddRefed<DocumentFragment> DocumentFragment::Constructor(
+/* static */
+already_AddRefed<DocumentFragment> DocumentFragment::Constructor(
     const GlobalObject& aGlobal, ErrorResult& aRv) {
   nsCOMPtr<nsPIDOMWindowInner> window =
       do_QueryInterface(aGlobal.GetAsSupports());

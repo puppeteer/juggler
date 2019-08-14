@@ -3,13 +3,24 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-loader.lazyRequireGetter(this, "CSS_PROPERTIES_DB",
-  "devtools/shared/css/properties-db", true);
+loader.lazyRequireGetter(
+  this,
+  "CSS_PROPERTIES_DB",
+  "devtools/shared/css/properties-db",
+  true
+);
 
-loader.lazyRequireGetter(this, "cssColors",
-  "devtools/shared/css/color-db", true);
+loader.lazyRequireGetter(
+  this,
+  "cssColors",
+  "devtools/shared/css/color-db",
+  true
+);
 
-const { FrontClassWithSpec, Front } = require("devtools/shared/protocol");
+const {
+  FrontClassWithSpec,
+  registerFront,
+} = require("devtools/shared/protocol");
 const { cssPropertiesSpec } = require("devtools/shared/specs/css-properties");
 
 /**
@@ -22,8 +33,18 @@ var NON_ASCII = "[^\\x00-\\x7F]";
 var ESCAPE = "\\\\[^\n\r]";
 var FIRST_CHAR = ["[_a-z]", NON_ASCII, ESCAPE].join("|");
 var TRAILING_CHAR = ["[_a-z0-9-]", NON_ASCII, ESCAPE].join("|");
-var IS_VARIABLE_TOKEN = new RegExp(`^--(${FIRST_CHAR})(${TRAILING_CHAR})*$`,
-                                   "i");
+var IS_VARIABLE_TOKEN = new RegExp(
+  `^--(${FIRST_CHAR})(${TRAILING_CHAR})*$`,
+  "i"
+);
+
+loader.lazyRequireGetter(
+  this,
+  "CSS_TYPES",
+  "devtools/shared/css/constants",
+  true
+);
+
 /**
  * Check that this is a CSS variable.
  *
@@ -34,6 +55,17 @@ function isCssVariable(input) {
   return !!input.match(IS_VARIABLE_TOKEN);
 }
 
+/**
+ * Check that this is a valid identifier.
+ *
+ * @param {String} input
+ * @return {Boolean}
+ * @see https://www.w3.org/TR/CSS21/syndata.html#value-def-identifier
+ */
+function isIdentifier(input) {
+  return input === CSS.escape(input);
+}
+
 var cachedCssProperties = new WeakMap();
 
 /**
@@ -42,12 +74,14 @@ var cachedCssProperties = new WeakMap();
  * interface that provides synchronous methods for finding out what CSS
  * properties the current server supports.
  */
-const CssPropertiesFront = FrontClassWithSpec(cssPropertiesSpec, {
-  initialize: function(client, { cssPropertiesActor }) {
-    Front.prototype.initialize.call(this, client, {actor: cssPropertiesActor});
-    this.manage(this);
-  },
-});
+class CssPropertiesFront extends FrontClassWithSpec(cssPropertiesSpec) {
+  constructor(client) {
+    super(client);
+
+    // Attribute name from which to retrieve the actorID out of the target actor's form
+    this.formAttributeName = "cssPropertiesActor";
+  }
+}
 
 /**
  * Query the feature supporting status in the featureSet.
@@ -80,15 +114,18 @@ function CssProperties(db) {
   this.pseudoElements = db.pseudoElements;
 
   // supported feature
-  this.cssColor4ColorFunction = hasFeature(db.supportedFeature,
-                                           "css-color-4-color-function");
+  this.cssColor4ColorFunction = hasFeature(
+    db.supportedFeature,
+    "css-color-4-color-function"
+  );
 
   this.isKnown = this.isKnown.bind(this);
   this.isInherited = this.isInherited.bind(this);
   this.supportsType = this.supportsType.bind(this);
   this.isValidOnClient = this.isValidOnClient.bind(this);
-  this.supportsCssColor4ColorFunction =
-    this.supportsCssColor4ColorFunction.bind(this);
+  this.supportsCssColor4ColorFunction = this.supportsCssColor4ColorFunction.bind(
+    this
+  );
 
   // A weakly held dummy HTMLDivElement to test CSS properties on the client.
   this._dummyElements = new WeakMap();
@@ -103,6 +140,8 @@ CssProperties.prototype = {
    * @return {Boolean}
    */
   isKnown(property) {
+    // Custom Property Names (aka CSS Variables) are case-sensitive; do not lowercase.
+    property = property.startsWith("--") ? property : property.toLowerCase();
     return !!this.properties[property] || isCssVariable(property);
   },
 
@@ -115,9 +154,14 @@ CssProperties.prototype = {
    * @return {Boolean}
    */
   isValidOnClient(name, value, doc) {
+    // The property name should be an identifier.
+    if (!isIdentifier(name)) {
+      return false;
+    }
+
     let dummyElement = this._dummyElements.get(doc);
     if (!dummyElement) {
-      dummyElement = doc.createElement("div");
+      dummyElement = doc.createElementNS("http://www.w3.org/1999/xhtml", "div");
       this._dummyElements.set(doc, dummyElement);
     }
 
@@ -152,20 +196,26 @@ CssProperties.prototype = {
    * @return {Boolean}
    */
   isInherited(property) {
-    return (this.properties[property] && this.properties[property].isInherited) ||
-            isCssVariable(property);
+    return (
+      (this.properties[property] && this.properties[property].isInherited) ||
+      isCssVariable(property)
+    );
   },
 
   /**
    * Checks if the property supports the given CSS type.
-   * CSS types should come from devtools/shared/css/constants.js' CSS_TYPES.
    *
    * @param {String} property The property to be checked.
-   * @param {Number} type One of the type values from CSS_TYPES.
+   * @param {String} type One of the values from InspectorPropertyType.
    * @return {Boolean}
    */
   supportsType(property, type) {
-    return this.properties[property] && this.properties[property].supports.includes(type);
+    const id = CSS_TYPES[type];
+    return (
+      this.properties[property] &&
+      (this.properties[property].supports.includes(type) ||
+        this.properties[property].supports.includes(id))
+    );
   },
 
   /**
@@ -197,6 +247,8 @@ CssProperties.prototype = {
    * @return {Array} An array of subproperty names.
    */
   getSubproperties(name) {
+    // Custom Property Names (aka CSS Variables) are case-sensitive; do not lowercase.
+    name = name.startsWith("--") ? name : name.toLowerCase();
     if (this.isKnown(name)) {
       if (this.properties[name] && this.properties[name].subproperties) {
         return this.properties[name].subproperties;
@@ -238,8 +290,8 @@ const initCssProperties = async function(toolbox) {
   const db = await front.getCSSDatabase();
 
   const cssProperties = new CssProperties(normalizeCssData(db));
-  cachedCssProperties.set(client, {cssProperties, front});
-  return {cssProperties, front};
+  cachedCssProperties.set(client, { cssProperties, front });
+  return { cssProperties, front };
 };
 
 /**
@@ -250,9 +302,11 @@ const initCssProperties = async function(toolbox) {
  */
 function getCssProperties(toolbox) {
   if (!cachedCssProperties.has(toolbox.target.client)) {
-    throw new Error("The CSS database has not been initialized, please make " +
-                    "sure initCssDatabase was called once before for this " +
-                    "toolbox.");
+    throw new Error(
+      "The CSS database has not been initialized, please make " +
+        "sure initCssDatabase was called once before for this " +
+        "toolbox."
+    );
   }
   return cachedCssProperties.get(toolbox.target.client).cssProperties;
 }
@@ -278,7 +332,7 @@ function normalizeCssData(db) {
   // If there is a `from` attributes, it means that it comes from RDP
   // and it is not the client CSS_PROPERTIES_DB object.
   // (prevent comparing to CSS_PROPERTIES_DB to avoid loading client database)
-  if (typeof (db.from) == "string") {
+  if (typeof db.from == "string") {
     // Firefox 49's getCSSDatabase() just returned the properties object, but
     // now it returns an object with multiple types of CSS information.
     if (!db.properties) {
@@ -290,7 +344,10 @@ function normalizeCssData(db) {
     const missingSubproperties = !db.properties.background.subproperties;
     const missingIsInherited = !db.properties.font.isInherited;
 
-    const missingSomething = missingSupports || missingValues || missingSubproperties ||
+    const missingSomething =
+      missingSupports ||
+      missingValues ||
+      missingSubproperties ||
       missingIsInherited;
 
     if (missingSomething) {
@@ -302,11 +359,13 @@ function normalizeCssData(db) {
 
         // Add "supports" information to the css properties if it's missing.
         if (missingSupports) {
-          db.properties[name].supports = CSS_PROPERTIES_DB.properties[name].supports;
+          db.properties[name].supports =
+            CSS_PROPERTIES_DB.properties[name].supports;
         }
         // Add "values" information to the css properties if it's missing.
         if (missingValues) {
-          db.properties[name].values = CSS_PROPERTIES_DB.properties[name].values;
+          db.properties[name].values =
+            CSS_PROPERTIES_DB.properties[name].values;
         }
         // Add "subproperties" information to the css properties if it's missing.
         if (missingSubproperties) {
@@ -359,3 +418,4 @@ module.exports = {
   initCssProperties,
   isCssVariable,
 };
+registerFront(CssPropertiesFront);

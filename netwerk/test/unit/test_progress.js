@@ -1,5 +1,4 @@
-ChromeUtils.import("resource://testing-common/httpd.js");
-ChromeUtils.import("resource://gre/modules/NetUtil.jsm");
+const { HttpServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 
 XPCOMUtils.defineLazyGetter(this, "URL", function() {
   return "http://localhost:" + httpserver.identity.primaryPort;
@@ -9,7 +8,8 @@ var httpserver = new HttpServer();
 var testpath = "/simple";
 var httpbody = "0123456789";
 
-var last = 0, max = 0;
+var last = 0,
+  max = 0;
 
 const STATUS_RECEIVING_FROM = 0x804b0006;
 const LOOPS = 50000;
@@ -26,49 +26,49 @@ var progressCallback = {
   _got_onstatus_after_onstartrequest: false,
   _last_callback_handled: null,
 
-  QueryInterface: function (iid) {
-    if (iid.equals(Ci.nsISupports) ||
-	iid.equals(Ci.nsIProgressEventSink) ||
-        iid.equals(Ci.nsIStreamListener) ||
-        iid.equals(Ci.nsIRequestObserver))
+  QueryInterface: ChromeUtils.generateQI([
+    "nsIProgressEventSink",
+    "nsIStreamListener",
+    "nsIRequestObserver",
+  ]),
+
+  getInterface(iid) {
+    if (
+      iid.equals(Ci.nsIProgressEventSink) ||
+      iid.equals(Ci.nsIStreamListener) ||
+      iid.equals(Ci.nsIRequestObserver)
+    ) {
       return this;
+    }
     throw Cr.NS_ERROR_NO_INTERFACE;
   },
 
-  getInterface: function (iid) {
-    if (iid.equals(Ci.nsIProgressEventSink) ||
-        iid.equals(Ci.nsIStreamListener) ||
-        iid.equals(Ci.nsIRequestObserver))
-      return this;
-    throw Cr.NS_ERROR_NO_INTERFACE;
-  },
-
-  onStartRequest: function(request, context) {
+  onStartRequest(request) {
     Assert.equal(this._last_callback_handled, TYPE_ONSTATUS);
     this._got_onstartrequest = true;
     this._last_callback_handled = TYPE_ONSTARTREQUEST;
 
     this._listener = new ChannelListener(checkRequest, request);
-    this._listener.onStartRequest(request, context);
+    this._listener.onStartRequest(request);
   },
 
-  onDataAvailable: function(request, context, data, offset, count) {
+  onDataAvailable(request, data, offset, count) {
     Assert.equal(this._last_callback_handled, TYPE_ONPROGRESS);
     this._last_callback_handled = TYPE_ONDATAAVAILABLE;
 
-    this._listener.onDataAvailable(request, context, data, offset, count);
+    this._listener.onDataAvailable(request, data, offset, count);
   },
 
-  onStopRequest: function(request, context, status) {
+  onStopRequest(request, status) {
     Assert.equal(this._last_callback_handled, TYPE_ONDATAAVAILABLE);
     Assert.ok(this._got_onstatus_after_onstartrequest);
     this._last_callback_handled = TYPE_ONSTOPREQUEST;
 
-    this._listener.onStopRequest(request, context, status);
+    this._listener.onStopRequest(request, status);
     delete this._listener;
   },
 
-  onProgress: function (request, context, progress, progressMax) {
+  onProgress(request, context, progress, progressMax) {
     Assert.equal(this._last_callback_handled, TYPE_ONSTATUS);
     this._last_callback_handled = TYPE_ONPROGRESS;
 
@@ -77,11 +77,12 @@ var progressCallback = {
     max = progressMax;
   },
 
-  onStatus: function (request, context, status, statusArg) {
+  onStatus(request, context, status, statusArg) {
     if (!this._got_onstartrequest) {
       // Ensure that all messages before onStartRequest are onStatus
-      if (this._last_callback_handled)
+      if (this._last_callback_handled) {
         Assert.equal(this._last_callback_handled, TYPE_ONSTATUS);
+      }
     } else if (this._last_callback_handled == TYPE_ONSTARTREQUEST) {
       this._got_onstatus_after_onstartrequest = true;
     } else {
@@ -100,14 +101,14 @@ function run_test() {
   httpserver.registerPathHandler(testpath, serverHandler);
   httpserver.start(-1);
   var channel = setupChannel(testpath);
-  channel.asyncOpen2(progressCallback);
+  channel.asyncOpen(progressCallback);
   do_test_pending();
 }
 
 function setupChannel(path) {
   var chan = NetUtil.newChannel({
     uri: URL + path,
-    loadUsingSystemPrincipal: true
+    loadUsingSystemPrincipal: true,
   });
   chan.QueryInterface(Ci.nsIHttpChannel);
   chan.requestMethod = "GET";
@@ -117,12 +118,13 @@ function setupChannel(path) {
 
 function serverHandler(metadata, response) {
   response.setHeader("Content-Type", "text/plain", false);
-  for (let i = 0; i < LOOPS; i++)
+  for (let i = 0; i < LOOPS; i++) {
     response.bodyOutputStream.write(httpbody, httpbody.length);
+  }
 }
 
 function checkRequest(request, data, context) {
-  Assert.equal(last, httpbody.length*LOOPS);
-  Assert.equal(max, httpbody.length*LOOPS);
+  Assert.equal(last, httpbody.length * LOOPS);
+  Assert.equal(max, httpbody.length * LOOPS);
   httpserver.stop(do_test_finished);
 }

@@ -22,18 +22,18 @@
 #include "mozilla/TypeTraits.h"
 
 #if ENABLE_INTL_API
-#include "unicode/ucal.h"
-#include "unicode/ucol.h"
-#include "unicode/udat.h"
-#include "unicode/udatpg.h"
-#include "unicode/udisplaycontext.h"
-#include "unicode/uenum.h"
-#include "unicode/uloc.h"
-#include "unicode/unum.h"
-#include "unicode/unumsys.h"
-#include "unicode/upluralrules.h"
-#include "unicode/ureldatefmt.h"
-#include "unicode/ustring.h"
+#  include "unicode/ucal.h"
+#  include "unicode/ucol.h"
+#  include "unicode/udat.h"
+#  include "unicode/udatpg.h"
+#  include "unicode/udisplaycontext.h"
+#  include "unicode/uenum.h"
+#  include "unicode/uloc.h"
+#  include "unicode/unum.h"
+#  include "unicode/unumsys.h"
+#  include "unicode/upluralrules.h"
+#  include "unicode/ureldatefmt.h"
+#  include "unicode/ustring.h"
 #endif
 
 /*
@@ -45,6 +45,8 @@
  */
 
 #if !ENABLE_INTL_API
+
+#  define U_ICU_VERSION_MAJOR_NUM 64
 
 enum UErrorCode {
   U_ZERO_ERROR,
@@ -226,6 +228,8 @@ enum UNumberFormatFields {
   UNUM_EXPONENT_SYMBOL_FIELD,
   UNUM_EXPONENT_SIGN_FIELD,
   UNUM_EXPONENT_FIELD,
+  UNUM_MEASURE_UNIT_FIELD,
+  UNUM_COMPACT_FIELD,
   UNUM_FIELD_COUNT,
 };
 

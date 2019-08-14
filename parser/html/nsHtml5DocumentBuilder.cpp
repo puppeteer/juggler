@@ -7,7 +7,6 @@
 #include "nsHtml5DocumentBuilder.h"
 
 #include "mozilla/dom/ScriptLoader.h"
-#include "nsIHTMLDocument.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsNameSpaceManager.h"
 #include "nsStyleLinkElement.h"
@@ -26,8 +25,8 @@ nsHtml5DocumentBuilder::nsHtml5DocumentBuilder(bool aRunsToCompletion)
   mRunsToCompletion = aRunsToCompletion;
 }
 
-nsresult nsHtml5DocumentBuilder::Init(nsIDocument* aDoc, nsIURI* aURI,
-                                      nsISupports* aContainer,
+nsresult nsHtml5DocumentBuilder::Init(mozilla::dom::Document* aDoc,
+                                      nsIURI* aURI, nsISupports* aContainer,
                                       nsIChannel* aChannel) {
   return nsContentSink::Init(aDoc, aURI, aContainer, aChannel);
 }
@@ -92,9 +91,7 @@ void nsHtml5DocumentBuilder::SetDocumentMode(nsHtml5DocumentMode m) {
       mode = eCompatibility_NavQuirks;
       break;
   }
-  nsCOMPtr<nsIHTMLDocument> htmlDocument = do_QueryInterface(mDocument);
-  NS_ASSERTION(htmlDocument, "Document didn't QI into HTML document.");
-  htmlDocument->SetCompatibilityMode(mode);
+  mDocument->SetCompatibilityMode(mode);
 }
 
 // nsContentSink overrides

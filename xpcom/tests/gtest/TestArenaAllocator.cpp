@@ -6,16 +6,14 @@
 
 #include "mozilla/ArenaAllocator.h"
 #include "mozilla/ArenaAllocatorExtensions.h"
-#include "nsIMemoryReporter.h" // MOZ_MALLOC_SIZE_OF
+#include "nsIMemoryReporter.h"  // MOZ_MALLOC_SIZE_OF
 
 #include "gtest/gtest.h"
 
 using mozilla::ArenaAllocator;
 
 TEST(ArenaAllocator, Constructor)
-{
-  ArenaAllocator<4096, 4> a;
-}
+{ ArenaAllocator<4096, 4> a; }
 
 TEST(ArenaAllocator, DefaultAllocate)
 {
@@ -79,7 +77,7 @@ TEST(ArenaAllocator, BadAlignment)
 TEST(ArenaAllocator, AllocateMultipleSizes)
 {
   // Test non-default 4-byte alignment.
-  ArenaAllocator<4096,4> a;
+  ArenaAllocator<4096, 4> a;
 
   for (int i = 1; i < 50; i++) {
     void* x = a.Allocate(i);

@@ -99,8 +99,8 @@ nsSimpleNestedURI::Write(nsIObjectOutputStream* aStream) {
   return rv;
 }
 
-// nsIIPCSerializableURI
-void nsSimpleNestedURI::Serialize(mozilla::ipc::URIParams& aParams) {
+NS_IMETHODIMP_(void)
+nsSimpleNestedURI::Serialize(mozilla::ipc::URIParams& aParams) {
   using namespace mozilla::ipc;
 
   SimpleNestedURIParams params;
@@ -146,7 +146,8 @@ nsSimpleNestedURI::GetInnermostURI(nsIURI** uri) {
 }
 
 // nsSimpleURI overrides
-/* virtual */ nsresult nsSimpleNestedURI::EqualsInternal(
+/* virtual */
+nsresult nsSimpleNestedURI::EqualsInternal(
     nsIURI* other, nsSimpleURI::RefHandlingEnum refHandlingMode, bool* result) {
   *result = false;
   NS_ENSURE_TRUE(mInnerURI, NS_ERROR_NOT_INITIALIZED);
@@ -173,7 +174,8 @@ nsSimpleNestedURI::GetInnermostURI(nsIURI** uri) {
   return NS_OK;
 }
 
-/* virtual */ nsSimpleURI* nsSimpleNestedURI::StartClone(
+/* virtual */
+nsSimpleURI* nsSimpleNestedURI::StartClone(
     nsSimpleURI::RefHandlingEnum refHandlingMode, const nsACString& newRef) {
   NS_ENSURE_TRUE(mInnerURI, nullptr);
 

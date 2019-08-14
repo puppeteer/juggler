@@ -16,8 +16,8 @@
 #include "js/CharacterEncoding.h"
 #include "js/Value.h"
 #include "vm/Debugger.h"
+#include "vm/EqualityOperations.h"  // js::SameValue
 #include "vm/TypedArrayObject.h"
-#include "vm/UnboxedObject.h"
 
 #include "gc/Nursery-inl.h"
 #include "vm/ArrayObject-inl.h"
@@ -26,7 +26,6 @@
 #include "vm/JSScript-inl.h"
 #include "vm/Shape-inl.h"
 #include "vm/TypeInference-inl.h"
-#include "vm/UnboxedObject-inl.h"
 
 using namespace js;
 
@@ -72,8 +71,9 @@ bool NativeObject::canHaveNonEmptyElements() {
 
 #endif  // DEBUG
 
-/* static */ void ObjectElements::ConvertElementsToDoubles(
-    JSContext* cx, uintptr_t elementsPtr) {
+/* static */
+void ObjectElements::ConvertElementsToDoubles(JSContext* cx,
+                                              uintptr_t elementsPtr) {
   /*
    * This function has an otherwise unused JSContext argument so that it can
    * be called directly from Ion code. Only arrays can have their dense
@@ -98,8 +98,8 @@ bool NativeObject::canHaveNonEmptyElements() {
   header->setShouldConvertDoubleElements();
 }
 
-/* static */ bool ObjectElements::MakeElementsCopyOnWrite(JSContext* cx,
-                                                          NativeObject* obj) {
+/* static */
+bool ObjectElements::MakeElementsCopyOnWrite(JSContext* cx, NativeObject* obj) {
   static_assert(sizeof(HeapSlot) >= sizeof(GCPtrObject),
                 "there must be enough room for the owner object pointer at "
                 "the end of the elements");
@@ -119,8 +119,8 @@ bool NativeObject::canHaveNonEmptyElements() {
   return true;
 }
 
-/* static */ bool ObjectElements::PreventExtensions(JSContext* cx,
-                                                    NativeObject* obj) {
+/* static */
+bool ObjectElements::PreventExtensions(JSContext* cx, NativeObject* obj) {
   if (!obj->maybeCopyElementsForWrite(cx)) {
     return false;
   }
@@ -136,8 +136,9 @@ bool NativeObject::canHaveNonEmptyElements() {
   return true;
 }
 
-/* static */ void ObjectElements::FreezeOrSeal(JSContext* cx, NativeObject* obj,
-                                               IntegrityLevel level) {
+/* static */
+void ObjectElements::FreezeOrSeal(JSContext* cx, NativeObject* obj,
+                                  IntegrityLevel level) {
   MOZ_ASSERT_IF(level == IntegrityLevel::Frozen && obj->is<ArrayObject>(),
                 !obj->as<ArrayObject>().lengthIsWritable());
   MOZ_ASSERT(!obj->denseElementsAreCopyOnWrite());
@@ -162,7 +163,8 @@ static mozilla::Atomic<bool, mozilla::Relaxed,
                        mozilla::recordreplay::Behavior::DontPreserve>
     gShapeConsistencyChecksEnabled(false);
 
-/* static */ void js::NativeObject::enableShapeConsistencyChecks() {
+/* static */
+void js::NativeObject::enableShapeConsistencyChecks() {
   gShapeConsistencyChecksEnabled = true;
 }
 
@@ -200,7 +202,7 @@ void js::NativeObject::checkShapeConsistency() {
                     shape->slot() < slotSpan());
       if (!prev) {
         MOZ_ASSERT(lastProperty() == shape);
-        MOZ_ASSERT(shape->listp == &shapeRef());
+        MOZ_ASSERT(shape->listp == &shape_);
       } else {
         MOZ_ASSERT(shape->listp == &prev->parent);
       }
@@ -265,21 +267,6 @@ void js::NativeObject::initSlotRange(uint32_t start, const Value* vector,
   }
 }
 
-void js::NativeObject::copySlotRange(uint32_t start, const Value* vector,
-                                     uint32_t length) {
-  HeapSlot* fixedStart;
-  HeapSlot* fixedEnd;
-  HeapSlot* slotsStart;
-  HeapSlot* slotsEnd;
-  getSlotRange(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
-  for (HeapSlot* sp = fixedStart; sp < fixedEnd; sp++) {
-    sp->set(this, HeapSlot::Slot, start++, *vector++);
-  }
-  for (HeapSlot* sp = slotsStart; sp < slotsEnd; sp++) {
-    sp->set(this, HeapSlot::Slot, start++, *vector++);
-  }
-}
-
 #ifdef DEBUG
 
 bool js::NativeObject::slotInRange(uint32_t slot,
@@ -334,50 +321,6 @@ void NativeObject::setLastPropertyShrinkFixedSlots(Shape* shape) {
   setShape(shape);
 }
 
-void NativeObject::setLastPropertyMakeNonNative(Shape* shape) {
-  MOZ_ASSERT(!inDictionaryMode());
-  MOZ_ASSERT(!shape->getObjectClass()->isNative());
-  MOZ_ASSERT(shape->zone() == zone());
-  MOZ_ASSERT(shape->slotSpan() == 0);
-  MOZ_ASSERT(shape->numFixedSlots() == 0);
-
-  if (hasDynamicElements()) {
-    js_free(getUnshiftedElementsHeader());
-  }
-  if (hasDynamicSlots()) {
-    js_free(slots_);
-    slots_ = nullptr;
-  }
-
-  setShape(shape);
-}
-
-void NativeObject::setLastPropertyMakeNative(JSContext* cx, Shape* shape) {
-  MOZ_ASSERT(getClass()->isNative());
-  MOZ_ASSERT(shape->getObjectClass()->isNative());
-  MOZ_ASSERT(!shape->inDictionary());
-
-  // This method is used to convert unboxed objects into native objects. In
-  // this case, the shape_ field was previously used to store other data and
-  // this should be treated as an initialization.
-  initShape(shape);
-
-  slots_ = nullptr;
-  elements_ = emptyObjectElements;
-
-  size_t oldSpan = shape->numFixedSlots();
-  size_t newSpan = shape->slotSpan();
-
-  initializeSlotRange(0, oldSpan);
-
-  // A failure at this point will leave the object as a mutant, and we
-  // can't recover.
-  AutoEnterOOMUnsafeRegion oomUnsafe;
-  if (oldSpan != newSpan && !updateSlotsForSpan(cx, oldSpan, newSpan)) {
-    oomUnsafe.crash("NativeObject::setLastPropertyMakeNative");
-  }
-}
-
 bool NativeObject::setSlotSpan(JSContext* cx, uint32_t span) {
   MOZ_ASSERT(inDictionaryMode());
 
@@ -414,6 +357,9 @@ bool NativeObject::growSlots(JSContext* cx, uint32_t oldCount,
       return false;
     }
     Debug_SetSlotRangeToCrashOnTouch(slots_, newCount);
+
+    AddCellMemory(this, newCount * sizeof(HeapSlot), MemoryUse::ObjectSlots);
+
     return true;
   }
 
@@ -423,6 +369,9 @@ bool NativeObject::growSlots(JSContext* cx, uint32_t oldCount,
     return false; /* Leave slots at its old size. */
   }
 
+  RemoveCellMemory(this, oldCount * sizeof(HeapSlot), MemoryUse::ObjectSlots);
+  AddCellMemory(this, newCount * sizeof(HeapSlot), MemoryUse::ObjectSlots);
+
   slots_ = newslots;
 
   Debug_SetSlotRangeToCrashOnTouch(slots_ + oldCount, newCount - oldCount);
@@ -430,8 +379,9 @@ bool NativeObject::growSlots(JSContext* cx, uint32_t oldCount,
   return true;
 }
 
-/* static */ bool NativeObject::growSlotsPure(JSContext* cx, NativeObject* obj,
-                                              uint32_t newCount) {
+/* static */
+bool NativeObject::growSlotsPure(JSContext* cx, NativeObject* obj,
+                                 uint32_t newCount) {
   // IC code calls this directly.
   AutoUnsafeCallWithABI unsafe;
 
@@ -442,8 +392,8 @@ bool NativeObject::growSlots(JSContext* cx, uint32_t oldCount,
   return true;
 }
 
-/* static */ bool NativeObject::addDenseElementPure(JSContext* cx,
-                                                    NativeObject* obj) {
+/* static */
+bool NativeObject::addDenseElementPure(JSContext* cx, NativeObject* obj) {
   // IC code calls this directly.
   AutoUnsafeCallWithABI unsafe;
 
@@ -468,8 +418,12 @@ bool NativeObject::growSlots(JSContext* cx, uint32_t oldCount,
   return true;
 }
 
-static void FreeSlots(JSContext* cx, HeapSlot* slots) {
-  if (cx->helperThread()) {
+static inline void FreeSlots(JSContext* cx, NativeObject* obj,
+                             HeapSlot* slots) {
+  if (cx->isHelperThreadContext()) {
+    js_free(slots);
+  } else if (obj->isTenured()) {
+    MOZ_ASSERT(!cx->nursery().isInside(slots));
     js_free(slots);
   } else {
     cx->nursery().freeBuffer(slots);
@@ -481,18 +435,25 @@ void NativeObject::shrinkSlots(JSContext* cx, uint32_t oldCount,
   MOZ_ASSERT(newCount < oldCount);
 
   if (newCount == 0) {
-    FreeSlots(cx, slots_);
+    RemoveCellMemory(this, numDynamicSlots() * sizeof(HeapSlot),
+                     MemoryUse::ObjectSlots);
+    FreeSlots(cx, this, slots_);
     slots_ = nullptr;
     return;
   }
 
   MOZ_ASSERT_IF(!is<ArrayObject>(), newCount >= SLOT_CAPACITY_MIN);
 
+  // Update the memory tracking whether or not the reallocation succeeds,
+  // because we have no way to tell the buffer size if it fails.
+  RemoveCellMemory(this, oldCount * sizeof(HeapSlot), MemoryUse::ObjectSlots);
+  AddCellMemory(this, newCount * sizeof(HeapSlot), MemoryUse::ObjectSlots);
+
   HeapSlot* newslots =
       ReallocateObjectBuffer<HeapSlot>(cx, this, slots_, oldCount, newCount);
   if (!newslots) {
     cx->recoverFromOutOfMemory();
-    return; /* Leave slots at its old size. */
+    return; // Leave slots at its old size.
   }
 
   slots_ = newslots;
@@ -530,7 +491,8 @@ bool NativeObject::willBeSparseElements(uint32_t requiredCapacity,
   return true;
 }
 
-/* static */ DenseElementResult NativeObject::maybeDensifySparseElements(
+/* static */
+DenseElementResult NativeObject::maybeDensifySparseElements(
     JSContext* cx, HandleNativeObject obj) {
   /*
    * Wait until after the object goes into dictionary mode, which must happen
@@ -795,9 +757,11 @@ bool NativeObject::tryUnshiftDenseElements(uint32_t count) {
 // Note: the structure and behavior of this method follow along with
 // UnboxedArrayObject::chooseCapacityIndex. Changes to the allocation strategy
 // in one should generally be matched by the other.
-/* static */ bool NativeObject::goodElementsAllocationAmount(
-    JSContext* cx, uint32_t reqCapacity, uint32_t length,
-    uint32_t* goodAmount) {
+/* static */
+bool NativeObject::goodElementsAllocationAmount(JSContext* cx,
+                                                uint32_t reqCapacity,
+                                                uint32_t length,
+                                                uint32_t* goodAmount) {
   if (reqCapacity > MAX_DENSE_ELEMENTS_COUNT) {
     ReportOutOfMemory(cx);
     return false;
@@ -940,10 +904,10 @@ bool NativeObject::growElements(JSContext* cx, uint32_t reqCapacity) {
   HeapSlot* oldHeaderSlots =
       reinterpret_cast<HeapSlot*>(getUnshiftedElementsHeader());
   HeapSlot* newHeaderSlots;
+  uint32_t oldAllocated = 0;
   if (hasDynamicElements()) {
     MOZ_ASSERT(oldCapacity <= MAX_DENSE_ELEMENTS_COUNT);
-    uint32_t oldAllocated =
-        oldCapacity + ObjectElements::VALUES_PER_HEADER + numShifted;
+    oldAllocated = oldCapacity + ObjectElements::VALUES_PER_HEADER + numShifted;
 
     newHeaderSlots = ReallocateObjectBuffer<HeapSlot>(
         cx, this, oldHeaderSlots, oldAllocated, newAllocated);
@@ -959,11 +923,19 @@ bool NativeObject::growElements(JSContext* cx, uint32_t reqCapacity) {
             ObjectElements::VALUES_PER_HEADER + initlen + numShifted);
   }
 
+  if (oldAllocated) {
+    RemoveCellMemory(this, oldAllocated * sizeof(HeapSlot),
+                     MemoryUse::ObjectElements);
+  }
+
   ObjectElements* newheader = reinterpret_cast<ObjectElements*>(newHeaderSlots);
   elements_ = newheader->elements() + numShifted;
   getElementsHeader()->capacity = newCapacity;
 
   Debug_SetSlotRangeToCrashOnTouch(elements_ + initlen, newCapacity - initlen);
+
+  AddCellMemory(this, newAllocated * sizeof(HeapSlot),
+                MemoryUse::ObjectElements);
 
   return true;
 }
@@ -1015,13 +987,56 @@ void NativeObject::shrinkElements(JSContext* cx, uint32_t reqCapacity) {
     return;  // Leave elements at its old size.
   }
 
+  RemoveCellMemory(this, oldAllocated * sizeof(HeapSlot),
+                   MemoryUse::ObjectElements);
+
   ObjectElements* newheader = reinterpret_cast<ObjectElements*>(newHeaderSlots);
   elements_ = newheader->elements() + numShifted;
   getElementsHeader()->capacity = newCapacity;
+
+  AddCellMemory(this, newAllocated * sizeof(HeapSlot),
+                MemoryUse::ObjectElements);
 }
 
-/* static */ bool NativeObject::CopyElementsForWrite(JSContext* cx,
-                                                     NativeObject* obj) {
+void NativeObject::shrinkCapacityToInitializedLength(JSContext* cx) {
+  // When an array's length becomes non-writable, writes to indexes greater
+  // greater than or equal to the length don't change the array.  We handle this
+  // with a check for non-writable length in most places. But in JIT code every
+  // check counts -- so we piggyback the check on the already-required range
+  // check for |index < capacity| by making capacity of arrays with non-writable
+  // length never exceed the length. This mechanism is also used when an object
+  // becomes non-extensible.
+
+  if (getElementsHeader()->numShiftedElements() > 0) {
+    moveShiftedElements();
+  }
+
+  ObjectElements* header = getElementsHeader();
+  uint32_t len = header->initializedLength;
+  MOZ_ASSERT(header->capacity >= len);
+  if (header->capacity == len) {
+    return;
+  }
+
+  shrinkElements(cx, len);
+
+  header = getElementsHeader();
+  uint32_t oldAllocated = header->numAllocatedElements();
+  header->capacity = len;
+
+  // The size of the memory allocation hasn't changed but we lose the actual
+  // capacity information. Make the associated size match the updated capacity.
+  if (!hasFixedElements()) {
+    uint32_t newAllocated = header->numAllocatedElements();
+    RemoveCellMemory(this, oldAllocated * sizeof(HeapSlot),
+                     MemoryUse::ObjectElements);
+    AddCellMemory(this, newAllocated * sizeof(HeapSlot),
+                  MemoryUse::ObjectElements);
+  }
+}
+
+/* static */
+bool NativeObject::CopyElementsForWrite(JSContext* cx, NativeObject* obj) {
   MOZ_ASSERT(obj->denseElementsAreCopyOnWrite());
   MOZ_ASSERT(obj->isExtensible());
 
@@ -1057,12 +1072,15 @@ void NativeObject::shrinkElements(JSContext* cx, uint32_t reqCapacity) {
   Debug_SetSlotRangeToCrashOnTouch(obj->elements_ + initlen,
                                    newCapacity - initlen);
 
+  AddCellMemory(obj, newAllocated * sizeof(HeapSlot),
+                MemoryUse::ObjectElements);
+
   return true;
 }
 
-/* static */ bool NativeObject::allocDictionarySlot(JSContext* cx,
-                                                    HandleNativeObject obj,
-                                                    uint32_t* slotp) {
+/* static */
+bool NativeObject::allocDictionarySlot(JSContext* cx, HandleNativeObject obj,
+                                       uint32_t* slotp) {
   MOZ_ASSERT(obj->inDictionaryMode());
 
   uint32_t slot = obj->slotSpan();
@@ -1135,11 +1153,10 @@ void NativeObject::freeSlot(JSContext* cx, uint32_t slot) {
   setSlot(slot, UndefinedValue());
 }
 
-/* static */ Shape* NativeObject::addDataProperty(JSContext* cx,
-                                                  HandleNativeObject obj,
-                                                  HandlePropertyName name,
-                                                  uint32_t slot,
-                                                  unsigned attrs) {
+/* static */
+Shape* NativeObject::addDataProperty(JSContext* cx, HandleNativeObject obj,
+                                     HandlePropertyName name, uint32_t slot,
+                                     unsigned attrs) {
   MOZ_ASSERT(!(attrs & (JSPROP_GETTER | JSPROP_SETTER)));
   RootedId id(cx, NameToId(name));
   return addDataProperty(cx, obj, id, slot, attrs);
@@ -1170,7 +1187,7 @@ static MOZ_ALWAYS_INLINE bool CallAddPropertyHook(JSContext* cx,
                                                   HandleValue value) {
   JSAddPropertyOp addProperty = obj->getClass()->getAddProperty();
   if (MOZ_UNLIKELY(addProperty)) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
 
     if (!CallJSAddPropertyOp(cx, addProperty, obj, id, value)) {
       NativeObject::removeProperty(cx, obj, id);
@@ -1196,7 +1213,7 @@ static MOZ_ALWAYS_INLINE bool CallAddPropertyHookDense(JSContext* cx,
 
   JSAddPropertyOp addProperty = obj->getClass()->getAddProperty();
   if (MOZ_UNLIKELY(addProperty)) {
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
 
     if (!obj->maybeCopyElementsForWrite(cx)) {
       return false;
@@ -1276,12 +1293,15 @@ void js::AddPropertyTypesAfterProtoChange(JSContext* cx, NativeObject* obj,
   MOZ_ASSERT(obj->group() != oldGroup);
   MOZ_ASSERT(!obj->group()->unknownProperties(sweepObjGroup));
 
-  // First copy the dynamic flags.
   AutoSweepObjectGroup sweepOldGroup(oldGroup);
+  if (oldGroup->unknownProperties(sweepOldGroup)) {
+    MarkObjectGroupUnknownProperties(cx, obj->group());
+    return;
+  }
+
+  // First copy the dynamic flags.
   MarkObjectGroupFlags(
-      cx, obj,
-      oldGroup->flags(sweepOldGroup) &
-          (OBJECT_FLAG_DYNAMIC_MASK & ~OBJECT_FLAG_UNKNOWN_PROPERTIES));
+      cx, obj, oldGroup->flags(sweepOldGroup) & OBJECT_FLAG_DYNAMIC_MASK);
 
   // Now update all property types. If the object has many properties, this
   // function may be slow so we mark all properties as unknown.
@@ -1393,13 +1413,15 @@ static MOZ_ALWAYS_INLINE bool ReshapeForShadowedProp(JSContext* cx,
   return true;
 }
 
-/* static */ bool NativeObject::reshapeForShadowedProp(JSContext* cx,
-                                                       HandleNativeObject obj) {
+/* static */
+bool NativeObject::reshapeForShadowedProp(JSContext* cx,
+                                          HandleNativeObject obj) {
   return generateOwnShape(cx, obj);
 }
 
-/* static */ bool NativeObject::reshapeForProtoMutation(
-    JSContext* cx, HandleNativeObject obj) {
+/* static */
+bool NativeObject::reshapeForProtoMutation(JSContext* cx,
+                                           HandleNativeObject obj) {
   return generateOwnShape(cx, obj);
 }
 
@@ -1556,10 +1578,9 @@ static bool GetExistingPropertyValue(JSContext* cx, HandleNativeObject obj,
                                      HandleId id, Handle<PropertyResult> prop,
                                      MutableHandleValue vp) {
   if (prop.isDenseOrTypedArrayElement()) {
-    vp.set(obj->getDenseOrTypedArrayElement(JSID_TO_INT(id)));
-    return true;
+    return obj->getDenseOrTypedArrayElement<CanGC>(cx, JSID_TO_INT(id), vp);
   }
-  MOZ_ASSERT(!cx->helperThread());
+  MOZ_ASSERT(!cx->isHelperThreadContext());
 
   MOZ_ASSERT(prop.shape()->propid() == id);
   MOZ_ASSERT(obj->contains(cx, prop.shape()));
@@ -1666,7 +1687,7 @@ bool js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj,
         return result.fail(JSMSG_CANT_REDEFINE_PROP);
       }
 
-      MOZ_ASSERT(!cx->helperThread());
+      MOZ_ASSERT(!cx->isHelperThreadContext());
       return ArraySetLength(cx, arr, id, desc_.attributes(), desc_.value(),
                             result);
     }
@@ -1682,7 +1703,7 @@ bool js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj,
     // 9.4.5.3 step 3. Indexed properties of typed arrays are special.
     uint64_t index;
     if (IsTypedArrayIndex(id, &index)) {
-      MOZ_ASSERT(!cx->helperThread());
+      MOZ_ASSERT(!cx->isHelperThreadContext());
       return DefineTypedArrayElement(cx, obj, index, desc_, result);
     }
   } else if (obj->is<ArgumentsObject>()) {
@@ -1839,7 +1860,7 @@ bool js::NativeDefineProperty(JSContext* cx, HandleNativeObject obj,
       } else {
         // Step 7.a.i.2.
         bool same;
-        MOZ_ASSERT(!cx->helperThread());
+        MOZ_ASSERT(!cx->isHelperThreadContext());
         if (!SameValue(cx, desc.value(), currentValue, &same)) {
           return false;
         }
@@ -1921,7 +1942,7 @@ bool js::NativeDefineAccessorProperty(JSContext* cx, HandleNativeObject obj,
     // Off-thread callers should not get here: they must call this
     // function only with known-valid arguments. Populating a new
     // PlainObject with configurable properties is fine.
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     result.reportError(cx, obj, id);
     return false;
   }
@@ -1948,7 +1969,7 @@ bool js::NativeDefineAccessorProperty(JSContext* cx, HandleNativeObject obj,
     // Off-thread callers should not get here: they must call this
     // function only with known-valid arguments. Populating a new
     // PlainObject with configurable properties is fine.
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     result.reportError(cx, obj, id);
     return false;
   }
@@ -1967,7 +1988,7 @@ bool js::NativeDefineDataProperty(JSContext* cx, HandleNativeObject obj,
     // Off-thread callers should not get here: they must call this
     // function only with known-valid arguments. Populating a new
     // PlainObject with configurable properties is fine.
-    MOZ_ASSERT(!cx->helperThread());
+    MOZ_ASSERT(!cx->isHelperThreadContext());
     result.reportError(cx, obj, id);
     return false;
   }
@@ -2010,10 +2031,9 @@ static bool DefineNonexistentProperty(JSContext* cx, HandleNativeObject obj,
       // Steps 1-2 are enforced by the caller.
 
       // Step 3.
-      // We still need to call ToNumber, because of its possible side
-      // effects.
-      double d;
-      if (!ToNumber(cx, v, &d)) {
+      // We still need to call ToNumber or ToBigInt, because of its
+      // possible side effects.
+      if (!obj->as<TypedArrayObject>().convertForSideEffect(cx, v)) {
         return false;
       }
 
@@ -2220,7 +2240,10 @@ bool js::NativeGetOwnPropertyDescriptor(
     desc.setSetter(nullptr);
 
     if (prop.isDenseOrTypedArrayElement()) {
-      desc.value().set(obj->getDenseOrTypedArrayElement(JSID_TO_INT(id)));
+      if (!obj->getDenseOrTypedArrayElement<CanGC>(cx, JSID_TO_INT(id),
+                                                   desc.value())) {
+        return false;
+      }
     } else {
       RootedShape shape(cx, prop.shape());
       if (!NativeGetExistingProperty(cx, obj, obj, shape, desc.value())) {
@@ -2278,12 +2301,12 @@ static MOZ_ALWAYS_INLINE bool GetExistingProperty(
   {
     jsbytecode* pc;
     JSScript* script = cx->currentScript(&pc);
-    if (script && script->hasICScript()) {
+    if (script && script->hasJitScript()) {
       switch (JSOp(*pc)) {
         case JSOP_GETPROP:
         case JSOP_CALLPROP:
         case JSOP_LENGTH:
-          script->icScript()->noteAccessedGetter(script->pcToOffset(pc));
+          script->jitScript()->noteAccessedGetter(script->pcToOffset(pc));
           break;
         default:
           break;
@@ -2539,8 +2562,8 @@ static MOZ_ALWAYS_INLINE bool NativeGetPropertyInline(
       // Steps 5-8. Special case for dense elements because
       // GetExistingProperty doesn't support those.
       if (prop.isDenseOrTypedArrayElement()) {
-        vp.set(pobj->getDenseOrTypedArrayElement(JSID_TO_INT(id)));
-        return true;
+        return pobj->template getDenseOrTypedArrayElement<allowGC>(
+            cx, JSID_TO_INT(id), vp);
       }
 
       typename MaybeRooted<Shape*, allowGC>::RootType shape(cx, prop.shape());
@@ -2815,7 +2838,7 @@ static bool SetNonexistentProperty(JSContext* cx, HandleNativeObject obj,
       Rooted<PropertyDescriptor> desc(cx);
       desc.initFields(nullptr, v, JSPROP_ENUMERATE, nullptr, nullptr);
 
-      MOZ_ASSERT(!cx->helperThread());
+      MOZ_ASSERT(!cx->isHelperThreadContext());
       return op(cx, obj, id, desc, result);
     }
 
@@ -2823,42 +2846,6 @@ static bool SetNonexistentProperty(JSContext* cx, HandleNativeObject obj,
   }
 
   return SetPropertyByDefining(cx, id, v, receiver, result);
-}
-
-// ES2019 draft rev e7dc63fb5d1c26beada9ffc12dc78aa6548f1fb5
-// 9.4.5.9 IntegerIndexedElementSet
-static bool SetTypedArrayElement(JSContext* cx, Handle<TypedArrayObject*> obj,
-                                 uint64_t index, HandleValue v,
-                                 ObjectOpResult& result) {
-  // Steps 1-2. Are enforced by the caller.
-
-  // Step 3.
-  double d;
-  if (!ToNumber(cx, v, &d)) {
-    return false;
-  }
-
-  // Step 5.
-  if (obj->hasDetachedBuffer()) {
-    return result.failSoft(JSMSG_TYPED_ARRAY_DETACHED);
-  }
-
-  // Step 6. Right now we only allow integer indexes.
-  // Step 7.
-
-  // Step 8.
-  uint32_t length = obj->length();
-
-  // Step 9.
-  if (index >= length) {
-    return result.failSoft(JSMSG_BAD_INDEX);
-  }
-
-  // Steps 4, 10-15.
-  TypedArrayObject::setElement(*obj, index, d);
-
-  // Step 16.
-  return result.succeed();
 }
 
 // Set an existing own property obj[index] that's a dense element.
@@ -3160,68 +3147,6 @@ bool js::CopyDataPropertiesNative(JSContext* cx, HandlePlainObject target,
     MOZ_ASSERT(from->lastProperty() == fromShape);
 
     value = from->getSlot(shape->slot());
-    if (targetHadNoOwnProperties) {
-      MOZ_ASSERT(!target->contains(cx, key),
-                 "didn't expect to find an existing property");
-
-      if (!AddDataPropertyNonDelegate(cx, target, key, value)) {
-        return false;
-      }
-    } else {
-      if (!NativeDefineDataProperty(cx, target, key, value, JSPROP_ENUMERATE)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
-bool js::CopyDataPropertiesNative(JSContext* cx, HandlePlainObject target,
-                                  Handle<UnboxedPlainObject*> from,
-                                  HandlePlainObject excludedItems,
-                                  bool* optimized) {
-  MOZ_ASSERT(
-      !target->isDelegate(),
-      "CopyDataPropertiesNative should only be called during object literal "
-      "construction"
-      "which precludes that |target| is the prototype of any other object");
-
-  *optimized = false;
-
-  // Don't use the fast path for unboxed objects with expandos.
-  if (from->maybeExpando()) {
-    return true;
-  }
-
-  *optimized = true;
-
-  // If |target| contains no own properties, we can directly call
-  // addProperty instead of the slower putProperty.
-  const bool targetHadNoOwnProperties = target->lastProperty()->isEmptyShape();
-
-#ifdef DEBUG
-  RootedObjectGroup fromGroup(cx, from->group());
-#endif
-
-  RootedId key(cx);
-  RootedValue value(cx);
-  const UnboxedLayout& layout = from->layout();
-  for (size_t i = 0; i < layout.properties().length(); i++) {
-    const UnboxedLayout::Property& property = layout.properties()[i];
-    key = NameToId(property.name);
-    MOZ_ASSERT(!JSID_IS_INT(key));
-
-    if (excludedItems && excludedItems->contains(cx, key)) {
-      continue;
-    }
-
-    // Ensure the object stays unboxed.
-    MOZ_ASSERT(from->group() == fromGroup);
-
-    // All unboxed properties are enumerable.
-    value = from->getValue(property);
-
     if (targetHadNoOwnProperties) {
       MOZ_ASSERT(!target->contains(cx, key),
                  "didn't expect to find an existing property");

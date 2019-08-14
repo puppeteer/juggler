@@ -17,7 +17,7 @@ namespace layers {
 
 class TransactionIdAllocator {
  protected:
-  virtual ~TransactionIdAllocator() {}
+  virtual ~TransactionIdAllocator() = default;
 
  public:
   NS_INLINE_DECL_REFCOUNTING(TransactionIdAllocator)
@@ -83,6 +83,8 @@ class TransactionIdAllocator {
   virtual mozilla::TimeStamp GetTransactionStart() = 0;
 
   virtual VsyncId GetVsyncId() = 0;
+
+  virtual mozilla::TimeStamp GetVsyncStart() = 0;
 };
 
 }  // namespace layers

@@ -1,7 +1,6 @@
 use crate::command::{
     AddonInstallParameters, AddonUninstallParameters, GeckoContextParameters,
     GeckoExtensionCommand, GeckoExtensionRoute, XblLocatorParameters, CHROME_ELEMENT_KEY,
-    LEGACY_ELEMENT_KEY,
 };
 use mozprofile::preferences::Pref;
 use mozprofile::profile::Profile;
@@ -20,10 +19,10 @@ use std::sync::Mutex;
 use std::thread;
 use std::time;
 use webdriver::capabilities::CapabilitiesMatching;
-use webdriver::command::WebDriverCommand::{AcceptAlert, AddCookie, CloseWindow, DeleteCookie,
-                                           DeleteCookies, DeleteSession, DismissAlert,
-                                           ElementClear, ElementClick, ElementSendKeys,
-                                           ExecuteAsyncScript, ExecuteScript,
+use webdriver::command::WebDriverCommand::{AcceptAlert, AddCookie, NewWindow, CloseWindow,
+                                           DeleteCookie, DeleteCookies, DeleteSession,
+                                           DismissAlert, ElementClear, ElementClick,
+                                           ElementSendKeys, ExecuteAsyncScript, ExecuteScript,
                                            Extension, FindElement, FindElementElement,
                                            FindElementElements, FindElements, FullscreenWindow,
                                            Get, GetActiveElement, GetAlertText, GetCSSValue,
@@ -41,11 +40,11 @@ use webdriver::command::WebDriverCommand::{AcceptAlert, AddCookie, CloseWindow, 
 use webdriver::command::{ActionsParameters, AddCookieParameters, GetNamedCookieParameters,
                          GetParameters, JavascriptCommandParameters, LocatorParameters,
                          NewSessionParameters, SwitchToFrameParameters, SwitchToWindowParameters,
-                         TimeoutsParameters, WindowRectParameters};
+                         TimeoutsParameters, WindowRectParameters, NewWindowParameters};
 use webdriver::command::{WebDriverCommand, WebDriverMessage};
 use webdriver::common::{Cookie, FrameId, WebElement, ELEMENT_KEY, FRAME_KEY, WINDOW_KEY};
 use webdriver::error::{ErrorStatus, WebDriverError, WebDriverResult};
-use webdriver::response::{CloseWindowResponse, CookieResponse, CookiesResponse,
+use webdriver::response::{NewWindowResponse, CloseWindowResponse, CookieResponse, CookiesResponse,
                           ElementRectResponse, NewSessionResponse, TimeoutsResponse,
                           ValueResponse, WebDriverResponse, WindowRectResponse};
 use webdriver::server::{Session, WebDriverHandler};
@@ -146,7 +145,7 @@ impl MarionetteHandler {
 
         let mut profile = match options.profile {
             Some(x) => x,
-            None => Profile::new(None)?,
+            None => Profile::new()?,
         };
 
         self.set_prefs(port, &mut profile, is_custom_profile, options.prefs)
@@ -393,12 +392,10 @@ impl MarionetteSession {
         let chrome_element = data.get(CHROME_ELEMENT_KEY);
         let element = data.get(ELEMENT_KEY);
         let frame = data.get(FRAME_KEY);
-        let legacy_element = data.get(LEGACY_ELEMENT_KEY);
         let window = data.get(WINDOW_KEY);
 
         let value = try_opt!(
             element
-                .or(legacy_element)
                 .or(chrome_element)
                 .or(frame)
                 .or(window),
@@ -410,7 +407,7 @@ impl MarionetteSession {
             ErrorStatus::UnknownError,
             "Failed to convert web element reference value to string"
         ).to_string();
-        Ok(WebElement::new(id))
+        Ok(WebElement(id))
     }
 
     pub fn next_command_id(&mut self) -> u64 {
@@ -481,15 +478,18 @@ impl MarionetteSession {
             | TakeScreenshot
             | TakeElementScreenshot(_) => WebDriverResponse::Generic(resp.to_value_response(true)?),
             GetTimeouts => {
-                let script = try_opt!(
-                    try_opt!(
+                let script = match try_opt!(
                         resp.result.get("script"),
                         ErrorStatus::UnknownError,
                         "Missing field: script"
-                    ).as_u64(),
-                    ErrorStatus::UnknownError,
-                    "Failed to interpret script timeout duration as u64"
-                );
+                    ) {
+                        Value::Null => None,
+                        n => try_opt!(
+                            Some(n.as_u64()),
+                            ErrorStatus::UnknownError,
+                            "Failed to interpret script timeout duration as u64"
+                        ),
+                };
                 // Check for the spec-compliant "pageLoad", but also for "page load",
                 // which was sent by Firefox 52 and earlier.
                 let page_load = try_opt!(
@@ -519,6 +519,28 @@ impl MarionetteSession {
             }
             Status => panic!("Got status command that should already have been handled"),
             GetWindowHandles => WebDriverResponse::Generic(resp.to_value_response(false)?),
+            NewWindow(_) => {
+                let handle: String = try_opt!(
+                    try_opt!(
+                        resp.result.get("handle"),
+                        ErrorStatus::UnknownError,
+                        "Failed to find handle field"
+                    ).as_str(),
+                    ErrorStatus::UnknownError,
+                    "Failed to interpret handle as string"
+                ).into();
+                let typ: String = try_opt!(
+                    try_opt!(
+                        resp.result.get("type"),
+                        ErrorStatus::UnknownError,
+                        "Failed to find type field"
+                    ).as_str(),
+                    ErrorStatus::UnknownError,
+                    "Failed to interpret type as string"
+                ).into();
+
+                WebDriverResponse::NewWindow(NewWindowResponse { handle, typ })
+            }
             CloseWindow => {
                 let data = try_opt!(
                     resp.result.as_array(),
@@ -785,6 +807,7 @@ impl MarionetteCommand {
                 (Some("WebDriver:AcceptDialog"), None)
             }
             AddCookie(ref x) => (Some("WebDriver:AddCookie"), Some(x.to_marionette())),
+            NewWindow(ref x) => (Some("WebDriver:NewWindow"), Some(x.to_marionette())),
             CloseWindow => (Some("WebDriver:CloseWindow"), None),
             DeleteCookie(ref x) => {
                 let mut data = Map::new();
@@ -805,7 +828,7 @@ impl MarionetteCommand {
             ElementClick(ref x) => (Some("WebDriver:ElementClick"), Some(x.to_marionette())),
             ElementSendKeys(ref e, ref x) => {
                 let mut data = Map::new();
-                data.insert("id".to_string(), Value::String(e.id.clone()));
+                data.insert("id".to_string(), Value::String(e.to_string()));
                 data.insert("text".to_string(), Value::String(x.text.clone()));
                 data.insert(
                     "value".to_string(),
@@ -826,13 +849,13 @@ impl MarionetteCommand {
             FindElement(ref x) => (Some("WebDriver:FindElement"), Some(x.to_marionette())),
             FindElementElement(ref e, ref x) => {
                 let mut data = x.to_marionette()?;
-                data.insert("element".to_string(), Value::String(e.id.clone()));
+                data.insert("element".to_string(), Value::String(e.to_string()));
                 (Some("WebDriver:FindElement"), Some(Ok(data)))
             }
             FindElements(ref x) => (Some("WebDriver:FindElements"), Some(x.to_marionette())),
             FindElementElements(ref e, ref x) => {
                 let mut data = x.to_marionette()?;
-                data.insert("element".to_string(), Value::String(e.id.clone()));
+                data.insert("element".to_string(), Value::String(e.to_string()));
                 (Some("WebDriver:FindElements"), Some(Ok(data)))
             }
             FullscreenWindow => (Some("WebDriver:FullscreenWindow"), None),
@@ -843,19 +866,19 @@ impl MarionetteCommand {
             GetCurrentUrl => (Some("WebDriver:GetCurrentURL"), None),
             GetCSSValue(ref e, ref x) => {
                 let mut data = Map::new();
-                data.insert("id".to_string(), Value::String(e.id.clone()));
+                data.insert("id".to_string(), Value::String(e.to_string()));
                 data.insert("propertyName".to_string(), Value::String(x.clone()));
                 (Some("WebDriver:GetElementCSSValue"), Some(Ok(data)))
             }
             GetElementAttribute(ref e, ref x) => {
                 let mut data = Map::new();
-                data.insert("id".to_string(), Value::String(e.id.clone()));
+                data.insert("id".to_string(), Value::String(e.to_string()));
                 data.insert("name".to_string(), Value::String(x.clone()));
                 (Some("WebDriver:GetElementAttribute"), Some(Ok(data)))
             }
             GetElementProperty(ref e, ref x) => {
                 let mut data = Map::new();
-                data.insert("id".to_string(), Value::String(e.id.clone()));
+                data.insert("id".to_string(), Value::String(e.to_string()));
                 data.insert("name".to_string(), Value::String(x.clone()));
                 (Some("WebDriver:GetElementProperty"), Some(Ok(data)))
             }
@@ -915,7 +938,7 @@ impl MarionetteCommand {
             SwitchToWindow(ref x) => (Some("WebDriver:SwitchToWindow"), Some(x.to_marionette())),
             TakeElementScreenshot(ref e) => {
                 let mut data = Map::new();
-                data.insert("id".to_string(), Value::String(e.id.clone()));
+                data.insert("id".to_string(), Value::String(e.to_string()));
                 data.insert("highlights".to_string(), Value::Array(vec![]));
                 data.insert("full".to_string(), Value::Bool(false));
                 (Some("WebDriver:TakeScreenshot"), Some(Ok(data)))
@@ -940,14 +963,14 @@ impl MarionetteCommand {
                 }
                 XblAnonymousByAttribute(e, x) => {
                     let mut data = x.to_marionette()?;
-                    data.insert("element".to_string(), Value::String(e.id.clone()));
+                    data.insert("element".to_string(), Value::String(e.to_string()));
                     (Some("WebDriver:FindElement"), Some(Ok(data)))
                 }
                 XblAnonymousChildren(e) => {
                     let mut data = Map::new();
                     data.insert("using".to_owned(), serde_json::to_value("anon")?);
                     data.insert("value".to_owned(), Value::Null);
-                    data.insert("element".to_string(), serde_json::to_value(e.id.clone())?);
+                    data.insert("element".to_string(), serde_json::to_value(e.to_string())?);
                     (Some("WebDriver:FindElements"), Some(Ok(data)))
                 }
                 TakeFullScreenshot => {
@@ -1255,7 +1278,7 @@ impl MarionetteConnection {
                 _ => panic!("Expected one byte got more"),
             };
             match byte {
-                '0'...'9' => {
+                '0'..='9' => {
                     bytes = bytes * 10;
                     bytes += byte as usize - '0' as usize;
                 }
@@ -1422,17 +1445,26 @@ impl ToMarionette for LocatorParameters {
     }
 }
 
+impl ToMarionette for NewWindowParameters {
+    fn to_marionette(&self) -> WebDriverResult<Map<String, Value>> {
+        let mut data = Map::new();
+        if let Some(ref x) = self.type_hint {
+            data.insert("type".to_string(), serde_json::to_value(x)?);
+        }
+        Ok(data)
+    }
+}
+
 impl ToMarionette for SwitchToFrameParameters {
     fn to_marionette(&self) -> WebDriverResult<Map<String, Value>> {
         let mut data = Map::new();
-        let key = match self.id {
+        match self.id {
             None => None,
-            Some(FrameId::Short(_)) => Some("id"),
-            Some(FrameId::Element(_)) => Some("element"),
+            Some(FrameId::Short(_)) => data.insert("id".to_string(),
+                                            serde_json::to_value(&self.id)?),
+            Some(FrameId::Element(ref web_element)) => data.insert("element".to_string(),
+                                            serde_json::to_value(web_element.to_string())?),
         };
-        if let Some(x) = key {
-            data.insert(x.to_string(), serde_json::to_value(&self.id)?);
-        }
         Ok(data)
     }
 }
@@ -1442,6 +1474,10 @@ impl ToMarionette for SwitchToWindowParameters {
         let mut data = Map::new();
         data.insert(
             "name".to_string(),
+            serde_json::to_value(self.handle.clone())?,
+        );
+        data.insert(
+            "handle".to_string(),
             serde_json::to_value(self.handle.clone())?,
         );
         Ok(data)
@@ -1461,7 +1497,7 @@ impl ToMarionette for TimeoutsParameters {
 impl ToMarionette for WebElement {
     fn to_marionette(&self) -> WebDriverResult<Map<String, Value>> {
         let mut data = Map::new();
-        data.insert("id".to_string(), serde_json::to_value(&self.id)?);
+        data.insert("id".to_string(), serde_json::to_value(self.to_string())?);
         Ok(data)
     }
 }
@@ -1487,7 +1523,7 @@ mod tests {
     // several regressions related to marionette.log.level.
     #[test]
     fn test_marionette_log_level() {
-        let mut profile = Profile::new(None).unwrap();
+        let mut profile = Profile::new().unwrap();
         let handler = MarionetteHandler::new(MarionetteSettings::default());
         handler.set_prefs(2828, &mut profile, false, vec![]).ok();
         let user_prefs = profile.user_prefs().unwrap();

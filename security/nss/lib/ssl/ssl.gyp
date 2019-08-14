@@ -35,6 +35,7 @@
         'sslinit.c',
         'sslmutex.c',
         'sslnonce.c',
+        'sslprimitive.c',
         'sslreveal.c',
         'sslsecur.c',
         'sslsnce.c',
@@ -48,6 +49,7 @@
         'tls13hashstate.c',
         'tls13hkdf.c',
         'tls13replay.c',
+        'tls13subcerts.c',
       ],
       'conditions': [
         [ 'OS=="win"', {
@@ -73,6 +75,11 @@
             '-std=gnu99',
           ],
         }],
+        [ 'enable_sslkeylogfile==1', {
+          'defines': [
+            'NSS_ALLOW_SSLKEYLOGFILE',
+          ],
+        }],
       ],
       'dependencies': [
         '<(DEPTH)/exports.gyp:nss_exports',
@@ -92,11 +99,6 @@
       }
     }
   ],
-  'target_defaults': {
-    'defines': [
-      'NSS_ALLOW_SSLKEYLOGFILE=1'
-    ]
-  },
   'variables': {
     'module': 'nss'
   }

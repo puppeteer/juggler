@@ -26,59 +26,56 @@ using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
-static std::string mimeType = "";
-
 // Prevents x being optimized away if it has no side-effects.
 // If optimized away, tools like ASan wouldn't be able to detect
 // faulty memory accesses.
-#define DUMMY_IF(x) if (x) { volatile int v; v=0; }
+#define DUMMY_IF(x) \
+  if (x) {          \
+    volatile int v; \
+    v = 0;          \
+  }
 
-class DecodeToSurfaceRunnableFuzzing : public Runnable
-{
-public:
+class DecodeToSurfaceRunnableFuzzing : public Runnable {
+ public:
   DecodeToSurfaceRunnableFuzzing(RefPtr<SourceSurface>& aSurface,
-                          nsIInputStream* aInputStream)
-    : mozilla::Runnable("DecodeToSurfaceRunnableFuzzing")
-    , mSurface(aSurface)
-    , mInputStream(aInputStream)
-  { }
+                                 nsIInputStream* aInputStream,
+                                 const char* mimeType)
+      : mozilla::Runnable("DecodeToSurfaceRunnableFuzzing"),
+        mSurface(aSurface),
+        mInputStream(aInputStream),
+        mMimeType(mimeType) {}
 
-  NS_IMETHOD Run() override
-  {
+  NS_IMETHOD Run() override {
     Go();
     return NS_OK;
   }
 
-  void Go()
-  {
-    mSurface =
-      ImageOps::DecodeToSurface(mInputStream.forget(),
-                                nsDependentCString(mimeType.c_str()),
-                                imgIContainer::DECODE_FLAGS_DEFAULT);
-    if (!mSurface)
-      return;
+  void Go() {
+    mSurface = ImageOps::DecodeToSurface(mInputStream.forget(), mMimeType,
+                                         imgIContainer::DECODE_FLAGS_DEFAULT);
+    if (!mSurface) return;
 
     if (mSurface->GetType() == SurfaceType::DATA) {
       if (mSurface->GetFormat() == SurfaceFormat::B8G8R8X8 ||
           mSurface->GetFormat() == SurfaceFormat::B8G8R8A8) {
-        DUMMY_IF(IntSize(1,1) == mSurface->GetSize());
+        DUMMY_IF(IntSize(1, 1) == mSurface->GetSize());
         DUMMY_IF(IsSolidColor(mSurface, BGRAColor::Green(), 1));
       }
     }
   }
 
-private:
+ private:
   RefPtr<SourceSurface>& mSurface;
   nsCOMPtr<nsIInputStream> mInputStream;
+  nsAutoCString mMimeType;
 };
 
-static int
-RunDecodeToSurfaceFuzzing(nsCOMPtr<nsIInputStream> inputStream)
-{
+static int RunDecodeToSurfaceFuzzing(nsCOMPtr<nsIInputStream> inputStream,
+                                     const char* mimeType) {
   uint64_t len;
   inputStream->Available(&len);
   if (len <= 0) {
-      return 0;
+    return 0;
   }
 
   nsCOMPtr<nsIThread> thread;
@@ -89,7 +86,7 @@ RunDecodeToSurfaceFuzzing(nsCOMPtr<nsIInputStream> inputStream)
   // DecodeToSurface doesn't require any main-thread-only code.
   RefPtr<SourceSurface> surface;
   nsCOMPtr<nsIRunnable> runnable =
-    new DecodeToSurfaceRunnableFuzzing(surface, inputStream);
+      new DecodeToSurfaceRunnableFuzzing(surface, inputStream, mimeType);
   thread->Dispatch(runnable, nsIThread::DISPATCH_SYNC);
 
   thread->Shutdown();
@@ -100,28 +97,55 @@ RunDecodeToSurfaceFuzzing(nsCOMPtr<nsIInputStream> inputStream)
   return 0;
 }
 
-int FuzzingInitImage(int *argc, char ***argv) {
-    nsCOMPtr<imgITools> imgTools =
-      do_CreateInstance("@mozilla.org/image/tools;1");
-    if (imgTools == nullptr) {
-      std::cerr << "Initializing image tools failed" << std::endl;
-      return 1;
-    }
-
-    char* mimeTypePtr = getenv("MOZ_FUZZ_IMG_MIMETYPE");
-    if (!mimeTypePtr) {
-      std::cerr << "Must specify mime-type in MOZ_FUZZ_IMG_MIMETYPE environment variable." << std::endl;
-      return 1;
-    }
-
-    mimeType = std::string(mimeTypePtr);
-    int ret = strncmp(mimeType.c_str(), "image/", strlen("image/"));
-
-    if (ret) {
-      std::cerr << "MOZ_FUZZ_IMG_MIMETYPE should start with 'image/', e.g. 'image/gif'. Return: " << ret << std::endl;
-      return 1;
-    }
-    return 0;
+static int RunDecodeToSurfaceFuzzingJPEG(nsCOMPtr<nsIInputStream> inputStream) {
+  return RunDecodeToSurfaceFuzzing(inputStream, "image/jpeg");
 }
 
-MOZ_FUZZING_INTERFACE_STREAM(FuzzingInitImage, RunDecodeToSurfaceFuzzing, Image);
+static int RunDecodeToSurfaceFuzzingGIF(nsCOMPtr<nsIInputStream> inputStream) {
+  return RunDecodeToSurfaceFuzzing(inputStream, "image/gif");
+}
+
+static int RunDecodeToSurfaceFuzzingICO(nsCOMPtr<nsIInputStream> inputStream) {
+  return RunDecodeToSurfaceFuzzing(inputStream, "image/ico");
+}
+
+static int RunDecodeToSurfaceFuzzingBMP(nsCOMPtr<nsIInputStream> inputStream) {
+  return RunDecodeToSurfaceFuzzing(inputStream, "image/bmp");
+}
+
+static int RunDecodeToSurfaceFuzzingPNG(nsCOMPtr<nsIInputStream> inputStream) {
+  return RunDecodeToSurfaceFuzzing(inputStream, "image/png");
+}
+
+static int RunDecodeToSurfaceFuzzingWebP(nsCOMPtr<nsIInputStream> inputStream) {
+  return RunDecodeToSurfaceFuzzing(inputStream, "image/webp");
+}
+
+int FuzzingInitImage(int* argc, char*** argv) {
+  nsCOMPtr<imgITools> imgTools =
+      do_CreateInstance("@mozilla.org/image/tools;1");
+  if (imgTools == nullptr) {
+    std::cerr << "Initializing image tools failed" << std::endl;
+    return 1;
+  }
+
+  return 0;
+}
+
+MOZ_FUZZING_INTERFACE_STREAM(FuzzingInitImage, RunDecodeToSurfaceFuzzingJPEG,
+                             ImageJPEG);
+
+MOZ_FUZZING_INTERFACE_STREAM(FuzzingInitImage, RunDecodeToSurfaceFuzzingGIF,
+                             ImageGIF);
+
+MOZ_FUZZING_INTERFACE_STREAM(FuzzingInitImage, RunDecodeToSurfaceFuzzingICO,
+                             ImageICO);
+
+MOZ_FUZZING_INTERFACE_STREAM(FuzzingInitImage, RunDecodeToSurfaceFuzzingBMP,
+                             ImageBMP);
+
+MOZ_FUZZING_INTERFACE_STREAM(FuzzingInitImage, RunDecodeToSurfaceFuzzingPNG,
+                             ImagePNG);
+
+MOZ_FUZZING_INTERFACE_STREAM(FuzzingInitImage, RunDecodeToSurfaceFuzzingWebP,
+                             ImageWebP);

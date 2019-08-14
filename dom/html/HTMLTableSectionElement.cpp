@@ -105,7 +105,7 @@ void HTMLTableSectionElement::DeleteRow(int32_t aValue, ErrorResult& aError) {
     refIndex = (uint32_t)aValue;
   }
 
-  nsINode* row = rows->Item(refIndex);
+  nsCOMPtr<nsINode> row = rows->Item(refIndex);
   if (!row) {
     aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return;
@@ -121,11 +121,12 @@ bool HTMLTableSectionElement::ParseAttribute(
     /* ignore these attributes, stored simply as strings
        ch
     */
-    if (aAttribute == nsGkAtoms::charoff) {
-      return aResult.ParseIntWithBounds(aValue, 0);
-    }
     if (aAttribute == nsGkAtoms::height) {
-      return aResult.ParseSpecialIntValue(aValue);
+      // Per HTML spec there should be nothing special here, but all browsers
+      // implement height mapping to style.  See
+      // <https://github.com/whatwg/html/issues/4718>.  All browsers allow 0, so
+      // keep doing that.
+      return aResult.ParseHTMLDimension(aValue);
     }
     if (aAttribute == nsGkAtoms::align) {
       return ParseTableCellHAlignValue(aValue, aResult);

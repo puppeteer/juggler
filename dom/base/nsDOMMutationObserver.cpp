@@ -139,8 +139,7 @@ void nsMutationReceiver::NativeAnonymousChildListChange(nsIContent* aContent,
 void nsMutationReceiver::AttributeWillChange(mozilla::dom::Element* aElement,
                                              int32_t aNameSpaceID,
                                              nsAtom* aAttribute,
-                                             int32_t aModType,
-                                             const nsAttrValue* aNewValue) {
+                                             int32_t aModType) {
   if (nsAutoMutationBatch::IsBatching() ||
       !ObservesAttr(RegisterTarget(), aElement, aNameSpaceID, aAttribute)) {
     return;
@@ -366,8 +365,7 @@ void nsAnimationReceiver::RecordAnimationMutation(
   }
 
   // Record animations targeting to a pseudo element only when subtree is true.
-  if (animationTarget->mPseudoType !=
-          mozilla::CSSPseudoElementType::NotPseudo &&
+  if (animationTarget->mPseudoType != PseudoStyleType::NotPseudo &&
       !Subtree()) {
     return;
   }
@@ -538,6 +536,7 @@ void nsDOMMutationObserver::ScheduleForRun() {
 
 class MutationObserverMicroTask final : public MicroTaskRunnable {
  public:
+  MOZ_CAN_RUN_SCRIPT
   virtual void Run(AutoSlowOperation& aAso) override {
     nsDOMMutationObserver::HandleMutations(aAso);
   }
@@ -547,7 +546,8 @@ class MutationObserverMicroTask final : public MicroTaskRunnable {
   }
 };
 
-/* static */ void nsDOMMutationObserver::QueueMutationObserverMicroTask() {
+/* static */
+void nsDOMMutationObserver::QueueMutationObserverMicroTask() {
   CycleCollectedJSContext* ccjs = CycleCollectedJSContext::Get();
   if (!ccjs) {
     return;
@@ -805,7 +805,8 @@ void nsDOMMutationObserver::HandleMutation() {
   }
   ClearPendingRecords();
 
-  mCallback->Call(this, mutations, *this);
+  RefPtr<dom::MutationCallback> callback(mCallback);
+  callback->Call(this, mutations, *this);
 }
 
 void nsDOMMutationObserver::HandleMutationsInternal(AutoSlowOperation& aAso) {

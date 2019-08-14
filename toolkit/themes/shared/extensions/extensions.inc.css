@@ -13,16 +13,17 @@
   min-height: 39px;
 }
 
-.view-pane > .list > scrollbox {
+.view-pane > .list {
   padding-right: 24px;
   padding-left: 24px;
 }
-
 
 /*** global warnings ***/
 
 .global-warning-container {
   overflow-x: hidden;
+  margin-right: 28px;
+  margin-left: 28px;
 }
 
 .global-warning {
@@ -97,8 +98,13 @@
 
 .alert-container {
   -moz-box-align: center;
-  margin-right: 48px;
-  margin-left: 48px;
+  margin-right: 28px;
+  margin-left: 28px;
+  margin-bottom: 10px;
+}
+
+.html-alert-container {
+  margin-bottom: 0;
 }
 
 .alert-spacer-before {
@@ -153,6 +159,11 @@ button.warning {
 
 /*** category selector ***/
 
+#categories {
+  /* Make room for outlines */
+  padding: 1px;
+}
+
 #categories > .category[disabled] {
   overflow: hidden;
   height: 0;
@@ -160,6 +171,7 @@ button.warning {
   opacity: 0;
   transition-property: min-height, opacity;
   transition-duration: 1s, 0.8s;
+  -moz-user-input: none; /* Prevents list item selection during animation. */
 }
 
 #categories > .category:not([disabled]) {
@@ -249,36 +261,55 @@ button.warning {
   }
 }
 
+#go-back,
 #header-utils-btn {
-  -moz-appearance: none;
-  border: 1px solid var(--in-content-box-border-color);
-  border-radius: 2px;
-  line-height: 20px;
-  background-color: var(--in-content-page-background);
-  padding-right: 10px;
-  padding-left: 10px;
-  /* This button is too tall, adding margin-bottom shrinks it. */
-  margin-bottom: 2px;
+  -moz-context-properties: fill;
+  fill: currentColor;
+  min-width: auto;
   margin-inline-end: 0;
 }
 
-#header-utils-btn:hover {
-  background-color: var(--in-content-box-background-hover);
-  cursor: pointer;
+#header-utils-btn > .button-box > hbox > .button-icon {
+  list-style-image: url("chrome://mozapps/skin/extensions/utilities.svg");
 }
 
-#header-utils-btn:active:hover,
-#header-utils-btn[open="true"] {
-  background-color: var(--in-content-box-background-active);
+#header-utils-btn > .button-box > .button-menu-dropmarker {
+  display: block;
+  list-style-image: url("chrome://global/skin/icons/arrow-dropdown-12.svg");
+  width: 12px;
+  margin-inline-start: 5px;
+  margin-inline-end: 1px; /* Match the 1px margin-inline-start on the icon. */
 }
 
-#header-utils-btn > .toolbarbutton-text {
+#go-back > .button-box > .button-text,
+#header-utils-btn > .button-box > hbox > .button-text {
   display: none;
 }
 
+#go-back {
+  margin-inline-start: 0;
+  margin-inline-end: 16px;
+}
+
+#go-back > .button-box > .button-icon {
+  list-style-image: url("chrome://global/skin/icons/calendar-arrow-left.svg");
+  margin: 0;
+}
+
+#go-back > .button-box > .button-icon:-moz-locale-dir(rtl) {
+  list-style-image: url("chrome://global/skin/icons/calendar-arrow-right.svg");
+}
+
 #heading {
-  margin-top: 26px;
+  /* This should be margin-top: 26px to match preferences, but we want to lower
+   * .header-name to be closer to centre with the buttons. */
+  margin-top: 21px;
   margin-bottom: 16px;
+}
+
+.header-name {
+  /* Add some top margin to try to centre the heading next to the back button. */
+  margin-top: 5px;
 }
 
 .heading-inner {
@@ -334,6 +365,8 @@ button.warning {
   max-width: 24px;
   max-height: 24px;
   margin-inline-end: 16px;
+  -moz-context-properties: fill;
+  fill: currentColor;
 }
 
 .content-inner-container {
@@ -379,6 +412,27 @@ button.warning {
   -moz-box-flex: 1;
 }
 
+.privateBrowsing-notice {
+  background-color: var(--purple-70);
+  color: #fff;
+  margin: 4px 0 0;
+  padding: 4px 5px 3px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  -moz-user-focus: ignore;
+  transition-property: color, background-color;
+  transition-timing-function: var(--animation-curve);
+  transition-duration: 150ms;
+}
+
+.message-container {
+  /* private-browsing-notice.max-width(664)
+     - message-bar.padding(8)
+     - message-bar-icon.computed-width(28) */
+  max-width: 628px;
+  min-width: 628px;
+}
+
 .legacy-warning {
   background-color: #FFE900;
   color: #3E2800;
@@ -387,7 +441,7 @@ button.warning {
   font-weight: 600;
   -moz-user-focus: ignore;
   transition-property: color, background-color;
-  transition-timing-function: cubic-bezier(.07,.95,0,1);
+  transition-timing-function: var(--animation-curve);
   transition-duration: 150ms;
 }
 
@@ -427,7 +481,15 @@ button.warning {
   -moz-box-align: center;
 }
 
-.content-container,
+.addon-view[type="theme"] .icon:-moz-locale-dir(rtl) {
+  transform: scaleX(-1);
+}
+
+.content-container {
+  -moz-box-align: center;
+}
+
+#updates-list > .addon > .content-container,
 .basicinfo-container {
   -moz-box-align: start;
 }
@@ -520,22 +582,22 @@ button.warning {
                                     transparent 75%);
 }
 .addon-view[notification="warning"] {
-  --view-highlight-color: #F9F5E5;
+  --view-highlight-color: rgb(208, 176, 47, 0.1);
 }
 
 .addon-view[notification="error"] {
-  --view-highlight-color: #FFE8E9;
+  --view-highlight-color: rgb(255, 0, 13, 0.1);
 }
 
 .addon-view[pending="enable"],
 .addon-view[pending="upgrade"],
 .addon-view[pending="install"] {
-  --view-highlight-color: #EFFAF2;
+  --view-highlight-color: rgb(61, 194, 97, 0.1);
 }
 
 .addon-view[pending="disable"],
 .addon-view[pending="uninstall"] {
-  --view-highlight-color: #F2F2F2;
+  --view-highlight-color: rgb(128, 128, 128, 0.1);
 }
 
 .list > .addon[selected] {
@@ -565,7 +627,7 @@ button.warning {
 .addon[status="uninstalled"] > .container {
   -moz-box-align: center;
   padding: 4px 20px;
-  background-color: #FDFFA8;
+  background-color: rgb(255, 255, 0, 0.1);
   border-radius: 8px;
   font-size: 120%;
 }
@@ -577,8 +639,8 @@ button.warning {
 
 /*** detail view ***/
 
-#detail-view > .scrollbox-innerbox {
-  margin: 8px 28px;
+#detail-view {
+  padding: 8px 28px;
 }
 
 #detail-view .loading {
@@ -760,7 +822,6 @@ button.warning {
   -moz-box-align: center;
   min-height: 35px;
   line-height: 20px;
-  text-shadow: 0 1px 1px #fefffe;
 }
 
 .inline-options-browser {
@@ -773,7 +834,7 @@ button.warning {
 }
 
 .preferences-description {
-  font-size: 90.9%;
+  font-size: 1.1rem;
   color: graytext;
   margin-top: -2px;
   margin-inline-start: 2em;
@@ -784,6 +845,18 @@ button.warning {
   display: none;
 }
 
+.detail-row-footer {
+  padding-bottom: 6px;
+}
+
+.detail-row-footer > .preferences-description {
+  margin-inline-start: 6px;
+  margin-top: 0;
+  margin-bottom: 0;
+  /* card-width - card-padding - description-margins */
+  width: calc(664px - 32px - 11px);
+  color: var(--in-content-deemphasized-text);
+}
 
 /*** creator ***/
 
@@ -936,10 +1009,6 @@ button.warning {
   padding: 2px 4px;
 }
 
-.no-auto-hide .addon-control {
-  display: block !important;
-}
-
 button.button-link {
   -moz-appearance: none;
   background: transparent;
@@ -995,7 +1064,7 @@ button.button-link:not([disabled="true"]):active:hover {
 /*** info UI for add-ons that have been disabled for being unsigned ***/
 
 #show-disabled-unsigned-extensions:not(:hover) {
-  background-color: #fcf8ed;
+  background-color: rgba(218, 170, 37, 0.05);
 }
 
 #disabled-unsigned-addons-info,

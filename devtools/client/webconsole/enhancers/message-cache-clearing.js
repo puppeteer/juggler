@@ -4,21 +4,19 @@
 
 "use strict";
 
-const {
-  MESSAGES_CLEAR,
-} = require("devtools/client/webconsole/constants");
+const { MESSAGES_CLEAR } = require("devtools/client/webconsole/constants");
 
 /**
  * This enhancer is responsible for clearing the messages caches using the
  * webconsoleClient when the user clear the messages (either by direct UI action, or via
  * `console.clear()`).
  */
-function enableMessagesCacheClearing(hud) {
+function enableMessagesCacheClearing(webConsoleUI) {
   return next => (reducer, initialState, enhancer) => {
     function messagesCacheClearingEnhancer(state, action) {
       state = reducer(state, action);
 
-      const webConsoleClient = hud && hud.proxy ? hud.proxy.webConsoleClient : null;
+      const webConsoleClient = webConsoleUI && webConsoleUI.webConsoleClient;
       if (webConsoleClient && action.type === MESSAGES_CLEAR) {
         webConsoleClient.clearNetworkRequests();
         webConsoleClient.clearMessagesCache();

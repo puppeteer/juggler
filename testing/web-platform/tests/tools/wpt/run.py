@@ -8,7 +8,7 @@ from six.moves import input
 wpt_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 sys.path.insert(0, os.path.abspath(os.path.join(wpt_root, "tools")))
 
-from . import browser, install, utils, virtualenv
+from . import browser, install, testfiles, utils, virtualenv
 from ..serve import serve
 
 logger = None
@@ -45,6 +45,8 @@ def create_parser():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("product", action="store",
                         help="Browser to run tests in")
+    parser.add_argument("--affected", action="store", default=None,
+                        help="Run affected tests since revish")
     parser.add_argument("--yes", "-y", dest="prompt", action="store_false", default=True,
                         help="Don't prompt before installing components")
     parser.add_argument("--install-browser", action="store_true",
@@ -63,9 +65,12 @@ def create_parser():
     return parser
 
 
-def exit(msg):
-    logger.error(msg)
-    sys.exit(1)
+def exit(msg=None):
+    if msg:
+        logger.error(msg)
+        sys.exit(1)
+    else:
+        sys.exit(0)
 
 
 def args_general(kwargs):
@@ -101,7 +106,7 @@ otherwise install OpenSSL and ensure that it's on your $PATH.""")
 
 
 def check_environ(product):
-    if product not in ("firefox", "servo"):
+    if product not in ("chrome", "firefox", "servo"):
         config_builder = serve.build_config(os.path.join(wpt_root, "config.json"))
         # Override the ports to avoid looking for free ports
         config_builder.ssl = {"type": "none"}
@@ -116,9 +121,14 @@ def check_environ(product):
 
         missing_hosts = set(expected_hosts)
         if is_windows:
-            hosts_path = "%s\System32\drivers\etc\hosts" % os.environ.get("SystemRoot", "C:\Windows")
+            hosts_path = r"%s\System32\drivers\etc\hosts" % os.environ.get("SystemRoot", r"C:\Windows")
         else:
             hosts_path = "/etc/hosts"
+
+        if os.path.abspath(os.curdir) == wpt_root:
+            wpt_path = "wpt"
+        else:
+            wpt_path = os.path.join(wpt_root, "wpt")
 
         with open(hosts_path, "r") as f:
             for line in f:
@@ -131,13 +141,14 @@ def check_environ(product):
                 if is_windows:
                     message = """Missing hosts file configuration. Run
 
-python wpt make-hosts-file | Out-File %s -Encoding ascii -Append
+python %s make-hosts-file | Out-File %s -Encoding ascii -Append
 
-in PowerShell with Administrator privileges.""" % hosts_path
+in PowerShell with Administrator privileges.""" % (wpt_path, hosts_path)
                 else:
                     message = """Missing hosts file configuration. Run
 
-./wpt make-hosts-file | sudo tee -a %s""" % hosts_path
+%s make-hosts-file | sudo tee -a %s""" % ("./wpt" if wpt_path == "wpt" else wpt_path,
+                                          hosts_path)
                 raise WptrunError(message)
 
 
@@ -146,7 +157,7 @@ class BrowserSetup(object):
     browser_cls = None
 
     def __init__(self, venv, prompt=True, sub_product=None):
-        self.browser = self.browser_cls()
+        self.browser = self.browser_cls(logger)
         self.venv = venv
         self.prompt = prompt
         self.sub_product = sub_product
@@ -166,7 +177,8 @@ class BrowserSetup(object):
             return self.browser.install(venv.path, channel)
 
     def install_requirements(self):
-        self.venv.install_requirements(os.path.join(wpt_root, "tools", "wptrunner", self.browser.requirements))
+        if not self.venv.skip_virtualenv_setup:
+            self.venv.install_requirements(os.path.join(wpt_root, "tools", "wptrunner", self.browser.requirements))
 
     def setup(self, kwargs):
         self.setup_kwargs(kwargs)
@@ -260,7 +272,7 @@ class Chrome(BrowserSetup):
 
                 if install:
                     logger.info("Downloading chromedriver")
-                    webdriver_binary = self.browser.install_webdriver(dest=self.venv.bin_path)
+                    webdriver_binary = self.browser.install_webdriver(dest=self.venv.bin_path, browser_binary=kwargs["binary"])
             else:
                 logger.info("Using webdriver binary %s" % webdriver_binary)
 
@@ -271,14 +283,8 @@ class Chrome(BrowserSetup):
         if kwargs["browser_channel"] == "dev":
             logger.info("Automatically turning on experimental features for Chrome Dev")
             kwargs["binary_args"].append("--enable-experimental-web-platform-features")
-            # TODO(foolip): remove after unified plan is enabled on Chrome stable
-            kwargs["binary_args"].append("--enable-features=RTCUnifiedPlanByDefault")
-
-        # Allow audio autoplay without a user gesture.
-        kwargs["binary_args"].append("--autoplay-policy=no-user-gesture-required")
-
-        # Allow WebRTC tests to call getUserMedia.
-        kwargs["binary_args"] += ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
+            # HACK(Hexcles): work around https://github.com/web-platform-tests/wpt/issues/16448
+            kwargs["webdriver_args"].append("--disable-build-check")
 
 
 class ChromeAndroid(BrowserSetup):
@@ -325,6 +331,32 @@ class Opera(BrowserSetup):
                 kwargs["webdriver_binary"] = webdriver_binary
             else:
                 raise WptrunError("Unable to locate or install operadriver binary")
+
+
+class EdgeChromium(BrowserSetup):
+    name = "MicrosoftEdge"
+    browser_cls = browser.EdgeChromium
+
+    def setup_kwargs(self, kwargs):
+        if kwargs["webdriver_binary"] is None:
+            webdriver_binary = self.browser.find_webdriver()
+
+            if webdriver_binary is None:
+                install = self.prompt_install("msedgedriver")
+
+                if install:
+                    logger.info("Downloading msedgedriver")
+                    webdriver_binary = self.browser.install_webdriver(dest=self.venv.bin_path)
+            else:
+                logger.info("Using webdriver binary %s" % webdriver_binary)
+
+            if webdriver_binary:
+                kwargs["webdriver_binary"] = webdriver_binary
+            else:
+                raise WptrunError("Unable to locate or install msedgedriver binary")
+        if kwargs["browser_channel"] == "dev":
+            logger.info("Automatically turning on experimental features for Edge Dev")
+            kwargs["binary_args"].append("--enable-experimental-web-platform-features")
 
 
 class Edge(BrowserSetup):
@@ -391,11 +423,6 @@ class Safari(BrowserSetup):
             kwargs["webdriver_binary"] = webdriver_binary
 
 
-class SafariWebDriver(Safari):
-    name = "safari_webdriver"
-    browser_cls = browser.SafariWebDriver
-
-
 class Sauce(BrowserSetup):
     name = "sauce"
     browser_cls = browser.Sauce
@@ -422,7 +449,7 @@ class Servo(BrowserSetup):
             binary = self.browser.find_binary(self.venv.path, None)
 
             if binary is None:
-                raise WptrunError("Unable to find servo binary on the PATH")
+                raise WptrunError("Unable to find servo binary in PATH")
             kwargs["binary"] = binary
 
 
@@ -442,21 +469,45 @@ class WebKit(BrowserSetup):
         pass
 
 
+class Epiphany(BrowserSetup):
+    name = "epiphany"
+    browser_cls = browser.Epiphany
+
+    def install(self, venv, channel=None):
+        raise NotImplementedError
+
+    def setup_kwargs(self, kwargs):
+        if kwargs["binary"] is None:
+            binary = self.browser.find_binary()
+
+            if binary is None:
+                raise WptrunError("Unable to find epiphany in PATH")
+            kwargs["binary"] = binary
+
+        if kwargs["webdriver_binary"] is None:
+            webdriver_binary = self.browser.find_webdriver()
+
+            if webdriver_binary is None:
+                raise WptrunError("Unable to find WebKitWebDriver in PATH")
+            kwargs["webdriver_binary"] = webdriver_binary
+
+
 product_setup = {
     "fennec": Fennec,
     "firefox": Firefox,
     "chrome": Chrome,
     "chrome_android": ChromeAndroid,
+    "edgechromium": EdgeChromium,
     "edge": Edge,
     "edge_webdriver": EdgeWebDriver,
     "ie": InternetExplorer,
     "safari": Safari,
-    "safari_webdriver": SafariWebDriver,
     "servo": Servo,
     "servodriver": ServoWebDriver,
     "sauce": Sauce,
     "opera": Opera,
     "webkit": WebKit,
+    "epiphany": Epiphany,
 }
 
 
@@ -475,6 +526,7 @@ def setup_logging(kwargs, default_config=None):
         default_config = {default_formatter: sys.stdout}
     wptrunner.setup_logging(kwargs, default_config)
     logger = wptrunner.logger
+    return logger
 
 
 def setup_wptrunner(venv, prompt=True, install_browser=False, **kwargs):
@@ -495,6 +547,25 @@ def setup_wptrunner(venv, prompt=True, install_browser=False, **kwargs):
     setup_cls = product_setup[kwargs["product"]](venv, prompt, sub_product)
     setup_cls.install_requirements()
 
+    affected_revish = kwargs.pop("affected", None)
+    if affected_revish is not None:
+        # TODO: Consolidate with `./wpt tests-affected --ignore-rules`:
+        # https://github.com/web-platform-tests/wpt/issues/14560
+        files_changed, _ = testfiles.files_changed(
+            affected_revish,
+            ignore_rules=["resources/testharness*"],
+            include_uncommitted=True, include_new=True)
+        # TODO: Perhaps use wptrunner.testloader.ManifestLoader here
+        # and remove the manifest-related code from testfiles.
+        # https://github.com/web-platform-tests/wpt/issues/14421
+        tests_changed, tests_affected = testfiles.affected_testfiles(
+            files_changed, manifest_path=kwargs.get("manifest_path"), manifest_update=kwargs["manifest_update"])
+        test_list = tests_changed | tests_affected
+        logger.info("Identified %s affected tests" % len(test_list))
+        test_list = [os.path.relpath(item, wpt_root) for item in test_list]
+        kwargs["test_list"] += test_list
+        kwargs["default_exclude"] = True
+
     if install_browser and not kwargs["channel"]:
         logger.info("--install-browser is given but --channel is not set, default to nightly channel")
         kwargs["channel"] = "nightly"
@@ -508,7 +579,8 @@ def setup_wptrunner(venv, prompt=True, install_browser=False, **kwargs):
             kwargs["browser_channel"] = channel
         else:
             logger.info("Valid channels for %s not known; using argument unmodified" % kwargs["product"])
-    del kwargs["channel"]
+            kwargs["browser_channel"] = kwargs["channel"]
+        del kwargs["channel"]
 
     if install_browser:
         logger.info("Installing browser")
@@ -520,10 +592,15 @@ def setup_wptrunner(venv, prompt=True, install_browser=False, **kwargs):
 
     wptrunner_path = os.path.join(wpt_root, "tools", "wptrunner")
 
-    venv.install_requirements(os.path.join(wptrunner_path, "requirements.txt"))
+    if not venv.skip_virtualenv_setup:
+        venv.install_requirements(os.path.join(wptrunner_path, "requirements.txt"))
 
-    kwargs['browser_version'] = setup_cls.browser.version(binary=kwargs.get("binary"),
-                                                          webdriver_binary=kwargs.get("webdriver_binary"))
+    # Only update browser_version if it was not given as a command line
+    # argument, so that it can be overridden on the command line.
+    if not kwargs["browser_version"]:
+        kwargs["browser_version"] = setup_cls.browser.version(binary=kwargs.get("binary"),
+                                                              webdriver_binary=kwargs.get("webdriver_binary"))
+
     return kwargs
 
 

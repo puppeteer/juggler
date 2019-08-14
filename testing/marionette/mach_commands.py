@@ -9,10 +9,8 @@ import os
 import sys
 
 from mach.decorators import (
-    CommandArgument,
     CommandProvider,
     Command,
-    SubCommand,
 )
 
 from mozbuild.base import (
@@ -20,10 +18,12 @@ from mozbuild.base import (
     MachCommandConditions as conditions,
 )
 
+SUPPORTED_APPS = ['firefox', 'android', 'thunderbird']
 
 def create_parser_tests():
     from marionette_harness.runtests import MarionetteArguments
     from mozlog.structured import commandline
+
     parser = MarionetteArguments()
     commandline.add_logging_group(parser)
     return parser
@@ -38,10 +38,6 @@ def run_marionette(tests, binary=None, topsrcdir=None, **kwargs):
     )
 
     parser = create_parser_tests()
-
-    if not tests:
-        tests = [os.path.join(topsrcdir,
-                 "testing/marionette/harness/marionette_harness/tests/unit-tests.ini")]
 
     args = argparse.Namespace(tests=tests)
 
@@ -64,12 +60,25 @@ def run_marionette(tests, binary=None, topsrcdir=None, **kwargs):
         return 0
 
 
+def is_buildapp_in(*apps):
+    def is_buildapp_supported(cls):
+        for a in apps:
+            c = getattr(conditions, 'is_{}'.format(a), None)
+            if c and c(cls):
+                return True
+        return False
+
+    is_buildapp_supported.__doc__ = 'Must have a {} build.'.format(
+        ' or '.join(apps))
+    return is_buildapp_supported
+
+
 @CommandProvider
 class MarionetteTest(MachCommandBase):
     @Command("marionette-test",
              category="testing",
-             description="Remote control protocol to Gecko, used for functional UI tests and browser automation.",
-             conditions=[conditions.is_firefox_or_android],
+             description="Remote control protocol to Gecko, used for browser automation.",
+             conditions=[is_buildapp_in(*SUPPORTED_APPS)],
              parser=create_parser_tests,
              )
     def marionette_test(self, tests, **kwargs):
@@ -79,38 +88,20 @@ class MarionetteTest(MachCommandBase):
                 tests.append(obj["file_relpath"])
             del kwargs["test_objects"]
 
-        if not kwargs.get("binary") and conditions.is_firefox(self):
+        if not tests:
+            if conditions.is_thunderbird(self):
+                tests = [os.path.join(self.topsrcdir,
+                         "comm/testing/marionette/unit-tests.ini")]
+            else:
+                tests = [os.path.join(self.topsrcdir,
+                         "testing/marionette/harness/marionette_harness/tests/unit-tests.ini")]
+
+        # Force disable e10s because it is not supported in Fennec
+        if kwargs.get("app") == "fennec":
+            kwargs["e10s"] = False
+
+        if not kwargs.get("binary") and \
+                (conditions.is_firefox(self) or conditions.is_thunderbird(self)):
             kwargs["binary"] = self.get_binary_path("app")
-        return run_marionette(tests, topsrcdir=self.topsrcdir, **kwargs)
 
-
-@CommandProvider
-class Marionette(MachCommandBase):
-
-    @property
-    def srcdir(self):
-        return os.path.join(self.topsrcdir, "testing/marionette")
-
-    @Command("marionette",
-             category="misc",
-             description="Remote control protocol to Gecko, used for functional UI tests and browser automation.",
-             conditions=[conditions.is_firefox_or_android],
-             )
-    def marionette(self):
-        self.parser.print_usage()
-        return 1
-
-    @SubCommand("marionette", "test",
-                description="Run browser automation tests based on Marionette harness.",
-                parser=create_parser_tests,
-                )
-    def marionette_test(self, tests, **kwargs):
-        if "test_objects" in kwargs:
-            tests = []
-            for obj in kwargs["test_objects"]:
-                tests.append(obj["file_relpath"])
-            del kwargs["test_objects"]
-
-        if not kwargs.get("binary") and conditions.is_firefox(self):
-            kwargs["binary"] = self.get_binary_path("app")
         return run_marionette(tests, topsrcdir=self.topsrcdir, **kwargs)

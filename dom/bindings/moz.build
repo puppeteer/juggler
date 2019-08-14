@@ -5,10 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
-
-if CONFIG['CC_TYPE'] == 'msvc':
-    CXXFLAGS += ['-bigobj']
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 TEST_DIRS += ['test']
 
@@ -49,10 +46,10 @@ EXPORTS.mozilla.dom += [
     'PrimitiveConversions.h',
     'ReadableStream.h',
     'Record.h',
+    'RemoteObjectProxy.h',
     'RootedDictionary.h',
     'SimpleGlobalObject.h',
     'SpiderMonkeyInterface.h',
-    'StructuredClone.h',
     'ToJSValue.h',
     'TypedArray.h',
     'UnionMember.h',
@@ -97,8 +94,7 @@ LOCAL_INCLUDES += [
     '/media/webrtc/trunk/',
 ]
 
-if CONFIG['MOZ_LIBPRIO']:
-    LOCAL_INCLUDES += ['/third_party/msgpack/include']
+LOCAL_INCLUDES += ['/third_party/msgpack/include']
 
 DEFINES['GOOGLE_PROTOBUF_NO_RTTI'] = True
 DEFINES['GOOGLE_PROTOBUF_NO_STATIC_INITIALIZER'] = True
@@ -113,13 +109,10 @@ UNIFIED_SOURCES += [
     'IterableIterator.cpp',
     'nsScriptError.cpp',
     'nsScriptErrorWithStack.cpp',
+    'RemoteObjectProxy.cpp',
     'SimpleGlobalObject.cpp',
     'ToJSValue.cpp',
     'WebIDLGlobalNameHash.cpp',
-]
-
-SOURCES += [
-    'StructuredClone.cpp',
 ]
 
 # Some tests, including those for for maplike and setlike, require bindings

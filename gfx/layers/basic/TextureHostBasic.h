@@ -15,13 +15,17 @@
 namespace mozilla {
 namespace layers {
 
+already_AddRefed<TextureHost> CreateTextureHostBasic(
+    const SurfaceDescriptor& aDesc, ISurfaceAllocator* aDeallocator,
+    LayersBackend aBackend, TextureFlags aFlags);
+
 /**
  * A texture source interface that can be used by the software Compositor.
  */
 class TextureSourceBasic {
  public:
   TextureSourceBasic() : mFromYCBCR(false) {}
-  virtual ~TextureSourceBasic() {}
+  virtual ~TextureSourceBasic() = default;
   virtual gfx::SourceSurface* GetSurface(gfx::DrawTarget* aTarget) = 0;
   virtual void SetBufferTextureHost(BufferTextureHost* aTexture) {}
   bool mFromYCBCR;  // we to track sources from YCBCR so we can use a less

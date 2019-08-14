@@ -198,31 +198,9 @@ bool InterpreterFrame::prologue(JSContext* cx) {
   MOZ_ASSERT(cx->interpreterRegs().pc == script->code());
   MOZ_ASSERT(cx->realm() == script->realm());
 
-  if (isEvalFrame()) {
-    if (!script->bodyScope()->hasEnvironment()) {
-      MOZ_ASSERT(!script->strict());
-      // Non-strict eval may introduce var bindings that conflict with
-      // lexical bindings in an enclosing lexical scope.
-      RootedObject varObjRoot(cx, &varObj());
-      if (!CheckEvalDeclarationConflicts(cx, script, environmentChain(),
-                                         varObjRoot)) {
-        return false;
-      }
-    }
-    return probes::EnterScript(cx, script, nullptr, this);
-  }
-
-  if (isGlobalFrame()) {
-    Rooted<LexicalEnvironmentObject*> lexicalEnv(cx);
-    RootedObject varObjRoot(cx);
-    if (script->hasNonSyntacticScope()) {
-      lexicalEnv = &extensibleLexicalEnvironment();
-      varObjRoot = &varObj();
-    } else {
-      lexicalEnv = &cx->global()->lexicalEnvironment();
-      varObjRoot = cx->global();
-    }
-    if (!CheckGlobalDeclarationConflicts(cx, script, lexicalEnv, varObjRoot)) {
+  if (isEvalFrame() || isGlobalFrame()) {
+    HandleObject env = environmentChain();
+    if (!CheckGlobalOrEvalDeclarationConflicts(cx, env, script)) {
       // Treat this as a script entry, for consistency with Ion.
       if (script->trackRecordReplayProgress()) {
         mozilla::recordreplay::AdvanceExecutionProgressCounter();
@@ -236,11 +214,12 @@ bool InterpreterFrame::prologue(JSContext* cx) {
     return probes::EnterScript(cx, script, nullptr, this);
   }
 
+  MOZ_ASSERT(isFunctionFrame());
+
   // At this point, we've yet to push any environments. Check that they
   // match the enclosing scope.
   AssertScopeMatchesEnvironment(script->enclosingScope(), environmentChain());
 
-  MOZ_ASSERT(isFunctionFrame());
   if (callee().needsFunctionEnvironmentObjects() &&
       !initFunctionEnvironmentObjects(cx)) {
     return false;
@@ -310,7 +289,7 @@ bool InterpreterFrame::pushVarEnvironment(JSContext* cx, HandleScope scope) {
 bool InterpreterFrame::pushLexicalEnvironment(JSContext* cx,
                                               Handle<LexicalScope*> scope) {
   LexicalEnvironmentObject* env =
-      LexicalEnvironmentObject::create(cx, scope, this);
+      LexicalEnvironmentObject::createForFrame(cx, scope, this);
   if (!env) {
     return false;
   }
@@ -540,6 +519,13 @@ JS::Realm* JitFrameIter::realm() const {
   return asJSJit().script()->realm();
 }
 
+uint8_t* JitFrameIter::resumePCinCurrentFrame() const {
+  if (isWasm()) {
+    return asWasm().resumePCinCurrentFrame();
+  }
+  return asJSJit().resumePCinCurrentFrame();
+}
+
 bool JitFrameIter::done() const {
   if (!isSome()) {
     return true;
@@ -678,6 +664,7 @@ bool FrameIter::principalsSubsumeFrame() const {
     return true;
   }
 
+  JS::AutoSuppressGCAnalysis nogc;
   return subsumes(data_.principals_, realm()->principals());
 }
 
@@ -766,8 +753,6 @@ FrameIter::Data::Data(const FrameIter::Data& other)
 FrameIter::FrameIter(JSContext* cx, DebuggerEvalOption debuggerEvalOption)
     : data_(cx, debuggerEvalOption, nullptr),
       ionInlineFrames_(cx, (js::jit::JSJitFrameIter*)nullptr) {
-  // settleOnActivation can only GC if principals are given.
-  JS::AutoSuppressGCAnalysis nogc;
   settleOnActivation();
 
   // No principals so we can see all frames.
@@ -1555,7 +1540,6 @@ void jit::JitActivation::removeRematerializedFrame(uint8_t* top) {
   }
 
   if (RematerializedFrameTable::Ptr p = rematerializedFrames_->lookup(top)) {
-    RematerializedFrame::FreeInVector(p->value());
     rematerializedFrames_->remove(p);
   }
 }
@@ -1567,7 +1551,6 @@ void jit::JitActivation::clearRematerializedFrames() {
 
   for (RematerializedFrameTable::Enum e(*rematerializedFrames_); !e.empty();
        e.popFront()) {
-    RematerializedFrame::FreeInVector(e.front().value());
     e.removeFront();
   }
 }
@@ -1613,10 +1596,11 @@ jit::RematerializedFrame* jit::JitActivation::getRematerializedFrame(
     }
 
     // See comment in unsetPrevUpToDateUntil.
-    DebugEnvironments::unsetPrevUpToDateUntil(cx, p->value()[inlineDepth]);
+    DebugEnvironments::unsetPrevUpToDateUntil(cx,
+                                              p->value()[inlineDepth].get());
   }
 
-  return p->value()[inlineDepth];
+  return p->value()[inlineDepth].get();
 }
 
 jit::RematerializedFrame* jit::JitActivation::lookupRematerializedFrame(
@@ -1625,7 +1609,7 @@ jit::RematerializedFrame* jit::JitActivation::lookupRematerializedFrame(
     return nullptr;
   }
   if (RematerializedFrameTable::Ptr p = rematerializedFrames_->lookup(top)) {
-    return inlineDepth < p->value().length() ? p->value()[inlineDepth]
+    return inlineDepth < p->value().length() ? p->value()[inlineDepth].get()
                                              : nullptr;
   }
   return nullptr;
@@ -1641,9 +1625,8 @@ void jit::JitActivation::removeRematerializedFramesFromDebugger(JSContext* cx,
   }
   if (RematerializedFrameTable::Ptr p = rematerializedFrames_->lookup(top)) {
     for (uint32_t i = 0; i < p->value().length(); i++) {
-      Debugger::handleUnrecoverableIonBailoutError(cx, p->value()[i]);
+      Debugger::handleUnrecoverableIonBailoutError(cx, p->value()[i].get());
     }
-    RematerializedFrame::FreeInVector(p->value());
     rematerializedFrames_->remove(p);
   }
 }
@@ -1951,17 +1934,18 @@ JS::ProfilingFrameIterator::getPhysicalFrameAndEntry(
     Frame frame;
     frame.kind = Frame_Wasm;
     frame.stackAddress = stackAddr;
-    frame.returnAddress = nullptr;
+    frame.returnAddress_ = nullptr;
     frame.activation = activation_;
     frame.label = nullptr;
     frame.endStackAddress = activation_->asJit()->jsOrWasmExitFP();
+    frame.interpreterScript = nullptr;
     return mozilla::Some(frame);
   }
 
   MOZ_ASSERT(isJSJit());
 
   // Look up an entry for the return address.
-  void* returnAddr = jsJitIter().returnAddressToFp();
+  void* returnAddr = jsJitIter().resumePCinCurrentFrame();
   jit::JitcodeGlobalTable* table =
       cx_->runtime()->jitRuntime()->getJitcodeGlobalTable();
   if (samplePositionInProfilerBuffer_) {
@@ -1972,7 +1956,7 @@ JS::ProfilingFrameIterator::getPhysicalFrameAndEntry(
   }
 
   MOZ_ASSERT(entry->isIon() || entry->isIonCache() || entry->isBaseline() ||
-             entry->isDummy());
+             entry->isBaselineInterpreter() || entry->isDummy());
 
   // Dummy frames produce no stack frames.
   if (entry->isDummy()) {
@@ -1980,11 +1964,26 @@ JS::ProfilingFrameIterator::getPhysicalFrameAndEntry(
   }
 
   Frame frame;
-  frame.kind = entry->isBaseline() ? Frame_Baseline : Frame_Ion;
+  if (entry->isBaselineInterpreter()) {
+    frame.kind = Frame_BaselineInterpreter;
+  } else if (entry->isBaseline()) {
+    frame.kind = Frame_Baseline;
+  } else {
+    frame.kind = Frame_Ion;
+  }
   frame.stackAddress = stackAddr;
-  frame.returnAddress = returnAddr;
+  if (entry->isBaselineInterpreter()) {
+    frame.label = jsJitIter().baselineInterpreterLabel();
+    jsJitIter().baselineInterpreterScriptPC(&frame.interpreterScript,
+                                            &frame.interpreterPC_);
+    MOZ_ASSERT(frame.interpreterScript);
+    MOZ_ASSERT(frame.interpreterPC_);
+  } else {
+    frame.interpreterScript = nullptr;
+    frame.returnAddress_ = returnAddr;
+    frame.label = nullptr;
+  }
   frame.activation = activation_;
-  frame.label = nullptr;
   frame.endStackAddress = activation_->asJit()->jsOrWasmExitFP();
   return mozilla::Some(frame);
 }
@@ -2010,11 +2009,16 @@ uint32_t JS::ProfilingFrameIterator::extractStack(Frame* frames,
     return 1;
   }
 
+  if (physicalFrame->kind == Frame_BaselineInterpreter) {
+    frames[offset] = physicalFrame.value();
+    return 1;
+  }
+
   // Extract the stack for the entry.  Assume maximum inlining depth is <64
   const char* labels[64];
-  uint32_t depth =
-      entry.callStackAtAddr(cx_->runtime(), jsJitIter().returnAddressToFp(),
-                            labels, ArrayLength(labels));
+  uint32_t depth = entry.callStackAtAddr(cx_->runtime(),
+                                         jsJitIter().resumePCinCurrentFrame(),
+                                         labels, ArrayLength(labels));
   MOZ_ASSERT(depth < ArrayLength(labels));
   for (uint32_t i = 0; i < depth; i++) {
     if (offset + i >= end) {

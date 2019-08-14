@@ -1,4 +1,7 @@
-AntiTracking.runTest("BroadcastChannel",
+/* import-globals-from antitracking_head.js */
+
+AntiTracking.runTest(
+  "BroadcastChannel",
   async _ => {
     try {
       new BroadcastChannel("hello");
@@ -14,11 +17,15 @@ AntiTracking.runTest("BroadcastChannel",
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
-  });
+  }
+);
 
-AntiTracking.runTest("BroadcastChannel in workers",
+AntiTracking.runTest(
+  "BroadcastChannel in workers",
   async _ => {
     function blockingCode() {
       try {
@@ -40,11 +47,15 @@ AntiTracking.runTest("BroadcastChannel in workers",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
   },
@@ -65,21 +76,29 @@ AntiTracking.runTest("BroadcastChannel in workers",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
       };
+
+      worker.onerror = function(e) {
+        reject();
+      };
     });
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
-  });
+  }
+);
 
-AntiTracking.runTest("BroadcastChannel and Storage Access API",
+AntiTracking.runTest(
+  "BroadcastChannel and Storage Access API",
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
     await noStorageAccessInitially();
@@ -95,12 +114,30 @@ AntiTracking.runTest("BroadcastChannel and Storage Access API",
     /* import-globals-from storageAccessAPIHelpers.js */
     await callRequestStorageAccess();
 
-    new BroadcastChannel("hello");
-    ok(true, "BroadcastChannel can be used");
+    if (
+      SpecialPowers.Services.prefs.getIntPref(
+        "network.cookie.cookieBehavior"
+      ) == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT
+    ) {
+      try {
+        new BroadcastChannel("hello");
+        ok(false, "BroadcastChannel cannot be used!");
+      } catch (e) {
+        ok(true, "BroadcastChannel cannot be used!");
+        is(e.name, "SecurityError", "We want a security error message.");
+      }
+    } else {
+      new BroadcastChannel("hello");
+      ok(true, "BroadcastChannel can be used");
+    }
   },
   async _ => {
     /* import-globals-from storageAccessAPIHelpers.js */
-    await noStorageAccessInitially();
+    if (allowListed) {
+      await hasStorageAccessInitially();
+    } else {
+      await noStorageAccessInitially();
+    }
 
     new BroadcastChannel("hello");
     ok(true, "BroadcastChanneli can be used");
@@ -113,12 +150,18 @@ AntiTracking.runTest("BroadcastChannel and Storage Access API",
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
   },
-  null, false, false);
+  null,
+  false,
+  false
+);
 
-AntiTracking.runTest("BroadcastChannel in workers and Storage Access API",
+AntiTracking.runTest(
+  "BroadcastChannel in workers and Storage Access API",
   async _ => {
     function blockingCode() {
       try {
@@ -147,18 +190,31 @@ AntiTracking.runTest("BroadcastChannel in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
 
     /* import-globals-from storageAccessAPIHelpers.js */
     await callRequestStorageAccess();
 
-    blob = new Blob([nonBlockingCode.toString() + "; nonBlockingCode();"]);
+    if (
+      SpecialPowers.Services.prefs.getIntPref(
+        "network.cookie.cookieBehavior"
+      ) == SpecialPowers.Ci.nsICookieService.BEHAVIOR_REJECT
+    ) {
+      blob = new Blob([blockingCode.toString() + "; blockingCode();"]);
+    } else {
+      blob = new Blob([nonBlockingCode.toString() + "; nonBlockingCode();"]);
+    }
+
     ok(blob, "Blob has been created");
 
     blobURL = URL.createObjectURL(blob);
@@ -169,11 +225,15 @@ AntiTracking.runTest("BroadcastChannel in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
   },
@@ -184,7 +244,11 @@ AntiTracking.runTest("BroadcastChannel in workers and Storage Access API",
     }
 
     /* import-globals-from storageAccessAPIHelpers.js */
-    await noStorageAccessInitially();
+    if (allowListed) {
+      await hasStorageAccessInitially();
+    } else {
+      await noStorageAccessInitially();
+    }
 
     let blob = new Blob([nonBlockingCode.toString() + "; nonBlockingCode();"]);
     ok(blob, "Blob has been created");
@@ -197,11 +261,15 @@ AntiTracking.runTest("BroadcastChannel in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
+      };
+
+      worker.onerror = function(e) {
+        reject();
       };
     });
 
@@ -215,17 +283,26 @@ AntiTracking.runTest("BroadcastChannel in workers and Storage Access API",
 
     await new Promise((resolve, reject) => {
       worker.onmessage = function(e) {
-        if (e) {
+        if (e.data) {
           resolve();
         } else {
           reject();
         }
       };
+
+      worker.onerror = function(e) {
+        reject();
+      };
     });
   },
   async _ => {
     await new Promise(resolve => {
-      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value => resolve());
+      Services.clearData.deleteData(Ci.nsIClearDataService.CLEAR_ALL, value =>
+        resolve()
+      );
     });
   },
-  null, false, false);
+  null,
+  false,
+  false
+);

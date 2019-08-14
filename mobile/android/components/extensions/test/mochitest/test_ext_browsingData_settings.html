@@ -3,7 +3,6 @@
 <head>
   <title>BrowsingData Settings test</title>
   <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
-  <script src="chrome://mochikit/content/tests/SimpleTest/AddTask.js"></script>
   <script src="chrome://mochikit/content/tests/SimpleTest/ExtensionTestUtils.js"></script>
   <script type="text/javascript" src="head.js"></script>
   <link rel="stylesheet" href="chrome://mochikit/contents/tests/SimpleTest/test.css"/>
@@ -13,7 +12,7 @@
 <script type="text/javascript">
 "use strict";
 
-var {SharedPreferences} = ChromeUtils.import("resource://gre/modules/SharedPreferences.jsm", {});
+var {SharedPreferences} = ChromeUtils.import("resource://gre/modules/SharedPreferences.jsm");
 
 const PREF_DOMAIN = "android.not_a_preference.privacy.clear";
 const PREF_KEY_PREFIX = "private.data.";

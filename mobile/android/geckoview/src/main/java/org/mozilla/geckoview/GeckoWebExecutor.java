@@ -49,13 +49,13 @@ public class GeckoWebExecutor {
     private static native void nativeResolve(String host, GeckoResult<InetAddress[]> result);
 
     @WrapForJNI(calledFrom = "gecko", exceptionMode = "nsresult")
-    private static ByteBuffer createByteBuffer(int capacity) {
+    private static ByteBuffer createByteBuffer(final int capacity) {
         return ByteBuffer.allocateDirect(capacity);
     }
 
     @Retention(RetentionPolicy.SOURCE)
-    @IntDef({FETCH_FLAGS_NONE, FETCH_FLAGS_ANONYMOUS})
-    public @interface FetchFlags {};
+    @IntDef({FETCH_FLAGS_NONE, FETCH_FLAGS_ANONYMOUS, FETCH_FLAGS_NO_REDIRECTS})
+    /* package */ @interface FetchFlags {};
 
     /**
      * No special treatment.
@@ -67,6 +67,12 @@ public class GeckoWebExecutor {
      */
     @WrapForJNI
     public static final int FETCH_FLAGS_ANONYMOUS = 1;
+
+    /**
+     * Don't automatically follow redirects.
+     */
+    @WrapForJNI
+    public static final int FETCH_FLAGS_NO_REDIRECTS = 1 << 1;
 
     /**
      * Create a new GeckoWebExecutor instance.
@@ -81,7 +87,9 @@ public class GeckoWebExecutor {
      * Send the given {@link WebRequest}.
      *
      * @param request A {@link WebRequest} instance
-     * @return A GeckoResult which will be completed with a {@link WebResponse}
+     * @return A {@link GeckoResult} which will be completed with a {@link WebResponse}. If the
+     *         request fails to complete, the {@link GeckoResult} will be completed exceptionally
+     *         with a {@link WebRequestError}.
      * @throws IllegalArgumentException if request is null or otherwise unusable.
      */
     public @NonNull GeckoResult<WebResponse> fetch(final @NonNull WebRequest request) {
@@ -92,8 +100,10 @@ public class GeckoWebExecutor {
      * Send the given {@link WebRequest} with specified flags.
      *
      * @param request A {@link WebRequest} instance
-     * @param flags The specified flags. One or more of {@link FetchFlags}.
-     * @return A GeckoResult which will be completed with a {@link WebResponse}
+     * @param flags The specified flags. One or more of the {@link #FETCH_FLAGS_NONE FETCH_*} flags.
+     * @return A {@link GeckoResult} which will be completed with a {@link WebResponse}. If the
+     *         request fails to complete, the {@link GeckoResult} will be completed exceptionally
+     *         with a {@link WebRequestError}.
      * @throws IllegalArgumentException if request is null or otherwise unusable.
      */
     public @NonNull GeckoResult<WebResponse> fetch(final @NonNull WebRequest request,
@@ -103,8 +113,7 @@ public class GeckoWebExecutor {
         }
 
         if (request.cacheMode < WebRequest.CACHE_MODE_FIRST ||
-            request.cacheMode > WebRequest.CACHE_MODE_LAST)
-        {
+            request.cacheMode > WebRequest.CACHE_MODE_LAST) {
             throw new IllegalArgumentException("Unknown cache mode");
         }
 
@@ -131,9 +140,10 @@ public class GeckoWebExecutor {
      *
      * @param host An Internet host name, e.g. mozilla.org.
      * @return A {@link GeckoResult} which will be fulfilled with a {@link List}
-     *         of {@link InetAddress}.
+     *         of {@link InetAddress}. In case of failure, the {@link GeckoResult}
+     *         will be completed exceptionally with a {@link java.net.UnknownHostException}.
      */
-    public GeckoResult<InetAddress[]> resolve(final @NonNull String host) {
+    public @NonNull GeckoResult<InetAddress[]> resolve(final @NonNull String host) {
         final GeckoResult<InetAddress[]> result = new GeckoResult<>();
 
         if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {

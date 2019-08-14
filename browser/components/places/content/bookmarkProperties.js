@@ -54,19 +54,26 @@
 /* import-globals-from controller.js */
 
 /* Shared Places Import - change other consumers if you change this: */
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+var { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+var { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 XPCOMUtils.defineLazyModuleGetters(this, {
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
 });
-XPCOMUtils.defineLazyScriptGetter(this, "PlacesTreeView",
-                                  "chrome://browser/content/places/treeView.js");
-XPCOMUtils.defineLazyScriptGetter(this, ["PlacesInsertionPoint", "PlacesController",
-                                         "PlacesControllerDragHelper"],
-                                  "chrome://browser/content/places/controller.js");
+XPCOMUtils.defineLazyScriptGetter(
+  this,
+  "PlacesTreeView",
+  "chrome://browser/content/places/treeView.js"
+);
+XPCOMUtils.defineLazyScriptGetter(
+  this,
+  ["PlacesInsertionPoint", "PlacesController", "PlacesControllerDragHelper"],
+  "chrome://browser/content/places/controller.js"
+);
 /* End Shared Places Import */
 
 const BOOKMARK_ITEM = 0;
@@ -78,7 +85,6 @@ const ACTION_ADD = 1;
 var elementsHeight = new Map();
 
 var BookmarkPropertiesPanel = {
-
   /** UI Text Strings */
   __strings: null,
   get _strings() {
@@ -106,11 +112,13 @@ var BookmarkPropertiesPanel = {
    */
   _getAcceptLabel: function BPP__getAcceptLabel() {
     if (this._action == ACTION_ADD) {
-      if (this._URIs.length)
+      if (this._URIs.length) {
         return this._strings.getString("dialogAcceptLabelAddMulti");
+      }
 
-      if (this._dummyItem)
+      if (this._dummyItem) {
         return this._strings.getString("dialogAcceptLabelAddItem");
+      }
 
       return this._strings.getString("dialogAcceptLabelSaveItem");
     }
@@ -123,14 +131,17 @@ var BookmarkPropertiesPanel = {
    */
   _getDialogTitle: function BPP__getDialogTitle() {
     if (this._action == ACTION_ADD) {
-      if (this._itemType == BOOKMARK_ITEM)
+      if (this._itemType == BOOKMARK_ITEM) {
         return this._strings.getString("dialogTitleAddBookmark");
+      }
 
       // add folder
-      if (this._itemType != BOOKMARK_FOLDER)
+      if (this._itemType != BOOKMARK_FOLDER) {
         throw new Error("Unknown item type");
-      if (this._URIs.length)
+      }
+      if (this._URIs.length) {
         return this._strings.getString("dialogTitleAddMulti");
+      }
 
       return this._strings.getString("dialogTitleAddFolder");
     }
@@ -148,32 +159,34 @@ var BookmarkPropertiesPanel = {
     this._action = dialogInfo.action == "add" ? ACTION_ADD : ACTION_EDIT;
     this._hiddenRows = dialogInfo.hiddenRows ? dialogInfo.hiddenRows : [];
     if (this._action == ACTION_ADD) {
-      if (!("type" in dialogInfo))
+      if (!("type" in dialogInfo)) {
         throw new Error("missing type property for add action");
+      }
 
-      if ("title" in dialogInfo)
+      if ("title" in dialogInfo) {
         this._title = dialogInfo.title;
+      }
 
       if ("defaultInsertionPoint" in dialogInfo) {
         this._defaultInsertionPoint = dialogInfo.defaultInsertionPoint;
       } else {
-        this._defaultInsertionPoint =
-          new PlacesInsertionPoint({
-            parentId: PlacesUtils.bookmarksMenuFolderId,
-            parentGuid: PlacesUtils.bookmarks.menuGuid,
-          });
+        this._defaultInsertionPoint = new PlacesInsertionPoint({
+          parentId: PlacesUtils.bookmarksMenuFolderId,
+          parentGuid: PlacesUtils.bookmarks.menuGuid,
+        });
       }
 
       switch (dialogInfo.type) {
         case "bookmark":
           this._itemType = BOOKMARK_ITEM;
           if ("uri" in dialogInfo) {
-            if (!(dialogInfo.uri instanceof Ci.nsIURI))
+            if (!(dialogInfo.uri instanceof Ci.nsIURI)) {
               throw new Error("uri property should be a uri object");
+            }
             this._uri = dialogInfo.uri;
-            if (typeof(this._title) != "string") {
-              this._title = await PlacesUtils.history.fetch(this._uri) ||
-                            this._uri.spec;
+            if (typeof this._title != "string") {
+              this._title =
+                (await PlacesUtils.history.fetch(this._uri)) || this._uri.spec;
             }
           } else {
             this._uri = Services.io.newURI("about:blank");
@@ -184,10 +197,12 @@ var BookmarkPropertiesPanel = {
           if ("keyword" in dialogInfo) {
             this._keyword = dialogInfo.keyword;
             this._isAddKeywordDialog = true;
-            if ("postData" in dialogInfo)
+            if ("postData" in dialogInfo) {
               this._postData = dialogInfo.postData;
-            if ("charSet" in dialogInfo)
+            }
+            if ("charSet" in dialogInfo) {
               this._charSet = dialogInfo.charSet;
+            }
           }
           break;
 
@@ -197,19 +212,22 @@ var BookmarkPropertiesPanel = {
             if ("URIList" in dialogInfo) {
               this._title = this._strings.getString("bookmarkAllTabsDefault");
               this._URIs = dialogInfo.URIList;
-            } else
+            } else {
               this._title = this._strings.getString("newFolderDefault");
               this._dummyItem = true;
+            }
           }
           break;
       }
-    } else { // edit
+    } else {
+      // edit
       this._node = dialogInfo.node;
       this._title = this._node.title;
-      if (PlacesUtils.nodeIsFolder(this._node))
+      if (PlacesUtils.nodeIsFolder(this._node)) {
         this._itemType = BOOKMARK_FOLDER;
-      else if (PlacesUtils.nodeIsURI(this._node))
+      } else if (PlacesUtils.nodeIsURI(this._node)) {
         this._itemType = BOOKMARK_ITEM;
+      }
     }
   },
 
@@ -221,6 +239,12 @@ var BookmarkPropertiesPanel = {
     await this._determineItemInfo();
 
     document.title = this._getDialogTitle();
+    document.addEventListener("dialogaccept", function() {
+      BookmarkPropertiesPanel.onDialogAccept();
+    });
+    document.addEventListener("dialogcancel", function() {
+      BookmarkPropertiesPanel.onDialogCancel();
+    });
 
     // Disable the buttons until we have all the information required.
     let acceptButton = document.documentElement.getButton("accept");
@@ -251,29 +275,32 @@ var BookmarkPropertiesPanel = {
       for (let mutation of mutations) {
         let target = mutation.target;
         let id = target.id;
-        if (!/^editBMPanel_.*(Row|Checkbox)$/.test(id))
+        if (!/^editBMPanel_.*(Row|Checkbox)$/.test(id)) {
           continue;
+        }
 
         let collapsed = target.getAttribute("collapsed") === "true";
         let wasCollapsed = mutation.oldValue === "true";
-        if (collapsed == wasCollapsed)
+        if (collapsed == wasCollapsed) {
           continue;
+        }
 
         if (collapsed) {
           this._height -= elementsHeight.get(id);
           elementsHeight.delete(id);
         } else {
-          elementsHeight.set(id, target.boxObject.height);
+          elementsHeight.set(id, target.getBoundingClientRect().height);
           this._height += elementsHeight.get(id);
         }
         window.resizeTo(window.outerWidth, this._height);
       }
     });
 
-    this._mutationObserver.observe(document,
-                                   { subtree: true,
-                                     attributeOldValue: true,
-                                     attributeFilter: ["collapsed"] });
+    this._mutationObserver.observe(document, {
+      subtree: true,
+      attributeOldValue: true,
+      attributeFilter: ["collapsed"],
+    });
 
     // Some controls are flexible and we want to update their cached size when
     // the dialog is resized.
@@ -281,41 +308,45 @@ var BookmarkPropertiesPanel = {
 
     switch (this._action) {
       case ACTION_EDIT:
-        gEditItemOverlay.initPanel({ node: this._node,
-                                     hiddenRows: this._hiddenRows,
-                                     focusedElement: "first" });
+        gEditItemOverlay.initPanel({
+          node: this._node,
+          hiddenRows: this._hiddenRows,
+          focusedElement: "first",
+        });
         acceptButtonDisabled = gEditItemOverlay.readOnly;
         break;
       case ACTION_ADD:
         this._node = await this._promiseNewItem();
         // Edit the new item
-        gEditItemOverlay.initPanel({ node: this._node,
-                                     hiddenRows: this._hiddenRows,
-                                     postData: this._postData,
-                                     focusedElement: "first" });
+        gEditItemOverlay.initPanel({
+          node: this._node,
+          hiddenRows: this._hiddenRows,
+          postData: this._postData,
+          focusedElement: "first",
+        });
 
         // Empty location field if the uri is about:blank, this way inserting a new
         // url will be easier for the user, Accept button will be automatically
         // disabled by the input listener until the user fills the field.
         let locationField = this._element("locationField");
-        if (locationField.value == "about:blank")
+        if (locationField.value == "about:blank") {
           locationField.value = "";
+        }
 
         // if this is an uri related dialog disable accept button until
         // the user fills an uri value.
-        if (this._itemType == BOOKMARK_ITEM)
+        if (this._itemType == BOOKMARK_ITEM) {
           acceptButtonDisabled = !this._inputIsValid();
+        }
         break;
     }
 
     if (!gEditItemOverlay.readOnly) {
       // Listen on uri fields to enable accept button if input is valid
       if (this._itemType == BOOKMARK_ITEM) {
-        this._element("locationField")
-            .addEventListener("input", this);
+        this._element("locationField").addEventListener("input", this);
         if (this._isAddKeywordDialog) {
-          this._element("keywordField")
-              .addEventListener("input", this);
+          this._element("keywordField").addEventListener("input", this);
         }
       }
     }
@@ -328,16 +359,20 @@ var BookmarkPropertiesPanel = {
     var target = aEvent.target;
     switch (aEvent.type) {
       case "input":
-        if (target.id == "editBMPanel_locationField" ||
-            target.id == "editBMPanel_keywordField") {
+        if (
+          target.id == "editBMPanel_locationField" ||
+          target.id == "editBMPanel_keywordField"
+        ) {
           // Check uri fields to enable accept button if input is valid
-          document.documentElement
-                  .getButton("accept").disabled = !this._inputIsValid();
+          document.documentElement.getButton(
+            "accept"
+          ).disabled = !this._inputIsValid();
         }
         break;
       case "resize":
         for (let [id, oldHeight] of elementsHeight) {
-          let newHeight = document.getElementById(id).boxObject.height;
+          let newHeight = document.getElementById(id).getBoundingClientRect()
+            .height;
           this._height += -oldHeight + newHeight;
           elementsHeight.set(id, newHeight);
         }
@@ -361,10 +396,8 @@ var BookmarkPropertiesPanel = {
 
     // Calling removeEventListener with arguments which do not identify any
     // currently registered EventListener on the EventTarget has no effect.
-    this._element("locationField")
-        .removeEventListener("input", this);
-    this._element("keywordField")
-        .removeEventListener("input", this);
+    this._element("locationField").removeEventListener("input", this);
+    this._element("keywordField").removeEventListener("input", this);
   },
 
   onDialogAccept() {
@@ -390,11 +423,18 @@ var BookmarkPropertiesPanel = {
    * @returns  true if the input is valid, false otherwise
    */
   _inputIsValid: function BPP__inputIsValid() {
-    if (this._itemType == BOOKMARK_ITEM &&
-        !this._containsValidURI("locationField"))
+    if (
+      this._itemType == BOOKMARK_ITEM &&
+      !this._containsValidURI("locationField")
+    ) {
       return false;
-    if (this._isAddKeywordDialog && !this._element("keywordField").value.length)
+    }
+    if (
+      this._isAddKeywordDialog &&
+      !this._element("keywordField").value.length
+    ) {
       return false;
+    }
 
     return true;
   },
@@ -415,7 +455,7 @@ var BookmarkPropertiesPanel = {
         PlacesUIUtils.createFixedURI(value);
         return true;
       }
-    } catch (e) { }
+    } catch (e) {}
     return false;
   },
 
@@ -435,19 +475,27 @@ var BookmarkPropertiesPanel = {
   },
 
   async _promiseNewItem() {
-    let [containerId, index, parentGuid] = await this._getInsertionPointDetails();
+    let [
+      containerId,
+      index,
+      parentGuid,
+    ] = await this._getInsertionPointDetails();
 
     let itemGuid;
     let info = { parentGuid, index, title: this._title };
     if (this._itemType == BOOKMARK_ITEM) {
       info.url = this._uri;
-      if (this._keyword)
+      if (this._keyword) {
         info.keyword = this._keyword;
-      if (this._postData)
+      }
+      if (this._postData) {
         info.postData = this._postData;
+      }
 
       if (this._charSet) {
-        PlacesUIUtils.setCharsetForPage(this._uri, this._charSet, window).catch(Cu.reportError);
+        PlacesUIUtils.setCharsetForPage(this._uri, this._charSet, window).catch(
+          Cu.reportError
+        );
       }
 
       itemGuid = await PlacesTransactions.NewBookmark(info).transact();
@@ -466,9 +514,10 @@ var BookmarkPropertiesPanel = {
       bookmarkGuid: itemGuid,
       title: this._title,
       uri: this._uri ? this._uri.spec : "",
-      type: this._itemType == BOOKMARK_ITEM ?
-              Ci.nsINavHistoryResultNode.RESULT_TYPE_URI :
-              Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER,
+      type:
+        this._itemType == BOOKMARK_ITEM
+          ? Ci.nsINavHistoryResultNode.RESULT_TYPE_URI
+          : Ci.nsINavHistoryResultNode.RESULT_TYPE_FOLDER,
       parent: {
         itemId: containerId,
         bookmarkGuid: parentGuid,

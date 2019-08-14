@@ -5,14 +5,21 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 UNIFIED_SOURCES += [
-    'nsIconModule.cpp',
     'nsIconProtocolHandler.cpp',
     'nsIconURI.cpp',
+]
+
+XPCOM_MANIFESTS += [
+    'components.conf',
 ]
 
 FINAL_LIBRARY = 'xul'
 
 include('/ipc/chromium/chromium-config.mozbuild')
+
+EXPORTS += [
+  'nsIconURI.h',
+]
 
 platform = None
 

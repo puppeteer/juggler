@@ -23,15 +23,25 @@
 #include "js/Utility.h"
 #include "js/Value.h"
 
+/* Crash diagnostics by default in debug and on nightly channel. */
+#if defined(DEBUG) || defined(NIGHTLY_BUILD)
+#  define JS_CRASH_DIAGNOSTICS 1
+#endif
+
+/* Enable poisoning in crash-diagnostics and zeal builds. */
+#if defined(JS_CRASH_DIAGNOSTICS) || defined(JS_GC_ZEAL)
+#  define JS_GC_POISONING 1
+#endif
+
 #if defined(JS_DEBUG)
-#define JS_DIAGNOSTICS_ASSERT(expr) MOZ_ASSERT(expr)
+#  define JS_DIAGNOSTICS_ASSERT(expr) MOZ_ASSERT(expr)
 #elif defined(JS_CRASH_DIAGNOSTICS)
-#define JS_DIAGNOSTICS_ASSERT(expr)         \
-  do {                                      \
-    if (MOZ_UNLIKELY(!(expr))) MOZ_CRASH(); \
-  } while (0)
+#  define JS_DIAGNOSTICS_ASSERT(expr)         \
+    do {                                      \
+      if (MOZ_UNLIKELY(!(expr))) MOZ_CRASH(); \
+    } while (0)
 #else
-#define JS_DIAGNOSTICS_ASSERT(expr) ((void)0)
+#  define JS_DIAGNOSTICS_ASSERT(expr) ((void)0)
 #endif
 
 static MOZ_ALWAYS_INLINE void* js_memcpy(void* dst_, const void* src_,
@@ -133,12 +143,12 @@ static inline HashNumber AddContainerToHash(const Container& c,
 }
 
 template <class T>
-static inline T Min(T t1, T t2) {
+static constexpr inline T Min(T t1, T t2) {
   return t1 < t2 ? t1 : t2;
 }
 
 template <class T>
-static inline T Max(T t1, T t2) {
+static constexpr inline T Max(T t1, T t2) {
   return t1 > t2 ? t1 : t2;
 }
 
@@ -210,6 +220,19 @@ static inline void ClearAllBitArrayElements(size_t* array, size_t length) {
   }
 }
 
+// Placement-new elements of an array. This should optimize away for types with
+// trivial default initiation.
+template <typename T>
+static void DefaultInitializeElements(void* arrayPtr, size_t length) {
+  uintptr_t elem = reinterpret_cast<uintptr_t>(arrayPtr);
+  MOZ_ASSERT(elem % alignof(T) == 0);
+
+  for (size_t i = 0; i < length; ++i) {
+    new (reinterpret_cast<void*>(elem)) T;
+    elem += sizeof(T);
+  }
+}
+
 } /* namespace js */
 
 namespace mozilla {
@@ -232,6 +255,10 @@ static MOZ_ALWAYS_INLINE void PodSet(T* aDst, const T& aSrc, size_t aNElem) {
  * pointer. These values should be odd, see the comment in IsThingPoisoned.
  *
  * Note: new patterns should also be added to the array in IsThingPoisoned!
+ *
+ * We try to keep our IRC bot, mrgiggles, up to date with these and other
+ * patterns:
+ * https://bitbucket.org/sfink/mrgiggles/src/default/plugins/knowledge/__init__.py
  */
 const uint8_t JS_FRESH_NURSERY_PATTERN = 0x2F;
 const uint8_t JS_SWEPT_NURSERY_PATTERN = 0x2B;
@@ -242,8 +269,18 @@ const uint8_t JS_SWEPT_TENURED_PATTERN = 0x4B;
 const uint8_t JS_ALLOCATED_TENURED_PATTERN = 0x4D;
 const uint8_t JS_FREED_HEAP_PTR_PATTERN = 0x6B;
 const uint8_t JS_FREED_CHUNK_PATTERN = 0x8B;
+const uint8_t JS_FREED_ARENA_PATTERN = 0x9B;
 const uint8_t JS_SWEPT_TI_PATTERN = 0x6F;
 const uint8_t JS_FRESH_MARK_STACK_PATTERN = 0x9F;
+const uint8_t JS_RESET_VALUE_PATTERN = 0xBB;
+const uint8_t JS_POISONED_JSSCRIPT_DATA_PATTERN = 0xDB;
+const uint8_t JS_OOB_PARSE_NODE_PATTERN = 0xFF;
+const uint8_t JS_LIFO_UNDEFINED_PATTERN = 0xcd;
+const uint8_t JS_LIFO_UNINITIALIZED_PATTERN = 0xce;
+
+// Even ones
+const uint8_t JS_NEW_NATIVE_ITERATOR_PATTERN = 0xCC;
+const uint8_t JS_SCOPE_DATA_TRAILING_NAMES_PATTERN = 0xCC;
 
 /*
  * Ensure JS_SWEPT_CODE_PATTERN is a byte pattern that will crash immediately
@@ -252,13 +289,13 @@ const uint8_t JS_FRESH_MARK_STACK_PATTERN = 0x9F;
  */
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64) || \
     defined(JS_CODEGEN_NONE)
-#define JS_SWEPT_CODE_PATTERN 0xED  // IN instruction, crashes in user mode.
+#  define JS_SWEPT_CODE_PATTERN 0xED  // IN instruction, crashes in user mode.
 #elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
-#define JS_SWEPT_CODE_PATTERN 0xA3  // undefined instruction
+#  define JS_SWEPT_CODE_PATTERN 0xA3  // undefined instruction
 #elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
-#define JS_SWEPT_CODE_PATTERN 0x01  // undefined instruction
+#  define JS_SWEPT_CODE_PATTERN 0x01  // undefined instruction
 #else
-#error "JS_SWEPT_CODE_PATTERN not defined for this platform"
+#  error "JS_SWEPT_CODE_PATTERN not defined for this platform"
 #endif
 
 enum class MemCheckKind : uint8_t {
@@ -287,6 +324,7 @@ static MOZ_ALWAYS_INLINE void SetMemCheckKind(void* ptr, size_t bytes,
 
 namespace js {
 
+// Unconditionally poison a region on memory.
 static inline void AlwaysPoison(void* ptr, uint8_t value, size_t num,
                                 MemCheckKind kind) {
   // Without a valid Value tag, a poisoned Value may look like a valid
@@ -297,9 +335,9 @@ static inline void AlwaysPoison(void* ptr, uint8_t value, size_t num,
 #if defined(DEBUG)
   uintptr_t poison;
   memset(&poison, value, sizeof(poison));
-#if defined(JS_PUNBOX64)
+#  if defined(JS_PUNBOX64)
   poison = poison & ((uintptr_t(1) << JSVAL_TAG_SHIFT) - 1);
-#endif
+#  endif
   JS::Value v = js::PoisonedObjectValue(poison);
 
   size_t value_count = num / sizeof(v);
@@ -320,33 +358,27 @@ static inline void AlwaysPoison(void* ptr, uint8_t value, size_t num,
 // JSGC_DISABLE_POISONING environment variable
 extern bool gDisablePoisoning;
 
+// Poison a region of memory in debug and nightly builds (plus builds where GC
+// zeal is configured). Can be disabled by setting the JSGC_DISABLE_POISONING
+// environment variable.
 static inline void Poison(void* ptr, uint8_t value, size_t num,
                           MemCheckKind kind) {
+#if defined(JS_CRASH_DIAGNOSTICS) || defined(JS_GC_ZEAL)
   if (!js::gDisablePoisoning) {
     AlwaysPoison(ptr, value, num, kind);
   }
+#endif
+}
+
+// Poison a region of memory in debug builds. Can be disabled by setting the
+// JSGC_DISABLE_POISONING environment variable.
+static inline void DebugOnlyPoison(void* ptr, uint8_t value, size_t num,
+                                   MemCheckKind kind) {
+#if defined(DEBUG)
+  Poison(ptr, value, num, kind);
+#endif
 }
 
 }  // namespace js
-
-/* Crash diagnostics by default in debug and on nightly channel. */
-#if defined(DEBUG) || defined(NIGHTLY_BUILD)
-#define JS_CRASH_DIAGNOSTICS 1
-#endif
-
-/* Enable poisoning in crash-diagnostics and zeal builds. */
-#if defined(JS_CRASH_DIAGNOSTICS) || defined(JS_GC_ZEAL)
-#define JS_POISON(p, val, size, kind) js::Poison(p, val, size, kind)
-#define JS_GC_POISONING 1
-#else
-#define JS_POISON(p, val, size, kind) ((void)0)
-#endif
-
-/* Enable even more poisoning in purely debug builds. */
-#if defined(DEBUG)
-#define JS_EXTRA_POISON(p, val, size, kind) js::Poison(p, val, size, kind)
-#else
-#define JS_EXTRA_POISON(p, val, size, kind) ((void)0)
-#endif
 
 #endif /* jsutil_h */

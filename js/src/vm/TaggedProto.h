@@ -7,6 +7,8 @@
 #ifndef vm_TaggedProto_h
 #define vm_TaggedProto_h
 
+#include "mozilla/Maybe.h"
+
 #include "gc/Tracer.h"
 
 namespace js {
@@ -87,12 +89,10 @@ struct MovableCellHasher<TaggedProto> {
 };
 
 #ifdef DEBUG
-MOZ_ALWAYS_INLINE bool TaggedProtoIsNotGray(const TaggedProto& proto) {
-  if (!proto.isObject()) {
-    return true;
+MOZ_ALWAYS_INLINE void AssertTaggedProtoIsNotGray(const TaggedProto& proto) {
+  if (proto.isObject()) {
+    JS::AssertObjectIsNotGray(proto.toObject());
   }
-
-  return JS::ObjectIsNotGray(proto.toObject());
 }
 #endif
 
@@ -107,8 +107,8 @@ struct InternalBarrierMethods<TaggedProto> {
   static bool isMarkable(const TaggedProto& proto) { return proto.isObject(); }
 
 #ifdef DEBUG
-  static bool thingIsNotGray(const TaggedProto& proto) {
-    return TaggedProtoIsNotGray(proto);
+  static void assertThingIsNotGray(const TaggedProto& proto) {
+    AssertTaggedProtoIsNotGray(proto);
   }
 #endif
 };
@@ -131,15 +131,24 @@ class WrappedPtrOperations<TaggedProto, Wrapper> {
 };
 
 // If the TaggedProto is a JSObject pointer, convert to that type and call |f|
-// with the pointer. If the TaggedProto is lazy, calls F::defaultValue.
-template <typename F, typename... Args>
-auto DispatchTyped(F f, const TaggedProto& proto, Args&&... args)
-    -> decltype(f(static_cast<JSObject*>(nullptr),
-                  std::forward<Args>(args)...)) {
+// with the pointer. If the TaggedProto is lazy, returns None().
+template <typename F>
+auto MapGCThingTyped(const TaggedProto& proto, F&& f) {
   if (proto.isObject()) {
-    return f(proto.toObject(), std::forward<Args>(args)...);
+    return mozilla::Some(f(proto.toObject()));
   }
-  return F::defaultValue(proto);
+  using ReturnType = decltype(f(static_cast<JSObject*>(nullptr)));
+  return mozilla::Maybe<ReturnType>();
+}
+
+template <typename F>
+bool ApplyGCThingTyped(const TaggedProto& proto, F&& f) {
+  return MapGCThingTyped(proto,
+                         [&f](auto t) {
+                           f(t);
+                           return true;
+                         })
+      .isSome();
 }
 
 // Since JSObject pointers are either nullptr or a valid object and since the

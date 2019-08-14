@@ -6,20 +6,30 @@
 var EXPORTED_SYMBOLS = ["RemoteSecurityUI"];
 
 function RemoteSecurityUI() {
-    this._secInfo = null;
-    this._state = 0;
+  this._secInfo = null;
+  this._state = 0;
+  this._event = 0;
 }
 
 RemoteSecurityUI.prototype = {
   QueryInterface: ChromeUtils.generateQI([Ci.nsISecureBrowserUI]),
 
   // nsISecureBrowserUI
-  get state() { return this._state; },
-  get tooltipText() { return ""; },
-  get secInfo() { return this._secInfo; },
+  get state() {
+    return this._state;
+  },
+  get contentBlockingEvent() {
+    return this._event;
+  },
+  get secInfo() {
+    return this._secInfo;
+  },
 
   _update(aSecInfo, aState) {
     this._secInfo = aSecInfo;
     this._state = aState;
+  },
+  _updateContentBlockingEvent(aEvent) {
+    this._event = aEvent;
   },
 };

@@ -10,7 +10,7 @@
  */
 
 const ACTORS_URL = EXAMPLE_URL + "testactors.js";
-const TAB_URL = EXAMPLE_URL + "doc_empty-tab-01.html";
+const TAB_URL = TEST_URI_ROOT + "doc_empty-tab-01.html";
 
 add_task(async function test() {
   const tab = await addTab(TAB_URL);
@@ -24,8 +24,7 @@ add_task(async function test() {
   const target = await TargetFactory.forTab(tab);
   await target.attach();
   const { client } = target;
-  const targetFront = target.activeTab;
-  const form = targetFront.targetForm;
+  const form = target.targetForm;
 
   await testTargetScopedActor(client, form);
   await removeTab(gBrowser.selectedTab);
@@ -33,11 +32,15 @@ add_task(async function test() {
 });
 
 async function testTargetScopedActor(client, form) {
-  ok(form.testOneActor,
-    "Found the test target-scoped actor.");
-  ok(form.testOneActor.includes("testOne"),
-    "testOneActor's actorPrefix should be used.");
+  ok(form.testOneActor, "Found the test target-scoped actor.");
+  ok(
+    form.testOneActor.includes("testOne"),
+    "testOneActor's actorPrefix should be used."
+  );
 
-  const response = await client.request({ to: form.testOneActor, type: "ping" });
+  const response = await client.request({
+    to: form.testOneActor,
+    type: "ping",
+  });
   is(response.pong, "pong", "Actor should respond to requests.");
 }

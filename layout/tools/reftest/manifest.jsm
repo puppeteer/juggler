@@ -50,7 +50,7 @@ function ReadManifest(aURL, aFilter)
 
     var listURL = aURL;
     var channel = NetUtil.newChannel({uri: aURL, loadUsingSystemPrincipal: true});
-    var inputStream = channel.open2();
+    var inputStream = channel.open();
     if (channel instanceof Ci.nsIHttpChannel
         && channel.responseStatus != 200) {
       g.logger.error("HTTP ERROR : " + channel.responseStatus);
@@ -122,8 +122,9 @@ function ReadManifest(aURL, aFilter)
         var chaosMode = false;
         var wrCapture = { test: false, ref: false };
         var nonSkipUsed = false;
+        var noAutoFuzz = false;
 
-        while (items[0].match(/^(fails|needs-focus|random|skip|asserts|slow|require-or|silentfail|pref|test-pref|ref-pref|fuzzy|chaos-mode|wr-capture|wr-capture-ref)/)) {
+        while (items[0].match(/^(fails|needs-focus|random|skip|asserts|slow|require-or|silentfail|pref|test-pref|ref-pref|fuzzy|chaos-mode|wr-capture|wr-capture-ref|noautofuzz)/)) {
             var item = items.shift();
             var stat;
             var cond;
@@ -211,6 +212,9 @@ function ReadManifest(aURL, aFilter)
             } else if (item == "wr-capture-ref") {
                 cond = false;
                 wrCapture.ref = true;
+            } else if (item == "noautofuzz") {
+                cond = false;
+                noAutoFuzz = true;
             } else {
                 throw "Error in manifest file " + aURL.spec + " line " + lineNo + ": unexpected item " + item;
             }
@@ -292,11 +296,12 @@ function ReadManifest(aURL, aFilter)
                 ReadManifest(incURI, aFilter);
             }
         } else if (items[0] == TYPE_LOAD || items[0] == TYPE_SCRIPT) {
+            var type = items[0];
             if (items.length != 2)
-                throw "Error in manifest file " + aURL.spec + " line " + lineNo + ": incorrect number of arguments to " + items[0];
-            if (items[0] == TYPE_LOAD && expected_status != EXPECTED_PASS && expected_status != EXPECTED_DEATH)
+                throw "Error in manifest file " + aURL.spec + " line " + lineNo + ": incorrect number of arguments to " + type;
+            if (type == TYPE_LOAD && expected_status != EXPECTED_PASS && expected_status != EXPECTED_DEATH)
                 throw "Error in manifest file " + aURL.spec + " line " + lineNo + ": incorrect known failure type for load test";
-            AddTestItem({ type: TYPE_LOAD,
+            AddTestItem({ type: type,
                           expected: expected_status,
                           manifest: aURL.spec,
                           allowSilentFail: allow_silent_fail,
@@ -315,7 +320,8 @@ function ReadManifest(aURL, aFilter)
                           url1: items[1],
                           url2: null,
                           chaosMode: chaosMode,
-                          wrCapture: wrCapture }, aFilter);
+                          wrCapture: wrCapture,
+                          noAutoFuzz: noAutoFuzz }, aFilter);
         } else if (items[0] == TYPE_REFTEST_EQUAL || items[0] == TYPE_REFTEST_NOTEQUAL || items[0] == TYPE_PRINT) {
             if (items.length != 3)
                 throw "Error in manifest file " + aURL.spec + " line " + lineNo + ": incorrect number of arguments to " + items[0];
@@ -363,7 +369,8 @@ function ReadManifest(aURL, aFilter)
                           url1: items[1],
                           url2: items[2],
                           chaosMode: chaosMode,
-                          wrCapture: wrCapture }, aFilter);
+                          wrCapture: wrCapture,
+                          noAutoFuzz: noAutoFuzz }, aFilter);
         } else {
             throw "Error in manifest file " + aURL.spec + " line " + lineNo + ": unknown test type " + items[0];
         }
@@ -425,13 +432,12 @@ function BuildConditionSandbox(aURL) {
     var info = gfxInfo.getInfo();
     var canvasBackend = readGfxInfo(info, "AzureCanvasBackend");
     var contentBackend = readGfxInfo(info, "AzureContentBackend");
-    var canvasAccelerated = readGfxInfo(info, "AzureCanvasAccelerated");
 
     sandbox.gpuProcess = gfxInfo.usingGPUProcess;
     sandbox.azureCairo = canvasBackend == "cairo";
     sandbox.azureSkia = canvasBackend == "skia";
     sandbox.skiaContent = contentBackend == "skia";
-    sandbox.azureSkiaGL = canvasAccelerated; // FIXME: assumes GL right now
+    sandbox.azureSkiaGL = false;
     // true if we are using the same Azure backend for rendering canvas and content
     sandbox.contentSameGfxBackendAsCanvas = contentBackend == canvasBackend
                                             || (contentBackend == "none" && canvasBackend == "cairo");
@@ -461,6 +467,12 @@ function BuildConditionSandbox(aURL) {
     sandbox.gtkWidget = xr.widgetToolkit == "gtk3";
     sandbox.qtWidget = xr.widgetToolkit == "qt";
     sandbox.winWidget = xr.widgetToolkit == "windows";
+
+    sandbox.is64Bit = xr.is64Bit;
+
+    // GeckoView is currently uniquely identified by "android + e10s" but
+    // we might want to make this condition more precise in the future.
+    sandbox.geckoview = (sandbox.Android && g.browserIsRemote);
 
     // Scrollbars that are semi-transparent. See bug 1169666.
     sandbox.transparentScrollbars = xr.widgetToolkit == "gtk3";
@@ -547,7 +559,8 @@ sandbox.compareRetainedDisplayLists = g.compareRetainedDisplayLists;
     // Running in a test-verify session?
     sandbox.verify = prefs.getBoolPref("reftest.verify", false);
 
-    // Running with serviceworker e10s redesign enabled?
+    // Running with a variant enabled?
+    sandbox.fission = prefs.getBoolPref("fission.autostart", false);
     sandbox.serviceWorkerE10s = prefs.getBoolPref("dom.serviceWorkers.parent_intercept", false);
 
     if (!g.dumpedConditionSandbox) {
@@ -641,7 +654,6 @@ function CreateUrls(test) {
                     .getService(Ci.nsIScriptSecurityManager);
 
     let manifestURL = g.ioService.newURI(test.manifest);
-    let principal = secMan.createCodebasePrincipal(manifestURL, {});
 
     let testbase = manifestURL;
     if (test.runHttp)
@@ -653,6 +665,9 @@ function CreateUrls(test) {
             return file;
 
         var testURI = g.ioService.newURI(file, null, testbase);
+        let isChrome = testURI.scheme == "chrome";
+        let principal = isChrome ? secMan.getSystemPrincipal() :
+                                   secMan.createCodebasePrincipal(manifestURL, {});
         secMan.checkLoadURIWithPrincipal(principal, testURI,
                                          Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT);
         return testURI;

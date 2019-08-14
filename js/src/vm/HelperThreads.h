@@ -18,6 +18,7 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/TypeTraits.h"
+#include "mozilla/Utf8.h"  // mozilla::Utf8Unit
 #include "mozilla/Variant.h"
 
 #include "jsapi.h"
@@ -63,10 +64,9 @@ namespace wasm {
 struct CompileTask;
 typedef Fifo<CompileTask*, 0, SystemAllocPolicy> CompileTaskPtrFifo;
 
-struct Tier2GeneratorTask {
+struct Tier2GeneratorTask : public RunnableTask {
   virtual ~Tier2GeneratorTask() = default;
   virtual void cancel() = 0;
-  virtual void execute() = 0;
 };
 
 typedef UniquePtr<Tier2GeneratorTask> UniqueTier2GeneratorTask;
@@ -426,7 +426,7 @@ struct HelperThread {
  private:
   struct AutoProfilerLabel {
     AutoProfilerLabel(HelperThread* helperThread, const char* label,
-                      ProfilingStackFrame::Category category);
+                      JS::ProfilingCategoryPair categoryPair);
     ~AutoProfilerLabel();
 
    private:
@@ -519,10 +519,22 @@ void CancelOffThreadWasmTier2Generator();
  * If helper threads are available, call execute() then dispatchResolve() on the
  * given task in a helper thread. If no helper threads are available, the given
  * task is executed and resolved synchronously.
+ *
+ * This function takes ownership of task unconditionally; if it fails, task is
+ * deleted.
  */
 bool StartOffThreadPromiseHelperTask(JSContext* cx,
                                      UniquePtr<PromiseHelperTask> task);
 
+/*
+ * Like the JSContext-accepting version, but only safe to use when helper
+ * threads are available, so we can be sure we'll never need to fall back on
+ * synchronous execution.
+ *
+ * This function can be called from any thread, but takes ownership of the task
+ * only on success. On OOM, it is the caller's responsibility to arrange for the
+ * task to be cleaned up properly.
+ */
 bool StartOffThreadPromiseHelperTask(PromiseHelperTask* task);
 
 /*
@@ -541,7 +553,7 @@ bool StartOffThreadIonFree(jit::IonBuilder* builder,
 struct AllCompilations {};
 struct ZonesInState {
   JSRuntime* runtime;
-  JS::Zone::GCState state;
+  JS::shadow::Zone::GCState state;
 };
 struct CompilationsUsingNursery {
   JSRuntime* runtime;
@@ -570,7 +582,7 @@ inline void CancelOffThreadIonCompile(Zone* zone) {
 }
 
 inline void CancelOffThreadIonCompile(JSRuntime* runtime,
-                                      JS::Zone::GCState state) {
+                                      JS::shadow::Zone::GCState state) {
   CancelOffThreadIonCompile(CompilationSelector(ZonesInState{runtime, state}),
                             true);
 }
@@ -600,10 +612,20 @@ bool StartOffThreadParseScript(JSContext* cx,
                                JS::SourceText<char16_t>& srcBuf,
                                JS::OffThreadCompileCallback callback,
                                void* callbackData);
+bool StartOffThreadParseScript(JSContext* cx,
+                               const JS::ReadOnlyCompileOptions& options,
+                               JS::SourceText<mozilla::Utf8Unit>& srcBuf,
+                               JS::OffThreadCompileCallback callback,
+                               void* callbackData);
 
 bool StartOffThreadParseModule(JSContext* cx,
                                const JS::ReadOnlyCompileOptions& options,
                                JS::SourceText<char16_t>& srcBuf,
+                               JS::OffThreadCompileCallback callback,
+                               void* callbackData);
+bool StartOffThreadParseModule(JSContext* cx,
+                               const JS::ReadOnlyCompileOptions& options,
+                               JS::SourceText<mozilla::Utf8Unit>& srcBuf,
                                JS::OffThreadCompileCallback callback,
                                void* callbackData);
 
@@ -650,6 +672,12 @@ bool EnqueueOffThreadCompression(JSContext* cx,
 // runtime.
 void CancelOffThreadCompressions(JSRuntime* runtime);
 
+void AttachFinishedCompressions(JSRuntime* runtime,
+                                AutoLockHelperThreadState& lock);
+
+// Run all pending source compression tasks synchronously, for testing purposes
+void RunPendingSourceCompressions(JSRuntime* runtime);
+
 class MOZ_RAII AutoLockHelperThreadState : public LockGuard<Mutex> {
   using Base = LockGuard<Mutex>;
 
@@ -676,7 +704,8 @@ class MOZ_RAII AutoUnlockHelperThreadState : public UnlockGuard<Mutex> {
 };
 
 struct ParseTask : public mozilla::LinkedListElement<ParseTask>,
-                   public JS::OffThreadToken {
+                   public JS::OffThreadToken,
+                   public RunnableTask {
   ParseTaskKind kind;
   JS::OwningCompileOptions options;
 
@@ -721,22 +750,9 @@ struct ParseTask : public mozilla::LinkedListElement<ParseTask>,
   size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
     return mallocSizeOf(this) + sizeOfExcludingThis(mallocSizeOf);
   }
-};
 
-struct ScriptParseTask : public ParseTask {
-  JS::SourceText<char16_t> data;
-
-  ScriptParseTask(JSContext* cx, JS::SourceText<char16_t>& srcBuf,
-                  JS::OffThreadCompileCallback callback, void* callbackData);
-  void parse(JSContext* cx) override;
-};
-
-struct ModuleParseTask : public ParseTask {
-  JS::SourceText<char16_t> data;
-
-  ModuleParseTask(JSContext* cx, JS::SourceText<char16_t>& srcBuf,
-                  JS::OffThreadCompileCallback callback, void* callbackData);
-  void parse(JSContext* cx) override;
+  void runTask() override;
+  ThreadType threadType() override { return ThreadType::THREAD_TYPE_PARSE; }
 };
 
 struct ScriptDecodeTask : public ParseTask {
@@ -783,7 +799,7 @@ extern bool OffThreadParsingMustWaitForGC(JSRuntime* rt);
 // GCs after being enqueued. Completed tasks are handled during the sweeping
 // phase by AttachCompressedSourcesTask, which runs in parallel with other GC
 // sweeping tasks.
-class SourceCompressionTask {
+class SourceCompressionTask : public RunnableTask {
   friend struct HelperThread;
   friend class ScriptSource;
 
@@ -809,6 +825,7 @@ class SourceCompressionTask {
       : runtime_(rt),
         majorGCNumber_(rt->gc.majorGCCount()),
         sourceHolder_(source) {}
+  virtual ~SourceCompressionTask() {}
 
   bool runtimeMatches(JSRuntime* runtime) const { return runtime == runtime_; }
   bool shouldStart() const {
@@ -823,8 +840,10 @@ class SourceCompressionTask {
     return sourceHolder_.get()->refs == 1;
   }
 
-  void work();
+  void runTask() override;
   void complete();
+
+  ThreadType threadType() override { return ThreadType::THREAD_TYPE_COMPRESS; }
 
  private:
   struct PerformTaskWork;
@@ -838,9 +857,14 @@ class SourceCompressionTask {
 };
 
 // A PromiseHelperTask is an OffThreadPromiseTask that executes a single job on
-// a helper thread. Derived classes do their helper-thread work by implementing
-// execute().
-struct PromiseHelperTask : OffThreadPromiseTask {
+// a helper thread. Call js::StartOffThreadPromiseHelperTask to submit a
+// PromiseHelperTask for execution.
+//
+// Concrete subclasses must implement execute and OffThreadPromiseTask::resolve.
+// The helper thread will call execute() to do the main work. Then, the thread
+// of the JSContext used to create the PromiseHelperTask will call resolve() to
+// resolve promise according to those results.
+struct PromiseHelperTask : OffThreadPromiseTask, public RunnableTask {
   PromiseHelperTask(JSContext* cx, Handle<PromiseObject*> promise)
       : OffThreadPromiseTask(cx, promise) {}
 
@@ -853,6 +877,8 @@ struct PromiseHelperTask : OffThreadPromiseTask {
   // Warning: After this function returns, 'this' can be deleted at any time, so
   // the caller must immediately return from the stream callback.
   void executeAndResolveAndDestroy(JSContext* cx);
+  void runTask() override;
+  ThreadType threadType() override { return THREAD_TYPE_PROMISE_TASK; }
 };
 
 } /* namespace js */

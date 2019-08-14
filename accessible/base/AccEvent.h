@@ -20,6 +20,7 @@ class Selection;
 namespace a11y {
 
 class DocAccessible;
+class EventQueue;
 
 // Constants used to point whether the event is from user input.
 enum EIsFromUserInput {
@@ -104,6 +105,7 @@ class AccEvent {
     eVirtualCursorChangeEvent,
     eObjectAttrChangedEvent,
     eScrollingEvent,
+    eAnnouncementEvent,
   };
 
   static const EventGroup kEventGroup = eGenericEvent;
@@ -542,6 +544,34 @@ class AccScrollingEvent : public AccEvent {
   uint32_t mScrollY;
   uint32_t mMaxScrollX;
   uint32_t mMaxScrollY;
+};
+
+/**
+ * Accessible announcement event.
+ */
+class AccAnnouncementEvent : public AccEvent {
+ public:
+  AccAnnouncementEvent(Accessible* aAccessible, const nsAString& aAnnouncement,
+                       uint16_t aPriority)
+      : AccEvent(nsIAccessibleEvent::EVENT_ANNOUNCEMENT, aAccessible),
+        mAnnouncement(aAnnouncement),
+        mPriority(aPriority) {}
+
+  virtual ~AccAnnouncementEvent() {}
+
+  // AccEvent
+  static const EventGroup kEventGroup = eAnnouncementEvent;
+  virtual unsigned int GetEventGroups() const override {
+    return AccEvent::GetEventGroups() | (1U << eAnnouncementEvent);
+  }
+
+  const nsString& Announcement() const { return mAnnouncement; }
+
+  uint16_t Priority() { return mPriority; }
+
+ private:
+  nsString mAnnouncement;
+  uint16_t mPriority;
 };
 
 /**

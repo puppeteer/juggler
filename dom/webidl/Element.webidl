@@ -147,19 +147,24 @@ interface Element : Node {
   [CEReactions, Throws]
   Attr? setAttributeNodeNS(Attr newAttr);
 
-  [ChromeOnly]
-  /**
-   * Scrolls the element by (dx, dy) CSS pixels without doing any
-   * layout flushing.
-   */
-  boolean scrollByNoFlush(long dx, long dy);
-
-  [ChromeOnly]
+  [Func="nsContentUtils::IsCallerChromeOrElementTransformGettersEnabled"]
   DOMMatrixReadOnly getTransformToAncestor(Element ancestor);
-  [ChromeOnly]
+  [Func="nsContentUtils::IsCallerChromeOrElementTransformGettersEnabled"]
   DOMMatrixReadOnly getTransformToParent();
-  [ChromeOnly]
+  [Func="nsContentUtils::IsCallerChromeOrElementTransformGettersEnabled"]
   DOMMatrixReadOnly getTransformToViewport();
+};
+
+// https://html.spec.whatwg.org/#focus-management-apis
+dictionary FocusOptions {
+  boolean preventScroll = false;
+};
+
+// TODO(mbrodesser): once https://bugzilla.mozilla.org/show_bug.cgi?id=1414372
+// is fixed, mixin should be used.
+[NoInterfaceObject] interface HTMLOrSVGOrXULElementMixin {
+  [Throws]
+  void focus(optional FocusOptions options = {});
 };
 
 // http://dev.w3.org/csswg/cssom-view/
@@ -175,7 +180,7 @@ partial interface Element {
   DOMRect getBoundingClientRect();
 
   // scrolling
-  void scrollIntoView(optional (boolean or ScrollIntoViewOptions) arg);
+  void scrollIntoView(optional (boolean or ScrollIntoViewOptions) arg = {});
   // None of the CSSOM attributes are [Pure], because they flush
            attribute long scrollTop;   // scroll on setting
            attribute long scrollLeft;  // scroll on setting
@@ -183,11 +188,11 @@ partial interface Element {
   readonly attribute long scrollHeight;
 
   void scroll(unrestricted double x, unrestricted double y);
-  void scroll(optional ScrollToOptions options);
+  void scroll(optional ScrollToOptions options = {});
   void scrollTo(unrestricted double x, unrestricted double y);
-  void scrollTo(optional ScrollToOptions options);
+  void scrollTo(optional ScrollToOptions options = {});
   void scrollBy(unrestricted double x, unrestricted double y);
-  void scrollBy(optional ScrollToOptions options);
+  void scrollBy(optional ScrollToOptions options = {});
   // mozScrollSnap is used by chrome to perform scroll snapping after the
   // user performs actions that may affect scroll position
   // mozScrollSnap is deprecated, to be replaced by a web accessible API, such
@@ -211,10 +216,10 @@ partial interface Element {
 
 // http://domparsing.spec.whatwg.org/#extensions-to-the-element-interface
 partial interface Element {
-  [CEReactions, SetterNeedsSubjectPrincipal=NonSystem, Pure, SetterThrows, GetterCanOOM, TreatNullAs=EmptyString]
-  attribute DOMString innerHTML;
-  [CEReactions, Pure,SetterThrows,TreatNullAs=EmptyString]
-  attribute DOMString outerHTML;
+  [CEReactions, SetterNeedsSubjectPrincipal=NonSystem, Pure, SetterThrows, GetterCanOOM]
+  attribute [TreatNullAs=EmptyString] DOMString innerHTML;
+  [CEReactions, Pure, SetterThrows]
+  attribute [TreatNullAs=EmptyString] DOMString outerHTML;
   [CEReactions, Throws]
   void insertAdjacentHTML(DOMString position, DOMString text);
 };
@@ -240,7 +245,7 @@ partial interface Element {
   [BinaryName="shadowRootByMode"]
   readonly attribute ShadowRoot? shadowRoot;
 
-  [Func="nsDocument::IsCallerChromeOrAddon", BinaryName="shadowRoot"]
+  [Func="Document::IsCallerChromeOrAddon", BinaryName="shadowRoot"]
   readonly attribute ShadowRoot? openOrClosedShadowRoot;
 
   [BinaryName="assignedSlotByMode"]
@@ -261,15 +266,15 @@ Element implements GeometryUtils;
 
 // https://fullscreen.spec.whatwg.org/#api
 partial interface Element {
-  [Throws, Func="nsDocument::IsUnprefixedFullscreenEnabled", NeedsCallerType]
+  [Throws, Func="Document::IsUnprefixedFullscreenEnabled", NeedsCallerType]
   Promise<void> requestFullscreen();
   [Throws, BinaryName="requestFullscreen", NeedsCallerType, Deprecated="MozRequestFullScreenDeprecatedPrefix"]
   Promise<void> mozRequestFullScreen();
 
   // Events handlers
-  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [Func="Document::IsUnprefixedFullscreenEnabled"]
   attribute EventHandler onfullscreenchange;
-  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  [Func="Document::IsUnprefixedFullscreenEnabled"]
   attribute EventHandler onfullscreenerror;
 };
 
@@ -307,4 +312,19 @@ partial interface Element {
    */
   [ChromeOnly, Pure]
   sequence<Element> getElementsWithGrid();
+};
+
+// These variables are used in vtt.js, they are used for positioning vtt cues.
+partial interface Element {
+  // These two attributes are a double version of the clientHeight and the
+  // clientWidth.
+  [ChromeOnly]
+  readonly attribute double clientHeightDouble;
+  [ChromeOnly]
+  readonly attribute double clientWidthDouble;
+  // This attribute returns the block size of the first line box under the different
+  // writing directions. If the direction is horizontal, it represents box's
+  // height. If the direction is vertical, it represents box's width.
+  [ChromeOnly]
+  readonly attribute double firstLineBoxBSize;
 };

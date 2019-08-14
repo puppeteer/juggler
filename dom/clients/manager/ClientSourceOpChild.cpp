@@ -48,7 +48,7 @@ void ClientSourceOpChild::DoSourceOp(Method aMethod, const Args& aArgs) {
   MOZ_DIAGNOSTIC_ASSERT(promise);
 
   // Capture 'this' is safe here because we disconnect the promise
-  // ActorDestroy() which ensures nethier lambda is called if the
+  // ActorDestroy() which ensures neither lambda is called if the
   // actor is destroyed before the source operation completes.
   //
   // Also capture the promise to ensure it lives until we get a reaction
@@ -56,15 +56,16 @@ void ClientSourceOpChild::DoSourceOp(Method aMethod, const Args& aArgs) {
   // If the ClientSource is doing something async it may throw away the
   // promise on its side if the global is closed.
   promise
-      ->Then(target, __func__,
-             [this, promise](const mozilla::dom::ClientOpResult& aResult) {
-               mPromiseRequestHolder.Complete();
-               Unused << PClientSourceOpChild::Send__delete__(this, aResult);
-             },
-             [this, promise](nsresult aRv) {
-               mPromiseRequestHolder.Complete();
-               Unused << PClientSourceOpChild::Send__delete__(this, aRv);
-             })
+      ->Then(
+          target, __func__,
+          [this, promise](const mozilla::dom::ClientOpResult& aResult) {
+            mPromiseRequestHolder.Complete();
+            Unused << PClientSourceOpChild::Send__delete__(this, aResult);
+          },
+          [this, promise](nsresult aRv) {
+            mPromiseRequestHolder.Complete();
+            Unused << PClientSourceOpChild::Send__delete__(this, aRv);
+          })
       ->Track(mPromiseRequestHolder);
 }
 

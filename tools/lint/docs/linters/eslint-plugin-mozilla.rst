@@ -18,7 +18,7 @@ http://eslint.org/docs/user-guide/configuring#specifying-environments
 browser-window
 --------------
 
-Defines the environment for scripts that are in the main browser.xul scope.
+Defines the environment for scripts that are in the main browser.xhtml scope.
 
 chrome-worker
 -------------
@@ -66,6 +66,12 @@ balanced-listeners
 
 Checks that for every occurrence of 'addEventListener' or 'on' there is an
 occurrence of 'removeEventListener' or 'off' with the same event name.
+
+consistent-if-bracing
+---------------------
+
+Checks that if/elseif/else bodies are braced consistently, so either all bodies
+are braced or unbraced. Doesn't enforce either of those styles though.
 
 import-browser-window-globals
 -----------------------------
@@ -177,26 +183,6 @@ This disallows statements such as:
 These used to be necessary but have now been defined globally for all chrome
 contexts.
 
-no-single-arg-cu-import
------------------------
-
-Rejects calls to "Cu.import" that do not supply a second argument (meaning they
-add the exported properties into global scope).
-
-
-no-import-into-var-and-global
------------------------------
-
-Reject use of ``Cu.import`` (or ``Components.utils.import``) where it attempts to
-import into a var and into the global scope at the same time, e.g.:
-
-.. code-block:: js
-
-    var foo = Cu.import("path.jsm", this);
-
-This is considered bad practice as it is confusing as to what is actually being
-imported.
-
 no-useless-parameters
 ---------------------
 
@@ -261,7 +247,7 @@ rather than ``Components.utils.import`` and
 ``XPCOMUtils.defineLazyModuleGetter``.
 
 use-default-preference-values
----------------
+-----------------------------
 
 Require providing a second parameter to get*Pref methods instead of
 using a try/catch block.
@@ -275,6 +261,11 @@ use-includes-instead-of-indexOf
 -------------------------------
 
 Use .includes instead of .indexOf to check if something is in an array or string.
+
+use-returnValue
+---------------
+
+Warn when idempotent methods are called and their return value is unused.
 
 use-services
 ------------

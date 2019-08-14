@@ -24,35 +24,44 @@ inline LexicalEnvironmentObject& NearestEnclosingExtensibleLexicalEnvironment(
   return env->as<LexicalEnvironmentObject>();
 }
 
-inline void EnvironmentObject::setAliasedBinding(JSContext* cx, uint32_t slot,
-                                                 PropertyName* name,
-                                                 const Value& v) {
-  if (isSingleton()) {
-    MOZ_ASSERT(name);
-    AddTypePropertyId(cx, this, NameToId(name), v);
-
-    // Keep track of properties which have ever been overwritten.
-    if (!getSlot(slot).isUndefined()) {
-      Shape* shape = lookup(cx, name);
-      shape->setOverwritten();
-    }
+// Returns the innermost "qualified var object" on the environment chain.
+// See the JSObject::isQualifiedVarObj comment for more info.
+inline JSObject& GetVariablesObject(JSObject* envChain) {
+  while (!envChain->isQualifiedVarObj()) {
+    envChain = envChain->enclosingEnvironment();
   }
+  MOZ_ASSERT(envChain);
+  return *envChain;
+}
 
+inline const Value& EnvironmentObject::aliasedBinding(
+    EnvironmentCoordinate ec) {
+  MOZ_ASSERT(!IsExtensibleLexicalEnvironment(this));
+  MOZ_ASSERT(nonExtensibleIsFixedSlot(ec) ==
+             NativeObject::isFixedSlot(ec.slot()));
+  return getSlot(ec.slot());
+}
+
+inline void EnvironmentObject::setAliasedBinding(JSContext* cx, uint32_t slot,
+                                                 const Value& v) {
+  MOZ_ASSERT(!isSingleton());
   setSlot(slot, v);
 }
 
 inline void EnvironmentObject::setAliasedBinding(JSContext* cx,
                                                  EnvironmentCoordinate ec,
-                                                 PropertyName* name,
                                                  const Value& v) {
-  setAliasedBinding(cx, ec.slot(), name, v);
+  MOZ_ASSERT(!IsExtensibleLexicalEnvironment(this));
+  MOZ_ASSERT(nonExtensibleIsFixedSlot(ec) ==
+             NativeObject::isFixedSlot(ec.slot()));
+  setAliasedBinding(cx, ec.slot(), v);
 }
 
 inline void EnvironmentObject::setAliasedBinding(JSContext* cx,
                                                  const BindingIter& bi,
                                                  const Value& v) {
   MOZ_ASSERT(bi.location().kind() == BindingLocation::Kind::Environment);
-  setAliasedBinding(cx, bi.location().slot(), bi.name()->asPropertyName(), v);
+  setAliasedBinding(cx, bi.location().slot(), v);
 }
 
 inline void CallObject::setAliasedFormalFromArguments(JSContext* cx,

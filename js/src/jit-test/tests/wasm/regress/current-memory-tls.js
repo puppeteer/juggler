@@ -1,7 +1,7 @@
 // Bug 1341650:
-// - when compiled with Ion, pass the TLS register to current_memory;
+// - when compiled with Ion, pass the TLS register to memory.size;
 // - when compiled with Baseline, don't clobber the last stack slot when
-// calling into current_memory/grow_memory;
+// calling into memory.size/memory.grow;
 
 // This toy module starts with an empty memory, then tries to set values at different
 // indexes, automatically growing memory when that would trigger an out of
@@ -12,17 +12,17 @@ let i = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`
 (module
     (memory $mem (export "mem") 0 65535)
 
-    (func (export "cur_mem") (result i32) (current_memory))
+    (func (export "cur_mem") (result i32) (memory.size))
 
     (func $maybeGrow (param $i i32) (local $smem i32)
-     ;; get current_memory in number of bytes, not pages.
-     current_memory
+     ;; get memory.size in number of bytes, not pages.
+     memory.size
      i64.extend_u/i32
      i64.const 65536
      i64.mul
 
      ;; get the last byte index accessed by an int32 access.
-     get_local $i
+     local.get $i
      i32.const 3
      i32.add
      tee_local $i
@@ -32,14 +32,14 @@ let i = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`
      i64.le_u
      if
          ;; get the floor of the accessed *page* index.
-         get_local $i
+         local.get $i
          i64.extend_u/i32
          i64.const 65536
          i64.div_u
 
          ;; subtract to that the size of the current memory in pages;
          ;; that's the amount of pages we want to grow, minus one.
-         current_memory
+         memory.size
          i64.extend_u/i32
 
          i64.sub
@@ -50,21 +50,21 @@ let i = new WebAssembly.Instance(new WebAssembly.Module(wasmTextToBinary(`
 
          ;; get back to i32 and grow memory.
          i32.wrap/i64
-         grow_memory
+         memory.grow
          drop
      end
     )
 
     (func (export "set") (param $i i32) (param $v i32)
-     get_local $i
+     local.get $i
      call $maybeGrow
-     get_local $i
-     get_local $v
+     local.get $i
+     local.get $v
      i32.store
     )
 
     (func (export "get") (param $i i32) (result i32)
-     get_local $i
+     local.get $i
      i32.load
     )
 )

@@ -61,6 +61,10 @@ schema = Schema({
         Optional('sccache', description='true if ccache in use is sccache'): bool,
         Optional('icecream', description='true if icecream in use'): bool,
     },
+    Optional('build_attrs', description='Attributes characterizing a build'): {
+        Optional('cpu_percent', description='cpu utilization observed during a build'): int,
+        Optional('clobber', description='true if the build was a clobber/full build'): bool,
+    },
     Required('system'): {
         # We don't need perfect granularity here.
         Required('os', description='Operating system'): Any('windows', 'macos', 'linux', 'other'),
@@ -177,7 +181,9 @@ def get_system_info():
         import psutil
 
         info['logical_cores'] = psutil.cpu_count()
-        info['physical_cores'] = psutil.cpu_count(logical=False)
+        physical_cores = psutil.cpu_count(logical=False)
+        if physical_cores is not None:
+            info['physical_cores'] = physical_cores
         # `total` on Linux is gathered from /proc/meminfo's `MemTotal`, which is the total
         # amount of physical memory minus some kernel usage, so round up to the nearest GB
         # to get a sensible answer.
@@ -207,15 +213,30 @@ def get_build_opts(substs):
                 ('opt', 'MOZ_OPTIMIZE', bool),
                 ('ccache', 'CCACHE', bool),
                 ('sccache', 'MOZ_USING_SCCACHE', bool),
-                # TODO: detect icecream: https://bugzilla.mozilla.org/show_bug.cgi?id=1481614
             )
         }
         compiler = substs.get('CC_TYPE', None)
         if compiler:
             opts['compiler'] = str(compiler)
+        if substs.get('CXX_IS_ICECREAM', None):
+            opts['icecream'] = True
         return opts
     except BuildEnvironmentNotFoundException:
         return {}
+
+
+def get_build_attrs(attrs):
+    '''
+    Extracts clobber and cpu usage info from command attributes.
+    '''
+    res = {}
+    clobber = attrs.get('clobber')
+    if clobber:
+        res['clobber'] = clobber
+    usage = attrs.get('usage')
+    if usage:
+        res['cpu_percent'] = int(round(usage['cpu_percent']))
+    return res
 
 
 def filter_args(command, argv, paths):
@@ -243,7 +264,7 @@ def filter_args(command, argv, paths):
 
 
 def gather_telemetry(command='', success=False, start_time=None, end_time=None,
-                     mach_context=None, substs={}, paths={}):
+                     mach_context=None, substs={}, paths={}, command_attrs=None):
     '''
     Gather telemetry about the build and the user's system and pass it to the telemetry
     handler to be stored for later submission.
@@ -264,6 +285,7 @@ def gather_telemetry(command='', success=False, start_time=None, end_time=None,
         # TODO: use a monotonic clock: https://bugzilla.mozilla.org/show_bug.cgi?id=1481624
         'duration_ms': int((end_time - start_time) * 1000),
         'build_opts': get_build_opts(substs),
+        'build_attrs': get_build_attrs(command_attrs),
         'system': get_system_info(),
         # TODO: exception: https://bugzilla.mozilla.org/show_bug.cgi?id=1481617
         # TODO: file_types_changed: https://bugzilla.mozilla.org/show_bug.cgi?id=1481774

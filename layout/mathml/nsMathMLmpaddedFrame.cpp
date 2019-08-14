@@ -7,6 +7,7 @@
 #include "nsMathMLmpaddedFrame.h"
 #include "nsMathMLElement.h"
 #include "mozilla/gfx/2D.h"
+#include "mozilla/PresShell.h"
 #include "mozilla/TextUtils.h"
 #include <algorithm>
 
@@ -28,9 +29,10 @@ using namespace mozilla;
 #define NS_MATHML_PSEUDO_UNIT_DEPTH 4
 #define NS_MATHML_PSEUDO_UNIT_NAMEDSPACE 5
 
-nsIFrame* NS_NewMathMLmpaddedFrame(nsIPresShell* aPresShell,
+nsIFrame* NS_NewMathMLmpaddedFrame(PresShell* aPresShell,
                                    ComputedStyle* aStyle) {
-  return new (aPresShell) nsMathMLmpaddedFrame(aStyle);
+  return new (aPresShell)
+      nsMathMLmpaddedFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsMathMLmpaddedFrame)
@@ -308,9 +310,9 @@ void nsMathMLmpaddedFrame::Reflow(nsPresContext* aPresContext,
   // NS_ASSERTION(aStatus.IsComplete(), "bad status");
 }
 
-/* virtual */ nsresult nsMathMLmpaddedFrame::Place(DrawTarget* aDrawTarget,
-                                                   bool aPlaceOrigin,
-                                                   ReflowOutput& aDesiredSize) {
+/* virtual */
+nsresult nsMathMLmpaddedFrame::Place(DrawTarget* aDrawTarget, bool aPlaceOrigin,
+                                     ReflowOutput& aDesiredSize) {
   nsresult rv = nsMathMLContainerFrame::Place(aDrawTarget, false, aDesiredSize);
   if (NS_MATHML_HAS_ERROR(mPresentationData.flags) || NS_FAILED(rv)) {
     DidReflowChildren(PrincipalChildList().FirstChild());
@@ -430,8 +432,9 @@ void nsMathMLmpaddedFrame::Reflow(nsPresContext* aPresContext,
   return NS_OK;
 }
 
-/* virtual */ nsresult nsMathMLmpaddedFrame::MeasureForWidth(
-    DrawTarget* aDrawTarget, ReflowOutput& aDesiredSize) {
+/* virtual */
+nsresult nsMathMLmpaddedFrame::MeasureForWidth(DrawTarget* aDrawTarget,
+                                               ReflowOutput& aDesiredSize) {
   ProcessAttributes();
   return Place(aDrawTarget, false, aDesiredSize);
 }

@@ -9,15 +9,7 @@
 #include <stdio.h>
 #include <mozilla/Assertions.h>
 
-/* GLIBCXX_3.4.8  is from gcc 4.1.1 (111691)
-   GLIBCXX_3.4.9  is from gcc 4.2.0 (111690)
-   GLIBCXX_3.4.10 is from gcc 4.3.0 (126287)
-   GLIBCXX_3.4.11 is from gcc 4.4.0 (133006)
-   GLIBCXX_3.4.12 is from gcc 4.4.1 (147138)
-   GLIBCXX_3.4.13 is from gcc 4.4.2 (151127)
-   GLIBCXX_3.4.14 is from gcc 4.5.0 (151126)
-   GLIBCXX_3.4.15 is from gcc 4.6.0 (160071)
-   GLIBCXX_3.4.16 is from gcc 4.6.1 (172240)
+/* GLIBCXX_3.4.16 is from gcc 4.6.1 (172240)
    GLIBCXX_3.4.17 is from gcc 4.7.0 (174383)
    GLIBCXX_3.4.18 is from gcc 4.8.0 (190787)
    GLIBCXX_3.4.19 is from gcc 4.8.1 (199309)
@@ -26,8 +18,8 @@
    GLIBCXX_3.4.22 is from gcc 6.0 (222482)
 
 This file adds the necessary compatibility tricks to avoid symbols with
-version GLIBCXX_3.4.16 and bigger, keeping binary compatibility with
-libstdc++ 4.6.1.
+version GLIBCXX_3.4.17 and bigger, keeping binary compatibility with
+libstdc++ 4.7.
 
 WARNING: all symbols from this file must be defined weak when they
 overlap with libstdc++.
@@ -38,8 +30,8 @@ overlap with libstdc++.
 #if MOZ_LIBSTDCXX_VERSION >= GLIBCXX_VERSION(3, 4, 18)
 // Implementation of utility functions for the prime rehash policy used in
 // unordered_map and unordered_set.
-#include <unordered_map>
-#include <tr1/unordered_map>
+#  include <unordered_map>
+#  include <tr1/unordered_map>
 namespace std {
 size_t __attribute__((weak))
 __detail::_Prime_rehash_policy::_M_next_bkt(size_t __n) const {
@@ -103,8 +95,8 @@ __attribute__((weak)) runtime_error::runtime_error(char const* s)
 
 #if MOZ_LIBSTDCXX_VERSION >= GLIBCXX_VERSION(3, 4, 21)
 /* Expose the definitions for the old ABI, allowing us to call its functions */
-#define _GLIBCXX_THREAD_ABI_COMPAT 1
-#include <thread>
+#  define _GLIBCXX_THREAD_ABI_COMPAT 1
+#  include <thread>
 
 namespace std {
 /* The old ABI has a thread::_M_start_thread(shared_ptr<_Impl_base>),
@@ -121,7 +113,7 @@ __attribute__((weak)) void thread::_M_start_thread(shared_ptr<_Impl_base> impl,
   _M_start_thread(std::move(impl));
 }
 
-#if MOZ_LIBSTDCXX_VERSION >= GLIBCXX_VERSION(3, 4, 22)
+#  if MOZ_LIBSTDCXX_VERSION >= GLIBCXX_VERSION(3, 4, 22)
 /* We need a _Impl_base-derived class wrapping a _State to call the old ABI
  * from what we got by diverting the new API */
 struct StateWrapper : public thread::_Impl_base {
@@ -141,7 +133,7 @@ __attribute__((weak)) void thread::_M_start_thread(unique_ptr<_State> aState,
 /* For some reason this is a symbol exported by new versions of libstdc++,
  * even though the destructor is default there too */
 __attribute__((weak)) thread::_State::~_State() = default;
-#endif
+#  endif
 }  // namespace std
 #endif
 

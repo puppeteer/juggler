@@ -53,7 +53,7 @@ ALL_FLAVORS = {
     'browser-chrome': {
         'suite': 'browser',
         'aliases': ('browser', 'browser-chrome', 'mochitest-browser-chrome', 'bc'),
-        'enabled_apps': ('firefox',),
+        'enabled_apps': ('firefox', 'thunderbird'),
         'extra_args': {
             'flavor': 'browser',
         }
@@ -370,13 +370,6 @@ class MochitestArguments(ArgumentContainer):
           "default": False,
           "help": "Delay execution between tests.",
           }],
-        [["--metro-immersive"],
-         {"action": "store_true",
-          "dest": "immersiveMode",
-          "default": False,
-          "help": "Launches tests in an immersive browser.",
-          "suppress": True,
-          }],
         [["--httpd-path"],
          {"dest": "httpdPath",
           "default": None,
@@ -389,6 +382,11 @@ class MochitestArguments(ArgumentContainer):
           "default": [],
           "dest": "extraPrefs",
           "help": "Defines an extra user preference.",
+          }],
+        [["--jsconsole"],
+         {"action": "store_true",
+          "default": False,
+          "help": "Open the Browser Console.",
           }],
         [["--jsdebugger"],
          {"action": "store_true",
@@ -422,11 +420,6 @@ class MochitestArguments(ArgumentContainer):
                   "JS_CODE_COVERAGE_OUTPUT_DIR in the environment.",
           "default": None,
           "suppress": True,
-          }],
-        [["--nested_oop"],
-         {"action": "store_true",
-          "default": False,
-          "help": "Run tests with nested_oop preferences and test filtering enabled.",
           }],
         [["--dmd"],
          {"action": "store_true",
@@ -602,12 +595,18 @@ class MochitestArguments(ArgumentContainer):
           "default": 3600,
           "help": "Maximum time, in seconds, to run in --verify mode.",
           }],
+        [["--enable-webrender"],
+         {"action": "store_true",
+          "dest": "enable_webrender",
+          "default": False,
+          "help": "Enable the WebRender compositor in Gecko.",
+          }],
     ]
 
     defaults = {
-        # Bug 1065098 - The geckomediaplugin process fails to produce a leak
+        # Bug 1065098 - The gmplugin process fails to produce a leak
         # log for some reason.
-        'ignoreMissingLeaks': ["geckomediaplugin"],
+        'ignoreMissingLeaks': ["gmplugin"],
         'extensionsToExclude': ['specialpowers'],
         # Set server information on the args object
         'webServer': '127.0.0.1',
@@ -622,9 +621,6 @@ class MochitestArguments(ArgumentContainer):
 
     def validate(self, parser, options, context):
         """Validate generic options."""
-
-        # for test manifest parsing.
-        mozinfo.update({"nested_oop": options.nested_oop})
 
         # and android doesn't use 'app' the same way, so skip validation
         if parser.app != 'android':
@@ -645,6 +641,11 @@ class MochitestArguments(ArgumentContainer):
 
         if options.flavor is None:
             options.flavor = 'plain'
+
+        for value in ALL_FLAVORS.values():
+            if options.flavor in value['aliases']:
+                options.flavor = value['suite']
+                break
 
         if options.gmp_path is None and options.app and build_obj:
             # Need to fix the location of gmp_fake which might not be shipped in the binary
@@ -711,13 +712,6 @@ class MochitestArguments(ArgumentContainer):
             options.symbolsPath = self.get_full_path(options.symbolsPath, parser.oldcwd)
         elif not options.symbolsPath and build_obj:
             options.symbolsPath = os.path.join(build_obj.distdir, 'crashreporter-symbols')
-
-        if options.jsdebugger:
-            options.extraPrefs += [
-                "devtools.debugger.remote-enabled=true",
-                "devtools.chrome.enabled=true",
-                "devtools.debugger.prompt-connection=false"
-            ]
 
         if options.debugOnFailure and not options.jsdebugger:
             parser.error(
@@ -794,15 +788,6 @@ class MochitestArguments(ArgumentContainer):
             if options.testingModulesDir[-1] != '/':
                 options.testingModulesDir += '/'
 
-        if options.immersiveMode:
-            if not mozinfo.isWin:
-                parser.error("immersive is only supported on Windows 8 and up.")
-            options.immersiveHelperPath = os.path.join(
-                options.utilityPath, "metrotestharness.exe")
-            if not os.path.exists(options.immersiveHelperPath):
-                parser.error("%s not found, cannot launch immersive tests." %
-                             options.immersiveHelperPath)
-
         if options.runUntilFailure:
             if not options.repeat:
                 options.repeat = 29
@@ -834,14 +819,16 @@ class MochitestArguments(ArgumentContainer):
                     'Missing binary pactl required for '
                     '--use-test-media-devices')
 
-        if options.nested_oop:
-            options.e10s = True
+        # The a11y and chrome flavors can't run with e10s.
+        if options.flavor in ('a11y', 'chrome') and options.e10s:
+            parser.error("mochitest-{} does not support e10s, try again with "
+                         "--disable-e10s.".format(options.flavor))
 
         options.leakThresholds = {
             "default": options.defaultLeakThreshold,
             "tab": options.defaultLeakThreshold,
             # GMP rarely gets a log, but when it does, it leaks a little.
-            "geckomediaplugin": 20000,
+            "gmplugin": 20000,
             "rdd": 400,
         }
 
@@ -867,7 +854,9 @@ class AndroidArguments(ArgumentContainer):
     args = [
         [["--deviceSerial"],
          {"dest": "deviceSerial",
-          "help": "ip address of remote device to test",
+          "help": "adb serial number of remote device. This is required "
+                  "when more than one device is connected to the host. "
+                  "Use 'adb devices' to see connected devices.",
           "default": None,
           }],
         [["--adbpath"],
@@ -879,42 +868,42 @@ class AndroidArguments(ArgumentContainer):
         [["--remote-webserver"],
          {"dest": "remoteWebServer",
           "default": None,
-          "help": "ip address where the remote web server is hosted at",
+          "help": "IP address of the remote web server.",
           }],
         [["--http-port"],
          {"dest": "httpPort",
           "default": DEFAULT_PORTS['http'],
-          "help": "http port of the remote web server",
+          "help": "http port of the remote web server.",
           "suppress": True,
           }],
         [["--ssl-port"],
          {"dest": "sslPort",
           "default": DEFAULT_PORTS['https'],
-          "help": "ssl port of the remote web server",
+          "help": "ssl port of the remote web server.",
           "suppress": True,
           }],
         [["--robocop-apk"],
          {"dest": "robocopApk",
           "default": "",
-          "help": "name of the Robocop APK to use for ADB test running",
+          "help": "Name of the robocop APK to use.",
           }],
         [["--remoteTestRoot"],
          {"dest": "remoteTestRoot",
           "default": None,
-          "help": "remote directory to use as test root \
-                   (eg. /mnt/sdcard/tests or /data/local/tests)",
+          "help": "Remote directory to use as test root "
+                  "(eg. /mnt/sdcard/tests or /data/local/tests).",
           "suppress": True,
           }],
         [["--enable-coverage"],
          {"action": "store_true",
           "default": False,
-          "help": "Enable collecting code coverage information when running"
+          "help": "Enable collecting code coverage information when running "
                   "robocop tests.",
           }],
         [["--coverage-output-dir"],
          {"action": "store",
           "default": None,
-          "help": "When using --enable-java-coverage, save the code coverage report"
+          "help": "When using --enable-java-coverage, save the code coverage report "
                   "files to this directory.",
           }],
     ]
@@ -951,10 +940,7 @@ class AndroidArguments(ArgumentContainer):
         options.webServer = options.remoteWebServer
 
         if options.app is None:
-            if build_obj:
-                options.app = build_obj.substs['ANDROID_PACKAGE_NAME']
-            else:
-                parser.error("You must specify either appPath or app")
+            options.app = "org.mozilla.geckoview.test"
 
         if build_obj and 'MOZ_HOST_BIN' in os.environ:
             options.xrePath = os.environ['MOZ_HOST_BIN']

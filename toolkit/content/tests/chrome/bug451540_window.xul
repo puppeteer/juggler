@@ -14,8 +14,8 @@
         title="451540 test">
 
   <script type="application/javascript"><![CDATA[
-    ChromeUtils.import("resource://testing-common/BrowserTestUtils.jsm");
-    ChromeUtils.import("resource://testing-common/ContentTask.jsm");
+    const {BrowserTestUtils} = ChromeUtils.import("resource://testing-common/BrowserTestUtils.jsm");
+    const {ContentTask} = ChromeUtils.import("resource://testing-common/ContentTask.jsm");
     ContentTask.setTestScope(window.opener.wrappedJSObject);
     const SEARCH_TEXT = "minefield";
 
@@ -225,6 +225,13 @@
       await BrowserTestUtils.synthesizeKey("VK_LEFT", { shiftKey: true }, gBrowser);
       await BrowserTestUtils.synthesizeKey("x", { ctrlKey: sendCtrl, metaKey: sendMeta }, gBrowser);
       await testSelection(elementId, 0, testTypeText + " correctly removed second highlight on selection deletion");
+
+      // Turn off highlighting
+      let highlightButton = gFindBar.getElement("highlight");
+      if (highlightButton.checked) {
+        highlightButton.click();
+      }
+
     }
 
     function onPageShow() {

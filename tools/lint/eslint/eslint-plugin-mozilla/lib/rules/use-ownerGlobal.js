@@ -13,23 +13,26 @@
 // -----------------------------------------------------------------------------
 
 module.exports = function(context) {
-
   // ---------------------------------------------------------------------------
   // Public
   //  --------------------------------------------------------------------------
 
   return {
-    "MemberExpression": function(node) {
-      if (node.property.type != "Identifier" ||
-          node.property.name != "defaultView" ||
-          node.object.type != "MemberExpression" ||
-          node.object.property.type != "Identifier" ||
-          node.object.property.name != "ownerDocument") {
+    MemberExpression(node) {
+      if (
+        node.property.type != "Identifier" ||
+        node.property.name != "defaultView" ||
+        node.object.type != "MemberExpression" ||
+        node.object.property.type != "Identifier" ||
+        node.object.property.name != "ownerDocument"
+      ) {
         return;
       }
 
-      context.report(node,
-                     "use .ownerGlobal instead of .ownerDocument.defaultView");
+      context.report(
+        node,
+        "use .ownerGlobal instead of .ownerDocument.defaultView"
+      );
     },
   };
 };

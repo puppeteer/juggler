@@ -24,20 +24,20 @@
 
 using namespace mozilla;
 
-static already_AddRefed<nsIURI> FileToURI(const char *aFilename,
-                                          nsresult *aRv = 0) {
+static already_AddRefed<nsIURI> FileToURI(const char* aFilename,
+                                          nsresult* aRv = 0) {
   nsCOMPtr<nsIFile> lf(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, aRv));
   NS_ENSURE_TRUE(lf, nullptr);
   // XXX Handle relative paths somehow.
   lf->InitWithNativePath(nsDependentCString(aFilename));
 
-  nsIURI *uri = nullptr;
+  nsIURI* uri = nullptr;
   nsresult rv = NS_NewFileURI(&uri, lf);
   if (aRv) *aRv = rv;
   return uri;
 }
 
-static int ParseCSSFile(nsIURI *aSheetURI) {
+static int ParseCSSFile(nsIURI* aSheetURI) {
   RefPtr<mozilla::css::Loader> = new mozilla::css::Loader();
   RefPtr<CSSStyleSheet> sheet;
   loader->LoadSheetSync(aSheetURI, getter_AddRefs(sheet));
@@ -53,16 +53,16 @@ static int ParseCSSFile(nsIURI *aSheetURI) {
   return 0;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   if (argc < 2) {
     fprintf(stderr, "%s [FILE]...\n", argv[0]);
   }
-  nsresult rv = NS_InitXPCOM2(nullptr, nullptr, nullptr);
+  nsresult rv = NS_InitXPCOM(nullptr, nullptr, nullptr);
   if (NS_FAILED(rv)) return (int)rv;
 
   int res = 0;
   for (int i = 1; i < argc; ++i) {
-    const char *filename = argv[i];
+    const char* filename = argv[i];
 
     printf("\nParsing %s.\n", filename);
 

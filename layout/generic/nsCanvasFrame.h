@@ -16,7 +16,6 @@
 #include "nsIPopupContainer.h"
 #include "nsDisplayList.h"
 #include "nsIAnonymousContentCreator.h"
-#include "gfxPrefs.h"
 
 class nsPresContext;
 class gfxContext;
@@ -36,8 +35,8 @@ class nsCanvasFrame final : public nsContainerFrame,
                             public nsIAnonymousContentCreator,
                             public nsIPopupContainer {
  public:
-  explicit nsCanvasFrame(ComputedStyle* aStyle)
-      : nsContainerFrame(aStyle, kClassID),
+  explicit nsCanvasFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsContainerFrame(aStyle, aPresContext, kClassID),
         mDoPaintFocus(false),
         mAddedScrollPositionListener(false),
         mPopupSetFrame(nullptr) {}
@@ -169,15 +168,15 @@ class nsDisplayCanvasBackgroundColor final : public nsDisplaySolidColorBase {
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
-      mozilla::layers::WebRenderLayerManager* aManager,
+      mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
   virtual LayerState GetLayerState(
       nsDisplayListBuilder* aBuilder, LayerManager* aManager,
       const ContainerLayerParameters& aParameters) override {
     if (ForceActiveLayers()) {
-      return mozilla::LAYER_ACTIVE;
+      return mozilla::LayerState::LAYER_ACTIVE;
     }
-    return mozilla::LAYER_NONE;
+    return mozilla::LayerState::LAYER_NONE;
   }
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
 
@@ -192,8 +191,9 @@ class nsDisplayCanvasBackgroundColor final : public nsDisplaySolidColorBase {
 class nsDisplayCanvasBackgroundImage : public nsDisplayBackgroundImage {
  public:
   explicit nsDisplayCanvasBackgroundImage(nsDisplayListBuilder* aBuilder,
+                                          nsIFrame* aFrame,
                                           const InitData& aInitData)
-      : nsDisplayBackgroundImage(aBuilder, aInitData) {}
+      : nsDisplayBackgroundImage(aBuilder, aFrame, aInitData) {}
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
 

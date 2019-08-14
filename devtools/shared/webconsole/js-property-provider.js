@@ -11,14 +11,19 @@ const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 if (!isWorker) {
   loader.lazyImporter(this, "Parser", "resource://devtools/shared/Parser.jsm");
 }
-loader.lazyRequireGetter(this, "Reflect", "resource://gre/modules/reflect.jsm", true);
+loader.lazyRequireGetter(
+  this,
+  "Reflect",
+  "resource://gre/modules/reflect.jsm",
+  true
+);
 
 // Provide an easy way to bail out of even attempting an autocompletion
 // if an object has way too many properties. Protects against large objects
 // with numeric values that wouldn't be tallied towards MAX_AUTOCOMPLETIONS.
-const MAX_AUTOCOMPLETE_ATTEMPTS = exports.MAX_AUTOCOMPLETE_ATTEMPTS = 100000;
+const MAX_AUTOCOMPLETE_ATTEMPTS = (exports.MAX_AUTOCOMPLETE_ATTEMPTS = 100000);
 // Prevent iterating over too many properties during autocomplete suggestions.
-const MAX_AUTOCOMPLETIONS = exports.MAX_AUTOCOMPLETIONS = 1500;
+const MAX_AUTOCOMPLETIONS = (exports.MAX_AUTOCOMPLETIONS = 1500);
 
 const STATE_NORMAL = Symbol("STATE_NORMAL");
 const STATE_QUOTE = Symbol("STATE_QUOTE");
@@ -34,6 +39,7 @@ const OPEN_CLOSE_BODY = {
 };
 
 const NO_AUTOCOMPLETE_PREFIXES = ["var", "const", "let", "function", "class"];
+const OPERATOR_CHARS_SET = new Set(";,:=<>+-*/%|&^~?!".split(""));
 
 function hasArrayIndex(str) {
   return /\[\d+\]$/.test(str);
@@ -60,6 +66,7 @@ function hasArrayIndex(str) {
  *                               element access (e.g. `x["match`).
  *            }
  */
+/* eslint-disable complexity */
 function analyzeInputString(str) {
   const bodyStack = [];
 
@@ -87,9 +94,21 @@ function analyzeInputString(str) {
     };
   };
 
-  for (let i = 0; i < characters.length; i++) {
-    c = characters[i];
+  const TIMEOUT = 2500;
+  const startingTime = Date.now();
 
+  for (let i = 0; i < characters.length; i++) {
+    // We are possibly dealing with a very large string that would take a long time to
+    // analyze (and freeze the process). If the function has been running for more than
+    // a given time, we stop the analysis (this isn't too bad because the only
+    // consequence is that we won't provide autocompletion items).
+    if (Date.now() - startingTime > TIMEOUT) {
+      return {
+        err: "timeout",
+      };
+    }
+
+    c = characters[i];
     switch (state) {
       // Normal JS state.
       case STATE_NORMAL:
@@ -99,7 +118,7 @@ function analyzeInputString(str) {
           state = STATE_QUOTE;
         } else if (c == "`") {
           state = STATE_TEMPLATE_LITERAL;
-        } else if (";,:=<>+-*/%|&^~?!".split("").includes(c)) {
+        } else if (OPERATOR_CHARS_SET.has(c)) {
           // If the character is an operator, we need to update the start position.
           start = i + 1;
         } else if (c == " ") {
@@ -117,15 +136,17 @@ function analyzeInputString(str) {
           // one either, and the current computed statement is not a
           // variable/function/class declaration, update the start position.
           if (
-            previousNonSpaceChar !== "." && nextNonSpaceChar !== "." &&
-            previousNonSpaceChar !== "[" && nextNonSpaceChar !== "[" &&
+            previousNonSpaceChar !== "." &&
+            nextNonSpaceChar !== "." &&
+            previousNonSpaceChar !== "[" &&
+            nextNonSpaceChar !== "[" &&
             !NO_AUTOCOMPLETE_PREFIXES.includes(currentLastStatement)
           ) {
-            start = i + (
-              nextNonSpaceCharIndex >= 0
+            start =
+              i +
+              (nextNonSpaceCharIndex >= 0
                 ? nextNonSpaceCharIndex
-                : (after.length + 1)
-            );
+                : after.length + 1);
           }
 
           // There's only spaces after that, so we can return.
@@ -195,6 +216,7 @@ function analyzeInputString(str) {
 
   return buildReturnObject();
 }
+/* eslint-enable complexity */
 
 /**
  * Provides a list of properties, that are possible matches based on the passed
@@ -215,9 +237,9 @@ function analyzeInputString(str) {
  *        Optional offset in the input where the cursor is located. If this is
  *        omitted then the cursor is assumed to be at the end of the input
  *        value.
- * - {Boolean} invokeUnsafeGetter (defaults to false).
- *        Optional boolean to indicate if the function should execute unsafe getter
- *        in order to retrieve its result's properties.
+ * - {Array} authorizedEvaluations (defaults to []).
+ *        Optional array containing all the different properties access that the engine
+ *        can execute in order to retrieve its result's properties.
  *        ⚠️ This should be set to true *ONLY* on user action as it may cause side-effects
  *        in the content page ⚠️
  * - {WebconsoleActor} webconsoleActor
@@ -231,7 +253,8 @@ function analyzeInputString(str) {
  *
  *          {
  *            isUnsafeGetter: true,
- *            getterName: {String} The name of the unsafe getter
+ *            getterPath: {Array<String>} An array of the property chain leading to the
+ *                        getter. Example: ["x", "myGetter"]
  *          }
  *
  *          If no completion valued could be computed, and the input is not an unsafe
@@ -246,12 +269,13 @@ function analyzeInputString(str) {
  *                               access (e.g. `window["addEvent`).
  *            }
  */
+/* eslint-disable complexity */
 function JSPropertyProvider({
   dbgObject,
   environment,
   inputValue,
   cursor,
-  invokeUnsafeGetter = false,
+  authorizedEvaluations = [],
   webconsoleActor,
   selectedNodeActor,
 }) {
@@ -263,15 +287,13 @@ function JSPropertyProvider({
 
   // Analyse the inputValue and find the beginning of the last part that
   // should be completed.
-  const {
-    err,
-    state,
-    lastStatement,
-    isElementAccess,
-  } = analyzeInputString(inputValue);
+  const { err, state, lastStatement, isElementAccess } = analyzeInputString(
+    inputValue
+  );
 
   // There was an error analysing the string.
   if (err) {
+    console.error("Failed to analyze input string", err);
     return null;
   }
 
@@ -286,14 +308,24 @@ function JSPropertyProvider({
     return null;
   }
 
-  if (NO_AUTOCOMPLETE_PREFIXES.some(prefix => lastStatement.startsWith(prefix + " "))) {
+  if (
+    NO_AUTOCOMPLETE_PREFIXES.some(prefix =>
+      lastStatement.startsWith(prefix + " ")
+    )
+  ) {
     return null;
   }
 
+  const env = environment || dbgObject.asEnvironment();
   const completionPart = lastStatement;
   const lastDotIndex = completionPart.lastIndexOf(".");
-  const lastOpeningBracketIndex = isElementAccess ? completionPart.lastIndexOf("[") : -1;
-  const lastCompletionCharIndex = Math.max(lastDotIndex, lastOpeningBracketIndex);
+  const lastOpeningBracketIndex = isElementAccess
+    ? completionPart.lastIndexOf("[")
+    : -1;
+  const lastCompletionCharIndex = Math.max(
+    lastDotIndex,
+    lastOpeningBracketIndex
+  );
   const startQuoteRegex = /^('|"|`)/;
 
   // AST representation of the expression before the last access char (`.` or `[`).
@@ -310,7 +342,8 @@ function JSPropertyProvider({
     const parsedExpression = completionPart.slice(0, lastCompletionCharIndex);
     const syntaxTree = parser.get(parsedExpression);
     const lastTree = syntaxTree.getLastSyntaxTree();
-    const lastBody = lastTree && lastTree.AST.body[lastTree.AST.body.length - 1];
+    const lastBody =
+      lastTree && lastTree.AST.body[lastTree.AST.body.length - 1];
 
     // Finding the last expression since we've sliced up until the dot.
     // If there were parse errors this won't exist.
@@ -319,12 +352,12 @@ function JSPropertyProvider({
       let matchingObject;
 
       if (astExpression.type === "ArrayExpression") {
-        matchingObject = Array.prototype;
+        matchingObject = getContentPrototypeObject(env, "Array");
       } else if (
         astExpression.type === "Literal" &&
         typeof astExpression.value === "string"
       ) {
-        matchingObject = String.prototype;
+        matchingObject = getContentPrototypeObject(env, "String");
       } else if (
         astExpression.type === "Literal" &&
         Number.isFinite(astExpression.value)
@@ -338,7 +371,7 @@ function JSPropertyProvider({
           !Number.isInteger(astExpression.value) ||
           /\d[^\.]{0}\.$/.test(completionPart) === false
         ) {
-          matchingObject = Number.prototype;
+          matchingObject = getContentPrototypeObject(env, "Number");
         } else {
           return null;
         }
@@ -353,7 +386,7 @@ function JSPropertyProvider({
           search = matchProp.replace(startQuoteRegex, "");
         }
 
-        let props = getMatchedProps(matchingObject, search);
+        let props = getMatchedPropsInDbgObject(matchingObject, search);
         if (isElementAccess) {
           props = wrapMatchesInQuotes(props, elementAccessQuote);
         }
@@ -384,7 +417,10 @@ function JSPropertyProvider({
       const lastPart = properties[properties.length - 1];
       const openBracketIndex = lastPart.lastIndexOf("[");
       matchProp = lastPart.substr(openBracketIndex + 1);
-      properties[properties.length - 1] = lastPart.substring(0, openBracketIndex);
+      properties[properties.length - 1] = lastPart.substring(
+        0,
+        openBracketIndex
+      );
     } else {
       matchProp = properties.pop().trimLeft();
     }
@@ -398,11 +434,6 @@ function JSPropertyProvider({
   }
 
   let obj = dbgObject;
-
-  // The first property must be found in the environment of the paused debugger
-  // or of the global lexical scope.
-  const env = environment || obj.asEnvironment();
-
   if (properties.length === 0) {
     return {
       isElementAccess,
@@ -452,18 +483,17 @@ function JSPropertyProvider({
       return null;
     }
 
-    if (!invokeUnsafeGetter && DevToolsUtils.isUnsafeGetter(obj, prop)) {
-      // If the unsafe getter is not the last property access of the input, bail out as
-      // things might get complex.
-      if (index !== properties.length - 1) {
-        return null;
-      }
+    const propPath = [firstProp].concat(properties.slice(0, index + 1));
+    const authorized = authorizedEvaluations.some(
+      x => JSON.stringify(x) === JSON.stringify(propPath)
+    );
 
+    if (!authorized && DevToolsUtils.isUnsafeGetter(obj, prop)) {
       // If we try to access an unsafe getter, return its name so we can consume that
       // on the frontend.
       return {
         isUnsafeGetter: true,
-        getterName: prop,
+        getterPath: propPath,
       };
     }
 
@@ -472,7 +502,7 @@ function JSPropertyProvider({
       // list[i][j]..[n]. Traverse the array to get the actual element.
       obj = getArrayMemberProperty(obj, null, prop);
     } else {
-      obj = DevToolsUtils.getProperty(obj, prop, invokeUnsafeGetter);
+      obj = DevToolsUtils.getProperty(obj, prop, authorized);
     }
 
     if (!isObjectUsable(obj)) {
@@ -489,21 +519,19 @@ function JSPropertyProvider({
       // If we're not performing an element access, we need to check that the property
       // are suited for a dot access. (Reflect.jsm is not available in worker context yet,
       // see Bug 1507181).
-      matches = new Set([...matches].filter(propertyName => {
-        let valid = true;
+      for (const match of matches) {
         try {
           // In order to know if the property is suited for dot notation, we use Reflect
           // to parse an expression where we try to access the property with a dot. If it
           // throws, this means that we need to do an element access instead.
-          Reflect.parse(`({${propertyName}: true})`);
+          Reflect.parse(`({${match}: true})`);
         } catch (e) {
-          valid = false;
+          matches.delete(match);
         }
-        return valid;
-      }));
+      }
     }
 
-    return {isElementAccess, matchProp, matches};
+    return { isElementAccess, matchProp, matches };
   };
 
   // If the final property is a primitive
@@ -512,6 +540,30 @@ function JSPropertyProvider({
   }
 
   return prepareReturnedObject(getMatchedPropsInDbgObject(obj, search));
+}
+/* eslint-enable complexity */
+
+/**
+ * For a given environment and constructor name, returns its Debugger.Object wrapped
+ * prototype.
+ *
+ * @param {Environment} env
+ * @param {String} name: Name of the constructor object we want the prototype of.
+ * @returns {Debugger.Object|null} the prototype, or null if it not found.
+ */
+function getContentPrototypeObject(env, name) {
+  // Retrieve the outermost environment to get the global object.
+  let outermostEnv = env;
+  while (outermostEnv && outermostEnv.parent) {
+    outermostEnv = outermostEnv.parent;
+  }
+
+  const constructorObj = DevToolsUtils.getProperty(outermostEnv.object, name);
+  if (!constructorObj) {
+    return null;
+  }
+
+  return DevToolsUtils.getProperty(constructorObj, "prototype");
 }
 
 /**
@@ -524,7 +576,7 @@ function getPropertiesFromAstExpression(ast) {
   if (!ast) {
     return result;
   }
-  const {type, property, object, name} = ast;
+  const { type, property, object, name } = ast;
   if (type === "ThisExpression") {
     result.unshift("this");
   } else if (type === "Identifier" && name) {
@@ -547,8 +599,34 @@ function getPropertiesFromAstExpression(ast) {
 }
 
 function wrapMatchesInQuotes(matches, quote = `"`) {
-  return new Set([...matches].map(p =>
-    `${quote}${p.replace(new RegExp(`${quote}`, "g"), `\\${quote}`)}${quote}`));
+  return new Set(
+    [...matches].map(p => {
+      // Escape as a double-quoted string literal
+      p = JSON.stringify(p);
+
+      // We don't have to do anything more when using double quotes
+      if (quote == `"`) {
+        return p;
+      }
+
+      // Remove surrounding double quotes
+      p = p.slice(1, -1);
+
+      // Unescape inner double quotes (all must be escaped, so no need to count backslashes)
+      p = p.replace(/\\(?=")/g, "");
+
+      // Escape the specified quote (assuming ' or `, which are treated literally in regex)
+      p = p.replace(new RegExp(quote, "g"), "\\$&");
+
+      // Template literals treat ${ specially, escape it
+      if (quote == "`") {
+        p = p.replace(/\${/g, "\\$&");
+      }
+
+      // Surround the result with quotes
+      return `${quote}${p}${quote}`;
+    })
+  );
 }
 
 /**
@@ -584,7 +662,10 @@ function getArrayMemberProperty(obj, env, prop) {
   const arrayIndicesRegex = /\[[^\]]*\]/g;
   while ((result = arrayIndicesRegex.exec(prop)) !== null) {
     const indexWithBrackets = result[0];
-    const indexAsText = indexWithBrackets.substr(1, indexWithBrackets.length - 2);
+    const indexAsText = indexWithBrackets.substr(
+      1,
+      indexWithBrackets.length - 2
+    );
     const index = parseInt(indexAsText, 10);
 
     if (isNaN(index)) {
@@ -663,7 +744,7 @@ function getMatchedProps(obj, match) {
  *        Filter for properties that match this string.
  * @returns {Set} List of matched properties.
  */
-function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
+function getMatchedPropsImpl(obj, match, { chainIterator, getProperties }) {
   const matches = new Set();
   let numProps = 0;
 
@@ -686,8 +767,10 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
     // If there are too many properties to event attempt autocompletion,
     // or if we have already added the max number, then stop looping
     // and return the partial set that has already been discovered.
-    if (numProps >= MAX_AUTOCOMPLETE_ATTEMPTS ||
-        matches.size >= MAX_AUTOCOMPLETIONS) {
+    if (
+      numProps >= MAX_AUTOCOMPLETE_ATTEMPTS ||
+      matches.size >= MAX_AUTOCOMPLETIONS
+    ) {
       break;
     }
 
@@ -726,7 +809,7 @@ function getMatchedPropsImpl(obj, match, {chainIterator, getProperties}) {
  *        A Debugger.Object if the property exists in the object's prototype
  *        chain, undefined otherwise.
  */
-function getExactMatchImpl(obj, name, {chainIterator, getProperty}) {
+function getExactMatchImpl(obj, name, { chainIterator, getProperty }) {
   // We need to go up the prototype chain.
   const iter = chainIterator(obj);
   for (obj of iter) {
@@ -739,7 +822,7 @@ function getExactMatchImpl(obj, name, {chainIterator, getProperty}) {
 }
 
 var JSObjectSupport = {
-  chainIterator: function* (obj) {
+  chainIterator: function*(obj) {
     while (obj) {
       yield obj;
       try {
@@ -767,7 +850,7 @@ var JSObjectSupport = {
 };
 
 var DebuggerObjectSupport = {
-  chainIterator: function* (obj) {
+  chainIterator: function*(obj) {
     while (obj) {
       yield obj;
       try {
@@ -795,7 +878,7 @@ var DebuggerObjectSupport = {
 };
 
 var DebuggerEnvironmentSupport = {
-  chainIterator: function* (obj) {
+  chainIterator: function*(obj) {
     while (obj) {
       yield obj;
       obj = obj.parent;
@@ -828,8 +911,11 @@ var DebuggerEnvironmentSupport = {
     }
 
     // FIXME: Need actual UI, bug 941287.
-    if (result === undefined || result.optimizedOut ||
-        result.missingArguments) {
+    if (
+      result === undefined ||
+      result.optimizedOut ||
+      result.missingArguments
+    ) {
       return null;
     }
     return { value: result };

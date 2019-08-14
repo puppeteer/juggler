@@ -8,7 +8,7 @@
 #include "mozilla/dom/SVGFESpotLightElementBinding.h"
 #include "nsSVGFilterInstance.h"
 
-NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(FESpotLight)
+NS_IMPL_NS_NEW_SVG_ELEMENT(FESpotLight)
 
 using namespace mozilla::gfx;
 
@@ -20,7 +20,7 @@ JSObject* SVGFESpotLightElement::WrapNode(JSContext* aCx,
   return SVGFESpotLightElement_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-nsSVGElement::NumberInfo SVGFESpotLightElement::sNumberInfo[8] = {
+SVGElement::NumberInfo SVGFESpotLightElement::sNumberInfo[8] = {
     {nsGkAtoms::x, 0, false},
     {nsGkAtoms::y, 0, false},
     {nsGkAtoms::z, 0, false},
@@ -71,42 +71,44 @@ LightType SVGFESpotLightElement::ComputeLightAttributes(
   return LightType::Spot;
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::X() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFESpotLightElement::X() {
   return mNumberAttributes[ATTR_X].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::Y() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFESpotLightElement::Y() {
   return mNumberAttributes[ATTR_Y].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::Z() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFESpotLightElement::Z() {
   return mNumberAttributes[ATTR_Z].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::PointsAtX() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFESpotLightElement::PointsAtX() {
   return mNumberAttributes[POINTS_AT_X].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::PointsAtY() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFESpotLightElement::PointsAtY() {
   return mNumberAttributes[POINTS_AT_Y].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::PointsAtZ() {
+already_AddRefed<DOMSVGAnimatedNumber> SVGFESpotLightElement::PointsAtZ() {
   return mNumberAttributes[POINTS_AT_Z].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::SpecularExponent() {
+already_AddRefed<DOMSVGAnimatedNumber>
+SVGFESpotLightElement::SpecularExponent() {
   return mNumberAttributes[SPECULAR_EXPONENT].ToDOMAnimatedNumber(this);
 }
 
-already_AddRefed<SVGAnimatedNumber> SVGFESpotLightElement::LimitingConeAngle() {
+already_AddRefed<DOMSVGAnimatedNumber>
+SVGFESpotLightElement::LimitingConeAngle() {
   return mNumberAttributes[LIMITING_CONE_ANGLE].ToDOMAnimatedNumber(this);
 }
 
 //----------------------------------------------------------------------
-// nsSVGElement methods
+// SVGElement methods
 
-nsSVGElement::NumberAttributesInfo SVGFESpotLightElement::GetNumberInfo() {
+SVGElement::NumberAttributesInfo SVGFESpotLightElement::GetNumberInfo() {
   return NumberAttributesInfo(mNumberAttributes, sNumberInfo,
                               ArrayLength(sNumberInfo));
 }

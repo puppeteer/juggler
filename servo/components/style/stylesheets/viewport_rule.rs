@@ -7,19 +7,22 @@
 //! [at]: https://drafts.csswg.org/css-device-adapt/#atviewport-rule
 //! [meta]: https://drafts.csswg.org/css-device-adapt/#viewport-meta
 
-use app_units::Au;
 use crate::context::QuirksMode;
 use crate::error_reporting::ContextualParseError;
 use crate::font_metrics::get_metrics_provider_for_product;
 use crate::media_queries::Device;
-use crate::parser::ParserContext;
+use crate::parser::{Parse, ParserContext};
 use crate::properties::StyleBuilder;
 use crate::rule_cache::RuleCacheConditions;
 use crate::shared_lock::{SharedRwLockReadGuard, StylesheetGuards, ToCssWithGuard};
 use crate::str::CssStringWriter;
 use crate::stylesheets::{Origin, StylesheetInDocument};
 use crate::values::computed::{Context, ToComputedValue};
-use crate::values::specified::{LengthOrPercentageOrAuto, NoCalcLength, ViewportPercentageLength};
+use crate::values::generics::length::LengthPercentageOrAuto;
+use crate::values::generics::NonNegative;
+use crate::values::specified::{self, NoCalcLength};
+use crate::values::specified::{NonNegativeLengthPercentageOrAuto, ViewportPercentageLength};
+use app_units::Au;
 use cssparser::CowRcStr;
 use cssparser::{parse_important, AtRuleParser, DeclarationListParser, DeclarationParser, Parser};
 use euclid::TypedSize2D;
@@ -35,11 +38,8 @@ use style_traits::{CssWriter, ParseError, PinchZoomFactor, StyleParseErrorKind, 
 /// Whether parsing and processing of `@viewport` rules is enabled.
 #[cfg(feature = "servo")]
 pub fn enabled() -> bool {
-    use servo_config::prefs::PREFS;
-    PREFS
-        .get("layout.viewport.enabled")
-        .as_boolean()
-        .unwrap_or(false)
+    use servo_config::pref;
+    pref!(layout.viewport.enabled)
 }
 
 /// Whether parsing and processing of `@viewport` rules is enabled.
@@ -80,7 +80,7 @@ macro_rules! declare_viewport_descriptor_inner {
         [ ]
         $number_of_variants: expr
     ) => {
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Clone, Debug, PartialEq, ToShmem)]
         #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
         #[allow(missing_docs)]
         pub enum ViewportDescriptor {
@@ -147,9 +147,9 @@ trait FromMeta: Sized {
 /// * http://dev.w3.org/csswg/css-device-adapt/#extend-to-zoom
 #[allow(missing_docs)]
 #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
-#[derive(Clone, Debug, PartialEq, ToCss)]
+#[derive(Clone, Debug, PartialEq, ToCss, ToShmem)]
 pub enum ViewportLength {
-    Specified(LengthOrPercentageOrAuto),
+    Specified(NonNegativeLengthPercentageOrAuto),
     ExtendToZoom,
 }
 
@@ -157,7 +157,9 @@ impl FromMeta for ViewportLength {
     fn from_meta(value: &str) -> Option<ViewportLength> {
         macro_rules! specified {
             ($value:expr) => {
-                ViewportLength::Specified(LengthOrPercentageOrAuto::Length($value))
+                ViewportLength::Specified(LengthPercentageOrAuto::LengthPercentage(NonNegative(
+                    specified::LengthPercentage::Length($value),
+                )))
             };
         }
 
@@ -184,7 +186,7 @@ impl ViewportLength {
     ) -> Result<Self, ParseError<'i>> {
         // we explicitly do not accept 'extend-to-zoom', since it is a UA
         // internal value for <META> viewport translation
-        LengthOrPercentageOrAuto::parse_non_negative(context, input).map(ViewportLength::Specified)
+        NonNegativeLengthPercentageOrAuto::parse(context, input).map(ViewportLength::Specified)
     }
 }
 
@@ -223,7 +225,7 @@ struct ViewportRuleParser<'a, 'b: 'a> {
     context: &'a ParserContext<'b>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToShmem)]
 #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 #[allow(missing_docs)]
 pub struct ViewportDescriptorDeclaration {
@@ -333,7 +335,7 @@ impl<'a, 'b, 'i> DeclarationParser<'i> for ViewportRuleParser<'a, 'b> {
 }
 
 /// A `@viewport` rule.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, ToShmem)]
 #[cfg_attr(feature = "servo", derive(MallocSizeOf))]
 pub struct ViewportRule {
     /// The declarations contained in this @viewport rule.
@@ -466,10 +468,10 @@ impl ViewportRule {
         if !has_width && has_zoom {
             if has_height {
                 push_descriptor!(MinWidth(ViewportLength::Specified(
-                    LengthOrPercentageOrAuto::Auto
+                    LengthPercentageOrAuto::Auto
                 )));
                 push_descriptor!(MaxWidth(ViewportLength::Specified(
-                    LengthOrPercentageOrAuto::Auto
+                    LengthPercentageOrAuto::Auto
                 )));
             } else {
                 push_descriptor!(MinWidth(ViewportLength::ExtendToZoom));
@@ -752,16 +754,11 @@ impl MaybeNew for ViewportConstraints {
                 if let Some($value) = $value {
                     match *$value {
                         ViewportLength::Specified(ref length) => match *length {
-                            LengthOrPercentageOrAuto::Length(ref value) => {
-                                Some(Au::from(value.to_computed_value(&context)))
-                            },
-                            LengthOrPercentageOrAuto::Percentage(value) => {
-                                Some(initial_viewport.$dimension.scale_by(value.0))
-                            },
-                            LengthOrPercentageOrAuto::Auto => None,
-                            LengthOrPercentageOrAuto::Calc(ref calc) => calc
-                                .to_computed_value(&context)
-                                .to_used_value(Some(initial_viewport.$dimension)),
+                            LengthPercentageOrAuto::Auto => None,
+                            LengthPercentageOrAuto::LengthPercentage(ref lop) => Some(
+                                lop.to_computed_value(&context)
+                                    .to_used_value(initial_viewport.$dimension),
+                            ),
                         },
                         ViewportLength::ExtendToZoom => {
                             // $extend_to will be 'None' if 'extend-to-zoom' is 'auto'

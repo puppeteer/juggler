@@ -1,6 +1,6 @@
-"use strict";
+/* eslint-env mozilla/frame-script */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+"use strict";
 
 /**
  * Defers one or more callbacks until the next turn of the event loop. Multiple
@@ -10,9 +10,15 @@ ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
  *  executed per tick.
  */
 function waterfall(...callbacks) {
-  callbacks.reduce((promise, callback) => promise.then(() => {
-    callback();
-  }), Promise.resolve()).catch(Cu.reportError);
+  callbacks
+    .reduce(
+      (promise, callback) =>
+        promise.then(() => {
+          callback();
+        }),
+      Promise.resolve()
+    )
+    .catch(Cu.reportError);
 }
 
 /**
@@ -51,19 +57,21 @@ MockWebSocketParent.prototype = {
   },
 
   serverSendMsg(msg) {
-    waterfall(() => this._listener.onMessageAvailable(this._context, msg),
-              () => this._listener.onAcknowledge(this._context, 0));
+    waterfall(
+      () => this._listener.onMessageAvailable(this._context, msg),
+      () => this._listener.onAcknowledge(this._context, 0)
+    );
   },
 };
 
-var pushService = Cc["@mozilla.org/push/Service;1"].
-                  getService(Ci.nsIPushService).
-                  wrappedJSObject;
+var pushService = Cc["@mozilla.org/push/Service;1"].getService(
+  Ci.nsIPushService
+).wrappedJSObject;
 
 var mockSocket;
 var serverMsgs = [];
 
-addMessageListener("socket-setup", function () {
+addMessageListener("socket-setup", function() {
   pushService.replaceServiceBackend({
     serverURI: "wss://push.example.org/",
     makeWebSocket(uri) {
@@ -73,24 +81,27 @@ addMessageListener("socket-setup", function () {
         mockSocket.serverSendMsg(msg);
       }
       return mockSocket;
-    }
+    },
   });
 });
 
-addMessageListener("socket-teardown", function (msg) {
-  pushService.restoreServiceBackend().then(_ => {
-    serverMsgs.length = 0;
-    if (mockSocket) {
-      mockSocket.close();
-      mockSocket = null;
-    }
-    sendAsyncMessage("socket-server-teardown");
-  }).catch(error => {
-    Cu.reportError(`Error restoring service backend: ${error}`);
-  })
+addMessageListener("socket-teardown", function(msg) {
+  pushService
+    .restoreServiceBackend()
+    .then(_ => {
+      serverMsgs.length = 0;
+      if (mockSocket) {
+        mockSocket.close();
+        mockSocket = null;
+      }
+      sendAsyncMessage("socket-server-teardown");
+    })
+    .catch(error => {
+      Cu.reportError(`Error restoring service backend: ${error}`);
+    });
 });
 
-addMessageListener("socket-server-msg", function (msg) {
+addMessageListener("socket-server-msg", function(msg) {
   if (mockSocket) {
     mockSocket.serverSendMsg(msg);
   } else {
@@ -107,9 +118,9 @@ var MockService = {
       let id = this.requestID++;
       this.resolvers.set(id, { resolve, reject });
       sendAsyncMessage("service-request", {
-        name: name,
-        id: id,
-        params: params,
+        name,
+        id,
+        params,
       });
     });
   },
@@ -144,20 +155,42 @@ var MockService = {
 
   reportDeliveryError(messageId, reason) {
     sendAsyncMessage("service-delivery-error", {
-      messageId: messageId,
-      reason: reason,
+      messageId,
+      reason,
     });
+  },
+
+  uninit() {
+    return Promise.resolve();
   },
 };
 
-addMessageListener("service-replace", function () {
-  pushService.service = MockService;
+async function replaceService(service) {
+  await pushService.service.uninit();
+  pushService.service = service;
+  await pushService.service.init();
+}
+
+addMessageListener("service-replace", function() {
+  replaceService(MockService)
+    .then(_ => {
+      sendAsyncMessage("service-replaced");
+    })
+    .catch(error => {
+      Cu.reportError(`Error replacing service: ${error}`);
+    });
 });
 
-addMessageListener("service-restore", function () {
-  pushService.service = null;
+addMessageListener("service-restore", function() {
+  replaceService(null)
+    .then(_ => {
+      sendAsyncMessage("service-restored");
+    })
+    .catch(error => {
+      Cu.reportError(`Error restoring service: ${error}`);
+    });
 });
 
-addMessageListener("service-response", function (response) {
+addMessageListener("service-response", function(response) {
   MockService.handleResponse(response);
 });

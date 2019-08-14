@@ -54,11 +54,8 @@ class nsSplittableFrame : public nsFrame {
 #endif
 
   // Get the previous/next continuation, only if it is fluid (an "in-flow").
-  nsIFrame* GetPrevInFlow() const;
-  nsIFrame* GetNextInFlow() const;
-
-  nsIFrame* GetPrevInFlowVirtual() const final { return GetPrevInFlow(); }
-  nsIFrame* GetNextInFlowVirtual() const final { return GetNextInFlow(); }
+  nsIFrame* GetPrevInFlow() const final;
+  nsIFrame* GetNextInFlow() const final;
 
   // Set a previous/next fluid continuation.
   void SetPrevInFlow(nsIFrame*) final;
@@ -74,8 +71,9 @@ class nsSplittableFrame : public nsFrame {
   static void RemoveFromFlow(nsIFrame* aFrame);
 
  protected:
-  nsSplittableFrame(ComputedStyle* aStyle, ClassID aID)
-      : nsFrame(aStyle, aID),
+  nsSplittableFrame(ComputedStyle* aStyle, nsPresContext* aPresContext,
+                    ClassID aID)
+      : nsFrame(aStyle, aPresContext, aID),
         mPrevContinuation(nullptr),
         mNextContinuation(nullptr) {}
 
@@ -94,8 +92,9 @@ class nsSplittableFrame : public nsFrame {
    * computed block size, minus the block size consumed by any previous
    * in-flows.
    */
-  nscoord GetEffectiveComputedBSize(const ReflowInput& aReflowInput,
-                                    nscoord aConsumed = NS_INTRINSICSIZE) const;
+  nscoord GetEffectiveComputedBSize(
+      const ReflowInput& aReflowInput,
+      nscoord aConsumed = NS_UNCONSTRAINEDSIZE) const;
 
   /**
    * @see nsIFrame::GetLogicalSkipSides()

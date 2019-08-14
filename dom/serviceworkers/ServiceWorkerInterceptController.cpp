@@ -7,6 +7,7 @@
 #include "ServiceWorkerInterceptController.h"
 
 #include "mozilla/BasePrincipal.h"
+#include "mozilla/StorageAccess.h"
 #include "nsContentUtils.h"
 #include "nsIChannel.h"
 #include "ServiceWorkerManager.h"
@@ -22,10 +23,7 @@ ServiceWorkerInterceptController::ShouldPrepareForIntercept(
     nsIURI* aURI, nsIChannel* aChannel, bool* aShouldIntercept) {
   *aShouldIntercept = false;
 
-  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-  if (!loadInfo) {
-    return NS_OK;
-  }
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
 
   // For subresource requests we base our decision solely on the client's
   // controller value.  Any settings that would have blocked service worker
@@ -51,8 +49,7 @@ ServiceWorkerInterceptController::ShouldPrepareForIntercept(
   // It is important to check for the availability of the service worker first
   // to avoid showing warnings about the use of third-party cookies in the UI
   // unnecessarily when no service worker is being accessed.
-  if (nsContentUtils::StorageAllowedForChannel(aChannel) !=
-      nsContentUtils::StorageAccess::eAllow) {
+  if (StorageAllowedForChannel(aChannel) != StorageAccess::eAllow) {
     return NS_OK;
   }
 

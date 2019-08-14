@@ -33,10 +33,9 @@ XMLStylesheetProcessingInstruction::~XMLStylesheetProcessingInstruction() {}
 
 // nsIContent
 
-nsresult XMLStylesheetProcessingInstruction::BindToTree(
-    nsIDocument* aDocument, nsIContent* aParent, nsIContent* aBindingParent) {
-  nsresult rv =
-      ProcessingInstruction::BindToTree(aDocument, aParent, aBindingParent);
+nsresult XMLStylesheetProcessingInstruction::BindToTree(BindContext& aContext,
+                                                        nsINode& aParent) {
+  nsresult rv = ProcessingInstruction::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   void (XMLStylesheetProcessingInstruction::*update)() =
@@ -47,11 +46,10 @@ nsresult XMLStylesheetProcessingInstruction::BindToTree(
   return rv;
 }
 
-void XMLStylesheetProcessingInstruction::UnbindFromTree(bool aDeep,
-                                                        bool aNullParent) {
-  nsCOMPtr<nsIDocument> oldDoc = GetUncomposedDoc();
+void XMLStylesheetProcessingInstruction::UnbindFromTree(bool aNullParent) {
+  nsCOMPtr<Document> oldDoc = GetUncomposedDoc();
 
-  ProcessingInstruction::UnbindFromTree(aDeep, aNullParent);
+  ProcessingInstruction::UnbindFromTree(aNullParent);
   Unused << UpdateStyleSheetInternal(oldDoc, nullptr);
 }
 
@@ -73,8 +71,8 @@ void XMLStylesheetProcessingInstruction::GetCharset(nsAString& aCharset) {
   }
 }
 
-/* virtual */ void XMLStylesheetProcessingInstruction::OverrideBaseURI(
-    nsIURI* aNewBaseURI) {
+/* virtual */
+void XMLStylesheetProcessingInstruction::OverrideBaseURI(nsIURI* aNewBaseURI) {
   mOverriddenBaseURI = aNewBaseURI;
 }
 
@@ -120,7 +118,7 @@ XMLStylesheetProcessingInstruction::GetStyleSheetInfo() {
     return Nothing();
   }
 
-  nsIDocument* doc = OwnerDoc();
+  Document* doc = OwnerDoc();
   nsIURI* baseURL =
       mOverriddenBaseURI ? mOverriddenBaseURI.get() : doc->GetDocBaseURI();
   auto encoding = doc->GetDocumentCharacterSet();
@@ -137,6 +135,7 @@ XMLStylesheetProcessingInstruction::GetStyleSheetInfo() {
       media,
       alternate ? HasAlternateRel::Yes : HasAlternateRel::No,
       IsInline::No,
+      IsExplicitlyEnabled::No,
   });
 }
 

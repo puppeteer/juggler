@@ -13,13 +13,17 @@
 class nsFontMetrics;
 class nsSharedPageData;
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 // Page frame class used by the simple page sequence frame
 class nsPageFrame final : public nsContainerFrame {
  public:
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsPageFrame)
 
-  friend nsPageFrame* NS_NewPageFrame(nsIPresShell* aPresShell,
+  friend nsPageFrame* NS_NewPageFrame(mozilla::PresShell* aPresShell,
                                       ComputedStyle* aStyle);
 
   virtual void Reflow(nsPresContext* aPresContext, ReflowOutput& aDesiredSize,
@@ -55,7 +59,7 @@ class nsPageFrame final : public nsContainerFrame {
   void AppendDirectlyOwnedAnonBoxes(nsTArray<OwnedAnonBox>& aResult) override;
 
  protected:
-  explicit nsPageFrame(ComputedStyle* aStyle);
+  explicit nsPageFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
   virtual ~nsPageFrame();
 
   typedef enum { eHeader, eFooter } nsHeaderFooterEnum;
@@ -89,7 +93,7 @@ class nsPageFrame final : public nsContainerFrame {
 class nsPageBreakFrame final : public nsLeafFrame {
   NS_DECL_FRAMEARENA_HELPERS(nsPageBreakFrame)
 
-  explicit nsPageBreakFrame(ComputedStyle* aStyle);
+  explicit nsPageBreakFrame(ComputedStyle* aStyle, nsPresContext* aPresContext);
   ~nsPageBreakFrame();
 
   virtual void Reflow(nsPresContext* aPresContext, ReflowOutput& aDesiredSize,
@@ -106,7 +110,7 @@ class nsPageBreakFrame final : public nsLeafFrame {
 
   bool mHaveReflowed;
 
-  friend nsIFrame* NS_NewPageBreakFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewPageBreakFrame(mozilla::PresShell* aPresShell,
                                         ComputedStyle* aStyle);
 };
 

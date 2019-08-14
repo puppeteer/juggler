@@ -6,9 +6,11 @@
 
 package org.mozilla.geckoview;
 
+import android.support.annotation.AnyThread;
 import android.support.annotation.IntDef;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.util.Log;
+import android.support.annotation.UiThread;
 
 import org.mozilla.gecko.util.GeckoBundle;
 
@@ -19,6 +21,7 @@ import java.lang.annotation.RetentionPolicy;
  * GeckoSession applications can use this class to handle media events
  * and control the HTMLMediaElement externally.
  **/
+@AnyThread
 public class MediaElement {
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({MEDIA_STATE_PLAY, MEDIA_STATE_PLAYING, MEDIA_STATE_PAUSE,
@@ -149,7 +152,7 @@ public class MediaElement {
         /**
          * Contains the current media source URI.
          */
-        public final String currentSource;
+        public final @Nullable String currentSource;
 
         /**
          * Indicates the duration of the media in seconds.
@@ -213,7 +216,7 @@ public class MediaElement {
          * Class used to represent a set of time ranges.
          */
         public class TimeRange {
-            protected TimeRange(double start, double end) {
+            protected TimeRange(final double start, final double end) {
                 this.start = start;
                 this.end = end;
             }
@@ -287,7 +290,9 @@ public class MediaElement {
          * @param mediaState The playback state of the media.
          *                   One of the {@link #MEDIA_STATE_PLAY MEDIA_STATE_*} flags.
          */
-        void onPlaybackStateChange(MediaElement mediaElement, @MediaStateFlags int mediaState);
+        @UiThread
+        default void onPlaybackStateChange(@NonNull MediaElement mediaElement,
+                                           @MediaStateFlags int mediaState) {}
 
         /**
          * The readiness state of the media has changed.
@@ -296,7 +301,9 @@ public class MediaElement {
          * @param readyState The readiness state of the media.
          *                   One of the {@link #MEDIA_READY_STATE_HAVE_NOTHING MEDIA_READY_STATE_*} flags.
          */
-        void onReadyStateChange(MediaElement mediaElement, @ReadyStateFlags int readyState);
+        @UiThread
+        default void onReadyStateChange(@NonNull MediaElement mediaElement,
+                                        @ReadyStateFlags int readyState) {}
 
         /**
          * The media metadata has loaded or changed.
@@ -304,7 +311,9 @@ public class MediaElement {
          * @param mediaElement A reference to the MediaElement that dispatched the event.
          * @param metaData The MetaData values of the media.
          */
-        void onMetadataChange(MediaElement mediaElement, Metadata metaData);
+        @UiThread
+        default void onMetadataChange(@NonNull MediaElement mediaElement,
+                                      @NonNull Metadata metaData) {}
 
         /**
          * Indicates that a loading operation is in progress for the media.
@@ -312,7 +321,9 @@ public class MediaElement {
          * @param mediaElement A reference to the MediaElement that dispatched the event.
          * @param progressInfo Information about the load progress and buffered ranges.
          */
-        void onLoadProgress(MediaElement mediaElement, LoadProgressInfo progressInfo);
+        @UiThread
+        default void onLoadProgress(@NonNull MediaElement mediaElement,
+                                    @NonNull LoadProgressInfo progressInfo) {}
 
         /**
          * The media audio volume has changed.
@@ -321,7 +332,9 @@ public class MediaElement {
          * @param volume The volume of the media.
          * @param muted True if the media is muted.
          */
-        void onVolumeChange(MediaElement mediaElement, double volume, boolean muted);
+        @UiThread
+        default void onVolumeChange(@NonNull MediaElement mediaElement, double volume,
+                                    boolean muted) {}
 
         /**
          * The current playback time has changed. This event is usually dispatched every 250ms.
@@ -329,7 +342,8 @@ public class MediaElement {
          * @param mediaElement A reference to the MediaElement that dispatched the event.
          * @param time The current playback time in seconds.
          */
-        void onTimeChange(MediaElement mediaElement, double time);
+        @UiThread
+        default void onTimeChange(@NonNull MediaElement mediaElement, double time) {}
 
         /**
          * The media playback speed has changed.
@@ -337,7 +351,8 @@ public class MediaElement {
          * @param mediaElement A reference to the MediaElement that dispatched the event.
          * @param rate The current playback rate. A value of 1.0 indicates normal speed.
          */
-        void onPlaybackRateChange(MediaElement mediaElement, double rate);
+        @UiThread
+        default void onPlaybackRateChange(@NonNull MediaElement mediaElement, double rate) {}
 
         /**
          * A media element has entered or exited fullscreen mode.
@@ -345,7 +360,8 @@ public class MediaElement {
          * @param mediaElement A reference to the MediaElement that dispatched the event.
          * @param fullscreen True if the media has entered full screen mode.
          */
-        void onFullscreenChange(MediaElement mediaElement, boolean fullscreen);
+        @UiThread
+        default void onFullscreenChange(@NonNull MediaElement mediaElement, boolean fullscreen) {}
 
         /**
          * An error has occurred.
@@ -354,7 +370,8 @@ public class MediaElement {
          * @param errorCode The error code.
          *                  One of the {@link #MEDIA_ERROR_NETWORK_NO_SOURCE MEDIA_ERROR_*} flags.
          */
-        void onError(MediaElement mediaElement, @MediaErrorFlags int errorCode);
+        @UiThread
+        default void onError(@NonNull MediaElement mediaElement, @MediaErrorFlags int errorCode) {}
     }
 
     /* package */ long getVideoId() {
@@ -557,7 +574,7 @@ public class MediaElement {
         mSession = session;
     }
 
-    final protected GeckoSession mSession;
+    final protected @NonNull GeckoSession mSession;
     final protected long mVideoId;
-    protected MediaElement.Delegate mDelegate;
+    protected @Nullable MediaElement.Delegate mDelegate;
 }

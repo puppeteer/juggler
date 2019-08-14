@@ -7,7 +7,7 @@
 #include "nsISupportsImpl.h"
 #include "mozilla/Assertions.h"
 #ifdef MOZ_THREAD_SAFETY_OWNERSHIP_CHECKS_SUPPORTED
-#include "nsThreadUtils.h"
+#  include "nsThreadUtils.h"
 #endif  // MOZ_THREAD_SAFETY_OWNERSHIP_CHECKS_SUPPORTED
 
 using namespace mozilla;
@@ -37,7 +37,7 @@ nsAutoOwningThread::nsAutoOwningThread() : mThread(GetCurrentVirtualThread()) {}
 void nsAutoOwningThread::AssertCurrentThreadOwnsMe(const char* msg) const {
   if (MOZ_UNLIKELY(!IsCurrentThread())) {
     // `msg` is a string literal by construction.
-    MOZ_CRASH_UNSAFE_OOL(msg);
+    MOZ_CRASH_UNSAFE(msg);
   }
 }
 

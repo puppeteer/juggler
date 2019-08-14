@@ -4,8 +4,9 @@
 
 "use strict";
 
-const BAD_LISTENER = "The event listener must be a function, or an object that has " +
-                     "`EventEmitter.handler` Symbol.";
+const BAD_LISTENER =
+  "The event listener must be a function, or an object that has " +
+  "`EventEmitter.handler` Symbol.";
 
 const eventListeners = Symbol("EventEmitter/listeners");
 const onceOriginalListener = Symbol("EventEmitter/once-original-listener");
@@ -85,7 +86,10 @@ class EventEmitter {
         // So we iterate all the listeners to check if any of them is a wrapper to
         // the `listener` given.
         for (const value of listenersForType.values()) {
-          if (onceOriginalListener in value && value[onceOriginalListener] === listener) {
+          if (
+            onceOriginalListener in value &&
+            value[onceOriginalListener] === listener
+          ) {
             listenersForType.delete(value);
             break;
           }
@@ -98,9 +102,17 @@ class EventEmitter {
         events.delete(type);
       }
     } else if (length === 1) {
-      // With only the `target` given, we're removing all the isteners from the object.
+      // With only the `target` given, we're removing all the listeners from the object.
       events.clear();
     }
+  }
+
+  static clearEvents(target) {
+    const events = target[eventListeners];
+    if (!events) {
+      return;
+    }
+    events.clear();
   }
 
   /**
@@ -159,14 +171,14 @@ class EventEmitter {
       // in emit.
       const listenersForType = new Set(target[eventListeners].get(type));
 
+      const events = target[eventListeners];
+      const listeners = events.get(type);
+
       for (const listener of listenersForType) {
         // If the object was destroyed during event emission, stop emitting.
         if (!(eventListeners in target)) {
           break;
         }
-
-        const events = target[eventListeners];
-        const listeners = events.get(type);
 
         // If listeners were removed during emission, make sure the
         // event handler we're going to fire wasn't removed.
@@ -247,6 +259,10 @@ class EventEmitter {
     EventEmitter.off(this, ...args);
   }
 
+  clearEvents() {
+    EventEmitter.clearEvents(this);
+  }
+
   once(...args) {
     return EventEmitter.once(this, ...args);
   }
@@ -258,7 +274,7 @@ class EventEmitter {
 
 module.exports = EventEmitter;
 
-const isEventHandler = (listener) =>
+const isEventHandler = listener =>
   listener && handler in listener && typeof listener[handler] === "function";
 
 const Services = require("Services");
@@ -287,8 +303,7 @@ function serialize(target) {
   }
 
   // Number / String
-  if (typeof target === "string" ||
-      typeof target === "number") {
+  if (typeof target === "string" || typeof target === "number") {
     return truncate(target, MAXLEN);
   }
 
@@ -317,9 +332,11 @@ function serialize(target) {
   }
 
   // Window
-  if (target.constructor &&
-      target.constructor.name &&
-      target.constructor.name === "Window") {
+  if (
+    target.constructor &&
+    target.constructor.name &&
+    target.constructor.name === "Window"
+  ) {
     return `window (${target.location.origin})`;
   }
 

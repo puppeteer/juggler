@@ -45,14 +45,16 @@ class BlobImpl : public nsISupports {
 
   virtual void GetMozFullPath(nsAString& aName,
                               SystemCallerGuarantee /* unused */,
-                              ErrorResult& aRv) const = 0;
+                              ErrorResult& aRv) = 0;
 
   virtual void GetMozFullPathInternal(nsAString& aFileName,
-                                      ErrorResult& aRv) const = 0;
+                                      ErrorResult& aRv) = 0;
 
   virtual uint64_t GetSize(ErrorResult& aRv) = 0;
 
   virtual void GetType(nsAString& aType) = 0;
+
+  virtual void GetBlobImplType(nsAString& aBlobImplType) const = 0;
 
   virtual size_t GetAllocationSize() const = 0;
   virtual size_t GetAllocationSize(

@@ -10,6 +10,10 @@
 #include "mozilla/Attributes.h"
 #include "nsMathMLSelectedFrame.h"
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 //
 // <semantics> -- associate annotations with a MathML expression
 //
@@ -18,12 +22,13 @@ class nsMathMLsemanticsFrame final : public nsMathMLSelectedFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsMathMLsemanticsFrame)
 
-  friend nsIFrame* NS_NewMathMLsemanticsFrame(nsIPresShell* aPresShell,
+  friend nsIFrame* NS_NewMathMLsemanticsFrame(mozilla::PresShell* aPresShell,
                                               ComputedStyle* aStyle);
 
  protected:
-  explicit nsMathMLsemanticsFrame(ComputedStyle* aStyle)
-      : nsMathMLSelectedFrame(aStyle, kClassID) {}
+  explicit nsMathMLsemanticsFrame(ComputedStyle* aStyle,
+                                  nsPresContext* aPresContext)
+      : nsMathMLSelectedFrame(aStyle, aPresContext, kClassID) {}
   virtual ~nsMathMLsemanticsFrame();
 
   nsIFrame* GetSelectedFrame() override;

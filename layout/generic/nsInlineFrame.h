@@ -14,6 +14,10 @@
 
 class nsLineLayout;
 
+namespace mozilla {
+class PresShell;
+}  // namespace mozilla
+
 /**
  * Inline frame class.
  *
@@ -25,7 +29,7 @@ class nsInlineFrame : public nsContainerFrame {
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS(nsInlineFrame)
 
-  friend nsInlineFrame* NS_NewInlineFrame(nsIPresShell* aPresShell,
+  friend nsInlineFrame* NS_NewInlineFrame(mozilla::PresShell* aPresShell,
                                           ComputedStyle* aStyle);
 
   // nsIFrame overrides
@@ -120,7 +124,7 @@ class nsInlineFrame : public nsContainerFrame {
       mozilla::ServoRestyleState& aRestyleState);
 
  protected:
-  // Additional reflow state used during our reflow methods
+  // Additional reflow input used during our reflow methods
   struct InlineReflowInput {
     nsIFrame* mPrevFrame;
     nsInlineFrame* mNextInFlow;
@@ -138,8 +142,9 @@ class nsInlineFrame : public nsContainerFrame {
     }
   };
 
-  nsInlineFrame(ComputedStyle* aStyle, ClassID aID)
-      : nsContainerFrame(aStyle, aID), mBaseline(NS_INTRINSIC_WIDTH_UNKNOWN) {}
+  nsInlineFrame(ComputedStyle* aStyle, nsPresContext* aPresContext, ClassID aID)
+      : nsContainerFrame(aStyle, aPresContext, aID),
+        mBaseline(NS_INTRINSIC_ISIZE_UNKNOWN) {}
 
   virtual LogicalSides GetLogicalSkipSides(
       const ReflowInput* aReflowInput = nullptr) const override;
@@ -162,8 +167,8 @@ class nsInlineFrame : public nsContainerFrame {
                           nsIFrame* aPrevSibling, InlineReflowInput& aState);
 
  private:
-  explicit nsInlineFrame(ComputedStyle* aStyle)
-      : nsInlineFrame(aStyle, kClassID) {}
+  explicit nsInlineFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsInlineFrame(aStyle, aPresContext, kClassID) {}
 
   /**
    * Move any frames on our overflow list to the end of our principal list.
@@ -186,7 +191,7 @@ class nsFirstLineFrame final : public nsInlineFrame {
  public:
   NS_DECL_FRAMEARENA_HELPERS(nsFirstLineFrame)
 
-  friend nsFirstLineFrame* NS_NewFirstLineFrame(nsIPresShell* aPresShell,
+  friend nsFirstLineFrame* NS_NewFirstLineFrame(mozilla::PresShell* aPresShell,
                                                 ComputedStyle* aStyle);
 
 #ifdef DEBUG_FRAME_DUMP
@@ -202,8 +207,8 @@ class nsFirstLineFrame final : public nsInlineFrame {
   virtual bool DrainSelfOverflowList() override;
 
  protected:
-  explicit nsFirstLineFrame(ComputedStyle* aStyle)
-      : nsInlineFrame(aStyle, kClassID) {}
+  explicit nsFirstLineFrame(ComputedStyle* aStyle, nsPresContext* aPresContext)
+      : nsInlineFrame(aStyle, aPresContext, kClassID) {}
 
   nsIFrame* PullOneFrame(nsPresContext*, InlineReflowInput&) override;
 };

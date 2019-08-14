@@ -63,7 +63,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULPrototypeDocument)
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNodeInfoManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrototypeWaiters)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsXULPrototypeDocument)
@@ -103,11 +102,13 @@ nsXULPrototypeDocument::Read(nsIObjectInputStream* aStream) {
   mURI = do_QueryInterface(supports);
 
   // nsIPrincipal mNodeInfoManager->mPrincipal
-  rv = aStream->ReadObject(true, getter_AddRefs(supports));
+  nsAutoCString JSON;
+  rv = aStream->ReadCString(JSON);
   if (NS_FAILED(rv)) {
     return rv;
   }
-  nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(supports);
+  nsCOMPtr<nsIPrincipal> principal = mozilla::BasePrincipal::FromJSON(JSON);
+
   // Better safe than sorry....
   mNodeInfoManager->SetDocumentPrincipal(principal);
 
@@ -238,8 +239,10 @@ nsXULPrototypeDocument::Write(nsIObjectOutputStream* aStream) {
   rv = aStream->WriteCompoundObject(mURI, NS_GET_IID(nsIURI), true);
 
   // nsIPrincipal mNodeInfoManager->mPrincipal
-  nsresult tmp =
-      aStream->WriteObject(mNodeInfoManager->DocumentPrincipal(), true);
+  nsAutoCString JSON;
+  mozilla::BasePrincipal::Cast(mNodeInfoManager->DocumentPrincipal())
+      ->ToJSON(JSON);
+  nsresult tmp = aStream->WriteStringZ(JSON.get());
   if (NS_FAILED(tmp)) {
     rv = tmp;
   }
@@ -376,14 +379,14 @@ nsNodeInfoManager* nsXULPrototypeDocument::GetNodeInfoManager() {
   return mNodeInfoManager;
 }
 
-nsresult nsXULPrototypeDocument::AwaitLoadDone(XULDocument* aDocument,
+nsresult nsXULPrototypeDocument::AwaitLoadDone(Callback&& aCallback,
                                                bool* aResult) {
   nsresult rv = NS_OK;
 
   *aResult = mLoaded;
 
   if (!mLoaded) {
-    rv = mPrototypeWaiters.AppendElement(aDocument)
+    rv = mPrototypeWaiters.AppendElement(std::move(aCallback))
              ? NS_OK
              : NS_ERROR_OUT_OF_MEMORY;  // addrefs
   }
@@ -397,20 +400,15 @@ nsresult nsXULPrototypeDocument::NotifyLoadDone() {
   // prototype cache because the winner filled the cache with
   // the not-yet-loaded prototype object.
 
-  nsresult rv = NS_OK;
-
   mLoaded = true;
 
   for (uint32_t i = mPrototypeWaiters.Length(); i > 0;) {
     --i;
-    // true means that OnPrototypeLoadDone will also
-    // call ResumeWalk().
-    rv = mPrototypeWaiters[i]->OnPrototypeLoadDone(true);
-    if (NS_FAILED(rv)) break;
+    mPrototypeWaiters[i]();
   }
   mPrototypeWaiters.Clear();
 
-  return rv;
+  return NS_OK;
 }
 
 void nsXULPrototypeDocument::TraceProtos(JSTracer* aTrc) {

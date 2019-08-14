@@ -15,11 +15,11 @@
 #include "mozilla/Unused.h"
 
 #ifdef XP_UNIX  // {
-#include "mozilla/Preferences.h"
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
+#  include "mozilla/Preferences.h"
+#  include <fcntl.h>
+#  include <unistd.h>
+#  include <sys/types.h>
+#  include <sys/stat.h>
 
 using namespace mozilla;
 
@@ -105,7 +105,8 @@ void FdWatcher::StopWatching() {
 
 StaticRefPtr<SignalPipeWatcher> SignalPipeWatcher::sSingleton;
 
-/* static */ SignalPipeWatcher* SignalPipeWatcher::GetSingleton() {
+/* static */
+SignalPipeWatcher* SignalPipeWatcher::GetSingleton() {
   if (!sSingleton) {
     sSingleton = new SignalPipeWatcher();
     sSingleton->Init();
@@ -220,7 +221,8 @@ void SignalPipeWatcher::OnFileCanReadWithoutBlocking(int aFd) {
 
 StaticRefPtr<FifoWatcher> FifoWatcher::sSingleton;
 
-/* static */ FifoWatcher* FifoWatcher::GetSingleton() {
+/* static */
+FifoWatcher* FifoWatcher::GetSingleton() {
   if (!sSingleton) {
     nsAutoCString dirPath;
     Preferences::GetCString("memory_info_dumper.watch_fifo.directory", dirPath);
@@ -231,7 +233,8 @@ StaticRefPtr<FifoWatcher> FifoWatcher::sSingleton;
   return sSingleton;
 }
 
-/* static */ bool FifoWatcher::MaybeCreate() {
+/* static */
+bool FifoWatcher::MaybeCreate() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!XRE_IsParentProcess()) {
@@ -313,11 +316,11 @@ int FifoWatcher::OpenFd() {
     return -1;
   }
 
-#ifdef ANDROID
+#  ifdef ANDROID
   // Android runs with a umask, so we need to chmod our fifo to make it
   // world-writable.
   chmod(path.get(), 0666);
-#endif
+#  endif
 
   int fd;
   do {
@@ -399,10 +402,9 @@ void FifoWatcher::OnFileCanReadWithoutBlocking(int aFd) {
 // In Android case, this function will open a file named aFilename under
 // /data/local/tmp/"aFoldername".
 // Otherwise, it will open a file named aFilename under "NS_OS_TEMP_DIR".
-/* static */ nsresult nsDumpUtils::OpenTempFile(const nsACString& aFilename,
-                                                nsIFile** aFile,
-                                                const nsACString& aFoldername,
-                                                Mode aMode) {
+/* static */
+nsresult nsDumpUtils::OpenTempFile(const nsACString& aFilename, nsIFile** aFile,
+                                   const nsACString& aFoldername, Mode aMode) {
 #ifdef ANDROID
   // For Android, first try the downloads directory which is world-readable
   // rather than the temp directory which is not.

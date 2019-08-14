@@ -2,8 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-ChromeUtils.import("resource://gre/modules/Services.jsm");
-ChromeUtils.import("resource://gre/modules/ContextualIdentityService.jsm");
+const { ContextualIdentityService } = ChromeUtils.import(
+  "resource://gre/modules/ContextualIdentityService.jsm"
+);
 
 /**
  * We want to set the window title immediately to prevent flickers.
@@ -36,6 +37,7 @@ let gContainersManager = {
     "pet",
     "tree",
     "chill",
+    "fence",
   ],
 
   colors: [
@@ -47,6 +49,7 @@ let gContainersManager = {
     "red",
     "pink",
     "purple",
+    "toolbar",
   ],
 
   onLoad() {
@@ -74,8 +77,7 @@ let gContainersManager = {
     document.getElementById("containers-content").removeAttribute("hidden");
   },
 
-  uninit() {
-  },
+  uninit() {},
 
   // Check if name is provided to determine if the form can be submitted
   checkForm() {
@@ -107,7 +109,7 @@ let gContainersManager = {
       document.l10n.setAttributes(iconSwatch, `containers-icon-${icon}`);
       let iconElement = document.createXULElement("hbox");
       iconElement.className = "userContext-icon";
-      iconElement.setAttribute("data-identity-icon", icon);
+      iconElement.classList.add("identity-icon-" + icon);
 
       iconSwatch.appendChild(iconElement);
       radiogroup.appendChild(iconSwatch);
@@ -135,8 +137,8 @@ let gContainersManager = {
       document.l10n.setAttributes(colorSwatch, `containers-color-${color}`);
       let iconElement = document.createXULElement("hbox");
       iconElement.className = "userContext-icon";
-      iconElement.setAttribute("data-identity-icon", "circle");
-      iconElement.setAttribute("data-identity-color", color);
+      iconElement.classList.add("identity-icon-circle");
+      iconElement.classList.add("identity-color-" + color);
 
       colorSwatch.appendChild(iconElement);
       radiogroup.appendChild(colorSwatch);
@@ -150,28 +152,24 @@ let gContainersManager = {
     let name = document.getElementById("name").value;
 
     if (!this.icons.includes(icon)) {
-      throw "Internal error. The icon value doesn't match.";
+      throw new Error("Internal error. The icon value doesn't match.");
     }
 
     if (!this.colors.includes(color)) {
-      throw "Internal error. The color value doesn't match.";
+      throw new Error("Internal error. The color value doesn't match.");
     }
 
     if (this.userContextId) {
-      ContextualIdentityService.update(this.userContextId,
-        name,
-        icon,
-        color);
+      ContextualIdentityService.update(this.userContextId, name, icon, color);
     } else {
-      ContextualIdentityService.create(name,
-        icon,
-        color);
+      ContextualIdentityService.create(name, icon, color);
     }
     window.parent.location.reload();
   },
 
   onWindowKeyPress(aEvent) {
-    if (aEvent.keyCode == KeyEvent.DOM_VK_ESCAPE)
+    if (aEvent.keyCode == KeyEvent.DOM_VK_ESCAPE) {
       window.close();
+    }
   },
 };

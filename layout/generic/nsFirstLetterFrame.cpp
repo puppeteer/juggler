@@ -8,22 +8,26 @@
 
 #include "nsFirstLetterFrame.h"
 #include "nsPresContext.h"
+#include "nsPresContextInlines.h"
 #include "mozilla/ComputedStyle.h"
+#include "mozilla/PresShell.h"
+#include "mozilla/PresShellInlines.h"
+#include "mozilla/RestyleManager.h"
+#include "mozilla/ServoStyleSet.h"
 #include "nsIContent.h"
 #include "nsLineLayout.h"
 #include "nsGkAtoms.h"
-#include "mozilla/ServoStyleSet.h"
 #include "nsFrameManager.h"
-#include "mozilla/RestyleManager.h"
 #include "nsPlaceholderFrame.h"
 #include "nsCSSFrameConstructor.h"
 
 using namespace mozilla;
 using namespace mozilla::layout;
 
-nsFirstLetterFrame* NS_NewFirstLetterFrame(nsIPresShell* aPresShell,
+nsFirstLetterFrame* NS_NewFirstLetterFrame(PresShell* aPresShell,
                                            ComputedStyle* aStyle) {
-  return new (aPresShell) nsFirstLetterFrame(aStyle);
+  return new (aPresShell)
+      nsFirstLetterFrame(aStyle, aPresShell->GetPresContext());
 }
 
 NS_IMPL_FRAMEARENA_HELPERS(nsFirstLetterFrame)
@@ -51,7 +55,7 @@ void nsFirstLetterFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
     // that represents everything *except* the first letter, so just create
     // a ComputedStyle that inherits from our style parent, with no extra rules.
     nsIFrame* styleParent =
-        CorrectStyleParentFrame(aParent, nsCSSPseudoElements::firstLetter());
+        CorrectStyleParentFrame(aParent, PseudoStyleType::firstLetter);
     ComputedStyle* parentComputedStyle = styleParent->Style();
     newSC = PresContext()->StyleSet()->ResolveStyleForFirstLetterContinuation(
         parentComputedStyle);
@@ -91,28 +95,30 @@ nsresult nsFirstLetterFrame::GetChildFrameContainingOffset(
 
 // Needed for non-floating first-letter frames and for the continuations
 // following the first-letter that we also use nsFirstLetterFrame for.
-/* virtual */ void nsFirstLetterFrame::AddInlineMinISize(
+/* virtual */
+void nsFirstLetterFrame::AddInlineMinISize(
     gfxContext* aRenderingContext, nsIFrame::InlineMinISizeData* aData) {
   DoInlineIntrinsicISize(aRenderingContext, aData, nsLayoutUtils::MIN_ISIZE);
 }
 
 // Needed for non-floating first-letter frames and for the continuations
 // following the first-letter that we also use nsFirstLetterFrame for.
-/* virtual */ void nsFirstLetterFrame::AddInlinePrefISize(
+/* virtual */
+void nsFirstLetterFrame::AddInlinePrefISize(
     gfxContext* aRenderingContext, nsIFrame::InlinePrefISizeData* aData) {
   DoInlineIntrinsicISize(aRenderingContext, aData, nsLayoutUtils::PREF_ISIZE);
   aData->mLineIsEmpty = false;
 }
 
 // Needed for floating first-letter frames.
-/* virtual */ nscoord nsFirstLetterFrame::GetMinISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsFirstLetterFrame::GetMinISize(gfxContext* aRenderingContext) {
   return nsLayoutUtils::MinISizeFromInline(this, aRenderingContext);
 }
 
 // Needed for floating first-letter frames.
-/* virtual */ nscoord nsFirstLetterFrame::GetPrefISize(
-    gfxContext* aRenderingContext) {
+/* virtual */
+nscoord nsFirstLetterFrame::GetPrefISize(gfxContext* aRenderingContext) {
   return nsLayoutUtils::PrefISizeFromInline(this, aRenderingContext);
 }
 
@@ -147,7 +153,7 @@ void nsFirstLetterFrame::Reflow(nsPresContext* aPresContext,
 
   nsIFrame* kid = mFrames.FirstChild();
 
-  // Setup reflow state for our child
+  // Setup reflow input for our child
   WritingMode wm = aReflowInput.GetWritingMode();
   LogicalSize availSize = aReflowInput.AvailableSize();
   const LogicalMargin& bp = aReflowInput.ComputedLogicalBorderPadding();
@@ -213,8 +219,8 @@ void nsFirstLetterFrame::Reflow(nsPresContext* aPresContext,
     nsLineLayout* ll = aReflowInput.mLineLayout;
     bool pushedFrame;
 
-    ll->SetInFirstLetter(mComputedStyle->GetPseudo() ==
-                         nsCSSPseudoElements::firstLetter());
+    ll->SetInFirstLetter(Style()->GetPseudoType() ==
+                         PseudoStyleType::firstLetter);
     ll->BeginSpan(this, &aReflowInput, bp.IStart(wm), availSize.ISize(wm),
                   &mBaseline);
     ll->ReflowFrame(kid, aReflowStatus, &kidMetrics, pushedFrame);
@@ -270,7 +276,8 @@ void nsFirstLetterFrame::Reflow(nsPresContext* aPresContext,
   NS_FRAME_SET_TRUNCATION(aReflowStatus, aReflowInput, aMetrics);
 }
 
-/* virtual */ bool nsFirstLetterFrame::CanContinueTextRun() const {
+/* virtual */
+bool nsFirstLetterFrame::CanContinueTextRun() const {
   // We can continue a text run through a first-letter frame.
   return true;
 }
@@ -284,7 +291,7 @@ nsresult nsFirstLetterFrame::CreateContinuationForFloatingParent(
 
   *aContinuation = nullptr;
 
-  nsIPresShell* presShell = aPresContext->PresShell();
+  mozilla::PresShell* presShell = aPresContext->PresShell();
   nsPlaceholderFrame* placeholderFrame = GetPlaceholderFrame();
   nsContainerFrame* parent = placeholderFrame->GetParent();
 
@@ -353,8 +360,8 @@ void nsFirstLetterFrame::DrainOverflowFrames(nsPresContext* aPresContext) {
       ComputedStyle* parentSC;
       if (prevInFlow) {
         // This is for the rest of the content not in the first-letter.
-        nsIFrame* styleParent = CorrectStyleParentFrame(
-            GetParent(), nsCSSPseudoElements::firstLetter());
+        nsIFrame* styleParent =
+            CorrectStyleParentFrame(GetParent(), PseudoStyleType::firstLetter);
         parentSC = styleParent->Style();
       } else {
         // And this for the first-letter style.

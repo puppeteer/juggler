@@ -2,21 +2,27 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function, unicode_literals
 
-from io import BytesIO
+from io import (
+    BytesIO,
+    UnsupportedOperation,
+)
 import struct
 import subprocess
 import zlib
 import os
+import six
 from zipfile import (
     ZIP_STORED,
     ZIP_DEFLATED,
 )
 from collections import OrderedDict
-from urlparse import urlparse, ParseResult
 import mozpack.path as mozpath
-from mozbuild.util import memoize
+from mozbuild.util import (
+    memoize,
+    ensure_bytes,
+)
 
 
 JAR_STORED = ZIP_STORED
@@ -64,7 +70,7 @@ class JarStruct(object):
     (deserialized), or with empty fields.
     '''
 
-    TYPE_MAPPING = {'uint32': ('I', 4), 'uint16': ('H', 2)}
+    TYPE_MAPPING = {'uint32': (b'I', 4), 'uint16': (b'H', 2)}
 
     def __init__(self, data=None):
         '''
@@ -72,8 +78,8 @@ class JarStruct(object):
         an instance with empty fields.
         '''
         assert self.MAGIC and isinstance(self.STRUCT, OrderedDict)
-        self.size_fields = set(t for t in self.STRUCT.itervalues()
-                               if not t in JarStruct.TYPE_MAPPING)
+        self.size_fields = set(t for t in six.itervalues(self.STRUCT)
+                               if t not in JarStruct.TYPE_MAPPING)
         self._values = {}
         if data:
             self._init_data(data)
@@ -94,7 +100,7 @@ class JarStruct(object):
         # For all fields used as other fields sizes, keep track of their value
         # separately.
         sizes = dict((t, 0) for t in self.size_fields)
-        for name, t in self.STRUCT.iteritems():
+        for name, t in six.iteritems(self.STRUCT):
             if t in JarStruct.TYPE_MAPPING:
                 value, size = JarStruct.get_data(t, data[offset:])
             else:
@@ -102,7 +108,7 @@ class JarStruct(object):
                 value = data[offset:offset + size]
                 if isinstance(value, memoryview):
                     value = value.tobytes()
-            if not name in sizes:
+            if name not in sizes:
                 self._values[name] = value
             else:
                 sizes[name] = value
@@ -113,7 +119,7 @@ class JarStruct(object):
         Initialize an instance with empty fields.
         '''
         self.signature = self.MAGIC
-        for name, t in self.STRUCT.iteritems():
+        for name, t in six.iteritems(self.STRUCT):
             if name in self.size_fields:
                 continue
             self._values[name] = 0 if t in JarStruct.TYPE_MAPPING else ''
@@ -130,26 +136,27 @@ class JarStruct(object):
         data = data[:size]
         if isinstance(data, memoryview):
             data = data.tobytes()
-        return struct.unpack('<' + format, data)[0], size
+        return struct.unpack(b'<' + format, data)[0], size
 
     def serialize(self):
         '''
         Serialize the data structure according to the data structure definition
         from self.STRUCT.
         '''
-        serialized = struct.pack('<I', self.signature)
-        sizes = dict((t, name) for name, t in self.STRUCT.iteritems()
-                     if not t in JarStruct.TYPE_MAPPING)
-        for name, t in self.STRUCT.iteritems():
+        serialized = struct.pack(b'<I', self.signature)
+        sizes = dict((t, name)
+                     for name, t in six.iteritems(self.STRUCT)
+                     if t not in JarStruct.TYPE_MAPPING)
+        for name, t in six.iteritems(self.STRUCT):
             if t in JarStruct.TYPE_MAPPING:
                 format, size = JarStruct.TYPE_MAPPING[t]
                 if name in sizes:
                     value = len(self[sizes[name]])
                 else:
                     value = self[name]
-                serialized += struct.pack('<' + format, value)
+                serialized += struct.pack(b'<' + format, value)
             else:
-                serialized += self[name]
+                serialized += ensure_bytes(self[name])
         return serialized
 
     @property
@@ -159,7 +166,7 @@ class JarStruct(object):
         variable length fields.
         '''
         size = JarStruct.TYPE_MAPPING['uint32'][1]
-        for name, type in self.STRUCT.iteritems():
+        for name, type in six.iteritems(self.STRUCT):
             if type in JarStruct.TYPE_MAPPING:
                 size += JarStruct.TYPE_MAPPING[type][1]
             else:
@@ -170,7 +177,7 @@ class JarStruct(object):
         return self._values[key]
 
     def __setitem__(self, key, value):
-        if not key in self.STRUCT:
+        if key not in self.STRUCT:
             raise KeyError(key)
         if key in self.size_fields:
             raise AttributeError("can't set attribute")
@@ -180,7 +187,7 @@ class JarStruct(object):
         return key in self._values
 
     def __iter__(self):
-        return self._values.iteritems()
+        return six.iteritems(self._values)
 
     def __repr__(self):
         return "<%s %s>" % (self.__class__.__name__,
@@ -202,6 +209,7 @@ class JarCdirEnd(JarStruct):
         ('comment_size', 'uint16'),
         ('comment', 'comment_size'),
     ])
+
 
 CDIR_END_SIZE = JarCdirEnd().size
 
@@ -260,6 +268,7 @@ class JarFileReader(object):
     File-like class for use by JarReader to give access to individual files
     within a Jar archive.
     '''
+
     def __init__(self, header, data):
         '''
         Initialize a JarFileReader. header is the local file header
@@ -341,6 +350,7 @@ class JarReader(object):
     Class with methods to read Jar files. Can open standard jar files as well
     as Mozilla jar files (see further details in the JarWriter documentation).
     '''
+
     def __init__(self, file=None, fileobj=None, data=None):
         '''
         Opens the given file as a Jar archive. Use the given file-like object
@@ -374,7 +384,7 @@ class JarReader(object):
         entries = self.entries
         if not entries:
             return JAR_STORED
-        return max(f['compression'] for f in entries.itervalues())
+        return max(f['compression'] for f in six.itervalues(entries))
 
     @property
     def entries(self):
@@ -390,7 +400,7 @@ class JarReader(object):
             preload = JarStruct.get_data('uint32', self._data)[0]
         entries = OrderedDict()
         offset = self._cdir_end['cdir_offset']
-        for e in xrange(self._cdir_end['cdir_entries']):
+        for e in six.moves.xrange(self._cdir_end['cdir_entries']):
             entry = JarCdirEntry(self._data[offset:])
             offset += entry.size
             # Creator host system. 0 is MSDOS, 3 is Unix
@@ -452,7 +462,7 @@ class JarReader(object):
             for file in jarReader:
                 ...
         '''
-        for entry in self.entries.itervalues():
+        for entry in six.itervalues(self.entries):
             yield self._getreader(entry)
 
     def __getitem__(self, name):
@@ -474,8 +484,8 @@ class JarWriter(object):
     archives as well as jar archives optimized for Gecko. See the documentation
     for the close() member function for a description of both layouts.
     '''
-    def __init__(self, file=None, fileobj=None, compress=True, optimize=True,
-                 compress_level=9):
+
+    def __init__(self, file=None, fileobj=None, compress=True, compress_level=9):
         '''
         Initialize a Jar archive in the given file. Use the given file-like
         object if one is given instead of opening the given file name.
@@ -495,7 +505,6 @@ class JarWriter(object):
         self._compress_level = compress_level
         self._contents = OrderedDict()
         self._last_preloaded = None
-        self._optimize = optimize
 
     def __enter__(self):
         '''
@@ -547,7 +556,7 @@ class JarWriter(object):
         headers = {}
         preload_size = 0
         # Prepare central directory entries
-        for entry, content in self._contents.itervalues():
+        for entry, content in six.itervalues(self._contents):
             header = JarLocalFileHeader()
             for name in entry.STRUCT:
                 if name in header:
@@ -561,28 +570,27 @@ class JarWriter(object):
         end = JarCdirEnd()
         end['disk_entries'] = len(self._contents)
         end['cdir_entries'] = end['disk_entries']
-        end['cdir_size'] = reduce(lambda x, y: x + y[0].size,
-                                  self._contents.values(), 0)
+        end['cdir_size'] = six.moves.reduce(lambda x, y: x + y[0].size,
+                                            self._contents.values(), 0)
         # On optimized archives, store the preloaded size and the central
         # directory entries, followed by the first end of central directory.
-        if self._optimize:
+        if preload_size:
             end['cdir_offset'] = 4
             offset = end['cdir_size'] + end['cdir_offset'] + end.size
-            if preload_size:
-                preload_size += offset
+            preload_size += offset
             self._data.write(struct.pack('<I', preload_size))
-            for entry, _ in self._contents.itervalues():
+            for entry, _ in six.itervalues(self._contents):
                 entry['offset'] += offset
                 self._data.write(entry.serialize())
             self._data.write(end.serialize())
         # Store local file entries followed by compressed data
-        for entry, content in self._contents.itervalues():
+        for entry, content in six.itervalues(self._contents):
             self._data.write(headers[entry].serialize())
             self._data.write(content)
         # On non optimized archives, store the central directory entries.
-        if not self._optimize:
+        if not preload_size:
             end['cdir_offset'] = offset
-            for entry, _ in self._contents.itervalues():
+            for entry, _ in six.itervalues(self._contents):
                 self._data.write(entry.serialize())
         # Store the end of central directory.
         self._data.write(end.serialize())
@@ -617,16 +625,18 @@ class JarWriter(object):
             compress = JAR_DEFLATED
         if compress is False:
             compress = JAR_STORED
-        if (isinstance(data, (JarFileReader, Deflater)) and \
+        if (isinstance(data, (JarFileReader, Deflater)) and
                 data.compress == compress):
             deflater = data
         else:
             deflater = Deflater(compress, compress_level=self._compress_level)
-            if isinstance(data, basestring):
+            if isinstance(data, (six.binary_type, six.string_types)):
                 deflater.write(data)
             elif hasattr(data, 'read'):
-                if hasattr(data, 'seek'):
+                try:
                     data.seek(0)
+                except (UnsupportedOperation, AttributeError):
+                    pass
                 deflater.write(data.read())
             else:
                 raise JarWriterError("Don't know how to handle %s" %
@@ -664,12 +674,12 @@ class JarWriter(object):
         '''
         new_contents = OrderedDict()
         for f in files:
-            if not f in self._contents:
+            if f not in self._contents:
                 continue
             new_contents[f] = self._contents[f]
             self._last_preloaded = f
         for f in self._contents:
-            if not f in new_contents:
+            if f not in new_contents:
                 new_contents[f] = self._contents[f]
         self._contents = new_contents
 
@@ -680,6 +690,7 @@ class Deflater(object):
     compressed unless the compressed form is smaller than the uncompressed
     data.
     '''
+
     def __init__(self, compress=True, compress_level=9):
         '''
         Initialize a Deflater. The compress argument determines how to
@@ -792,9 +803,9 @@ class Brotli(object):
     @staticmethod
     @memoize
     def brotli_tool():
-            from buildconfig import topobjdir, substs
-            return os.path.join(topobjdir, 'dist', 'host', 'bin',
-                               'bro' + substs.get('BIN_SUFFIX', ''))
+        from buildconfig import topobjdir, substs
+        return os.path.join(topobjdir, 'dist', 'host', 'bin',
+                            'bro' + substs.get('BIN_SUFFIX', ''))
 
     @staticmethod
     def run_brotli_tool(args, input):
@@ -816,7 +827,6 @@ class Brotli(object):
         return Brotli.run_brotli_tool(['--decompress'], data)
 
 
-
 class BrotliCompress(object):
     def __init__(self):
         self._buf = BytesIO()
@@ -832,55 +842,18 @@ class BrotliCompress(object):
 class JarLog(dict):
     '''
     Helper to read the file Gecko generates when setting MOZ_JAR_LOG_FILE.
-    The jar log is then available as a dict with the jar path as key (see
-    canonicalize for more details on the key value), and the corresponding
-    access log as a list value. Only the first access to a given member of
-    a jar is stored.
+    The jar log is then available as a dict with the jar path as key, and
+    the corresponding access log as a list value. Only the first access to
+    a given member of a jar is stored.
     '''
+
     def __init__(self, file=None, fileobj=None):
         if not fileobj:
             fileobj = open(file, 'r')
-        urlmap = {}
         for line in fileobj:
-            url, path = line.strip().split(None, 1)
-            if not url or not path:
+            jar, path = line.strip().split(None, 1)
+            if not jar or not path:
                 continue
-            if url not in urlmap:
-                urlmap[url] = JarLog.canonicalize(url)
-            jar = urlmap[url]
             entry = self.setdefault(jar, [])
             if path not in entry:
                 entry.append(path)
-
-    @staticmethod
-    def canonicalize(url):
-        '''
-        The jar path is stored in a MOZ_JAR_LOG_FILE log as a url. This method
-        returns a unique value corresponding to such urls.
-        - file:///{path} becomes {path}
-        - jar:file:///{path}!/{subpath} becomes ({path}, {subpath})
-        - jar:jar:file:///{path}!/{subpath}!/{subpath2} becomes
-           ({path}, {subpath}, {subpath2})
-        '''
-        if not isinstance(url, ParseResult):
-            # Assume that if it doesn't start with jar: or file:, it's a path.
-            if not url.startswith(('jar:', 'file:')):
-                url = 'file:///' + os.path.abspath(url)
-            url = urlparse(url)
-        assert url.scheme
-        assert url.scheme in ('jar', 'file')
-        if url.scheme == 'jar':
-            path = JarLog.canonicalize(url.path)
-            if isinstance(path, tuple):
-                return path[:-1] + tuple(path[-1].split('!/', 1))
-            return tuple(path.split('!/', 1))
-        if url.scheme == 'file':
-            assert os.path.isabs(url.path)
-            path = url.path
-            # On Windows, url.path will be /drive:/path ; on Unix systems,
-            # /path. As we want drive:/path instead of /drive:/path on Windows,
-            # remove the leading /.
-            if os.path.isabs(path[1:]):
-                path = path[1:]
-            path = os.path.realpath(path)
-            return mozpath.normsep(os.path.normcase(path))

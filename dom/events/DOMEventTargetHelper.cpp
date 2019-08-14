@@ -5,7 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsContentUtils.h"
-#include "nsIDocument.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/Sprintf.h"
 #include "nsGlobalWindow.h"
 #include "mozilla/dom/Event.h"
@@ -134,14 +134,14 @@ void DOMEventTargetHelper::DisconnectFromOwner() {
 }
 
 nsPIDOMWindowInner* DOMEventTargetHelper::GetWindowIfCurrent() const {
-  if (NS_FAILED(CheckInnerWindowCorrectness())) {
+  if (NS_FAILED(CheckCurrentGlobalCorrectness())) {
     return nullptr;
   }
 
   return GetOwner();
 }
 
-nsIDocument* DOMEventTargetHelper::GetDocumentIfCurrent() const {
+Document* DOMEventTargetHelper::GetDocumentIfCurrent() const {
   nsPIDOMWindowInner* win = GetWindowIfCurrent();
   if (!win) {
     return nullptr;
@@ -212,10 +212,10 @@ EventListenerManager* DOMEventTargetHelper::GetExistingListenerManager() const {
 }
 
 nsresult DOMEventTargetHelper::WantsUntrusted(bool* aRetVal) {
-  nsresult rv = CheckInnerWindowCorrectness();
+  nsresult rv = CheckCurrentGlobalCorrectness();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIDocument> doc = GetDocumentIfCurrent();
+  nsCOMPtr<Document> doc = GetDocumentIfCurrent();
   // We can let listeners on workers to always handle all the events.
   *aRetVal = (doc && !nsContentUtils::IsChromeDoc(doc)) || !NS_IsMainThread();
   return rv;
@@ -253,7 +253,7 @@ void DOMEventTargetHelper::IgnoreKeepAliveIfHasListenersFor(nsAtom* aType) {
 void DOMEventTargetHelper::MaybeUpdateKeepAlive() {
   bool shouldBeKeptAlive = false;
 
-  if (NS_SUCCEEDED(CheckInnerWindowCorrectness())) {
+  if (NS_SUCCEEDED(CheckCurrentGlobalCorrectness())) {
     if (!mKeepingAliveTypes.mAtoms.IsEmpty()) {
       for (uint32_t i = 0; i < mKeepingAliveTypes.mAtoms.Length(); ++i) {
         if (HasListenersFor(mKeepingAliveTypes.mAtoms[i])) {
@@ -312,6 +312,25 @@ void DOMEventTargetHelper::BindToOwnerInternal(nsIGlobalObject* aOwner) {
       mHasOrHasHadOwnerWindow = true;
     }
   }
+}
+
+nsresult DOMEventTargetHelper::CheckCurrentGlobalCorrectness() const {
+  NS_ENSURE_STATE(!mHasOrHasHadOwnerWindow || mOwnerWindow);
+
+  // Main-thread.
+  if (mOwnerWindow && !mOwnerWindow->IsCurrentInnerWindow()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (NS_IsMainThread()) {
+    return NS_OK;
+  }
+
+  if (!mParentObject) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
 }
 
 }  // namespace mozilla

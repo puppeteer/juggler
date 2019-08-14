@@ -4,7 +4,10 @@
 
 "use strict";
 
-const { createFactory, PureComponent } = require("devtools/client/shared/vendor/react");
+const {
+  createFactory,
+  PureComponent,
+} = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
@@ -16,8 +19,9 @@ const Actions = require("../actions/index");
 class ConnectionPromptSetting extends PureComponent {
   static get propTypes() {
     return {
-      dispatch: PropTypes.func.isRequired,
+      className: PropTypes.string,
       connectionPromptEnabled: PropTypes.bool.isRequired,
+      dispatch: PropTypes.func.isRequired,
     };
   }
 
@@ -27,11 +31,11 @@ class ConnectionPromptSetting extends PureComponent {
   }
 
   render() {
-    const { connectionPromptEnabled } = this.props;
+    const { className, connectionPromptEnabled } = this.props;
 
     const localizedState = connectionPromptEnabled
-                             ? "about-debugging-connection-prompt-disable-button"
-                             : "about-debugging-connection-prompt-enable-button";
+      ? "about-debugging-connection-prompt-disable-button"
+      : "about-debugging-connection-prompt-enable-button";
 
     return Localized(
       {
@@ -39,7 +43,7 @@ class ConnectionPromptSetting extends PureComponent {
       },
       dom.button(
         {
-          className: "default-button js-connection-prompt-toggle-button",
+          className: `${className} default-button qa-connection-prompt-toggle-button`,
           onClick: () => this.onToggleClick(),
         },
         localizedState

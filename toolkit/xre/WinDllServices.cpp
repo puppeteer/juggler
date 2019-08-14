@@ -67,6 +67,7 @@ class UntrustedModulesManager {
 
   ModuleEvaluator mEvaluator;
   int mErrorModules = 0;
+  Maybe<double> mXULLoadDurationMS;
 
   // In order to get a list of modules loaded at startup, we take a list of
   // currently-loaded modules, and subtract:
@@ -142,6 +143,7 @@ class UntrustedModulesManager {
    */
   void ProcessQueuedEvents(bool& aHasProcessedStartupModules) {
     MOZ_ASSERT(!NS_IsMainThread());
+    MOZ_ASSERT(!!mEvaluator);
 
     // Hold a reference to DllServices to ensure the object doesn't get deleted
     // during this call.
@@ -164,6 +166,10 @@ class UntrustedModulesManager {
       mQueuedEvents.swap(queuedEvents);
     }
 
+    if (!mEvaluator) {
+      return;
+    }
+
     Vector<ModuleLoadEvent, 0, InfallibleAllocPolicy> processedEvents;
     int errorModules = 0;
 
@@ -177,13 +183,26 @@ class UntrustedModulesManager {
       ModuleLoadEvent eventCopy(
           e, ModuleLoadEvent::CopyOption::CopyWithoutModules);
       for (auto& m : e.mModules) {
-        Maybe<bool> ret =
+        bool ok = m.PrepForTelemetry();
+        MOZ_ASSERT(ok);
+        if (!ok) {
+          continue;
+        }
+
+        Maybe<bool> maybeIsTrusted =
             mEvaluator.IsModuleTrusted(m, eventCopy, dllSvcRef.get());
-        if (ret.isNothing()) {
+
+        // Save xul.dll load timing for the ping payload.
+        if ((m.mTrustFlags & ModuleTrustFlags::Xul) &&
+            mXULLoadDurationMS.isNothing()) {
+          mXULLoadDurationMS = m.mLoadDurationMS;
+        }
+
+        if (maybeIsTrusted.isNothing()) {
           // If there was an error, assume the DLL is trusted to avoid
           // flooding the telemetry packet, but record that an error occurred.
           errorModules++;
-        } else if (*ret) {
+        } else if (maybeIsTrusted.value()) {
           // Module is trusted. If we haven't yet processed startup modules,
           // we need to remember it.
           if (!aHasProcessedStartupModules) {
@@ -300,8 +319,7 @@ class UntrustedModulesManager {
 
         // It's never been seen before so it must be a startup module.
         // One module = one event here.
-        ModuleLoadEvent::ModuleInfo mi;
-        mi.mBase = base;
+        ModuleLoadEvent::ModuleInfo mi(base);
         ModuleLoadEvent e;
         e.mIsStartup = true;
         e.mProcessUptimeMS = 0;
@@ -322,8 +340,7 @@ class UntrustedModulesManager {
     for (auto& e : startupEvents) {
       MOZ_ASSERT(e.mModules.length() == 1);
       ModuleLoadEvent::ModuleInfo& mi(e.mModules[0]);
-      widget::WinUtils::GetModuleFullPath((HMODULE)mi.mBase, mi.mLdrName);
-      Unused << NS_NewLocalFile(mi.mLdrName, false, getter_AddRefs(mi.mFile));
+      mi.PopulatePathInfo();
     }
 
     // Lock mQueuedEvents to add the new items.
@@ -355,6 +372,7 @@ class UntrustedModulesManager {
     }
 
     aOut.mErrorModules = mErrorModules;
+    aOut.mXULLoadDurationMS = mXULLoadDurationMS;
 
     // Lock mProcessedEvents and mProcessedStacks to make a copy for the caller.
     // Only trivial (loader lock friendly) code allowed here!
@@ -386,10 +404,10 @@ DllServices* DllServices::Get() {
   sInstance = new DllServices();
   sDllServicesHasBeenSet = true;
 
-  // Enable() winds up calling NotifyUntrustedModuleLoads which requires
-  // sInstance to be valid. So we must call Enable() here rather than the
+  // EnableFull() winds up calling NotifyUntrustedModuleLoads which requires
+  // sInstance to be valid. So we must call EnableFull() here rather than the
   // DllServices constructor.
-  sInstance->Enable();
+  sInstance->EnableFull();
   ClearOnShutdown(&sInstance);
   return sInstance;
 }

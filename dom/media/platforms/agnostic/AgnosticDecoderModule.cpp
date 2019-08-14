@@ -14,8 +14,8 @@
 #include "mozilla/StaticPrefs.h"
 
 #ifdef MOZ_AV1
-#include "AOMDecoder.h"
-#include "DAV1DDecoder.h"
+#  include "AOMDecoder.h"
+#  include "DAV1DDecoder.h"
 #endif
 
 namespace mozilla {
@@ -24,10 +24,18 @@ bool AgnosticDecoderModule::SupportsMimeType(
     const nsACString& aMimeType, DecoderDoctorDiagnostics* aDiagnostics) const {
   bool supports =
       VPXDecoder::IsVPX(aMimeType) || OpusDataDecoder::IsOpus(aMimeType) ||
-      VorbisDataDecoder::IsVorbis(aMimeType) ||
       WaveDataDecoder::IsWave(aMimeType) || TheoraDecoder::IsTheora(aMimeType);
+  if (!StaticPrefs::media_rdd_vorbis_enabled() ||
+      !StaticPrefs::media_rdd_process_enabled() ||
+      !BrowserTabsRemoteAutostart()) {
+    supports |= VorbisDataDecoder::IsVorbis(aMimeType);
+  }
 #ifdef MOZ_AV1
-  if (StaticPrefs::MediaAv1Enabled()) {
+  // We remove support for decoding AV1 here if RDD is enabled so that
+  // decoding on the content process doesn't accidentally happen in case
+  // something goes wrong with launching the RDD process.
+  if (StaticPrefs::media_av1_enabled() &&
+      !StaticPrefs::media_rdd_process_enabled()) {
     supports |= AOMDecoder::IsAV1(aMimeType);
   }
 #endif
@@ -45,9 +53,11 @@ already_AddRefed<MediaDataDecoder> AgnosticDecoderModule::CreateVideoDecoder(
     m = new VPXDecoder(aParams);
   }
 #ifdef MOZ_AV1
+  // see comment above about AV1 and the RDD process
   else if (AOMDecoder::IsAV1(aParams.mConfig.mMimeType) &&
-           StaticPrefs::MediaAv1Enabled()) {
-    if (StaticPrefs::MediaAv1UseDav1d()) {
+           !StaticPrefs::media_rdd_process_enabled() &&
+           StaticPrefs::media_av1_enabled()) {
+    if (StaticPrefs::media_av1_use_dav1d()) {
       m = new DAV1DDecoder(aParams);
     } else {
       m = new AOMDecoder(aParams);

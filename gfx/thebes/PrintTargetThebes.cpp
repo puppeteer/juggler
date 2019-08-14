@@ -12,8 +12,9 @@
 namespace mozilla {
 namespace gfx {
 
-/* static */ already_AddRefed<PrintTargetThebes>
-PrintTargetThebes::CreateOrNull(gfxASurface* aSurface) {
+/* static */
+already_AddRefed<PrintTargetThebes> PrintTargetThebes::CreateOrNull(
+    gfxASurface* aSurface) {
   MOZ_ASSERT(aSurface);
 
   if (!aSurface || aSurface->CairoStatus()) {
@@ -35,8 +36,7 @@ already_AddRefed<DrawTarget> PrintTargetThebes::MakeDrawTarget(
   MOZ_ASSERT(mHasActivePage, "We can't guarantee a valid DrawTarget");
 
   RefPtr<gfx::DrawTarget> dt =
-      gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(mGfxSurface,
-                                                             aSize);
+      gfxPlatform::CreateDrawTargetForSurface(mGfxSurface, aSize);
   if (!dt || !dt->IsValid()) {
     return nullptr;
   }
@@ -54,8 +54,7 @@ already_AddRefed<DrawTarget> PrintTargetThebes::MakeDrawTarget(
 already_AddRefed<DrawTarget> PrintTargetThebes::GetReferenceDrawTarget() {
   if (!mRefDT) {
     RefPtr<gfx::DrawTarget> dt =
-        gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(mGfxSurface,
-                                                               mSize);
+        gfxPlatform::CreateDrawTargetForSurface(mGfxSurface, mSize);
     if (!dt || !dt->IsValid()) {
       return nullptr;
     }

@@ -4,10 +4,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_dom_ipc_IPCBlobInputStreamParent_h
-#define mozilla_dom_ipc_IPCBlobInputStreamParent_h
+#ifndef mozilla_dom_IPCBlobInputStreamParent_h
+#define mozilla_dom_IPCBlobInputStreamParent_h
 
-#include "mozilla/ipc/PIPCBlobInputStreamParent.h"
+#include "mozilla/dom/PIPCBlobInputStreamParent.h"
 
 class nsIInputStream;
 
@@ -24,8 +24,7 @@ class NS_NO_VTABLE IPCBlobInputStreamParentCallback {
   virtual ~IPCBlobInputStreamParentCallback() {}
 };
 
-class IPCBlobInputStreamParent final
-    : public mozilla::ipc::PIPCBlobInputStreamParent {
+class IPCBlobInputStreamParent final : public PIPCBlobInputStreamParent {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(IPCBlobInputStreamParent)
 
@@ -49,11 +48,11 @@ class IPCBlobInputStreamParent final
 
   void SetCallback(IPCBlobInputStreamParentCallback* aCallback);
 
-  mozilla::ipc::IPCResult RecvStreamNeeded() override;
+  mozilla::ipc::IPCResult RecvStreamNeeded();
 
-  mozilla::ipc::IPCResult RecvLengthNeeded() override;
+  mozilla::ipc::IPCResult RecvLengthNeeded();
 
-  mozilla::ipc::IPCResult RecvClose() override;
+  mozilla::ipc::IPCResult RecvClose();
 
   mozilla::ipc::IPCResult Recv__delete__() override;
 
@@ -61,7 +60,7 @@ class IPCBlobInputStreamParent final
 
  private:
   IPCBlobInputStreamParent(const nsID& aID, uint64_t aSize,
-                           nsIContentParent* aManager);
+                           ContentParent* aManager);
 
   IPCBlobInputStreamParent(const nsID& aID, uint64_t aSize,
                            mozilla::ipc::PBackgroundParent* aManager);
@@ -73,7 +72,7 @@ class IPCBlobInputStreamParent final
 
   // Only 1 of these 2 is set. Raw pointer because these 2 managers are keeping
   // the parent actor alive. The pointers will be nullified in ActorDestroyed.
-  nsIContentParent* mContentManager;
+  ContentParent* mContentManager;
   mozilla::ipc::PBackgroundParent* mPBackgroundManager;
 
   RefPtr<IPCBlobInputStreamParentCallback> mCallback;
@@ -84,4 +83,4 @@ class IPCBlobInputStreamParent final
 }  // namespace dom
 }  // namespace mozilla
 
-#endif  // mozilla_dom_ipc_IPCBlobInputStreamParent_h
+#endif  // mozilla_dom_IPCBlobInputStreamParent_h

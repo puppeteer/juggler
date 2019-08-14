@@ -2,32 +2,27 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use {WindowWrapper, NotifierEvent};
+use crate::{WindowWrapper, NotifierEvent};
 use base64;
+use semver;
 use image::load as load_piston_image;
 use image::png::PNGEncoder;
 use image::{ColorType, ImageFormat};
-use parse_function::parse_function;
-use png::save_flipped;
-use std::cmp;
+use crate::parse_function::parse_function;
+use crate::png::save_flipped;
+use std::{cmp, env};
 use std::fmt::{Display, Error, Formatter};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::mpsc::Receiver;
-use webrender::RendererStats;
+use webrender::RenderResults;
 use webrender::api::*;
-use wrench::{Wrench, WrenchThing};
-use yaml_frame_reader::YamlFrameReader;
+use webrender::api::units::*;
+use crate::wrench::{Wrench, WrenchThing};
+use crate::yaml_frame_reader::YamlFrameReader;
 
-#[cfg(target_os = "windows")]
-const PLATFORM: &str = "win";
-#[cfg(target_os = "linux")]
-const PLATFORM: &str = "linux";
-#[cfg(target_os = "macos")]
-const PLATFORM: &str = "mac";
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-const PLATFORM: &str = "other";
 
 const OPTION_DISABLE_SUBPX: &str = "disable-subpixel";
 const OPTION_DISABLE_AA: &str = "disable-aa";
@@ -67,16 +62,40 @@ impl Display for ReftestOp {
     }
 }
 
+#[derive(Debug)]
+enum ExtraCheck {
+    DrawCalls(usize),
+    AlphaTargets(usize),
+    ColorTargets(usize),
+    /// Checks the dirty region when rendering the test at |index| in the
+    /// sequence, and compares its serialization to |region|.
+    DirtyRegion { index: usize, region: String },
+}
+
+impl ExtraCheck {
+    fn run(&self, results: &[RenderResults]) -> bool {
+        match *self {
+            ExtraCheck::DrawCalls(x) =>
+                x == results.last().unwrap().stats.total_draw_calls,
+            ExtraCheck::AlphaTargets(x) =>
+                x == results.last().unwrap().stats.alpha_target_count,
+            ExtraCheck::ColorTargets(x) =>
+                x == results.last().unwrap().stats.color_target_count,
+            ExtraCheck::DirtyRegion { index, ref region } => {
+                *region == format!("{}", results[index].recorded_dirty_regions[0])
+            }
+        }
+    }
+}
+
 pub struct Reftest {
     op: ReftestOp,
-    test: PathBuf,
+    test: Vec<PathBuf>,
     reference: PathBuf,
     font_render_mode: Option<FontRenderMode>,
     max_difference: usize,
     num_differences: usize,
-    expected_draw_calls: Option<usize>,
-    expected_alpha_targets: Option<usize>,
-    expected_color_targets: Option<usize>,
+    extra_checks: Vec<ExtraCheck>,
     disable_dual_source_blending: bool,
     allow_mipmaps: bool,
     zoom_factor: f32,
@@ -84,10 +103,11 @@ pub struct Reftest {
 
 impl Display for Reftest {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        let paths: Vec<String> = self.test.iter().map(|t| t.display().to_string()).collect();
         write!(
             f,
             "{} {} {}",
-            self.test.display(),
+            paths.join(", "),
             self.op,
             self.reference.display()
         )
@@ -169,7 +189,7 @@ struct ReftestManifest {
     reftests: Vec<Reftest>,
 }
 impl ReftestManifest {
-    fn new(manifest: &Path, options: &ReftestOptions) -> ReftestManifest {
+    fn new(manifest: &Path, environment: &ReftestEnvironment, options: &ReftestOptions) -> ReftestManifest {
         let dir = manifest.parent().unwrap();
         let f =
             File::open(manifest).expect(&format!("couldn't open manifest: {}", manifest.display()));
@@ -193,13 +213,13 @@ impl ReftestManifest {
             let mut max_count = 0;
             let mut op = ReftestOp::Equal;
             let mut font_render_mode = None;
-            let mut expected_color_targets = None;
-            let mut expected_alpha_targets = None;
-            let mut expected_draw_calls = None;
+            let mut extra_checks = vec![];
             let mut disable_dual_source_blending = false;
             let mut zoom_factor = 1.0;
             let mut allow_mipmaps = false;
+            let mut dirty_region_index = 0;
 
+            let mut paths = vec![];
             for (i, token) in tokens.iter().enumerate() {
                 match *token {
                     "include" => {
@@ -207,14 +227,22 @@ impl ReftestManifest {
                         let include = dir.join(tokens[1]);
 
                         reftests.append(
-                            &mut ReftestManifest::new(include.as_path(), options).reftests,
+                            &mut ReftestManifest::new(include.as_path(), environment, options).reftests,
                         );
 
                         break;
                     }
+                    platform if platform.starts_with("skip_on") => {
+                        // e.g. skip_on(android,debug) will skip only when
+                        // running on a debug android build.
+                        let (_, args, _) = parse_function(platform);
+                        if args.iter().all(|arg| environment.has(arg)) {
+                            break;
+                        }
+                    }
                     platform if platform.starts_with("platform") => {
                         let (_, args, _) = parse_function(platform);
-                        if !args.iter().any(|arg| arg == &PLATFORM) {
+                        if !args.iter().any(|arg| arg == &environment.platform) {
                             // Skip due to platform not matching
                             break;
                         }
@@ -230,15 +258,24 @@ impl ReftestManifest {
                     }
                     function if function.starts_with("draw_calls") => {
                         let (_, args, _) = parse_function(function);
-                        expected_draw_calls = Some(args[0].parse().unwrap());
+                        extra_checks.push(ExtraCheck::DrawCalls(args[0].parse().unwrap()));
                     }
                     function if function.starts_with("alpha_targets") => {
                         let (_, args, _) = parse_function(function);
-                        expected_alpha_targets = Some(args[0].parse().unwrap());
+                        extra_checks.push(ExtraCheck::AlphaTargets(args[0].parse().unwrap()));
                     }
                     function if function.starts_with("color_targets") => {
                         let (_, args, _) = parse_function(function);
-                        expected_color_targets = Some(args[0].parse().unwrap());
+                        extra_checks.push(ExtraCheck::ColorTargets(args[0].parse().unwrap()));
+                    }
+                    function if function.starts_with("dirty") => {
+                        let (_, args, _) = parse_function(function);
+                        let region: String = args[0].parse().unwrap();
+                        extra_checks.push(ExtraCheck::DirtyRegion {
+                            index: dirty_region_index,
+                            region,
+                        });
+                        dirty_region_index += 1;
                     }
                     options if options.starts_with("options") => {
                         let (_, args, _) = parse_function(options);
@@ -262,25 +299,36 @@ impl ReftestManifest {
                         op = ReftestOp::NotEqual;
                     }
                     _ => {
-                        reftests.push(Reftest {
-                            op,
-                            test: dir.join(tokens[i + 0]),
-                            reference: dir.join(tokens[i + 1]),
-                            font_render_mode,
-                            max_difference: cmp::max(max_difference, options.allow_max_difference),
-                            num_differences: cmp::max(max_count, options.allow_num_differences),
-                            expected_draw_calls,
-                            expected_alpha_targets,
-                            expected_color_targets,
-                            disable_dual_source_blending,
-                            allow_mipmaps,
-                            zoom_factor,
-                        });
-
-                        break;
+                        paths.push(dir.join(*token));
                     }
                 }
             }
+
+            // Don't try to add tests for include lines.
+            if paths.len() < 2 {
+                assert_eq!(paths.len(), 0, "Only one path provided: {:?}", paths[0]);
+                continue;
+            }
+
+            // The reference is the last path provided. If multiple paths are
+            // passed for the test, they render sequentially before being
+            // compared to the reference, which is useful for testing
+            // invalidation.
+            let reference = paths.pop().unwrap();
+            let test = paths;
+
+            reftests.push(Reftest {
+                op,
+                test,
+                reference,
+                font_render_mode,
+                max_difference: cmp::max(max_difference, options.allow_max_difference),
+                num_differences: cmp::max(max_count, options.allow_num_differences),
+                extra_checks,
+                disable_dual_source_blending,
+                allow_mipmaps,
+                zoom_factor,
+            });
         }
 
         ReftestManifest { reftests: reftests }
@@ -290,9 +338,95 @@ impl ReftestManifest {
         self.reftests
             .iter()
             .filter(|x| {
-                x.test.starts_with(prefix) || x.reference.starts_with(prefix)
+                x.test.iter().any(|t| t.starts_with(prefix)) || x.reference.starts_with(prefix)
             })
             .collect()
+    }
+}
+
+struct YamlRenderOutput {
+    image: ReftestImage,
+    results: RenderResults,
+}
+
+struct ReftestEnvironment {
+    pub platform: &'static str,
+    pub version: Option<semver::Version>,
+    pub mode: &'static str,
+}
+
+impl ReftestEnvironment {
+    fn new() -> Self {
+        Self {
+            platform: Self::platform(),
+            version: Self::version(),
+            mode: Self::mode(),
+        }
+    }
+
+    fn has(&self, condition: &str) -> bool {
+        if self.platform == condition || self.mode == condition {
+            return true;
+        }
+        match (&self.version, &semver::VersionReq::parse(condition)) {
+            (Some(v), Ok(r)) => {
+                if r.matches(v) {
+                    return true;
+                }
+            },
+            _ => (),
+        };
+        let envkey = format!("WRENCH_REFTEST_CONDITION_{}", condition.to_uppercase());
+        env::var(envkey).is_ok()
+    }
+
+    fn platform() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "win"
+        } else if cfg!(target_os = "linux") {
+            "linux"
+        } else if cfg!(target_os = "macos") {
+            "mac"
+        } else if cfg!(target_os = "android") {
+            "android"
+        } else {
+            "other"
+        }
+    }
+
+    fn version() -> Option<semver::Version> {
+        if cfg!(target_os = "macos") {
+            use std::str;
+            let version_bytes = Command::new("defaults")
+                .arg("read")
+                .arg("loginwindow")
+                .arg("SystemVersionStampAsString")
+                .output()
+                .expect("Failed to get macOS version")
+                .stdout;
+            let mut version_string = str::from_utf8(&version_bytes)
+                .expect("Failed to read macOS version")
+                .trim()
+                .to_string();
+            // On some machines this produces just the major.minor and on
+            // some machines this gives major.minor.patch. But semver requires
+            // the patch so we fake one if it's not there.
+            if version_string.chars().filter(|c| *c == '.').count() == 1 {
+                version_string.push_str(".0");
+            }
+            Some(semver::Version::parse(&version_string)
+                 .expect(&format!("Failed to parse macOS version {}", version_string)))
+        } else {
+            None
+        }
+    }
+
+    fn mode() -> &'static str {
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
     }
 }
 
@@ -300,14 +434,16 @@ pub struct ReftestHarness<'a> {
     wrench: &'a mut Wrench,
     window: &'a mut WindowWrapper,
     rx: &'a Receiver<NotifierEvent>,
+    environment: ReftestEnvironment,
 }
 impl<'a> ReftestHarness<'a> {
     pub fn new(wrench: &'a mut Wrench, window: &'a mut WindowWrapper, rx: &'a Receiver<NotifierEvent>) -> Self {
-        ReftestHarness { wrench, window, rx }
+        let environment = ReftestEnvironment::new();
+        ReftestHarness { wrench, window, rx, environment }
     }
 
     pub fn run(mut self, base_manifest: &Path, reftests: Option<&Path>, options: &ReftestOptions) -> usize {
-        let manifest = ReftestManifest::new(base_manifest, options);
+        let manifest = ReftestManifest::new(base_manifest, &self.environment, options);
         let reftests = manifest.find(reftests.unwrap_or(&PathBuf::new()));
 
         let mut total_passing = 0;
@@ -358,30 +494,46 @@ impl<'a> ReftestHarness<'a> {
         }
 
         let window_size = self.window.get_inner_size();
-        let reference = match t.reference.extension().unwrap().to_str().unwrap() {
-            "yaml" => {
-                let (reference, _) = self.render_yaml(
-                    t.reference.as_path(),
-                    window_size,
+        let reference_image = match t.reference.extension().unwrap().to_str().unwrap() {
+            "yaml" => None,
+            "png" => Some(self.load_image(t.reference.as_path(), ImageFormat::PNG)),
+            other => panic!("Unknown reftest extension: {}", other),
+        };
+        let test_size = reference_image.as_ref().map_or(window_size, |img| img.size);
+
+        // The reference can be smaller than the window size, in which case
+        // we only compare the intersection.
+        //
+        // Note also that, when we have multiple test scenes in sequence, we
+        // want to test the picture caching machinery. But since picture caching
+        // only takes effect after the result has been the same several frames in
+        // a row, we need to render the scene multiple times.
+        let mut images = vec![];
+        let mut results = vec![];
+
+        for filename in t.test.iter() {
+            let output = self.render_yaml(
+                &filename,
+                test_size,
+                t.font_render_mode,
+                t.allow_mipmaps,
+            );
+            images.push(output.image);
+            results.push(output.results);
+        }
+
+        let reference = match reference_image {
+            Some(image) => image,
+            None => {
+                let output = self.render_yaml(
+                    &t.reference,
+                    test_size,
                     t.font_render_mode,
                     t.allow_mipmaps,
                 );
-                reference
+                output.image
             }
-            "png" => {
-                self.load_image(t.reference.as_path(), ImageFormat::PNG)
-            }
-            other => panic!("Unknown reftest extension: {}", other),
         };
-
-        // the reference can be smaller than the window size,
-        // in which case we only compare the intersection
-        let (test, stats) = self.render_yaml(
-            t.test.as_path(),
-            reference.size,
-            t.font_render_mode,
-            t.allow_mipmaps,
-        );
 
         if t.disable_dual_source_blending {
             self.wrench
@@ -391,42 +543,21 @@ impl<'a> ReftestHarness<'a> {
                 );
         }
 
+        for extra_check in t.extra_checks.iter() {
+            if !extra_check.run(&results) {
+                println!(
+                    "REFTEST TEST-UNEXPECTED-FAIL | {} | Failing Check: {:?} | Actual Results: {:?}",
+                    t,
+                    extra_check,
+                    results,
+                );
+                println!("REFTEST TEST-END | {}", t);
+                return false;
+            }
+        }
+
+        let test = images.pop().unwrap();
         let comparison = test.compare(&reference);
-
-        if let Some(expected_draw_calls) = t.expected_draw_calls {
-            if expected_draw_calls != stats.total_draw_calls {
-                println!("REFTEST TEST-UNEXPECTED-FAIL | {} | {}/{} | expected_draw_calls",
-                    t,
-                    stats.total_draw_calls,
-                    expected_draw_calls
-                );
-                println!("REFTEST TEST-END | {}", t);
-                return false;
-            }
-        }
-        if let Some(expected_alpha_targets) = t.expected_alpha_targets {
-            if expected_alpha_targets != stats.alpha_target_count {
-                println!("REFTEST TEST-UNEXPECTED-FAIL | {} | {}/{} | alpha_target_count",
-                    t,
-                    stats.alpha_target_count,
-                    expected_alpha_targets
-                );
-                println!("REFTEST TEST-END | {}", t);
-                return false;
-            }
-        }
-        if let Some(expected_color_targets) = t.expected_color_targets {
-            if expected_color_targets != stats.color_target_count {
-                println!("REFTEST TEST-UNEXPECTED-FAIL | {} | {}/{} | color_target_count",
-                    t,
-                    stats.color_target_count,
-                    expected_color_targets
-                );
-                println!("REFTEST TEST-END | {}", t);
-                return false;
-            }
-        }
-
         match (&t.op, comparison) {
             (&ReftestOp::Equal, ReftestImageComparison::Equal) => true,
             (
@@ -483,7 +614,7 @@ impl<'a> ReftestHarness<'a> {
         size: DeviceIntSize,
         font_render_mode: Option<FontRenderMode>,
         allow_mipmaps: bool,
-    ) -> (ReftestImage, RendererStats) {
+    ) -> YamlRenderOutput {
         let mut reader = YamlFrameReader::new(filename);
         reader.set_font_render_mode(font_render_mode);
         reader.allow_mipmaps(allow_mipmaps);
@@ -493,7 +624,7 @@ impl<'a> ReftestHarness<'a> {
 
         // wait for the frame
         self.rx.recv().unwrap();
-        let stats = self.wrench.render();
+        let results = self.wrench.render();
 
         let window_size = self.window.get_inner_size();
         assert!(
@@ -503,7 +634,10 @@ impl<'a> ReftestHarness<'a> {
         );
 
         // taking the bottom left sub-rectangle
-        let rect = DeviceIntRect::new(DeviceIntPoint::new(0, window_size.height - size.height), size);
+        let rect = FramebufferIntRect::new(
+            FramebufferIntPoint::new(0, window_size.height - size.height),
+            FramebufferIntSize::new(size.width, size.height),
+        );
         let pixels = self.wrench.renderer.read_pixels_rgba8(rect);
         self.window.swap_buffers();
 
@@ -515,6 +649,9 @@ impl<'a> ReftestHarness<'a> {
 
         reader.deinit(self.wrench);
 
-        (ReftestImage { data: pixels, size }, stats)
+        YamlRenderOutput {
+            image: ReftestImage { data: pixels, size },
+            results,
+        }
     }
 }

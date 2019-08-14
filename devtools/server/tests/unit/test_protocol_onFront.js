@@ -8,7 +8,7 @@
  */
 
 const protocol = require("devtools/shared/protocol");
-const {RetVal} = protocol;
+const { RetVal } = protocol;
 
 const childSpec = protocol.generateActorSpec({
   typeName: "childActor",
@@ -20,10 +20,7 @@ const ChildActor = protocol.ActorClassWithSpec(childSpec, {
     this.childID = id;
   },
 
-  form: function(detail) {
-    if (detail === "actorid") {
-      return this.actorID;
-    }
+  form: function() {
     return {
       actor: this.actorID,
       childID: this.childID,
@@ -69,23 +66,21 @@ const RootActor = protocol.ActorClassWithSpec(rootSpec, {
   },
 });
 
-const ChildFront = protocol.FrontClassWithSpec(childSpec, {
-  form(form, detail) {
-    if (detail === "actorid") {
-      return;
-    }
+class ChildFront extends protocol.FrontClassWithSpec(childSpec) {
+  form(form) {
     this.childID = form.childID;
-  },
-});
+  }
+}
+protocol.registerFront(ChildFront);
 
-const RootFront = protocol.FrontClassWithSpec(rootSpec, {
-  initialize(client) {
+class RootFront extends protocol.FrontClassWithSpec(rootSpec) {
+  constructor(client) {
+    super(client);
     this.actorID = "root";
-    protocol.Front.prototype.initialize.call(this, client);
     // Root owns itself.
     this.manage(this);
-  },
-});
+  }
+}
 
 add_task(async function run_test() {
   DebuggerServer.createRootActor = RootActor;
@@ -103,27 +98,46 @@ add_task(async function run_test() {
   });
 
   const firstChild = await rootFront.createChild();
-  ok(firstChild instanceof ChildFront, "createChild returns a ChildFront instance");
+  ok(
+    firstChild instanceof ChildFront,
+    "createChild returns a ChildFront instance"
+  );
   equal(firstChild.childID, 0, "First child has ID=0");
 
-  equal(fronts.length, 1,
-    "onFront fires the callback, even if the front is created in the future");
-  equal(fronts[0], firstChild,
-    "onFront fires the callback with the right front instance");
+  equal(
+    fronts.length,
+    1,
+    "onFront fires the callback, even if the front is created in the future"
+  );
+  equal(
+    fronts[0],
+    firstChild,
+    "onFront fires the callback with the right front instance"
+  );
 
   const onFrontAfter = await new Promise(resolve => {
     rootFront.onFront("childActor", resolve);
   });
-  equal(onFrontAfter, firstChild,
+  equal(
+    onFrontAfter,
+    firstChild,
     "onFront fires the callback, even if the front is already created, " +
-    " with the same front instance");
+      " with the same front instance"
+  );
 
-  equal(fronts.length, 1,
-    "There is still only one front reported from the first listener");
+  equal(
+    fronts.length,
+    1,
+    "There is still only one front reported from the first listener"
+  );
 
   const secondChild = await rootFront.createChild();
 
-  equal(fronts.length, 2, "After a second call to createChild, two fronts are reported");
+  equal(
+    fronts.length,
+    2,
+    "After a second call to createChild, two fronts are reported"
+  );
   equal(fronts[1], secondChild, "And the new front is the right instance");
 
   trace.close();

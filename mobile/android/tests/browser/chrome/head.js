@@ -1,35 +1,45 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-function fuzzyEquals(a, b) {
-  return (Math.abs(a - b) < 1e-6);
-}
-
-function promiseBrowserEvent(browserOrFrame, eventType, options) {
-  return new Promise((resolve) => {
+function promiseBrowserEvent(browserOrFrame, eventType, options = {}) {
+  let listenerOptions = { capture: true };
+  if (options.mozSystemGroup) {
+    listenerOptions.mozSystemGroup = true;
+  }
+  return new Promise(resolve => {
     function handle(event) {
       // Since we'll be redirecting, don't make assumptions about the given URL and the loaded URL
-      if (event.target != (browserOrFrame.contentDocument || browserOrFrame.document) ||
-                          event.target.location.href == "about:blank") {
-        info("Skipping spurious '" + eventType + "' event" + " for " + event.target.location.href);
+      let document = browserOrFrame.contentDocument || browserOrFrame.document;
+      if (
+        (event.target != document &&
+          event.target != document.ownerGlobal.visualViewport) ||
+        document.location.href == "about:blank"
+      ) {
+        info(
+          "Skipping spurious '" +
+            eventType +
+            "' event" +
+            " for " +
+            document.location.href
+        );
         return;
       }
       info("Received event " + eventType + " from browser");
-      browserOrFrame.removeEventListener(eventType, handle, true);
-      if (options && options.resolveAtNextTick) {
+      browserOrFrame.removeEventListener(eventType, handle, listenerOptions);
+      if (options.resolveAtNextTick) {
         Services.tm.dispatchToMainThread(() => resolve(event));
       } else {
         resolve(event);
       }
     }
 
-    browserOrFrame.addEventListener(eventType, handle, true);
+    browserOrFrame.addEventListener(eventType, handle, listenerOptions);
     info("Now waiting for " + eventType + " event from browser");
   });
 }
 
 function promiseTabEvent(container, eventType) {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     function handle(event) {
       info("Received event " + eventType + " from container");
       container.removeEventListener(eventType, handle, true);
@@ -42,7 +52,9 @@ function promiseTabEvent(container, eventType) {
 }
 
 function promiseNotification(aTopic) {
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
+  const { Services } = ChromeUtils.import(
+    "resource://gre/modules/Services.jsm"
+  );
 
   return new Promise((resolve, reject) => {
     function observe(subject, topic, data) {
@@ -56,7 +68,9 @@ function promiseNotification(aTopic) {
 }
 
 function promiseLinkVisit(url) {
-  ChromeUtils.import("resource://gre/modules/Services.jsm");
+  const { Services } = ChromeUtils.import(
+    "resource://gre/modules/Services.jsm"
+  );
 
   var linkVisitedTopic = "link-visited";
   return new Promise((resolve, reject) => {
@@ -64,7 +78,13 @@ function promiseLinkVisit(url) {
       info("Received " + topic + " notification from Gecko");
       var uri = subject.QueryInterface(Ci.nsIURI);
       if (uri.spec != url) {
-        info("Visited URL " + uri.spec + " is not desired URL " + url + "; ignoring.");
+        info(
+          "Visited URL " +
+            uri.spec +
+            " is not desired URL " +
+            url +
+            "; ignoring."
+        );
         return;
       }
       info("Visited URL " + uri.spec + " is desired URL " + url);
@@ -72,7 +92,12 @@ function promiseLinkVisit(url) {
       resolve();
     }
     Services.obs.addObserver(observe, linkVisitedTopic);
-    info("Now waiting for " + linkVisitedTopic + " notification from Gecko with URL " + url);
+    info(
+      "Now waiting for " +
+        linkVisitedTopic +
+        " notification from Gecko with URL " +
+        url
+    );
   });
 }
 
@@ -85,13 +110,10 @@ function makeObserver(observerId) {
     promise: deferred.promise,
     observe: function(subject, topic, data) {
       ret.count += 1;
-      let msg = { subject: subject,
-                  topic: topic,
-                  data: data };
+      let msg = { subject: subject, topic: topic, data: data };
       deferred.resolve(msg);
     },
   };
 
   return ret;
 }
-

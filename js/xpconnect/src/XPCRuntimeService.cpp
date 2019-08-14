@@ -42,6 +42,13 @@ JSObject* BackstagePass::GetGlobalJSObject() {
   return nullptr;
 }
 
+JSObject* BackstagePass::GetGlobalJSObjectPreserveColor() const {
+  if (mWrapper) {
+    return mWrapper->GetFlatJSObjectPreserveColor();
+  }
+  return nullptr;
+}
+
 void BackstagePass::SetGlobalObject(JSObject* global) {
   nsISupports* p = XPCWrappedNative::Get(global);
   MOZ_ASSERT(p);
@@ -61,7 +68,8 @@ BackstagePass::Resolve(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
 
 NS_IMETHODIMP
 BackstagePass::NewEnumerate(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
-                            JSObject* objArg, JS::AutoIdVector& properties,
+                            JSObject* objArg,
+                            JS::MutableHandleIdVector properties,
                             bool enumerableOnly, bool* _retval) {
   JS::RootedObject obj(cx, objArg);
   *_retval = WebIDLGlobalNameHash::NewEnumerateSystemGlobal(cx, obj, properties,
@@ -71,13 +79,9 @@ BackstagePass::NewEnumerate(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
 
 /***************************************************************************/
 NS_IMETHODIMP
-BackstagePass::GetInterfaces(uint32_t* aCount, nsIID*** aArray) {
-  *aCount = 2;
-  nsIID** array = static_cast<nsIID**>(moz_xmalloc(2 * sizeof(nsIID*)));
-  *aArray = array;
-
-  array[0] = NS_GET_IID(nsIXPCScriptable).Clone();
-  array[1] = NS_GET_IID(nsIScriptObjectPrincipal).Clone();
+BackstagePass::GetInterfaces(nsTArray<nsIID>& aArray) {
+  aArray = nsTArray<nsIID>{NS_GET_IID(nsIXPCScriptable),
+                           NS_GET_IID(nsIScriptObjectPrincipal)};
   return NS_OK;
 }
 

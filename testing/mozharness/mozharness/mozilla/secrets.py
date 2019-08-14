@@ -50,13 +50,13 @@ class SecretsMixin(object):
         dirs = self.query_abs_dirs()
         secret_files = self.config.get('secret_files', [])
 
-        scm_level = self.config.get('scm_level', 1)
+        scm_level = int(os.environ.get('MOZ_SCM_LEVEL', '1'))
         subst = {
             'scm-level': scm_level,
         }
 
         for sf in secret_files:
-            filename = sf['filename']
+            filename = os.path.abspath(sf['filename'])
             secret_name = sf['secret_name'] % subst
             min_scm_level = sf.get('min_scm_level', 0)
             if scm_level < min_scm_level:

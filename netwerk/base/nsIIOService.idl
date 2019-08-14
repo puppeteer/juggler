@@ -37,7 +37,7 @@ class ServiceWorkerDescriptor;
  * as a convenience to the programmer and in some cases to improve performance
  * by eliminating intermediate data structures and interfaces.
  */
-[scriptable, uuid(4286de5a-b2ea-446f-8f70-e2a461f42694)]
+[scriptable, builtinclass, uuid(4286de5a-b2ea-446f-8f70-e2a461f42694)]
 interface nsIIOService : nsISupports
 {
     /**
@@ -74,7 +74,7 @@ interface nsIIOService : nsISupports
      * @param aFile specifies the file path
      * @return reference to a new nsIURI object
      *
-     * Note: in the future, for perf reasons we should allow 
+     * Note: in the future, for perf reasons we should allow
      * callers to specify whether this is a file or directory by
      * splitting this  into newDirURI() and newActualFileURI().
      */
@@ -101,12 +101,12 @@ interface nsIIOService : nsISupports
      * Keep in mind that URIs coming from a webpage should *never* use the
      * systemPrincipal as the loadingPrincipal.
      */
-    nsIChannel newChannelFromURI2(in nsIURI aURI,
-                                  in Node aLoadingNode,
-                                  in nsIPrincipal aLoadingPrincipal,
-                                  in nsIPrincipal aTriggeringPrincipal,
-                                  in unsigned long aSecurityFlags,
-                                  in unsigned long aContentPolicyType);
+    nsIChannel newChannelFromURI(in nsIURI aURI,
+                                 in Node aLoadingNode,
+                                 in nsIPrincipal aLoadingPrincipal,
+                                 in nsIPrincipal aTriggeringPrincipal,
+                                 in unsigned long aSecurityFlags,
+                                 in unsigned long aContentPolicyType);
 
     [noscript, nostdcall, notxpcom]
     nsresult NewChannelFromURIWithClientAndController(in nsIURI aURI,
@@ -120,28 +120,28 @@ interface nsIIOService : nsISupports
                                                       out nsIChannel aResult);
 
     /**
-     * Equivalent to newChannelFromURI2(aURI, aLoadingNode, ...)
+     * Equivalent to newChannelFromURI(aURI, aLoadingNode, ...)
      */
     nsIChannel newChannelFromURIWithLoadInfo(in nsIURI aURI,
                                              in nsILoadInfo aLoadInfo);
 
     /**
-     * Equivalent to newChannelFromURI2(newURI(...))
+     * Equivalent to newChannelFromURI(newURI(...))
      */
-    nsIChannel newChannel2(in AUTF8String aSpec,
-                           in string aOriginCharset,
-                           in nsIURI aBaseURI,
-                           in Node aLoadingNode,
-                           in nsIPrincipal aLoadingPrincipal,
-                           in nsIPrincipal aTriggeringPrincipal,
-                           in unsigned long aSecurityFlags,
-                           in unsigned long aContentPolicyType);
+    nsIChannel newChannel(in AUTF8String aSpec,
+                          in string aOriginCharset,
+                          in nsIURI aBaseURI,
+                          in Node aLoadingNode,
+                          in nsIPrincipal aLoadingPrincipal,
+                          in nsIPrincipal aTriggeringPrincipal,
+                          in unsigned long aSecurityFlags,
+                          in unsigned long aContentPolicyType);
 
     /**
-     * Returns true if networking is in "offline" mode. When in offline mode, 
-     * attempts to access the network will fail (although this does not 
-     * necessarily correlate with whether there is actually a network 
-     * available -- that's hard to detect without causing the dialer to 
+     * Returns true if networking is in "offline" mode. When in offline mode,
+     * attempts to access the network will fail (although this does not
+     * necessarily correlate with whether there is actually a network
+     * available -- that's hard to detect without causing the dialer to
      * come up).
      *
      * Changing this fires observer notifications ... see below.
@@ -226,14 +226,14 @@ interface nsIIOService : nsISupports
      * then loadingPrincipal must be equal to loadingNode->NodePrincipal().
      * But less error prone is to just supply a loadingNode.
      */
-    nsIChannel newChannelFromURIWithProxyFlags2(in nsIURI aURI,
-                                                in nsIURI aProxyURI,
-                                                in unsigned long aProxyFlags,
-                                                in Node aLoadingNode,
-                                                in nsIPrincipal aLoadingPrincipal,
-                                                in nsIPrincipal aTriggeringPrincipal,
-                                                in unsigned long aSecurityFlags,
-                                                in unsigned long aContentPolicyType);
+    nsIChannel newChannelFromURIWithProxyFlags(in nsIURI aURI,
+                                               in nsIURI aProxyURI,
+                                               in unsigned long aProxyFlags,
+                                               in Node aLoadingNode,
+                                               in nsIPrincipal aLoadingPrincipal,
+                                               in nsIPrincipal aTriggeringPrincipal,
+                                               in unsigned long aSecurityFlags,
+                                               in unsigned long aContentPolicyType);
 };
 
 %{C++

@@ -5,7 +5,12 @@
 "use strict";
 
 const Services = require("Services");
-const { applyMiddleware, createStore } = require("devtools/client/shared/vendor/redux");
+const {
+  applyMiddleware,
+  createStore,
+} = require("devtools/client/shared/vendor/redux");
+
+const { MIN_COLUMN_WIDTH, DEFAULT_COLUMN_WIDTH } = require("./constants");
 
 // Middleware
 const batching = require("./middleware/batching");
@@ -21,7 +26,8 @@ const { FilterTypes, Filters } = require("./reducers/filters");
 const { Requests } = require("./reducers/requests");
 const { Sort } = require("./reducers/sort");
 const { TimingMarkers } = require("./reducers/timing-markers");
-const { UI, Columns } = require("./reducers/ui");
+const { UI, Columns, ColumnsData } = require("./reducers/ui");
+const { WebSockets } = require("./reducers/web-sockets");
 
 /**
  * Configure state and middleware for the Network monitor tool.
@@ -37,7 +43,9 @@ function configureStore(connector, telemetry) {
     timingMarkers: new TimingMarkers(),
     ui: UI({
       columns: getColumnState(),
+      columnsData: getColumnsData(),
     }),
+    webSockets: new WebSockets(),
   };
 
   // Prepare middleware.
@@ -47,7 +55,7 @@ function configureStore(connector, telemetry) {
     batching,
     recording(connector),
     throttling(connector),
-    eventTelemetry(connector, telemetry),
+    eventTelemetry(connector, telemetry)
   );
 
   return createStore(rootReducer, initialState, middleware);
@@ -71,12 +79,33 @@ function getColumnState() {
 }
 
 /**
+ * Get columns data (width, min-width)
+ */
+function getColumnsData() {
+  const columnsData = getPref("devtools.netmonitor.columnsData");
+  if (!columnsData.length) {
+    return ColumnsData();
+  }
+
+  const newMap = new Map();
+  columnsData.forEach(col => {
+    if (col.name) {
+      col.minWidth = col.minWidth ? col.minWidth : MIN_COLUMN_WIDTH;
+      col.width = col.width ? col.width : DEFAULT_COLUMN_WIDTH;
+      newMap.set(col.name, col);
+    }
+  });
+
+  return newMap;
+}
+
+/**
  * Get filter state from preferences.
  */
 function getFilterState() {
   const activeFilters = {};
   const filters = getPref("devtools.netmonitor.filters");
-  filters.forEach((filter) => {
+  filters.forEach(filter => {
     activeFilters[filter] = true;
   });
   return new FilterTypes(activeFilters);

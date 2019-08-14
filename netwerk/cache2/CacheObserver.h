@@ -27,38 +27,39 @@ class CacheObserver : public nsIObserver, public nsSupportsWeakReference {
   // Access to preferences
   static bool UseDiskCache() { return sUseDiskCache; }
   static bool UseMemoryCache() { return sUseMemoryCache; }
-  static uint32_t MetadataMemoryLimit()  // result in bytes.
+  static uint32_t MetadataMemoryLimit()  // result in kilobytes.
   {
-    return sMetadataMemoryLimit << 10;
+    return sMetadataMemoryLimit;
   }
-  static uint32_t MemoryCacheCapacity();  // result in bytes.
-  static uint32_t DiskCacheCapacity()     // result in bytes.
+  static uint32_t MemoryCacheCapacity();  // result in kilobytes.
+  static uint32_t DiskCacheCapacity()     // result in kilobytes.
   {
-    return sDiskCacheCapacity << 10;
+    return sDiskCacheCapacity;
   }
-  static void SetDiskCacheCapacity(uint32_t);  // parameter in bytes.
-  static uint32_t DiskFreeSpaceSoftLimit()     // result in bytes.
+  static void SetDiskCacheCapacity(uint32_t);  // parameter in kilobytes.
+  static uint32_t DiskFreeSpaceSoftLimit()     // result in kilobytes.
   {
-    return sDiskFreeSpaceSoftLimit << 10;
+    return sDiskFreeSpaceSoftLimit;
   }
-  static uint32_t DiskFreeSpaceHardLimit()  // result in bytes.
+  static uint32_t DiskFreeSpaceHardLimit()  // result in kilobytes.
   {
-    return sDiskFreeSpaceHardLimit << 10;
+    return sDiskFreeSpaceHardLimit;
   }
   static bool SmartCacheSizeEnabled() { return sSmartCacheSizeEnabled; }
   static uint32_t PreloadChunkCount() { return sPreloadChunkCount; }
-  static uint32_t MaxMemoryEntrySize()  // result in bytes.
+  static uint32_t MaxMemoryEntrySize()  // result in kilobytes.
   {
-    return sMaxMemoryEntrySize << 10;
+    return sMaxMemoryEntrySize;
   }
-  static uint32_t MaxDiskEntrySize()  // result in bytes.
+  static uint32_t MaxDiskEntrySize()  // result in kilobytes.
   {
-    return sMaxDiskEntrySize << 10;
+    return sMaxDiskEntrySize;
   }
-  static uint32_t MaxDiskChunksMemoryUsage(bool aPriority)  // result in bytes.
+  static uint32_t MaxDiskChunksMemoryUsage(
+      bool aPriority)  // result in kilobytes.
   {
-    return aPriority ? sMaxDiskPriorityChunksMemoryUsage << 10
-                     : sMaxDiskChunksMemoryUsage << 10;
+    return aPriority ? sMaxDiskPriorityChunksMemoryUsage
+                     : sMaxDiskChunksMemoryUsage;
   }
   static uint32_t CompressionLevel() { return sCompressionLevel; }
   static uint32_t HalfLifeSeconds() { return sHalfLifeHours * 60.0F * 60.0F; }
@@ -69,6 +70,13 @@ class CacheObserver : public nsIObserver, public nsSupportsWeakReference {
   static void SetCacheFSReported();
   static bool HashStatsReported() { return sHashStatsReported; }
   static void SetHashStatsReported();
+  static uint32_t TelemetryReportID() { return sTelemetryReportID; }
+  static void SetTelemetryReportID(uint32_t);
+  static uint32_t CacheAmountWritten()  // result in kilobytes
+  {
+    return sCacheAmountWritten;
+  }
+  static void SetCacheAmountWritten(uint32_t);  // parameter in kilobytes.
   static void ParentDirOverride(nsIFile** aDir);
 
   static bool EntryIsTooBig(int64_t aSize, bool aUsingDisk);
@@ -81,11 +89,13 @@ class CacheObserver : public nsIObserver, public nsSupportsWeakReference {
   }
 
  private:
-  static CacheObserver* sSelf;
+  static StaticRefPtr<CacheObserver> sSelf;
 
   void StoreDiskCacheCapacity();
   void StoreCacheFSReported();
   void StoreHashStatsReported();
+  void StoreTelemetryReportID();
+  void StoreCacheAmountWritten();
   void AttachToPreferences();
 
   static bool sUseMemoryCache;
@@ -96,7 +106,7 @@ class CacheObserver : public nsIObserver, public nsSupportsWeakReference {
   static Atomic<uint32_t, Relaxed> sDiskCacheCapacity;
   static uint32_t sDiskFreeSpaceSoftLimit;
   static uint32_t sDiskFreeSpaceHardLimit;
-  static bool sSmartCacheSizeEnabled;
+  static Atomic<bool, Relaxed> sSmartCacheSizeEnabled;
   static uint32_t sPreloadChunkCount;
   static int32_t sMaxMemoryEntrySize;
   static int32_t sMaxDiskEntrySize;
@@ -110,6 +120,8 @@ class CacheObserver : public nsIObserver, public nsSupportsWeakReference {
   static bool sHashStatsReported;
   static Atomic<uint32_t, Relaxed> sMaxShutdownIOLag;
   static Atomic<PRIntervalTime> sShutdownDemandedTime;
+  static Atomic<uint32_t, Relaxed> sTelemetryReportID;
+  static Atomic<uint32_t, Relaxed> sCacheAmountWritten;
 
   // Non static properties, accessible via sSelf
   nsCOMPtr<nsIFile> mCacheParentDirectoryOverride;

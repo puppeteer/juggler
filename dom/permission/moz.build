@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM")
+    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
 
 EXPORTS.mozilla.dom += [
     'Permissions.h',
@@ -17,6 +17,10 @@ UNIFIED_SOURCES += [
     'Permissions.cpp',
     'PermissionStatus.cpp',
     'PermissionUtils.cpp',
+]
+
+LOCAL_INCLUDES += [
+    '/extensions/permissions',
 ]
 
 MOCHITEST_MANIFESTS += ['tests/mochitest.ini']

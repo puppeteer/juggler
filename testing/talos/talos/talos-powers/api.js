@@ -4,7 +4,9 @@
 
 /* globals ExtensionAPI */
 
-ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   OS: "resource://gre/modules/osfile.jsm",
@@ -12,10 +14,19 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PerTestCoverageUtils: "resource://testing-common/PerTestCoverageUtils.jsm",
 });
 
-XPCOMUtils.defineLazyServiceGetter(this, "resProto",
-                                   "@mozilla.org/network/protocol;1?name=resource",
-                                   "nsISubstitutingProtocolHandler");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "resProto",
+  "@mozilla.org/network/protocol;1?name=resource",
+  "nsISubstitutingProtocolHandler"
+);
 
+// To support the 'new TextEncoder()' call inside of 'profilerFinish()' here,
+// we have to import TextEncoder.  It's not automagically defined for us,
+// because we are in a child process, because we are an extension. See second
+// category in https://bugzilla.mozilla.org/show_bug.cgi?id=1501127#c2
+//
+// eslint-disable-next-line mozilla/reject-importGlobalProperties
 Cu.importGlobalProperties(["TextEncoder"]);
 
 const Cm = Components.manager.QueryInterface(Ci.nsIComponentRegistrar);
@@ -36,8 +47,12 @@ TalosPowersService.prototype = {
   QueryInterface: ChromeUtils.generateQI([]),
 
   register() {
-    Cm.registerFactory(this.classID, this.classDescription,
-                       this.contractID, this.factory);
+    Cm.registerFactory(
+      this.classID,
+      this.classDescription,
+      this.contractID,
+      this.factory
+    );
 
     void Cc[this.contractID].getService();
   },
@@ -101,10 +116,12 @@ TalosPowersService.prototype = {
    *          The thread names to sample.
    */
   profilerBegin(data) {
-    Services.profiler
-            .StartProfiler(data.entries, data.interval,
-                           ["js", "leaf", "stackwalk", "threads"], 4,
-                           data.threadsArray, data.threadsArray.length);
+    Services.profiler.StartProfiler(
+      data.entries,
+      data.interval,
+      ["js", "leaf", "stackwalk", "threads"],
+      data.threadsArray
+    );
 
     Services.profiler.PauseSampling();
   },
@@ -122,23 +139,26 @@ TalosPowersService.prototype = {
    */
   profilerFinish(profileFile) {
     return new Promise((resolve, reject) => {
-      Services.profiler.getProfileDataAsync().then((profile) => {
-        let encoder = new TextEncoder();
-        let array = encoder.encode(JSON.stringify(profile));
+      Services.profiler.getProfileDataAsync().then(
+        profile => {
+          let encoder = new TextEncoder();
+          let array = encoder.encode(JSON.stringify(profile));
 
-        OS.File.writeAtomic(profileFile, array, {
-          tmpPath: profileFile + ".tmp",
-        }).then(() => {
-          Services.profiler.StopProfiler();
-          resolve();
-          Services.obs.notifyObservers(null, "talos-profile-gathered");
-        });
-      }, (error) => {
-        Cu.reportError("Failed to gather profile: " + error);
-        // FIXME: We should probably send a message down to the
-        // child which causes it to reject the waiting Promise.
-        reject();
-      });
+          OS.File.writeAtomic(profileFile, array, {
+            tmpPath: profileFile + ".tmp",
+          }).then(() => {
+            Services.profiler.StopProfiler();
+            resolve();
+            Services.obs.notifyObservers(null, "talos-profile-gathered");
+          });
+        },
+        error => {
+          Cu.reportError("Failed to gather profile: " + error);
+          // FIXME: We should probably send a message down to the
+          // child which causes it to reject the waiting Promise.
+          reject();
+        }
+      );
     });
   },
 
@@ -225,7 +245,10 @@ TalosPowersService.prototype = {
 
   async forceQuit(messageData) {
     if (messageData && messageData.waitForSafeBrowsing) {
-      let SafeBrowsing = ChromeUtils.import("resource://gre/modules/SafeBrowsing.jsm", {}).SafeBrowsing;
+      let SafeBrowsing = ChromeUtils.import(
+        "resource://gre/modules/SafeBrowsing.jsm",
+        {}
+      ).SafeBrowsing;
 
       // Speed things up in case nobody else called this:
       SafeBrowsing.init();
@@ -242,16 +265,8 @@ TalosPowersService.prototype = {
     // down, since some caching that can influence future runs in this profile
     // keys off of that notification.
     let topWin = BrowserWindowTracker.getTopWindow();
-    if (topWin &&
-        topWin.gBrowserInit &&
-        !topWin.gBrowserInit.idleTasksFinished) {
-      await new Promise(resolve => {
-        let obs = (subject, topic, data) => {
-          Services.obs.removeObserver(obs, "browser-idle-startup-tasks-finished");
-          resolve();
-        };
-        Services.obs.addObserver(obs, "browser-idle-startup-tasks-finished");
-      });
+    if (topWin && topWin.gBrowserInit) {
+      await topWin.gBrowserInit.idleTasksFinishedPromise;
     }
 
     for (let domWindow of Services.wm.getEnumerator(null)) {
@@ -277,13 +292,17 @@ TalosPowersService.prototype = {
       let obs = function(subject, topic) {
         Services.obs.removeObserver(this, topic);
         startupInfo = Services.startup.getStartupInfo();
-        mm.sendAsyncMessage("TalosPowersContent:GetStartupInfo:Result",
-                            startupInfo);
+        mm.sendAsyncMessage(
+          "TalosPowersContent:GetStartupInfo:Result",
+          startupInfo
+        );
       };
       Services.obs.addObserver(obs, "widget-first-paint");
     } else {
-      mm.sendAsyncMessage("TalosPowersContent:GetStartupInfo:Result",
-                          startupInfo);
+      mm.sendAsyncMessage(
+        "TalosPowersContent:GetStartupInfo:Result",
+        startupInfo
+      );
     }
   },
 
@@ -329,7 +348,9 @@ TalosPowersService.prototype = {
     },
 
     dumpAboutSupport(arg, callback, win) {
-      ChromeUtils.import("resource://gre/modules/Troubleshoot.jsm");
+      const { Troubleshoot } = ChromeUtils.import(
+        "resource://gre/modules/Troubleshoot.jsm"
+      );
       Troubleshoot.snapshot(function(snapshot) {
         dump("about:support\t" + JSON.stringify(snapshot));
       });
@@ -347,20 +368,32 @@ TalosPowersService.prototype = {
     }
 
     let command = msg.data.command;
-    if (!this.ParentExecServices.hasOwnProperty(command.name))
-      throw new Error("TalosPowers:ParentExec: Invalid service '" + command.name + "'");
+    if (!this.ParentExecServices.hasOwnProperty(command.name)) {
+      throw new Error(
+        "TalosPowers:ParentExec: Invalid service '" + command.name + "'"
+      );
+    }
 
-    this.ParentExecServices[command.name](command.data, sendResult, msg.target.ownerGlobal);
+    this.ParentExecServices[command.name](
+      command.data,
+      sendResult,
+      msg.target.ownerGlobal
+    );
   },
-
 };
 
 this.talos_powers = class extends ExtensionAPI {
   onStartup() {
     let uri = Services.io.newURI("content/", null, this.extension.rootURI);
-    resProto.setSubstitutionWithFlags("talos-powers", uri, resProto.ALLOW_CONTENT_ACCESS);
+    resProto.setSubstitutionWithFlags(
+      "talos-powers",
+      uri,
+      resProto.ALLOW_CONTENT_ACCESS
+    );
 
-    frameScriptURL = this.extension.baseURI.resolve("chrome/talos-powers-content.js");
+    frameScriptURL = this.extension.baseURI.resolve(
+      "chrome/talos-powers-content.js"
+    );
 
     TalosPowersService.prototype.register();
   }

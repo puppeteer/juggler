@@ -19,9 +19,11 @@
 #ifndef wasm_code_h
 #define wasm_code_h
 
+#include "jit/shared/Assembler-shared.h"
 #include "js/HashTable.h"
 #include "threading/ExclusiveData.h"
 #include "vm/MutexIDs.h"
+#include "wasm/WasmGC.h"
 #include "wasm/WasmTypes.h"
 
 namespace js {
@@ -234,6 +236,11 @@ class FuncExport {
     return pod.eagerInterpEntryOffset_;
   }
 
+  bool canHaveJitEntry() const {
+    return !funcType_.temporarilyUnsupportedAnyRef() &&
+           JitOptions.enableWasmJitEntry;
+  }
+
   bool clone(const FuncExport& src) {
     mozilla::PodAssign(&pod, &src.pod);
     return funcType_.clone(src.funcType_);
@@ -292,11 +299,6 @@ class FuncImport {
 
 typedef Vector<FuncImport, 0, SystemAllocPolicy> FuncImportVector;
 
-// A wasm module can either use no memory, a unshared memory (ArrayBuffer) or
-// shared memory (SharedArrayBuffer).
-
-enum class MemoryUsage { None = false, Unshared = 1, Shared = 2 };
-
 // Metadata holds all the data that is needed to describe compiled wasm code
 // at runtime (as opposed to data that is only used to statically link or
 // instantiate a module).
@@ -312,7 +314,6 @@ enum class MemoryUsage { None = false, Unshared = 1, Shared = 2 };
 struct MetadataCacheablePod {
   ModuleKind kind;
   MemoryUsage memoryUsage;
-  HasGcTypes temporaryGcTypesConfigured;
   uint32_t minMemoryLength;
   uint32_t globalDataLength;
   Maybe<uint32_t> maxMemoryLength;
@@ -323,7 +324,6 @@ struct MetadataCacheablePod {
   explicit MetadataCacheablePod(ModuleKind kind)
       : kind(kind),
         memoryUsage(MemoryUsage::None),
-        temporaryGcTypesConfigured(HasGcTypes::False),
         minMemoryLength(0),
         globalDataLength(0),
         filenameIsURL(false) {}
@@ -394,7 +394,7 @@ struct Metadata : public ShareableBase<Metadata>, public MetadataCacheablePod {
     return getFuncName(NameContext::BeforeLocation, funcIndex, name);
   }
 
-  WASM_DECLARE_SERIALIZABLE_VIRTUAL(Metadata);
+  WASM_DECLARE_SERIALIZABLE(Metadata);
 };
 
 typedef RefPtr<Metadata> MutableMetadata;
@@ -411,6 +411,7 @@ struct MetadataTier {
   TrapSiteVectorArray trapSites;
   FuncImportVector funcImports;
   FuncExportVector funcExports;
+  StackMaps stackMaps;
 
   // Debug information, not serialized.
   Uint32Vector debugTrapFarJumpOffsets;
@@ -500,8 +501,7 @@ class LazyStubTier {
   LazyFuncExportVector exports_;
   size_t lastStubSegmentIndex_;
 
-  bool createMany(HasGcTypes gcTypesEnabled,
-                  const Uint32Vector& funcExportIndices,
+  bool createMany(const Uint32Vector& funcExportIndices,
                   const CodeTier& codeTier, size_t* stubSegmentIndex);
 
  public:
@@ -522,8 +522,7 @@ class LazyStubTier {
   // them in a single stub. Jit entries won't be used until
   // setJitEntries() is actually called, after the Code owner has committed
   // tier2.
-  bool createTier2(HasGcTypes gcTypesConfigured,
-                   const Uint32Vector& funcExportIndices,
+  bool createTier2(const Uint32Vector& funcExportIndices,
                    const CodeTier& codeTier, Maybe<size_t>* stubSegmentIndex);
   void setJitEntries(const Maybe<size_t>& stubSegmentIndex, const Code& code);
 
@@ -602,22 +601,20 @@ class JumpTables {
             const CodeRangeVector& codeRanges);
 
   void setJitEntry(size_t i, void* target) const {
-    // See comment in wasm::Module::finishTier2 and JumpTables::init.
+    // Make sure that write is atomic; see comment in wasm::Module::finishTier2
+    // to that effect.
     MOZ_ASSERT(i < numFuncs_);
-    jit_.get()[2 * i] = target;
-    jit_.get()[2 * i + 1] = target;
+    jit_.get()[i] = target;
   }
   void** getAddressOfJitEntry(size_t i) const {
     MOZ_ASSERT(i < numFuncs_);
-    MOZ_ASSERT(jit_.get()[2 * i]);
-    return &jit_.get()[2 * i];
+    MOZ_ASSERT(jit_.get()[i]);
+    return &jit_.get()[i];
   }
   size_t funcIndexFromJitEntry(void** target) const {
     MOZ_ASSERT(target >= &jit_.get()[0]);
-    MOZ_ASSERT(target <= &(jit_.get()[2 * numFuncs_ - 1]));
-    size_t index = (intptr_t*)target - (intptr_t*)&jit_.get()[0];
-    MOZ_ASSERT(index % 2 == 0);
-    return index / 2;
+    MOZ_ASSERT(target <= &(jit_.get()[numFuncs_ - 1]));
+    return (intptr_t*)target - (intptr_t*)&jit_.get()[0];
   }
 
   void setTieringEntry(size_t i, void* target) const {
@@ -699,6 +696,7 @@ class Code : public ShareableBase<Code> {
 
   const CallSite* lookupCallSite(void* returnAddress) const;
   const CodeRange* lookupFuncRange(void* pc) const;
+  const StackMap* lookupStackMap(uint8_t* nextPC) const;
   bool containsCodePC(const void* pc) const;
   bool lookupTrap(void* pc, Trap* trap, BytecodeOffset* bytecode) const;
 
@@ -725,6 +723,8 @@ class Code : public ShareableBase<Code> {
                                     const LinkData& linkData,
                                     Metadata& metadata, SharedCode* code);
 };
+
+void PatchDebugSymbolicAccesses(uint8_t* codeBase, jit::MacroAssembler& masm);
 
 }  // namespace wasm
 }  // namespace js

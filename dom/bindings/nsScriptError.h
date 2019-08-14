@@ -19,6 +19,8 @@
 #include "nsIScriptError.h"
 #include "nsString.h"
 
+class nsGlobalWindowInner;
+
 class nsScriptErrorNote final : public nsIScriptErrorNote {
  public:
   nsScriptErrorNote();
@@ -27,14 +29,16 @@ class nsScriptErrorNote final : public nsIScriptErrorNote {
   NS_DECL_NSISCRIPTERRORNOTE
 
   void Init(const nsAString& message, const nsAString& sourceName,
-            uint32_t lineNumber, uint32_t columnNumber);
+            uint32_t sourceId, uint32_t lineNumber, uint32_t columnNumber);
 
  private:
   virtual ~nsScriptErrorNote();
 
   nsString mMessage;
   nsString mSourceName;
+  nsString mCssSelectors;
   nsString mSourceLine;
+  uint32_t mSourceId;
   uint32_t mLineNumber;
   uint32_t mColumnNumber;
 };
@@ -49,6 +53,10 @@ class nsScriptErrorBase : public nsIScriptError {
 
   void AddNote(nsIScriptErrorNote* note);
 
+  static bool ComputeIsFromPrivateWindow(nsGlobalWindowInner* aWindow);
+
+  static bool ComputeIsFromChromeContext(nsGlobalWindowInner* aWindow);
+
  protected:
   virtual ~nsScriptErrorBase();
 
@@ -57,13 +65,15 @@ class nsScriptErrorBase : public nsIScriptError {
   void InitializationHelper(const nsAString& message,
                             const nsAString& sourceLine, uint32_t lineNumber,
                             uint32_t columnNumber, uint32_t flags,
-                            const nsACString& category,
-                            uint64_t aInnerWindowID);
+                            const nsACString& category, uint64_t aInnerWindowID,
+                            bool aFromChromeContext);
 
   nsCOMArray<nsIScriptErrorNote> mNotes;
   nsString mMessage;
   nsString mMessageName;
   nsString mSourceName;
+  nsString mCssSelectors;
+  uint32_t mSourceId;
   uint32_t mLineNumber;
   nsString mSourceLine;
   uint32_t mColumnNumber;
@@ -74,10 +84,11 @@ class nsScriptErrorBase : public nsIScriptError {
   uint64_t mInnerWindowID;
   int64_t mTimeStamp;
   uint64_t mTimeWarpTarget;
-  // mInitializedOnMainThread and mIsFromPrivateWindow are set on the main
-  // thread from InitializeOnMainThread().
+  // mInitializedOnMainThread, mIsFromPrivateWindow and mIsFromChromeContext are
+  // set on the main thread from InitializeOnMainThread().
   mozilla::Atomic<bool> mInitializedOnMainThread;
   bool mIsFromPrivateWindow;
+  bool mIsFromChromeContext;
 };
 
 class nsScriptError final : public nsScriptErrorBase {

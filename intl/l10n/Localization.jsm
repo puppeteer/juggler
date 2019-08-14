@@ -21,9 +21,9 @@
 /* eslint no-console: ["error", { allow: ["warn", "error"] }] */
 /* global console */
 
-const { L10nRegistry } = ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm", {});
-const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm", {});
-const { AppConstants } = ChromeUtils.import("resource://gre/modules/AppConstants.jsm", {});
+const { L10nRegistry } = ChromeUtils.import("resource://gre/modules/L10nRegistry.jsm");
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { AppConstants } = ChromeUtils.import("resource://gre/modules/AppConstants.jsm");
 
 /*
  * Base CachedIterable class.
@@ -114,6 +114,64 @@ class CachedAsyncIterable extends CachedIterable {
   }
 }
 
+/*
+ * CachedSyncIterable caches the elements yielded by an iterable.
+ *
+ * It can be used to iterate over an iterable many times without depleting the
+ * iterable.
+ */
+class CachedSyncIterable extends CachedIterable {
+    /**
+     * Create an `CachedSyncIterable` instance.
+     *
+     * @param {Iterable} iterable
+     * @returns {CachedSyncIterable}
+     */
+    constructor(iterable) {
+        super();
+
+        if (Symbol.iterator in Object(iterable)) {
+            this.iterator = iterable[Symbol.iterator]();
+        } else {
+            throw new TypeError("Argument must implement the iteration protocol.");
+        }
+    }
+
+    [Symbol.iterator]() {
+        const cached = this;
+        let cur = 0;
+
+        return {
+            next() {
+                if (cached.length <= cur) {
+                    cached.push(cached.iterator.next());
+                }
+                return cached[cur++];
+            },
+        };
+    }
+
+    /**
+     * This method allows user to consume the next element from the iterator
+     * into the cache.
+     *
+     * @param {number} count - number of elements to consume
+     */
+    touchNext(count = 1) {
+        let idx = 0;
+        while (idx++ < count) {
+            const last = this[this.length - 1];
+            if (last && last.done) {
+                break;
+            }
+            this.push(this.iterator.next());
+        }
+        // Return the last cached {value, done} object to allow the calling
+        // code to decide if it needs to call touchNext again.
+        return this[this.length - 1];
+    }
+}
+
 /**
  * The default localization strategy for Gecko. It comabines locales
  * available in L10nRegistry, with locales requested by the user to
@@ -128,6 +186,23 @@ function defaultGenerateBundles(resourceIds) {
   return L10nRegistry.generateBundles(appLocales, resourceIds);
 }
 
+function defaultGenerateBundlesSync(resourceIds) {
+  const appLocales = Services.locale.appLocalesAsBCP47;
+  return L10nRegistry.generateBundlesSync(appLocales, resourceIds);
+}
+
+function maybeReportErrorToGecko(error) {
+  if (AppConstants.NIGHTLY_BUILD || Cu.isInAutomation) {
+    if (Cu.isInAutomation) {
+      // We throw a string, rather than Error
+      // to allow the C++ Promise handler
+      // to clone it
+      throw error;
+    }
+    console.warn(error);
+  }
+}
+
 /**
  * The `Localization` class is a central high-level API for vanilla
  * JavaScript use of Fluent.
@@ -136,17 +211,28 @@ function defaultGenerateBundles(resourceIds) {
  */
 class Localization {
   /**
-   * @param {Array<String>} resourceIds     - List of resource IDs
-   * @param {Function}      generateBundles - Function that returns a
-   *                                          generator over FluentBundles
+   * @param {Array<String>} resourceIds         - List of resource IDs
+   * @param {Function}      generateBundles     - Function that returns an async
+   *                                              generator over FluentBundles
+   * @param {Function}      generateBundlesSync - Function that returns a sync
+   *                                              generator over FluentBundles
    *
    * @returns {Localization}
    */
-  constructor(resourceIds = [], generateBundles = defaultGenerateBundles) {
+  constructor(resourceIds = [], sync = false, generateBundles = defaultGenerateBundles, generateBundlesSync = defaultGenerateBundlesSync) {
+    this.isSync = sync;
     this.resourceIds = resourceIds;
     this.generateBundles = generateBundles;
-    this.bundles = CachedAsyncIterable.from(
-      this.generateBundles(this.resourceIds));
+    this.generateBundlesSync = generateBundlesSync;
+    this.onChange(true);
+  }
+
+  cached(iterable) {
+    if (this.isSync) {
+      return CachedSyncIterable.from(iterable);
+    } else {
+      return CachedAsyncIterable.from(iterable);
+    }
   }
 
   /**
@@ -170,7 +256,7 @@ class Localization {
    * Format translations and handle fallback if needed.
    *
    * Format translations for `keys` from `FluentBundle` instances on this
-   * DOMLocalization. In case of errors, fetch the next context in the
+   * Localization. In case of errors, fetch the next context in the
    * fallback chain.
    *
    * @param   {Array<Object>}         keys    - Translation keys to format.
@@ -179,27 +265,68 @@ class Localization {
    * @private
    */
   async formatWithFallback(keys, method) {
-    const translations = [];
+    const translations = new Array(keys.length);
+    let hasAtLeastOneBundle = false;
 
     for await (const bundle of this.bundles) {
+      hasAtLeastOneBundle = true;
       const missingIds = keysFromBundle(method, bundle, keys, translations);
 
       if (missingIds.size === 0) {
         break;
       }
 
-      if (AppConstants.NIGHTLY_BUILD || Cu.isInAutomation) {
-        const locale = bundle.locales[0];
-        const ids = Array.from(missingIds).join(", ");
-        if (Cu.isInAutomation) {
-          throw new Error(`Missing translations in ${locale}: ${ids}`);
-        }
-        console.warn(`Missing translations in ${locale}: ${ids}`);
-      }
+      const locale = bundle.locales[0];
+      const ids = Array.from(missingIds).join(", ");
+      maybeReportErrorToGecko(`[fluent] Missing translations in ${locale}: ${ids}.`);
+    }
+
+    if (!hasAtLeastOneBundle) {
+      maybeReportErrorToGecko(`[fluent] Request for keys failed because no resource bundles got generated.\n keys: ${JSON.stringify(keys)}.\n resourceIds: ${JSON.stringify(this.resourceIds)}.`);
     }
 
     return translations;
   }
+
+  /**
+   * Format translations and handle fallback if needed.
+   *
+   * Format translations for `keys` from `FluentBundle` instances on this
+   * Localization. In case of errors, fetch the next context in the
+   * fallback chain.
+   *
+   * @param   {Array<Object>}         keys    - Translation keys to format.
+   * @param   {Function}              method  - Formatting function.
+   * @returns {Array<string|Object>}
+   * @private
+   */
+  formatWithFallbackSync(keys, method) {
+    if (!this.isSync) {
+      throw new Error("Can't use sync formatWithFallback when state is async.");
+    }
+    const translations = new Array(keys.length);
+    let hasAtLeastOneBundle = false;
+
+    for (const bundle of this.bundles) {
+      hasAtLeastOneBundle = true;
+      const missingIds = keysFromBundle(method, bundle, keys, translations);
+
+      if (missingIds.size === 0) {
+        break;
+      }
+
+      const locale = bundle.locales[0];
+      const ids = Array.from(missingIds).join(", ");
+      maybeReportErrorToGecko(`[fluent] Missing translations in ${locale}: ${ids}.`);
+    }
+
+    if (!hasAtLeastOneBundle) {
+      maybeReportErrorToGecko(`[fluent] Request for keys failed because no resource bundles got generated.\n keys: ${JSON.stringify(keys)}.\n resourceIds: ${JSON.stringify(this.resourceIds)}.`);
+    }
+
+    return translations;
+  }
+
 
   /**
    * Format translations into {value, attributes} objects.
@@ -221,7 +348,7 @@ class Localization {
    *     //   }
    *     // ]
    *
-   * Returns a Promise resolving to an array of the translation strings.
+   * Returns a Promise resolving to an array of the translation messages.
    *
    * @param   {Array<Object>} keys
    * @returns {Promise<Array<{value: string, attributes: Object}>>}
@@ -232,9 +359,22 @@ class Localization {
   }
 
   /**
+   * Sync version of `formatMessages`.
+   *
+   * Returns an array of the translation messages.
+   *
+   * @param   {Array<Object>} keys
+   * @returns {Array<{value: string, attributes: Object}>}
+   * @private
+   */
+  formatMessagesSync(keys) {
+    return this.formatWithFallbackSync(keys, messageFromBundle);
+  }
+
+  /**
    * Retrieve translations corresponding to the passed keys.
    *
-   * A generalized version of `DOMLocalization.formatValue`. Keys can
+   * A generalized version of `Localization.formatValue`. Keys can
    * either be simple string identifiers or `[id, args]` arrays.
    *
    *     docL10n.formatValues([
@@ -255,6 +395,19 @@ class Localization {
   }
 
   /**
+   * Sync version of `formatValues`.
+   *
+   * Returns an array of the translation strings.
+   *
+   * @param   {Array<Object>} keys
+   * @returns {Array<string>}
+   * @private
+   */
+  formatValuesSync(keys) {
+    return this.formatWithFallbackSync(keys, valueFromBundle);
+  }
+
+  /**
    * Retrieve the translation corresponding to the `id` identifier.
    *
    * If passed, `args` is a simple hash object with a list of variables that
@@ -266,7 +419,7 @@ class Localization {
    *
    *     // 'Hello, world!'
    *
-   * Returns a Promise resolving to the translation string.
+   * Returns a Promise resolving to a translation string.
    *
    * Use this sparingly for one-off messages which don't need to be
    * retranslated when the user changes their language preferences, e.g. in
@@ -278,6 +431,20 @@ class Localization {
    */
   async formatValue(id, args) {
     const [val] = await this.formatValues([{id, args}]);
+    return val;
+  }
+
+  /**
+   * Sync version of `formatValue`.
+   *
+   * Returns a translation string.
+   *
+   * @param   {Array<Object>} keys
+   * @returns {string>}
+   * @private
+   */
+  formatValueSync(id, args) {
+    const [val] = this.formatValuesSync([{id, args}]);
     return val;
   }
 
@@ -319,8 +486,8 @@ class Localization {
    * @param {bool} eager - whether the I/O for new context should begin eagerly
    */
   onChange(eager = false) {
-    this.bundles = CachedAsyncIterable.from(
-      this.generateBundles(this.resourceIds));
+    let generateMessages = this.isSync ? this.generateBundlesSync : this.generateBundles;
+    this.bundles = this.cached(generateMessages(this.resourceIds));
     if (eager) {
       // If the first app locale is the same as last fallback
       // it means that we have all resources in this locale, and
@@ -332,6 +499,11 @@ class Localization {
       const prefetchCount = appLocale === lastFallback ? 1 : 2;
       this.bundles.touchNext(prefetchCount);
     }
+  }
+
+  setIsSync(isSync) {
+    this.isSync = isSync;
+    this.onChange();
   }
 }
 
@@ -449,7 +621,11 @@ function keysFromBundle(method, bundle, keys, translations) {
     if (bundle.hasMessage(id)) {
       messageErrors.length = 0;
       translations[i] = method(bundle, messageErrors, id, args);
-      // XXX: Report resolver errors
+      if (messageErrors.length > 0) {
+        const locale = bundle.locales[0];
+        const errors = messageErrors.join(", ");
+        maybeReportErrorToGecko(`[fluent][resolver] errors in ${locale}/${id}: ${errors}.`);
+      }
     } else {
       missingIds.add(id);
     }
@@ -458,5 +634,17 @@ function keysFromBundle(method, bundle, keys, translations) {
   return missingIds;
 }
 
+/**
+ * Helper function which allows us to construct a new
+ * Localization from Localization.
+ */
+var getLocalization = (resourceIds, sync = false) => {
+  return new Localization(resourceIds, sync);
+};
+
+var getLocalizationWithCustomGenerateMessages = (resourceIds, generateMessages) => {
+  return new Localization(resourceIds, false, generateMessages);
+};
+
 this.Localization = Localization;
-var EXPORTED_SYMBOLS = ["Localization"];
+var EXPORTED_SYMBOLS = ["Localization", "getLocalization", "getLocalizationWithCustomGenerateMessages"];

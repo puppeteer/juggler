@@ -2,7 +2,7 @@
 Abstract syntax trees.
 
 This module defines classes that can be used to create abstract syntax trees
-for patern matching an rewriting of cranelift instructions.
+for pattern matching an rewriting of cranelift instructions.
 """
 from __future__ import absolute_import
 from . import instructions
@@ -79,7 +79,7 @@ class Def(object):
         # type: (VarAtomMap) -> Def
         """
         Return a copy of this Def with vars replaced with fresh variables,
-        in accordance with the map m. Update m as neccessary.
+        in accordance with the map m. Update m as necessary.
         """
         new_expr = self.expr.copy(m)
         new_defs = []  # type: List[Var]
@@ -162,19 +162,19 @@ class Var(Atom):
         Values that are defined only in the destination pattern.
     """
 
-    def __init__(self, name, typevar=None):
-        # type: (str, TypeVar) -> None
+    def __init__(self, name):
+        # type: (str) -> None
         self.name = name
         # The `Def` defining this variable in a source pattern.
         self.src_def = None  # type: Def
         # The `Def` defining this variable in a destination pattern.
         self.dst_def = None  # type: Def
         # TypeVar representing the type of this variable.
-        self.typevar = typevar  # type: TypeVar
+        self.typevar = None  # type: TypeVar
         # The original 'typeof(x)' type variable that was created for this Var.
         # This one doesn't change. `self.typevar` above may be changed to
         # another typevar by type inference.
-        self.original_typevar = self.typevar  # type: TypeVar
+        self.original_typevar = None  # type: TypeVar
 
     def __str__(self):
         # type: () -> str
@@ -423,7 +423,7 @@ class Apply(Expr):
         # type: (VarAtomMap) -> Apply
         """
         Return a copy of this Expr with vars replaced with fresh variables,
-        in accordance with the map m. Update m as neccessary.
+        in accordance with the map m. Update m as necessary.
         """
         return Apply(self.inst, tuple(map(lambda e: replace_var(e, m),
                                           self.args)))
@@ -441,7 +441,7 @@ class Apply(Expr):
     def substitution(self, other, s):
         # type: (Apply, VarAtomMap) -> Optional[VarAtomMap]
         """
-        If there is a substituion from Var->Atom that converts self to other,
+        If there is a substitution from Var->Atom that converts self to other,
         return it, otherwise return None. Note that this is strictly weaker
         than unification (see TestXForm.test_subst_enum_bad_var_const for
         example).
@@ -513,7 +513,7 @@ class ConstantInt(Literal):
     A value of an integer immediate operand.
 
     Immediate operands like `imm64` or `offset32` can be specified in AST
-    expressions using the call syntax: `imm64(5)` which greates a `ConstantInt`
+    expressions using the call syntax: `imm64(5)` which creates a `ConstantInt`
     node.
     """
 

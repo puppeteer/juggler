@@ -5,8 +5,7 @@
   <link id="link" rel="stylesheet" type="text/css"
         href="chrome://mochikit/content/tests/SimpleTest/test.css" />
 
-  <script type="application/javascript"
-          src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
 
   <script type="application/javascript"
           src="../common.js"></script>
@@ -716,6 +715,7 @@
         actions: "press",
       };
       testElm("input_image", obj);
+      testElm("input_image_display", obj);
       testElm("input_submit", obj);
 
       obj = {
@@ -771,6 +771,45 @@
       testElm("input_tel", obj);
       testElm("input_text", obj);
       testElm("input_url", obj);
+
+      // ////////////////////////////////////////////////////////////////////////
+      // input @type="text" with placeholder attribute
+
+      // First: Label and placeholder, text is the same, no attribute.
+      obj = {
+        role: ROLE_ENTRY,
+        name: "Your name",
+        extraStates: EXT_STATE_EDITABLE | EXT_STATE_SINGLE_LINE,
+        actions: "activate",
+        absentAttributes: { placeholder: "Your name" },
+        interfaces: [ nsIAccessibleText, nsIAccessibleEditableText ],
+        children: [],
+      };
+      testElm("input_placeholder_same", obj);
+
+      // Second: Label and placeholder, text is different, attribute.
+      obj = {
+        role: ROLE_ENTRY,
+        name: "First name:",
+        extraStates: EXT_STATE_EDITABLE | EXT_STATE_SINGLE_LINE,
+        actions: "activate",
+        attributes: { placeholder: "Enter your first name" },
+        interfaces: [ nsIAccessibleText, nsIAccessibleEditableText ],
+        children: [],
+      };
+      testElm("input_placeholder_different", obj);
+
+      // Third: placeholder only, text is name, no attribute.
+      obj = {
+        role: ROLE_ENTRY,
+        name: "Date of birth",
+        extraStates: EXT_STATE_EDITABLE | EXT_STATE_SINGLE_LINE,
+        actions: "activate",
+        absentAttributes: { placeholder: "Date of birth" },
+        interfaces: [ nsIAccessibleText, nsIAccessibleEditableText ],
+        children: [],
+      };
+      testElm("input_placeholder_only", obj);
 
       // ////////////////////////////////////////////////////////////////////////
       // HTML:input@type="password"
@@ -899,23 +938,6 @@
         ],
       };
       testElm("kbd_container", obj);
-
-      // ////////////////////////////////////////////////////////////////////////
-      // HTML:keygen
-
-      obj = {
-        role: ROLE_COMBOBOX,
-        states: STATE_COLLAPSED | STATE_HASPOPUP,
-        extraStates: EXT_STATE_EXPANDABLE,
-        actions: "open",
-        children: [
-          { COMBOBOX_LIST: [
-            { role: ROLE_COMBOBOX_OPTION }, // high grade
-            { role: ROLE_COMBOBOX_OPTION }, // medium grade
-          ] },
-        ],
-      };
-      testElm("keygen", obj);
 
       // ////////////////////////////////////////////////////////////////////////
       // HTML:label
@@ -1249,6 +1271,13 @@
       // HTML:span
 
       ok(!isAccessible("span"), "span element is not accessible");
+
+      // ////////////////////////////////////////////////////////////////////////
+      // html:span with a title attribute, which should make it accessible.
+      obj = {
+        role: ROLE_TEXT,
+      };
+      testElm("span_explicit", obj);
 
       // ////////////////////////////////////////////////////////////////////////
       // HTML:strong contained by paragraph
@@ -1605,6 +1634,7 @@
   <input id="input_checkbox_true" type="checkbox" checked>
   <input id="input_file" type="file">
   <input id="input_image" type="image">
+  <input id="input_image_display" type="image" style="display: block">
   <form>
     <input id="input_image_default" type="image">
   </form>
@@ -1614,6 +1644,13 @@
   </form>
   <input id="input_number" type="number" value="44">
   <input id="input_text" type="text" value="hi">
+  <form>
+    <label for="input_placeholder_same">Your name</label>
+    <input id="input_placeholder_same" placeholder="Your name"/>
+    <label for="input_placeholder_different">First name:</label>
+    <input id="input_placeholder_different" placeholder="Enter your first name"/>
+    <input id="input_placeholder_only" placeholder="Date of birth"/>
+  </form>
   <input id="input_search" type="search" value="cats">
   <input id="input_email" type="email" value="me@mozilla.com">
   <input id="input_tel" type="tel" value="111.111.1111">
@@ -1631,7 +1668,6 @@
 
   <p id="ins_container">normal<ins>Inserted</ins></p>
   <p id="kbd_container">normal<kbd>cmd</kbd></p>
-  <keygen id="keygen" name="RSA public key" challenge="123456789" keytype="RSA">
 
   <label id="label">label<input id="label_input"></label>
   <label id="label_for" for="label_for_input">label</label>
@@ -1762,6 +1798,7 @@
   <section id="named_section" aria-label="foo">named section</section>
   <p id="small_container">normal<small>small</small></p>
   <span id="span"></span>
+  <span id="span_explicit" title="explicit"></span>
   <p id="strong_container">normal<strong>strong</strong></p>
   <p id="sub_container">normal<sub>sub</sub></p>
   <p id="sup_container">normal<sup>sup</sup></p>

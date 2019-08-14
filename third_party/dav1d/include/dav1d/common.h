@@ -25,15 +25,20 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DAV1D_COMMON_H__
-#define __DAV1D_COMMON_H__
+#ifndef DAV1D_COMMON_H
+#define DAV1D_COMMON_H
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #ifndef DAV1D_API
     #if defined _WIN32
-      #define DAV1D_API __declspec(dllexport)
+      #if defined DAV1D_BUILDING_DLL
+        #define DAV1D_API __declspec(dllexport)
+      #else
+        #define DAV1D_API
+      #endif
     #else
       #if __GNUC__ >= 4
         #define DAV1D_API __attribute__ ((visibility ("default")))
@@ -42,6 +47,20 @@
       #endif
     #endif
 #endif
+
+#if EPERM > 0
+#define DAV1D_ERR(e) (-(e)) ///< Negate POSIX error code.
+#else
+#define DAV1D_ERR(e) (e)
+#endif
+
+/**
+ * A reference-counted object wrapper for a user-configurable pointer.
+ */
+typedef struct Dav1dUserData {
+    const uint8_t *data; ///< data pointer
+    struct Dav1dRef *ref; ///< allocation origin
+} Dav1dUserData;
 
 /**
  * Input packet metadata which are copied from the input data used to
@@ -56,6 +75,7 @@ typedef struct Dav1dDataProps {
     int64_t duration; ///< container duration of input data, 0 if unknown (default)
     int64_t offset; ///< stream offset of input data, -1 if unknown (default)
     size_t size; ///< packet size, default Dav1dData.sz
+    struct Dav1dUserData user_data; ///< user-configurable data, default NULL members
 } Dav1dDataProps;
 
-#endif // __DAV1D_COMMON_H__
+#endif /* DAV1D_COMMON_H */

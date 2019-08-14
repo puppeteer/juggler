@@ -3,9 +3,8 @@
 <html>
 <head>
 <meta charset="utf-8">
-  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/AddTask.js"></script>
-  <script type="text/javascript" src="/tests/SimpleTest/ExtensionTestUtils.js"></script>
+  <script src="/tests/SimpleTest/SimpleTest.js"></script>
+  <script src="/tests/SimpleTest/ExtensionTestUtils.js"></script>
   <script type="text/javascript" src="head_webrequest.js"></script>
   <script type="text/javascript" src="head.js"></script>
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
@@ -15,7 +14,7 @@
 // This file defines content scripts.
 /* eslint-env mozilla/frame-script */
 
-let baseUrl = "http://mochi.test:8888/tests/toolkit/components/passwordmgr/test/authenticate.sjs";
+let baseUrl = "http://mochi.test:8888/tests/toolkit/components/passwordmgr/test/mochitest/authenticate.sjs";
 function testXHR(url) {
   return new Promise((resolve, reject) => {
     let xhr = new XMLHttpRequest();
@@ -68,7 +67,7 @@ add_task(async function test_webRequest_auth_nonblocking_forwardAuthProvider() {
   // if the authorization is not handled by the onAuthRequired handler.
 
   let chromeScript = SpecialPowers.loadChromeScript(() => {
-    ChromeUtils.import("resource://gre/modules/Services.jsm");
+    const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
     let observer = channel => {
       if (!(channel instanceof Ci.nsIHttpChannel && channel.URI.host === "mochi.test")) {
@@ -129,7 +128,7 @@ add_task(async function test_webRequest_auth_nonblocking_forwardAuthPrompt2() {
   // if the authorization is not handled by the onAuthRequired handler.
 
   let chromeScript = SpecialPowers.loadChromeScript(() => {
-    ChromeUtils.import("resource://gre/modules/Services.jsm");
+    const {Services} = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
     let observer = channel => {
       if (!(channel instanceof Ci.nsIHttpChannel && channel.URI.host === "mochi.test")) {

@@ -21,12 +21,15 @@
 #include "GeckoProfiler.h"
 #include "nsIPowerManagerService.h"
 #ifdef MOZ_ENABLE_DBUS
-#include "WakeLockListener.h"
+#  include "WakeLockListener.h"
 #endif
 #include "gfxPlatform.h"
 #include "ScreenHelperGTK.h"
 #include "HeadlessScreenHelper.h"
 #include "mozilla/widget/ScreenManager.h"
+#ifdef MOZ_WAYLAND
+#  include "nsWaylandDisplay.h"
+#endif
 
 using mozilla::LazyLogModule;
 using mozilla::Unused;
@@ -40,6 +43,7 @@ LazyLogModule gWidgetLog("Widget");
 LazyLogModule gWidgetFocusLog("WidgetFocus");
 LazyLogModule gWidgetDragLog("WidgetDrag");
 LazyLogModule gWidgetDrawLog("WidgetDraw");
+LazyLogModule gWidgetWaylandLog("WidgetWayland");
 
 static GPollFunc sPollFunc;
 
@@ -105,9 +109,10 @@ static void WrapGdkFrameClockDispose(GObject* object) {
 }
 #endif
 
-/*static*/ gboolean nsAppShell::EventProcessorCallback(GIOChannel* source,
-                                                       GIOCondition condition,
-                                                       gpointer data) {
+/*static*/
+gboolean nsAppShell::EventProcessorCallback(GIOChannel* source,
+                                            GIOCondition condition,
+                                            gpointer data) {
   nsAppShell* self = static_cast<nsAppShell*>(data);
 
   unsigned char c;
@@ -265,5 +270,9 @@ void nsAppShell::ScheduleNativeEventCallback() {
 }
 
 bool nsAppShell::ProcessNextNativeEvent(bool mayWait) {
-  return g_main_context_iteration(nullptr, mayWait);
+  bool ret = g_main_context_iteration(nullptr, mayWait);
+#ifdef MOZ_WAYLAND
+  WaylandDispatchDisplays();
+#endif
+  return ret;
 }

@@ -25,7 +25,7 @@ namespace mozilla {
 // block for a given element.
 class MappedDeclarations final {
  public:
-  explicit MappedDeclarations(nsIDocument* aDoc,
+  explicit MappedDeclarations(dom::Document* aDoc,
                               already_AddRefed<RawServoDeclarationBlock> aDecls)
       : mDocument(aDoc), mDecl(aDecls) {
     MOZ_ASSERT(mDecl);
@@ -33,7 +33,7 @@ class MappedDeclarations final {
 
   ~MappedDeclarations() { MOZ_ASSERT(!mDecl, "Forgot to take the block?"); }
 
-  nsIDocument* Document() { return mDocument; }
+  dom::Document* Document() { return mDocument; }
 
   already_AddRefed<RawServoDeclarationBlock> TakeDeclarationBlock() {
     MOZ_ASSERT(mDecl);
@@ -94,6 +94,16 @@ class MappedDeclarations final {
   // Set a property to an integer value
   void SetIntValue(nsCSSPropertyID aId, int32_t aValue) {
     Servo_DeclarationBlock_SetIntValue(mDecl, aId, aValue);
+  }
+
+  // Set "counter-reset: list-item <integer>".
+  void SetCounterResetListItem(int32_t aValue) {
+    Servo_DeclarationBlock_SetCounterResetListItem(mDecl, aValue);
+  }
+
+  // Set "counter-set: list-item <integer>".
+  void SetCounterSetListItem(int32_t aValue) {
+    Servo_DeclarationBlock_SetCounterSetListItem(mDecl, aValue);
   }
 
   // Set a property to a pixel value
@@ -164,7 +174,7 @@ class MappedDeclarations final {
 
   // Set font-family to a string
   void SetFontFamily(const nsString& aValue) {
-    Servo_DeclarationBlock_SetFontFamily(mDecl, aValue);
+    Servo_DeclarationBlock_SetFontFamily(mDecl, &aValue);
   }
 
   // Add a quirks-mode override to the decoration color of elements nested in
@@ -176,7 +186,7 @@ class MappedDeclarations final {
   void SetBackgroundImage(const nsAttrValue& value);
 
  private:
-  nsIDocument* const mDocument;
+  dom::Document* const mDocument;
   RefPtr<RawServoDeclarationBlock> mDecl;
 };
 

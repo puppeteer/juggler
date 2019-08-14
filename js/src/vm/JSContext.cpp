@@ -14,18 +14,18 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/Unused.h"
 
-#include <ctype.h>
 #include <stdarg.h>
 #include <string.h>
 #ifdef ANDROID
-#include <android/log.h>
-#include <fstream>
-#include <string>
+#  include <android/log.h>
+#  include <fstream>
+#  include <string>
 #endif  // ANDROID
 #ifdef XP_WIN
-#include <processthreadsapi.h>
+#  include <processthreadsapi.h>
 #endif  // XP_WIN
 
 #include "jsexn.h"
@@ -38,12 +38,13 @@
 #include "jit/Ion.h"
 #include "jit/PcScriptCache.h"
 #include "js/CharacterEncoding.h"
+#include "js/ContextOptions.h"  // JS::ContextOptions
 #include "js/Printf.h"
 #ifdef JS_SIMULATOR_ARM64
-#include "jit/arm64/vixl/Simulator-vixl.h"
+#  include "jit/arm64/vixl/Simulator-vixl.h"
 #endif
 #ifdef JS_SIMULATOR_ARM
-#include "jit/arm/Simulator-arm.h"
+#  include "jit/arm/Simulator-arm.h"
 #endif
 #include "util/DoubleToString.h"
 #include "util/NativeStack.h"
@@ -172,19 +173,6 @@ JSContext* js::NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes,
   return cx;
 }
 
-static void FreeJobQueueHandling(JSContext* cx) {
-  if (!cx->jobQueue) {
-    return;
-  }
-
-  cx->jobQueue->reset();
-  FreeOp* fop = cx->defaultFreeOp();
-  fop->delete_(cx->jobQueue.ref());
-  cx->getIncumbentGlobalCallback = nullptr;
-  cx->enqueuePromiseJobCallback = nullptr;
-  cx->enqueuePromiseJobCallbackData = nullptr;
-}
-
 void js::DestroyContext(JSContext* cx) {
   JS_AbortIfWrongThread(cx);
 
@@ -194,16 +182,21 @@ void js::DestroyContext(JSContext* cx) {
   // interrupt this context. See HelperThread::handleIonWorkload.
   CancelOffThreadIonCompile(cx->runtime());
 
-  FreeJobQueueHandling(cx);
+  cx->jobQueue = nullptr;
+  cx->internalJobQueue = nullptr;
+  SetContextProfilingStack(cx, nullptr);
+
+  JSRuntime* rt = cx->runtime();
 
   // Flush promise tasks executing in helper threads early, before any parts
   // of the JSRuntime that might be visible to helper threads are torn down.
-  cx->runtime()->offThreadPromiseState.ref().shutdown(cx);
+  rt->offThreadPromiseState.ref().shutdown(cx);
 
   // Destroy the runtime along with its last context.
-  cx->runtime()->destroyRuntime();
-  js_delete(cx->runtime());
+  js::AutoNoteSingleThreadedRegion nochecks;
+  rt->destroyRuntime();
   js_delete_poison(cx);
+  js_delete_poison(rt);
 }
 
 void JS::RootingContext::checkNoGCRooters() {
@@ -269,6 +262,9 @@ static void PopulateReportBlame(JSContext* cx, JSErrorReport* report) {
   }
 
   report->filename = iter.filename();
+  if (iter.hasScript()) {
+    report->sourceId = iter.script()->scriptSource()->id();
+  }
   uint32_t column;
   report->lineno = iter.computeLine(&column);
   report->column = FixupColumnForDisplay(column);
@@ -295,7 +291,7 @@ JS_FRIEND_API void js::ReportOutOfMemory(JSContext* cx) {
 #endif
   mozilla::recordreplay::InvalidateRecording("OutOfMemory exception thrown");
 
-  if (cx->helperThread()) {
+  if (cx->isHelperThreadContext()) {
     return cx->addPendingOutOfMemory();
   }
 
@@ -308,7 +304,7 @@ JS_FRIEND_API void js::ReportOutOfMemory(JSContext* cx) {
   }
 
   RootedValue oomMessage(cx, StringValue(cx->names().outOfMemory));
-  cx->setPendingException(oomMessage);
+  cx->setPendingException(oomMessage, nullptr);
 }
 
 mozilla::GenericErrorResult<OOM&> js::ReportOutOfMemoryResult(JSContext* cx) {
@@ -330,7 +326,7 @@ void js::ReportOverRecursed(JSContext* maybecx, unsigned errorNumber) {
 #endif
   mozilla::recordreplay::InvalidateRecording("OverRecursed exception thrown");
   if (maybecx) {
-    if (!maybecx->helperThread()) {
+    if (!maybecx->isHelperThreadContext()) {
       JS_ReportErrorNumberASCII(maybecx, GetErrorMessage, nullptr, errorNumber);
       maybecx->overRecursed_ = true;
     } else {
@@ -348,7 +344,7 @@ void js::ReportAllocationOverflow(JSContext* cx) {
     return;
   }
 
-  if (cx->helperThread()) {
+  if (cx->isHelperThreadContext()) {
     return;
   }
 
@@ -741,8 +737,8 @@ bool ExpandErrorArgumentsHelper(JSContext* cx, JSErrorCallback callback,
         fmt = efs->format;
         while (*fmt) {
           if (*fmt == '{') {
-            if (isdigit(fmt[1])) {
-              int d = JS7_UNDEC(fmt[1]);
+            if (mozilla::IsAsciiDigit(fmt[1])) {
+              int d = AsciiDigitToNumber(fmt[1]);
               MOZ_RELEASE_ASSERT(d < args.count());
               strncpy(out, args.args(d), args.lengths(d));
               out += args.lengths(d);
@@ -1006,9 +1002,9 @@ JS_FRIEND_API const JSErrorFormatString* js::GetErrorMessage(
 }
 
 void JSContext::recoverFromOutOfMemory() {
-  if (helperThread()) {
+  if (isHelperThreadContext()) {
     // Keep in sync with addPendingOutOfMemory.
-    if (ParseTask* task = helperThread()->parseTask()) {
+    if (ParseTask* task = parseTask()) {
       task->outOfMemory = false;
     }
   } else {
@@ -1019,21 +1015,6 @@ void JSContext::recoverFromOutOfMemory() {
   }
 }
 
-static bool InternalEnqueuePromiseJobCallback(JSContext* cx,
-                                              JS::HandleObject promise,
-                                              JS::HandleObject job,
-                                              JS::HandleObject allocationSite,
-                                              JS::HandleObject incumbentGlobal,
-                                              void* data) {
-  MOZ_ASSERT(job);
-  JS::JobQueueMayNotBeEmpty(cx);
-  if (!cx->jobQueue->pushBack(job)) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-  return true;
-}
-
 JS_FRIEND_API bool js::UseInternalJobQueues(JSContext* cx) {
   // Internal job queue handling must be set up very early. Self-hosting
   // initialization is as good a marker for that as any.
@@ -1041,42 +1022,59 @@ JS_FRIEND_API bool js::UseInternalJobQueues(JSContext* cx) {
       !cx->runtime()->hasInitializedSelfHosting(),
       "js::UseInternalJobQueues must be called early during runtime startup.");
   MOZ_ASSERT(!cx->jobQueue);
-  auto* queue =
-      js_new<PersistentRooted<JobQueue>>(cx, JobQueue(SystemAllocPolicy()));
+  auto queue = MakeUnique<InternalJobQueue>(cx);
   if (!queue) {
     return false;
   }
 
-  cx->jobQueue = queue;
+  cx->internalJobQueue = std::move(queue);
+  cx->jobQueue = cx->internalJobQueue.ref().get();
 
   cx->runtime()->offThreadPromiseState.ref().initInternalDispatchQueue();
   MOZ_ASSERT(cx->runtime()->offThreadPromiseState.ref().initialized());
-
-  JS::SetEnqueuePromiseJobCallback(cx, InternalEnqueuePromiseJobCallback);
 
   return true;
 }
 
 JS_FRIEND_API bool js::EnqueueJob(JSContext* cx, JS::HandleObject job) {
   MOZ_ASSERT(cx->jobQueue);
-  JS::JobQueueMayNotBeEmpty(cx);
-  if (!cx->jobQueue->pushBack(job)) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  return true;
+  return cx->jobQueue->enqueuePromiseJob(cx, nullptr, job, nullptr, nullptr);
 }
 
 JS_FRIEND_API void js::StopDrainingJobQueue(JSContext* cx) {
-  MOZ_ASSERT(cx->jobQueue);
-  cx->stopDrainingJobQueue = true;
+  MOZ_ASSERT(cx->internalJobQueue.ref());
+  cx->internalJobQueue->interrupt();
 }
 
 JS_FRIEND_API void js::RunJobs(JSContext* cx) {
   MOZ_ASSERT(cx->jobQueue);
+  cx->jobQueue->runJobs(cx);
+}
 
-  if (cx->drainingJobQueue || cx->stopDrainingJobQueue) {
+JSObject* InternalJobQueue::getIncumbentGlobal(JSContext* cx) {
+  if (!cx->compartment()) {
+    return nullptr;
+  }
+  return cx->global();
+}
+
+bool InternalJobQueue::enqueuePromiseJob(JSContext* cx,
+                                         JS::HandleObject promise,
+                                         JS::HandleObject job,
+                                         JS::HandleObject allocationSite,
+                                         JS::HandleObject incumbentGlobal) {
+  MOZ_ASSERT(job);
+  if (!queue.pushBack(job)) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
+  JS::JobQueueMayNotBeEmpty(cx);
+  return true;
+}
+
+void InternalJobQueue::runJobs(JSContext* cx) {
+  if (draining_ || interrupted_) {
     return;
   }
 
@@ -1087,26 +1085,26 @@ JS_FRIEND_API void js::RunJobs(JSContext* cx) {
     // same time we don't want to assert against it, because that'd make
     // drainJobQueue unsafe for fuzzers. We do want fuzzers to test this,
     // so we simply ignore nested calls of drainJobQueue.
-    cx->drainingJobQueue = true;
+    draining_ = true;
 
     RootedObject job(cx);
     JS::HandleValueArray args(JS::HandleValueArray::empty());
     RootedValue rval(cx);
 
     // Execute jobs in a loop until we've reached the end of the queue.
-    while (!cx->jobQueue->empty()) {
+    while (!queue.empty()) {
       // A previous job might have set this flag. E.g., the js shell
       // sets it if the `quit` builtin function is called.
-      if (cx->stopDrainingJobQueue) {
+      if (interrupted_) {
         break;
       }
 
-      job = cx->jobQueue->front();
-      cx->jobQueue->popFront();
+      job = queue.front();
+      queue.popFront();
 
       // If the next job is the last job in the job queue, allow
       // skipping the standard job queuing behavior.
-      if (cx->jobQueue->empty()) {
+      if (queue.empty()) {
         JS::JobQueueIsEmpty(cx);
       }
 
@@ -1132,14 +1130,14 @@ JS_FRIEND_API void js::RunJobs(JSContext* cx) {
       }
     }
 
-    cx->drainingJobQueue = false;
+    draining_ = false;
 
-    if (cx->stopDrainingJobQueue) {
-      cx->stopDrainingJobQueue = false;
+    if (interrupted_) {
+      interrupted_ = false;
       break;
     }
 
-    cx->jobQueue->clear();
+    queue.clear();
 
     // It's possible a job added a new off-thread promise task.
     if (!cx->runtime()->offThreadPromiseState.ref().internalHasPending()) {
@@ -1148,14 +1146,60 @@ JS_FRIEND_API void js::RunJobs(JSContext* cx) {
   }
 }
 
+bool InternalJobQueue::empty() const { return queue.empty(); }
+
+JSObject* InternalJobQueue::maybeFront() const {
+  if (queue.empty()) {
+    return nullptr;
+  }
+
+  return queue.get().front();
+}
+
+class js::InternalJobQueue::SavedQueue : public JobQueue::SavedJobQueue {
+ public:
+  SavedQueue(JSContext* cx, Queue&& saved, bool draining)
+      : cx(cx), saved(cx, std::move(saved)), draining_(draining) {
+    MOZ_ASSERT(cx->internalJobQueue.ref());
+  }
+
+  ~SavedQueue() {
+    MOZ_ASSERT(cx->internalJobQueue.ref());
+    cx->internalJobQueue->queue = std::move(saved.get());
+    cx->internalJobQueue->draining_ = draining_;
+  }
+
+ private:
+  JSContext* cx;
+  PersistentRooted<Queue> saved;
+  bool draining_;
+};
+
+js::UniquePtr<JS::JobQueue::SavedJobQueue> InternalJobQueue::saveJobQueue(
+    JSContext* cx) {
+  auto saved =
+      js::MakeUnique<SavedQueue>(cx, std::move(queue.get()), draining_);
+  if (!saved) {
+    // When MakeUnique's allocation fails, the SavedQueue constructor is never
+    // called, so this->queue is still initialized. (The move doesn't occur
+    // until the constructor gets called.)
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+
+  queue = Queue(SystemAllocPolicy());
+  draining_ = false;
+  return saved;
+}
+
 JS::Error JSContext::reportedError;
 JS::OOM JSContext::reportedOOM;
 
 mozilla::GenericErrorResult<OOM&> JSContext::alreadyReportedOOM() {
 #ifdef DEBUG
-  if (helperThread()) {
+  if (isHelperThreadContext()) {
     // Keep in sync with addPendingOutOfMemory.
-    if (ParseTask* task = helperThread()->parseTask()) {
+    if (ParseTask* task = parseTask()) {
       MOZ_ASSERT(task->outOfMemory);
     }
   } else {
@@ -1167,7 +1211,7 @@ mozilla::GenericErrorResult<OOM&> JSContext::alreadyReportedOOM() {
 
 mozilla::GenericErrorResult<JS::Error&> JSContext::alreadyReportedError() {
 #ifdef DEBUG
-  if (!helperThread()) {
+  if (!isHelperThreadContext()) {
     MOZ_ASSERT(isExceptionPending());
   }
 #endif
@@ -1177,81 +1221,83 @@ mozilla::GenericErrorResult<JS::Error&> JSContext::alreadyReportedError() {
 JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
     : runtime_(runtime),
       kind_(ContextKind::HelperThread),
-      helperThread_(nullptr),
-      options_(options),
-      freeLists_(nullptr),
-      jitActivation(nullptr),
-      activation_(nullptr),
+      nurserySuppressions_(this),
+      options_(this, options),
+      freeLists_(this, nullptr),
+      atomsZoneFreeLists_(this),
+      defaultFreeOp_(this, runtime, true),
+      jitActivation(this, nullptr),
+      regexpStack(this),
+      activation_(this, nullptr),
       profilingActivation_(nullptr),
       nativeStackBase(GetNativeStackBase()),
-      entryMonitor(nullptr),
-      noExecuteDebuggerTop(nullptr),
+      entryMonitor(this, nullptr),
+      noExecuteDebuggerTop(this, nullptr),
 #ifdef DEBUG
-      inUnsafeCallWithABI(false),
-      hasAutoUnsafeCallWithABI(false),
+      inUnsafeCallWithABI(this, false),
+      hasAutoUnsafeCallWithABI(this, false),
 #endif
 #ifdef JS_SIMULATOR
-      simulator_(nullptr),
+      simulator_(this, nullptr),
 #endif
 #ifdef JS_TRACE_LOGGING
       traceLogger(nullptr),
 #endif
-      autoFlushICache_(nullptr),
-      dtoaState(nullptr),
-      suppressGC(0),
+      autoFlushICache_(this, nullptr),
+      dtoaState(this, nullptr),
+      suppressGC(this, 0),
 #ifdef DEBUG
-      ionCompiling(false),
-      ionCompilingSafeForMinorGC(false),
-      performingGC(false),
-      gcSweeping(false),
-      gcHelperStateThread(false),
-      isTouchingGrayThings(false),
-      noNurseryAllocationCheck(0),
-      disableStrictProxyCheckingCount(0),
+      ionCompiling(this, false),
+      ionCompilingSafeForMinorGC(this, false),
+      performingGC(this, false),
+      gcSweeping(this, false),
+      isTouchingGrayThings(this, false),
+      noNurseryAllocationCheck(this, 0),
+      disableStrictProxyCheckingCount(this, 0),
 #endif
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
-      runningOOMTest(false),
+      runningOOMTest(this, false),
 #endif
-      enableAccessValidation(false),
-      inUnsafeRegion(0),
-      generationalDisabled(0),
-      compactingDisabledCount(0),
+      enableAccessValidation(this, false),
+      inUnsafeRegion(this, 0),
+      generationalDisabled(this, 0),
+      compactingDisabledCount(this, 0),
+      frontendCollectionPool_(this),
       suppressProfilerSampling(false),
       wasmTriedToInstallSignalHandlers(false),
       wasmHaveSignalHandlers(false),
-      tempLifoAlloc_((size_t)TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
-      debuggerMutations(0),
-      ionPcScriptCache(nullptr),
-      throwing(false),
-      overRecursed_(false),
-      propagatingForcedReturn_(false),
-      liveVolatileJitFrameIter_(nullptr),
-      reportGranularity(JS_DEFAULT_JITREPORT_GRANULARITY),
-      resolvingList(nullptr),
+      tempLifoAlloc_(this, (size_t)TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
+      debuggerMutations(this, 0),
+      ionPcScriptCache(this, nullptr),
+      throwing(this, false),
+      unwrappedException_(this),
+      unwrappedExceptionStack_(this),
+      overRecursed_(this, false),
+      propagatingForcedReturn_(this, false),
+      liveVolatileJitFrameIter_(this, nullptr),
+      reportGranularity(this, JS_DEFAULT_JITREPORT_GRANULARITY),
+      resolvingList(this, nullptr),
 #ifdef DEBUG
-      enteredPolicy(nullptr),
+      enteredPolicy(this, nullptr),
 #endif
-      generatingError(false),
-      cycleDetectorVector_(this),
+      generatingError(this, false),
+      cycleDetectorVector_(this, this),
       data(nullptr),
-      jitIsBroken(false),
-      asyncCauseForNewActivations(nullptr),
-      asyncCallIsExplicit(false),
-      interruptCallbackDisabled(false),
+      asyncStackForNewActivations_(this),
+      asyncCauseForNewActivations(this, nullptr),
+      asyncCallIsExplicit(this, false),
+      interruptCallbacks_(this),
+      interruptCallbackDisabled(this, false),
       interruptBits_(0),
-      osrTempData_(nullptr),
-      ionReturnOverride_(MagicValue(JS_ARG_POISON)),
+      osrTempData_(this, nullptr),
+      ionReturnOverride_(this, MagicValue(JS_ARG_POISON)),
       jitStackLimit(UINTPTR_MAX),
-      jitStackLimitNoInterrupt(UINTPTR_MAX),
-      getIncumbentGlobalCallback(nullptr),
-      enqueuePromiseJobCallback(nullptr),
-      enqueuePromiseJobCallbackData(nullptr),
-      jobQueue(nullptr),
-      drainingJobQueue(false),
-      stopDrainingJobQueue(false),
-      canSkipEnqueuingJobs(false),
-      promiseRejectionTrackerCallback(nullptr),
-      promiseRejectionTrackerCallbackData(nullptr)
+      jitStackLimitNoInterrupt(this, UINTPTR_MAX),
+      jobQueue(this, nullptr),
+      internalJobQueue(this),
+      canSkipEnqueuingJobs(this, false),
+      promiseRejectionTrackerCallback(this, nullptr),
+      promiseRejectionTrackerCallbackData(this, nullptr)
 #ifdef JS_STRUCTURED_SPEW
       ,
       structuredSpewer_()
@@ -1262,10 +1308,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
 
   MOZ_ASSERT(!TlsContext.get());
   TlsContext.set(this);
-
-  for (size_t i = 0; i < mozilla::ArrayLength(nativeStackQuota); i++) {
-    nativeStackQuota[i] = 0;
-  }
 }
 
 JSContext::~JSContext() {
@@ -1304,9 +1346,27 @@ void JSContext::setRuntime(JSRuntime* rt) {
   MOZ_ASSERT(!compartment());
   MOZ_ASSERT(!activation());
   MOZ_ASSERT(!unwrappedException_.ref().initialized());
+  MOZ_ASSERT(!unwrappedExceptionStack_.ref().initialized());
   MOZ_ASSERT(!asyncStackForNewActivations_.ref().initialized());
 
   runtime_ = rt;
+}
+
+static const size_t MAX_REPORTED_STACK_DEPTH = 1u << 7;
+
+void JSContext::setPendingExceptionAndCaptureStack(HandleValue value) {
+  RootedObject stack(this);
+  if (!CaptureCurrentStack(
+          this, &stack,
+          JS::StackCapture(JS::MaxFrames(MAX_REPORTED_STACK_DEPTH)))) {
+    clearPendingException();
+  }
+
+  RootedSavedFrame nstack(this);
+  if (stack) {
+    nstack = &stack->as<SavedFrame>();
+  }
+  setPendingException(value, nstack);
 }
 
 bool JSContext::getPendingException(MutableHandleValue rval) {
@@ -1315,15 +1375,20 @@ bool JSContext::getPendingException(MutableHandleValue rval) {
   if (zone()->isAtomsZone()) {
     return true;
   }
+  RootedSavedFrame stack(this, unwrappedExceptionStack());
   bool wasOverRecursed = overRecursed_;
   clearPendingException();
   if (!compartment()->wrap(this, rval)) {
     return false;
   }
   this->check(rval);
-  setPendingException(rval);
+  setPendingException(rval, stack);
   overRecursed_ = wasOverRecursed;
   return true;
+}
+
+SavedFrame* JSContext::getPendingExceptionStack() {
+  return unwrappedExceptionStack();
 }
 
 bool JSContext::isThrowingOutOfMemory() {
@@ -1340,74 +1405,6 @@ bool JSContext::isThrowingDebuggeeWouldRun() {
          unwrappedException().toObject().as<ErrorObject>().type() ==
              JSEXN_DEBUGGEEWOULDRUN;
 }
-
-static bool ComputeIsJITBroken() {
-#if !defined(ANDROID)
-  return false;
-#else   // ANDROID
-  if (getenv("JS_IGNORE_JIT_BROKENNESS")) {
-    return false;
-  }
-
-  std::string line;
-
-  // Check for the known-bad kernel version (2.6.29).
-  std::ifstream osrelease("/proc/sys/kernel/osrelease");
-  std::getline(osrelease, line);
-  __android_log_print(ANDROID_LOG_INFO, "Gecko", "Detected osrelease `%s'",
-                      line.c_str());
-
-  if (line.npos == line.find("2.6.29")) {
-    // We're using something other than 2.6.29, so the JITs should work.
-    __android_log_print(ANDROID_LOG_INFO, "Gecko", "JITs are not broken");
-    return false;
-  }
-
-  // We're using 2.6.29, and this causes trouble with the JITs on i9000.
-  line = "";
-  bool broken = false;
-  std::ifstream cpuinfo("/proc/cpuinfo");
-  do {
-    if (0 == line.find("Hardware")) {
-      static const char* const blacklist[] = {
-          "SCH-I400",  // Samsung Continuum
-          "SGH-T959",  // Samsung i9000, Vibrant device
-          "SGH-I897",  // Samsung i9000, Captivate device
-          "SCH-I500",  // Samsung i9000, Fascinate device
-          "SPH-D700",  // Samsung i9000, Epic device
-          "GT-I9000",  // Samsung i9000, UK/Europe device
-          nullptr};
-      for (const char* const* hw = &blacklist[0]; *hw; ++hw) {
-        if (line.npos != line.find(*hw)) {
-          __android_log_print(ANDROID_LOG_INFO, "Gecko",
-                              "Blacklisted device `%s'", *hw);
-          broken = true;
-          break;
-        }
-      }
-      break;
-    }
-    std::getline(cpuinfo, line);
-  } while (!cpuinfo.fail() && !cpuinfo.eof());
-
-  __android_log_print(ANDROID_LOG_INFO, "Gecko", "JITs are %sbroken",
-                      broken ? "" : "not ");
-
-  return broken;
-#endif  // ifndef ANDROID
-}
-
-static bool IsJITBrokenHere() {
-  static bool computedIsBroken = false;
-  static bool isBroken = false;
-  if (!computedIsBroken) {
-    isBroken = ComputeIsJITBroken();
-    computedIsBroken = true;
-  }
-  return isBroken;
-}
-
-void JSContext::updateJITEnabled() { jitIsBroken = IsJITBrokenHere(); }
 
 size_t JSContext::sizeOfExcludingThis(
     mozilla::MallocSizeOf mallocSizeOf) const {
@@ -1426,10 +1423,6 @@ bool JSContext::inAtomsZone() const { return zone_->isAtomsZone(); }
 void JSContext::trace(JSTracer* trc) {
   cycleDetectorVector().trace(trc);
   geckoProfiler().trace(trc);
-
-  if (trc->isMarkingTracer() && realm_) {
-    realm_->mark();
-  }
 }
 
 void* JSContext::stackLimitAddressForJitCode(JS::StackKind kind) {

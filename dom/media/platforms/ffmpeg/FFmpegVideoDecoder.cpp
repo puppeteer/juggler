@@ -14,15 +14,15 @@
 
 #include "libavutil/pixfmt.h"
 #if LIBAVCODEC_VERSION_MAJOR < 54
-#define AVPixelFormat PixelFormat
-#define AV_PIX_FMT_YUV420P PIX_FMT_YUV420P
-#define AV_PIX_FMT_YUVJ420P PIX_FMT_YUVJ420P
-#define AV_PIX_FMT_YUV420P10LE PIX_FMT_YUV420P10LE
-#define AV_PIX_FMT_YUV422P PIX_FMT_YUV422P
-#define AV_PIX_FMT_YUV422P10LE PIX_FMT_YUV422P10LE
-#define AV_PIX_FMT_YUV444P PIX_FMT_YUV444P
-#define AV_PIX_FMT_YUV444P10LE PIX_FMT_YUV444P10LE
-#define AV_PIX_FMT_NONE PIX_FMT_NONE
+#  define AVPixelFormat PixelFormat
+#  define AV_PIX_FMT_YUV420P PIX_FMT_YUV420P
+#  define AV_PIX_FMT_YUVJ420P PIX_FMT_YUVJ420P
+#  define AV_PIX_FMT_YUV420P10LE PIX_FMT_YUV420P10LE
+#  define AV_PIX_FMT_YUV422P PIX_FMT_YUV422P
+#  define AV_PIX_FMT_YUV422P10LE PIX_FMT_YUV422P10LE
+#  define AV_PIX_FMT_YUV444P PIX_FMT_YUV444P
+#  define AV_PIX_FMT_YUV444P10LE PIX_FMT_YUV444P10LE
+#  define AV_PIX_FMT_NONE PIX_FMT_NONE
 #endif
 #include "mozilla/PodOperations.h"
 #include "mozilla/TaskQueue.h"
@@ -367,17 +367,23 @@ MediaResult FFmpegVideoDecoder<LIBAV_VER>::CreateImage(
   }
   if (mLib->av_frame_get_colorspace) {
     switch (mLib->av_frame_get_colorspace(mFrame)) {
+#if LIBAVCODEC_VERSION_MAJOR >= 55
+      case AVCOL_SPC_BT2020_NCL:
+      case AVCOL_SPC_BT2020_CL:
+        b.mYUVColorSpace = gfx::YUVColorSpace::BT2020;
+        break;
+#endif
       case AVCOL_SPC_BT709:
-        b.mYUVColorSpace = YUVColorSpace::BT709;
+        b.mYUVColorSpace = gfx::YUVColorSpace::BT709;
         break;
       case AVCOL_SPC_SMPTE170M:
       case AVCOL_SPC_BT470BG:
-        b.mYUVColorSpace = YUVColorSpace::BT601;
+        b.mYUVColorSpace = gfx::YUVColorSpace::BT601;
         break;
       case AVCOL_SPC_UNSPECIFIED:
 #if LIBAVCODEC_VERSION_MAJOR >= 55
         if (mCodecContext->codec_id == AV_CODEC_ID_VP9) {
-          b.mYUVColorSpace = YUVColorSpace::BT709;
+          b.mYUVColorSpace = gfx::YUVColorSpace::BT709;
         }
 #endif
         break;
