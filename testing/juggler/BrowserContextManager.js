@@ -140,7 +140,7 @@ class BrowserContextManager {
   }
 
   getCookies(browserContextId, urls) {
-    const userContextId = browserContextId ? this._browserContextIdToUserContextId.get(browserContextId) : undefined;
+    const userContextId = browserContextId ? this._browserContextIdToUserContextId.get(browserContextId) : 0;
     const result = [];
     const sameSiteToProtocol = {
       [Ci.nsICookie.SAMESITE_NONE]: undefined,
