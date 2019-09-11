@@ -7,7 +7,7 @@ Juggler can be found in [`//testing/juggler/`](https://github.com/Puppeteer/jugg
 
 ## Protocol
 
-See [`//testing/juggler/Protocol.js`](https://github.com/Puppeteer/juggler/blob/master/testing/juggler/Protocol.js).
+See [`//testing/juggler/Protocol.js`](https://github.com/puppeteer/juggler/blob/master/testing/juggler/protocol/Protocol.js).
 
 ## Building FF with Juggler
 
