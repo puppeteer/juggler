@@ -1,9 +1,11 @@
-# Juggler
+# Juggler (Deprecated)
 
-> Juggler - Firefox Automation Protocol for implementing the Puppeteer API.
+> Juggler - Experimental Firefox Automation Protocol for implementing the Puppeteer API.
 
 This repository is a fork of the Firefox browser with additional support for the "Juggler" remote debugging protocol.
 Juggler can be found in [`//testing/juggler/`](https://github.com/Puppeteer/juggler/blob/master/testing/juggler).
+
+**⚠️ The puppeteer-firefox package has been deprecated**: As of puppeteer v2.1.0 you can interact with official Firefox Nightly binaries, which do not use Juggler. The puppeteer-firefox npm package, which depends on Juggler, will remain available until the transition is complete, but it is no longer actively maintained and neither is Juggler. For more information visit https://wiki.mozilla.org/Remote and see also https://github.com/puppeteer/puppeteer/issues/5397
 
 ## Protocol
 
